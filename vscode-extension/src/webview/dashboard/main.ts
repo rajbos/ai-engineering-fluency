@@ -10,6 +10,7 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import type { ModelUsage } from "../shared/types";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { applyWebviewLocale } from "../shared/webviewLocale";
+import { installSurfaceNavigation } from "../shared/surfaceNavigation";
 
 interface UserSummary {
   userId: string;
@@ -80,6 +81,7 @@ declare global {
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
+installSurfaceNavigation(vscode, 'dashboard');
 const initialData = getWindowData<DashboardStats & { localization?: Record<string, string> }>('__INITIAL_DASHBOARD__');
 console.log("[CopilotTokenTracker] dashboard webview loaded");
 
@@ -239,6 +241,7 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
 
 function buildPersonalSection(personal: UserSummary, lookbackDays: number): HTMLElement {
   const section = el("div", "section");
+  section.id = "section-personal-summary";
   const sectionTitle = el(
     "h2",
     "",
@@ -286,6 +289,7 @@ function buildPersonalSection(personal: UserSummary, lookbackDays: number): HTML
 
 function buildTeamSection(stats: DashboardStats): HTMLElement {
   const section = el("div", "section");
+  section.id = "section-team-comparison";
   const sectionTitle = el("h2", "", "👥 Team Comparison");
 
   const teamGrid = el("div", "stats-grid");

@@ -16,6 +16,7 @@ import { localize, localizeFormat } from "../shared/localization";
 import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
 import { shouldListAccountBudgets } from "../../githubAccountBudgets";
 import { applyWebviewLocale } from "../shared/webviewLocale";
+import { installSurfaceNavigation } from "../shared/surfaceNavigation";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -235,6 +236,7 @@ declare function acquireVsCodeApi<TState = DiagnosticsViewState>(): {
 };
 
 const vscode = acquireVsCodeApi<DiagnosticsViewState>();
+installSurfaceNavigation(vscode, 'diagnostics');
 const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
 
 // Initialize localization for webview

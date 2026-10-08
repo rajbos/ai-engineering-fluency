@@ -468,6 +468,7 @@ import {
 	type WhatsNewState,
 } from './whatsNew/announcer';
 import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from './whatsNew/visits';
+import { findViewIndexEntry, type ViewIndexNavigation } from './whatsNew/viewIndex';
 import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 
 type LocalViewRegressionProbeResult = {
@@ -1084,11 +1085,14 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'readiness' | 'worktrees' | 'insights' | 'corrections';
+/** How long a "take me there" request waits for its panel to finish loading before it is dropped. */
+const SURFACE_REVEAL_TTL_MS = 30_000;
+
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'agent' | 'readiness' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'sessions', 'tools', 'health', 'repos', 'readiness', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'repos', 'agent', 'readiness', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
 
 /**
@@ -1284,6 +1288,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		(error) => this.warn(`Efficiency message delivery failed: ${error}`),
 	);
 	private whatsNewPanel: vscode.WebviewPanel | undefined;
+	/**
+	 * "Take me there" requests for a panel that was not open yet. A new panel's
+	 * script is not listening when it is created, so the request waits here until
+	 * the panel reports `surfaceNavReady`. Keyed by view; a newer request replaces
+	 * an older one, and one older than {@link SURFACE_REVEAL_TTL_MS} is dropped so
+	 * it can never replay the next time the user opens that view on their own.
+	 */
+	private pendingSurfaceReveals: Partial<Record<FeatureViewId, { nav: ViewIndexNavigation; requestedAt: number }>> = {};
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
 	/** Last time the user opened each view / tab; see `src/whatsNew/visits.ts`. */
@@ -1930,6 +1942,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (typeof message.featureId === 'string' && message.featureId) {
 					await this.openWhatsNewFeature(message.featureId);
 				}
+			},
+			openViewIndexEntry:     async () => {
+				if (typeof message.entryId === 'string' && message.entryId) {
+					await this.openViewIndexEntry(message.entryId);
+				}
+			},
+			// A panel's script is now listening: hand it any navigation that was
+			// requested while the panel was still being created.
+			surfaceNavReady:        () => {
+				if (typeof message.view === 'string') { this.flushPendingSurfaceReveal(message.view as FeatureViewId); }
 			},
 			openFile:               () => {
 				if (typeof message.path === 'string' && message.path) {
@@ -2802,22 +2824,58 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		const { view, tab, anchor } = entry.feature.surface;
-		if (view === 'usage' && tab && isUsageAnalysisTab(tab)) {
-			await this.showUsageAnalysisOnTab(tab, anchor);
+		await this.openViewSurface(view, { ...(tab ? { tab } : {}), ...(anchor ? { anchor } : {}) });
+	}
+
+	/** Opens the view, tab and section a View index entry points at. */
+	private async openViewIndexEntry(entryId: string): Promise<void> {
+		const entry = findViewIndexEntry(entryId);
+		if (!entry) {
+			this.warn(`View index: unknown entry id "${entryId}"`);
 			return;
 		}
-		if (view === 'diagnostics') {
-			await this.showDiagnosticReport();
-			if (tab) { this.diagnosticsPanel?.webview.postMessage({ command: 'switchTab', tab }); }
+		this.log(`🧭 View index: opening ${entry.path.join(' › ')}`);
+		await this.openViewSurface(entry.view, entry.nav);
+	}
+
+	/** The open panel for a view, if any. */
+	private getPanelForView(view: FeatureViewId): vscode.WebviewPanel | undefined {
+		const panels: Partial<Record<FeatureViewId, vscode.WebviewPanel | undefined>> = {
+			details: this.detailsPanel,
+			chart: this.chartPanel,
+			usage: this.analysisPanel,
+			maturity: this.maturityPanel,
+			efficiency: this.efficiencyPanel,
+			environmental: this.environmentalPanel,
+			diagnostics: this.diagnosticsPanel,
+			'fluency-level-viewer': this.fluencyLevelViewerPanel,
+			dashboard: this.dashboardPanel,
+			whatsnew: this.whatsNewPanel,
+		};
+		return panels[view];
+	}
+
+	/**
+	 * Opens a view and lands on a tab and section within it. The usage panel has
+	 * its own navigation protocol (`switchTab`); every other panel takes a
+	 * `revealSurface` request (see webview/shared/surfaceNavigation.ts).
+	 */
+	private async openViewSurface(view: FeatureViewId, nav: ViewIndexNavigation): Promise<void> {
+		if (view === 'usage') {
+			if (nav.tab && isUsageAnalysisTab(nav.tab)) {
+				await this.showUsageAnalysisOnTab(nav.tab, nav.anchor);
+			} else {
+				await this.showUsageAnalysis();
+			}
 			return;
 		}
 		const openers: Partial<Record<FeatureViewId, () => Promise<void>>> = {
 			details: () => this.showDetails(),
 			chart: () => this.showChart(),
-			usage: () => this.showUsageAnalysis(),
 			maturity: () => this.showMaturity(),
 			efficiency: () => this.showEfficiency(),
 			environmental: () => this.showEnvironmental(),
+			diagnostics: () => this.showDiagnosticReport(),
 			// `logviewer` is deliberately absent: it only opens against a specific
 			// session file, so it can never be the destination of a catalog entry.
 			'fluency-level-viewer': () => this.showFluencyLevelViewer(),
@@ -2825,7 +2883,32 @@ class CopilotTokenTracker implements vscode.Disposable {
 			whatsnew: () => this.showWhatsNew(),
 		};
 		const open = openers[view];
-		if (open) { await open(); }
+		if (!open) { return; }
+		const hasTarget = !!(nav.tab || nav.subtab || nav.anchor || nav.selector);
+		const existingPanel = this.getPanelForView(view);
+		if (hasTarget) {
+			// Set before opening: a new panel (or one whose opener reloads its HTML)
+			// may report ready before `open` resolves.
+			this.pendingSurfaceReveals[view] = { nav, requestedAt: Date.now() };
+		} else {
+			delete this.pendingSurfaceReveals[view];
+		}
+		await open();
+		if (hasTarget && existingPanel) {
+			// Already listening, so deliver now. Revealing twice (here and again on a
+			// reload's ready) is harmless: the same tab is clicked, the same section scrolled to.
+			existingPanel.reveal(undefined, false);
+			void existingPanel.webview.postMessage({ command: 'revealSurface', ...nav });
+		}
+	}
+
+	private flushPendingSurfaceReveal(view: FeatureViewId): void {
+		const pending = this.pendingSurfaceReveals[view];
+		const panel = this.getPanelForView(view);
+		if (!pending || !panel) { return; }
+		delete this.pendingSurfaceReveals[view];
+		if (Date.now() - pending.requestedAt > SURFACE_REVEAL_TTL_MS) { return; }
+		void panel.webview.postMessage({ command: 'revealSurface', ...pending.nav });
 	}
 
 	/** Projects the catalog into the shape the What's New webview renders. */

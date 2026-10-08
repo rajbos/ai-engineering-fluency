@@ -1070,7 +1070,7 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 	const missed = stats.missedPotential || initialData?.missedPotential || [];
 	if (missed.length === 0) {
 		return `
-			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
+			<div id="section-missed-potential" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
 				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
 					${statusBadgeHtml('✅')} No other AI tool configs missing a Copilot counterpart
 				</div>
@@ -1085,7 +1085,7 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 	}
 
 	return `
-        <div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
+        <div id="section-missed-potential" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
             <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                 ${statusBadgeHtml('⚠️')} Missed Potential: Non-Copilot Instruction Files
             </div>
@@ -3029,7 +3029,7 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): boolean {
 function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
 	if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
 		return `
-			<div class="section">
+			<div class="section" id="section-customization-files">
 				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
 				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
 				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
@@ -3062,7 +3062,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 			</tr>`;
 	}).join('');
 	return `
-		<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+		<div id="section-customization-files" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
 				🛠️ Copilot Customization Files
 			</div>
@@ -3141,7 +3141,7 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 
 	return `
 		<!-- Model Cost Section -->
-		<div class="section">
+		<div class="section" id="section-model-cost">
 			<div class="section-title"><span>💰</span><span>Model Cost Usage</span></div>
 			<div class="section-subtitle">Request distribution across cost levels — low (&lt;$2/M tokens), medium ($2–5/M), high (≥$5/M)</div>
 			<div class="three-column">
@@ -3166,7 +3166,7 @@ function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
 	if (!effortData) { return ''; }
 	return `
 		<!-- Thinking Effort Section -->
-		<div class="section">
+		<div class="section" id="section-thinking-effort">
 			<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
 			<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
 			<div class="three-column">
@@ -3238,7 +3238,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 			${renderMissedPotential(stats)}
 
 			<!-- Repository Setup Section -->
-			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div class="repo-hygiene-section" id="section-repo-hygiene" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
 				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
 					🏗️ Repository Hygiene Analysis
 				</div>
@@ -3272,7 +3272,7 @@ function buildMcpToolsSectionHtml(
 ): string {
 	return `
 		<!-- MCP Tools Section -->
-		<div class="section">
+		<div class="section" id="section-mcp-tools">
 			<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
 			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
 			${buildUnknownMcpToolsBannerHtml(stats)}
@@ -4845,7 +4845,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
 	return `
-		<div class="section">
+		<div class="section" id="section-billing-coverage">
 			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
 			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
@@ -5074,7 +5074,7 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 	const tier30 = cw30 && cw30.maxRequestInputTokens > 0 ? _tierInfoForModels(cw30.maxRequestModels) : null;
 	const bar = cw30 && tier30 ? _renderContextWindowBar(cw30.maxRequestInputTokens, tier30) : '';
 	return `
-		<div class="section">
+		<div class="section" id="section-context-window">
 			<div class="section-title"><span>🪟</span><span>Context Window &amp; Long-Context Pricing</span></div>
 			<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a request exceeds their default-tier threshold.</div>
 			<div class="three-column">
@@ -5643,7 +5643,7 @@ function buildToolsTabPanelHtml(
 	return `
 		<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
 			<!-- Tool Calls Section -->
-			<div class="section">
+			<div class="section" id="section-tool-usage">
 				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
 				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions${hideAutomaticToolCalls ? ' (automatic tool calls hidden — disable "Hide Automatic Tool Calls" in settings to show them)' : ''}</div>
 				<div class="three-column">
@@ -5678,7 +5678,7 @@ function buildToolsTabPanelHtml(
 			${buildServerMemoriesSectionHtml(currentServerMemoriesAnalysis ?? stats.serverMemoriesAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
-			<div class="section">
+			<div class="section" id="section-multi-model">
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
 				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
 				<div class="three-column">
@@ -5766,7 +5766,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	const thinkingEffortHtml = safeSectionHtml('Thinking Effort', () => buildThinkingEffortSectionHtml(stats));
 	const sessionsSummaryHtml = `
 		<!-- Summary Section -->
-		<div class="section">
+		<div class="section" id="section-sessions-summary">
 			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
 			<div class="stats-grid">
 				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>

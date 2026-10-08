@@ -662,6 +662,8 @@
   "whatsNew.release.0.19.1.headline": "The Tools & Integrations tab now shows how reliable and how slow each tool is, which MCP servers fail, and a cost-vs-speed map of your built-in, subagent and skill tools.",
   "whatsNew.feature.usage.tool-execution-stats.title": "Tool reliability, latency and MCP health",
   "whatsNew.feature.usage.tool-execution-stats.description": "Four new sections on the Tools & Integrations tab, built from the per-call outcomes your session logs already record: success vs. failure per tool, p50/p95 observed duration per tool, calls and error share per MCP server, and a cost-vs-speed map of built-in, subagent and skill tools (latency × tokens per call, bubble size = calls). Recorded from Copilot CLI, JetBrains, Claude Code and Claude Desktop sessions.",
+  "whatsNew.feature.whatsnew.view-index.title": "View index",
+  "whatsNew.feature.whatsnew.view-index.description": "A searchable map of every view, tab and section in the extension, on its own tab here in What's New. Search by name or by what it shows, then jump straight to that tab and section.",
   "whatsNew.release.0.19.0.headline": "Usage Analysis is now organized into Usage, Workspace, GitHub and Coaching groups, with banded sections, official editor logos in the Chart view and Copilot budget for every signed-in GitHub account.",
   "whatsNew.release.0.18.3.headline": "A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.",
   "whatsNew.release.0.18.2.headline": "See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.",
