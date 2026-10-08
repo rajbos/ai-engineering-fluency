@@ -1682,3 +1682,47 @@ test('l10n: efficiency placeholder templates keep their {0} slot for localizeFor
 		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
 	}
 });
+
+test('l10n: Tools & Integrations tool-execution section strings resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.reliability.title'), 'Tool execution reliability');
+	assert.equal(t('usage.toolExec.latency.title'), 'Tool latency profile');
+	assert.equal(t('usage.toolExec.mcp.title'), 'MCP server health');
+	assert.equal(t('usage.toolExec.costSpeed.title'), 'Cost vs speed map');
+	assert.equal(t('usage.toolExec.costSpeed.hint'), 'top-right = heavy & slow');
+	assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% fail');
+	assert.equal(t('usage.toolExec.legend.failure'), 'Failure');
+	assert.equal(t('usage.toolExec.empty.mcp'), 'No MCP server calls with a recorded outcome in this period.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.reliability.title'), '工具执行可靠性');
+		assert.equal(t('usage.toolExec.latency.title'), '工具延迟分布');
+		assert.equal(t('usage.toolExec.mcp.title'), 'MCP 服务器健康度');
+		assert.equal(t('usage.toolExec.costSpeed.title'), '成本与速度图');
+		assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% 失败');
+		assert.equal(t('usage.toolExec.legend.failure'), '失败');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New entry resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View: 30 succeeded, 10 failed');
+	assert.equal(t('usage.toolExec.tip.latency', 'Bash', '3.3s', '55s', '451'), 'Bash: p50 3.3s, p95 55s, 451 calls');
+	assert.equal(t('usage.toolExec.table.show'), 'Show as table');
+	assert.equal(t('usage.toolExec.col.completed'), 'Completed calls');
+	assert.equal(t('usage.toolExec.empty.latency'), 'No tool latency data yet. It is recorded from Copilot CLI, JetBrains, Claude Code and Claude Desktop sessions.');
+	assert.equal(t('whatsNew.release.0.19.1.headline'), 'The Tools & Integrations tab now shows how reliable and how slow each tool is, which MCP servers fail, and a cost-vs-speed map of your built-in, subagent and skill tools.');
+	assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), 'Tool reliability, latency and MCP health');
+	assert.ok(t('whatsNew.feature.usage.tool-execution-stats.description').includes('cost-vs-speed map'));
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View：成功 30 次，失败 10 次');
+		assert.equal(t('usage.toolExec.table.show'), '以表格显示');
+		assert.equal(t('usage.toolExec.col.completed'), '已完成调用');
+		assert.equal(t('usage.toolExec.empty.latency'), '暂无工具延迟数据。该数据来自 Copilot CLI、JetBrains、Claude Code 和 Claude Desktop 会话。');
+		assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), '工具可靠性、延迟与 MCP 健康度');
+		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

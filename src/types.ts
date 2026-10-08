@@ -498,10 +498,48 @@ export interface SessionUsageAnalysis {
   firstUserPrompt?: string;
 }
 
+/**
+ * Additive, log-spaced latency histogram (see src/latencyHistogram.ts).
+ * `buckets[i]` counts durations in `[2^i, 2^(i+1))` ms; the last bucket is overflow.
+ * Stored as counts + sum (never averages) so it merges correctly across sessions,
+ * cache entries and backend rollups.
+ */
+export interface LatencyHistogram {
+  count: number;
+  sumMs: number;
+  buckets: number[];
+}
+
 export interface ToolCallUsage {
   total: number;
   byTool: { [toolName: string]: number };
   outputTokensByTool?: { [toolName: string]: number };
+  /**
+   * Calls whose session log recorded an explicit verdict (success or failure) on a
+   * completion/result event matched to its start. This is the denominator for
+   * `failuresByTool` and `outputTokensByTool`, which are only ever recorded for such
+   * calls; unlike `byTool` it excludes orphaned starts, streaming re-logs, editors whose
+   * format carries no completion events, and verdict-less completions (older Copilot CLI
+   * schemas). `latencyByTool` is a *different* population — any matched completion with
+   * usable timestamps, verdict or not — so its `count` may differ from this in either
+   * direction; never divide one by the other. Absent when no format contributed
+   * verdicts. MCP calls are counted under {@link McpToolUsage.completedByServer} instead.
+   */
+  completedByTool?: { [toolName: string]: number };
+  /**
+   * Calls whose session log explicitly flagged them as failed (Copilot CLI/JetBrains
+   * `tool.execution_complete.success === false`, Claude Code `tool_result.is_error`).
+   * A subset of `completedByTool`; absent when no failure was recorded.
+   */
+  failuresByTool?: { [toolName: string]: number };
+  /**
+   * Observed execution duration per tool, from the start→complete timestamp delta.
+   * This includes permission-prompt and queueing time, not just tool runtime. Sampled
+   * from every matched completion with usable timestamps, including verdict-less ones,
+   * so `count` is its own population (see {@link completedByTool}). Absent when the
+   * format carries no per-call timestamps.
+   */
+  latencyByTool?: { [toolName: string]: LatencyHistogram };
 }
 
 export interface ModeUsage {
@@ -556,6 +594,12 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+  /** MCP calls with a recorded outcome per server; see {@link ToolCallUsage.completedByTool}. */
+  completedByServer?: { [serverName: string]: number };
+  /** Failed MCP calls per server; same source and caveats as {@link ToolCallUsage.failuresByTool}. */
+  failuresByServer?: { [serverName: string]: number };
+  /** Observed MCP call duration per server; same source and caveats as {@link ToolCallUsage.latencyByTool}. */
+  latencyByServer?: { [serverName: string]: LatencyHistogram };
 }
 
 /**

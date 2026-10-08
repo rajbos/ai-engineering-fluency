@@ -39,6 +39,8 @@ import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDete
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
+import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSanitizer';
 import { renderContextRefTable } from './contextRefTableHtml';
 import { shouldListAccountBudgets } from '../../githubAccountBudgets';
 import { applyBillingFields, sanitizeAccountBudgets, sanitizeCopilotApiBalance, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
@@ -1728,11 +1730,13 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		toolCalls: {
 			total: coerceNumber(toolCalls.total),
 			byTool: toolCalls.byTool ?? {},
+			...sanitizeToolOutcomeMaps(toolCalls),
 		},
 		mcpTools: {
 			total: coerceNumber(mcpTools.total),
 			byServer: mcpTools.byServer ?? {},
 			byTool: mcpTools.byTool ?? {},
+			...sanitizeMcpOutcomeMaps(mcpTools),
 		},
 		modelSwitching: {
 			modelsPerSession: [],
@@ -5658,6 +5662,7 @@ function buildToolsTabPanelHtml(
 				</div>
 			</div>
 
+			${safeSectionHtml(localize('usage.tab.tools'), () => buildToolExecutionSectionsHtml({ toolCalls: stats.last30Days.toolCalls, mcpTools: stats.last30Days.mcpTools, resolveToolName: lookupToolName, hiddenTools: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined }))}
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
 			${buildMemoryFilesSectionHtml(currentMemoryFilesAnalysis ?? stats.memoryFilesAnalysis)}

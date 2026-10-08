@@ -108,6 +108,8 @@ usage-data/agent-sessions.json-*
 # never be swept into a commit by `git add -A`.
 vscode-extension/.test-fixtures/
 vscode-extension/claude-test-*/
+vscode-extension/sync-test-*/
+vscode-extension/cowork-test-*/
 vscode-extension/cliapp-split-*/
 vscode-extension/contract-fixture-*/
 vscode-extension/ctt-cache-*/

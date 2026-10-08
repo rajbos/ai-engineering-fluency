@@ -930,9 +930,9 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 
 	private extractJsonFieldsFluency(analysis: any): any {
 		const result: any = {};
-		if (analysis.toolCalls) { result.toolCallsJson = JSON.stringify(analysis.toolCalls); }
+		if (analysis.toolCalls) { result.toolCallsJson = JSON.stringify(stripLatencyHistograms(analysis.toolCalls)); }
 		if (analysis.contextReferences) { result.contextRefsJson = JSON.stringify(analysis.contextReferences); }
-		if (analysis.mcpTools) { result.mcpToolsJson = JSON.stringify(analysis.mcpTools); }
+		if (analysis.mcpTools) { result.mcpToolsJson = JSON.stringify(stripLatencyHistograms(analysis.mcpTools)); }
 		if (analysis.modelSwitching) { result.modelSwitchingJson = JSON.stringify(analysis.modelSwitching); }
 		if (analysis.agentTypes) { result.agentTypesJson = JSON.stringify(analysis.agentTypes); }
 		if (analysis.sessionDuration) { result.sessionDurationJson = JSON.stringify(analysis.sessionDuration); }
@@ -2175,4 +2175,17 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 			this.deps.logger.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
 		}
 	}
+}
+
+/**
+ * The per-tool / per-server latency histograms (`latencyByTool`, `latencyByServer`,
+ * ~25 integers per key — docs/adr/TOOL-EXECUTION-STATS.md) are a local-dashboard
+ * feature and nothing server-side reads them, while an Azure Table string
+ * property is capped at 64 KiB and a day's rollup keeps the union of every tool
+ * seen. Drop them from the uploaded JSON so the payload stays bounded by the
+ * number of distinct tools times a few counters; the count maps are kept.
+ */
+export function stripLatencyHistograms<T extends Record<string, unknown>>(usage: T): Omit<T, 'latencyByTool' | 'latencyByServer'> {
+	const { latencyByTool: _lt, latencyByServer: _ls, ...rest } = usage as T & { latencyByTool?: unknown; latencyByServer?: unknown };
+	return rest;
 }
