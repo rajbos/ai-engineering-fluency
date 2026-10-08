@@ -106,6 +106,19 @@ test('surface reveal queue: an opener that left no panel drops the request, and 
 	assert.equal(queue.peek('usage'), undefined);
 });
 
+test('surface reveal queue: a late acknowledgement for a replaced request leaves the newer one held', () => {
+	const { queue } = makeQueue();
+	const panel = { name: 'existing' };
+	const first = queue.request('chart', { anchor: 'old' }, panel);
+	const second = queue.request('chart', { anchor: 'new' }, panel);
+	assert.notEqual(first, second);
+	queue.handled('chart', first);
+	assert.deepEqual(queue.peek('chart'), { anchor: 'new' });
+	assert.equal(queue.currentId('chart'), second);
+	queue.handled('chart', second);
+	assert.equal(queue.peek('chart'), undefined);
+});
+
 // ── Webview side: carrying out a reveal ──────────────────────────────────
 
 /** Installs a jsdom document as the globals the webview helper reads, and records scrolls. */
@@ -214,9 +227,9 @@ test('installSurfaceNavigation: reports ready, then acknowledges a reveal only o
 	assert.equal(posted.length, 1);
 
 	// A reveal that lands — superseding the one still waiting — is acknowledged once.
-	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', anchor: 'present' } }));
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', requestId: 7, anchor: 'present' } }));
 	await sleep(150);
-	assert.deepEqual(posted.slice(1), [{ command: 'surfaceRevealHandled', view: 'chart' }]);
+	assert.deepEqual(posted.slice(1), [{ command: 'surfaceRevealHandled', view: 'chart', requestId: 7 }]);
 
 	// The superseded reveal never acknowledges, even once its section appears.
 	const late = window.document.createElement('div');

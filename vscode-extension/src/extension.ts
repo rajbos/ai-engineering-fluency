@@ -1953,7 +1953,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			},
 			// The webview acted on a revealSurface request: nothing is left to replay.
 			surfaceRevealHandled:   () => {
-				if (typeof message.view === 'string') { this.surfaceReveals.handled(message.view as FeatureViewId); }
+				if (typeof message.view === 'string') {
+					this.surfaceReveals.handled(message.view as FeatureViewId, typeof message.requestId === 'number' ? message.requestId : undefined);
+				}
 			},
 			openFile:               () => {
 				if (typeof message.path === 'string' && message.path) {
@@ -2903,13 +2905,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await open();
 		const panel = this.getPanelForView(view);
 		const postNow = this.surfaceReveals.opened(view, panel);
-		if (panel && postNow) {
+		if (!panel) { return; }
+		// Bring the destination forward and focus it, new or reused: most openers
+		// create their panel with preserveFocus, which would leave it in the background.
+		panel.reveal(undefined, false);
+		if (postNow) {
 			// The opener reused the panel. Post now; if the webview is reloading
 			// (a hidden panel without retained context) the message may be lost, so
 			// the request stays held until the webview acknowledges it or the
 			// reloaded page reports ready.
-			panel.reveal(undefined, false);
-			void panel.webview.postMessage({ command: 'revealSurface', ...postNow });
+			void panel.webview.postMessage({ command: 'revealSurface', requestId: this.surfaceReveals.currentId(view), ...postNow });
 		}
 	}
 
@@ -2918,7 +2923,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!panel) { return; }
 		// Held until the webview acknowledges it with surfaceRevealHandled.
 		const nav = this.surfaceReveals.ready(view, panel);
-		if (nav) { void panel.webview.postMessage({ command: 'revealSurface', ...nav }); }
+		if (nav) { void panel.webview.postMessage({ command: 'revealSurface', requestId: this.surfaceReveals.currentId(view), ...nav }); }
 	}
 
 	/** Projects the catalog into the shape the What's New webview renders. */

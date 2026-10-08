@@ -18,6 +18,8 @@ import { registerMessageHandler } from './messageHandler';
 
 export type SurfaceRevealRequest = {
 	command: 'revealSurface';
+	/** The host's id for this request, echoed back in the acknowledgement. */
+	requestId?: number;
 	/** `data-tab` value of the tab to open. */
 	tab?: string;
 	/** `data-subtab` value of a sub-tab inside that tab. */
@@ -201,7 +203,10 @@ export function installSurfaceNavigation(vscode: PostMessageApi, view: string): 
 			// Acknowledge only once the reveal landed: until then the host keeps the
 			// request, so a reload of this panel (its ready handshake) can retry it.
 			void revealSurface(message as SurfaceRevealRequest).then((landed) => {
-				if (landed) { vscode.postMessage({ command: 'surfaceRevealHandled', view }); }
+				if (landed) {
+					const { requestId } = message;
+					vscode.postMessage({ command: 'surfaceRevealHandled', view, ...(typeof requestId === 'number' ? { requestId } : {}) });
+				}
 			});
 		}
 	});

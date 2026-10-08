@@ -23,6 +23,8 @@
  * panel the user later opens on their own.
  */
 type Pending<TNav, TPanel> = {
+	/** Unique per request; echoed back in the acknowledgement so a stale one cannot clear a newer request. */
+	id: number;
 	nav: TNav;
 	requestedAt: number;
 	/** The panel the request is for, once the opener has returned it. */
@@ -33,15 +35,26 @@ type Pending<TNav, TPanel> = {
 
 export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 	private readonly pending = new Map<TKey, Pending<TNav, TPanel>>();
+	private nextId = 1;
 
 	constructor(
 		private readonly ttlMs: number,
 		private readonly now: () => number = Date.now,
 	) {}
 
-	/** Holds `nav` for `view`, replacing any older request. `existingPanel` is the panel open right now, if any. */
-	request(view: TKey, nav: TNav, existingPanel: TPanel | undefined): void {
-		this.pending.set(view, { nav, requestedAt: this.now(), replacedPanel: existingPanel });
+	/**
+	 * Holds `nav` for `view`, replacing any older request. `existingPanel` is the
+	 * panel open right now, if any. Returns the request's id.
+	 */
+	request(view: TKey, nav: TNav, existingPanel: TPanel | undefined): number {
+		const id = this.nextId++;
+		this.pending.set(view, { id, nav, requestedAt: this.now(), replacedPanel: existingPanel });
+		return id;
+	}
+
+	/** Id of the request currently held for `view`; post it alongside the navigation. */
+	currentId(view: TKey): number | undefined {
+		return this.pending.get(view)?.id;
 	}
 
 	/** Forgets any request for `view` — e.g. the view is being opened with no target. */
@@ -91,9 +104,16 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 		return entry.nav;
 	}
 
-	/** The webview for `view` reports the reveal landed. */
-	handled(view: TKey): void {
-		this.pending.delete(view);
+	/**
+	 * The webview for `view` reports the reveal with `requestId` landed. An
+	 * acknowledgement for an older request — one a newer request has since
+	 * replaced — leaves the newer request alone.
+	 */
+	handled(view: TKey, requestId?: number): void {
+		const entry = this.pending.get(view);
+		if (entry && (requestId === undefined || requestId === entry.id)) {
+			this.pending.delete(view);
+		}
 	}
 
 	/** The navigation still held for `view`, if any. For tests and diagnostics. */
