@@ -398,17 +398,18 @@ export function readGitOriginUrl(repoRoot: string): string | undefined {
 /**
  * Identify the repository a checkout belongs to, so linked worktrees of one
  * repository can be grouped. Returns the shared git directory (the same for the
- * main checkout and every linked worktree) and the main checkout's root when it
- * can be derived (a non-bare repository whose common dir is `<root>/.git`).
+ * main checkout and every linked worktree) and whether `repoRoot` is itself the
+ * main checkout (a non-bare repository whose common dir is `<repoRoot>/.git`).
  */
-export function resolveRepoIdentity(repoRoot: string): { key: string; mainRoot?: string } {
+export function resolveRepoIdentity(repoRoot: string): { key: string; isMainCheckout: boolean } {
 	const configDir = resolveGitConfigDir(repoRoot);
-	if (!configDir) { return { key: canonicalPath(repoRoot) }; }
+	if (!configDir) { return { key: canonicalPath(repoRoot), isMainCheckout: true }; }
 	// Canonical, so a checkout reached through a symlink and a worktree whose gitdir
 	// points at the physical path still share one key.
 	const key = canonicalPath(configDir);
-	const mainRoot = path.basename(key) === '.git' && !isBareRepository(key) ? path.dirname(key) : undefined;
-	return { key, mainRoot };
+	// The main checkout is the one whose own `.git` directory *is* the common dir (a bare repo has none).
+	const isMainCheckout = path.basename(key) === '.git' && !isBareRepository(key) && path.dirname(key) === canonicalPath(repoRoot);
+	return { key, isMainCheckout };
 }
 
 /** `realpath` when the path exists, otherwise the plain resolved path. */

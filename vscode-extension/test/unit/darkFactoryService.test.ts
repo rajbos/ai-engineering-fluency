@@ -111,10 +111,10 @@ test('selectRepoRoots: groups linked worktrees under their main checkout', () =>
 	assert.equal(skipped, 0);
 });
 
-test('selectRepoRoots: worktrees alone resolve to the main checkout when it exists', () => {
+test('selectRepoRoots: a lone worktree is scanned as itself, never swapped for a checkout the user did not open', () => {
 	const main = makeRepo({});
 	const wt = makeWorktree(main, 'a');
-	assert.deepEqual(selectRepoRoots([wt]).roots, [main]);
+	assert.deepEqual(selectRepoRoots([wt]).roots, [wt]);
 });
 
 test('selectRepoRoots: falls back to the first worktree when the main checkout is gone', () => {
@@ -171,6 +171,7 @@ const reportAt = (scannedAt: string) => ({ scannedAt, repos: [] }) as never;
 test('parseCachedReport: accepts a report-shaped value and rejects anything else', () => {
 	const ok = reportAt('2026-09-01T12:00:00.000Z');
 	assert.equal(parseCachedReport(ok), ok);
+	assert.equal(parseCachedReport(Object.assign(Object.create({ inherited: true }), ok)), undefined);
 	for (const bad of [undefined, null, 'x', {}, { repos: [] }, { repos: {}, scannedAt: '2026-09-01T12:00:00.000Z' }, { repos: [], scannedAt: 'nope' }]) {
 		assert.equal(parseCachedReport(bad), undefined);
 	}

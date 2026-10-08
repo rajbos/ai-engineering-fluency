@@ -404,10 +404,15 @@ test('AI Readiness scans only on tab visit, refreshes on demand, and survives a 
 	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 2);
 	harness.post({ command: 'readinessLoaded', requestId: 1, report });
 	await harness.settle();
-	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+	// A forced refresh keeps the current report on screen and says it is refreshing.
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.force, true);
+	assert.match(harness.text('#readiness-content')!, /Showing the last scan while a fresh one runs/);
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+	// A failed refresh must not throw away the report that is still on screen.
 	harness.post({ command: 'readinessScanFailed', requestId: 2 });
 	await harness.settle();
-	assert.match(harness.text('#readiness-content')!, /Could not scan repository readiness/);
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+	assert.doesNotMatch(harness.text('#readiness-content')!, /Could not scan repository readiness/);
 });
 
 test('AI Readiness deep link waits for stats and ignores responses from before a full refresh', async () => {

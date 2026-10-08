@@ -41,6 +41,8 @@ export const DARK_FACTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Narrow an untrusted persisted value to a usable report, or `undefined` when it is not one. */
 export function parseCachedReport(value: unknown): DarkFactoryReport | undefined {
 	if (!value || typeof value !== 'object') { return undefined; }
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== Object.prototype && proto !== null) { return undefined; }
 	const candidate = value as Partial<DarkFactoryReport>;
 	if (!Array.isArray(candidate.repos) || typeof candidate.scannedAt !== 'string') { return undefined; }
 	return Number.isFinite(Date.parse(candidate.scannedAt)) ? (value as DarkFactoryReport) : undefined;
@@ -67,20 +69,24 @@ function resolveNameWithOwner(repoRoot: string, hosts: Set<string>): string | un
 export function selectRepoRoots(workspacePaths: readonly string[]): { roots: string[]; skipped: number } {
 	const seen = new Set<string>();
 	// Linked worktrees share one git directory; group them so a repository is
-	// listed once. The main checkout represents the group when it still exists,
-	// otherwise the first (most relevant) worktree seen does.
-	const groups = new Map<string, string>();
+	// listed once. The representative is always one of the caller's own paths: the
+	// main checkout when it is among them, otherwise the first (most relevant)
+	// worktree seen. Never a checkout the user did not open, which could be on
+	// another branch.
+	const groups = new Map<string, { root: string; isMain: boolean }>();
 	for (const workspacePath of workspacePaths) {
 		if (!workspacePath || workspacePath.startsWith('<unresolved:')) { continue; }
 		const resolved = path.resolve(workspacePath);
 		if (seen.has(resolved)) { continue; }
 		seen.add(resolved);
 		if (!isGitRepoRoot(resolved)) { continue; }
-		const { key, mainRoot } = resolveRepoIdentity(resolved);
-		const representative = mainRoot && isGitRepoRoot(mainRoot) ? mainRoot : resolved;
-		if (!groups.has(key)) { groups.set(key, representative); }
+		const { key, isMainCheckout } = resolveRepoIdentity(resolved);
+		const existing = groups.get(key);
+		if (!existing || (isMainCheckout && !existing.isMain)) {
+			groups.set(key, { root: resolved, isMain: isMainCheckout });
+		}
 	}
-	const all = [...groups.values()];
+	const all = [...groups.values()].map(group => group.root);
 	const roots = all.slice(0, MAX_SCANNED_REPOS);
 	return { roots, skipped: all.length - roots.length };
 }

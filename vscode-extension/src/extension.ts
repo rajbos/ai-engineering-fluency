@@ -10943,7 +10943,8 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	private scanReadinessAndPost(panel: vscode.WebviewPanel, requestId: number): void {
 		try {
 			const report = this.runDarkFactoryScan();
-			void this.context.globalState.update(DARK_FACTORY_CACHE_KEY, report);
+			Promise.resolve(this.context.globalState.update(DARK_FACTORY_CACHE_KEY, report))
+				.catch(err => this.warn(`Dark Factory readiness cache could not be saved: ${err}`));
 			if (this.analysisPanel === panel) {
 				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, refreshing: false });
 			}
