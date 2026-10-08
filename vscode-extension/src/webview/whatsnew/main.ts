@@ -8,7 +8,8 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import { registerMessageHandler } from '../shared/messageHandler';
-import { buildViewIndexTab } from './viewIndexTab';
+import { buildViewIndexTab, type ViewIndexPersistedState } from './viewIndexTab';
+import { createViewStateManager } from '../shared/viewState';
 import { localize, localizeFormat } from '../shared/localization';
 import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 
@@ -40,7 +41,11 @@ type WhatsNewViewData = {
 
 type WhatsNewTab = 'releases' | 'index';
 
-type WhatsNewWebviewState = { activeTab?: WhatsNewTab };
+type WhatsNewWebviewState = {
+	activeTab: WhatsNewTab;
+	/** Survives the panel being hidden, which tears the webview down. */
+	index: ViewIndexPersistedState;
+};
 
 declare function acquireVsCodeApi<TState = unknown>(): {
 	postMessage: (message: any) => void;
@@ -61,12 +66,13 @@ const TABS: ReadonlyArray<{ id: WhatsNewTab; labelKey: string }> = [
 	{ id: 'index', labelKey: 'whatsNew.tab.index' },
 ];
 
-let activeTab: WhatsNewTab = vscode.getState()?.activeTab === 'index' ? 'index' : 'releases';
+const viewState = createViewStateManager<WhatsNewWebviewState>(vscode, { activeTab: 'releases', index: { query: '', toggled: {} } });
+let activeTab: WhatsNewTab = viewState.restore().activeTab === 'index' ? 'index' : 'releases';
 
 /** Shows one tab's panel and hides the other. The index is built once and kept, so its search survives tab switches. */
 function activateTab(tab: WhatsNewTab): void {
 	activeTab = tab;
-	vscode.setState({ ...(vscode.getState() ?? {}), activeTab: tab });
+	viewState.patch({ activeTab: tab });
 	document.querySelectorAll<HTMLElement>('.wn-tab').forEach((button) => {
 		const isActive = button.dataset.tab === tab;
 		button.classList.toggle('active', isActive);
@@ -217,7 +223,11 @@ function render(data: WhatsNewViewData): void {
 	data.releases.forEach((release) => releases.append(buildRelease(release)));
 	const footer = el('div', 'footer', localizeFormat('whatsNew.footer', data.currentVersion));
 	container.append(buildTabPanel('releases', intro, releases, footer));
-	container.append(buildTabPanel('index', buildViewIndexTab((message) => vscode.postMessage(message))));
+	container.append(buildTabPanel('index', buildViewIndexTab(
+		(message) => vscode.postMessage(message),
+		viewState.restore().index,
+		(index) => viewState.patch({ index }),
+	)));
 
 	root.append(themeStyle, style, container);
 

@@ -78,12 +78,26 @@ function openGroupOf(tabButton: HTMLElement): void {
 	if (groupButton && !groupButton.classList.contains('active')) { groupButton.click(); }
 }
 
-/** Briefly outlines the section that was scrolled to, so the eye finds it. */
+/** In-flight flashes: the inline styles to restore, and the timer that restores them. */
+const activeFlashes = new WeakMap<HTMLElement, { boxShadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
+
+/**
+ * Briefly outlines the section that was scrolled to, so the eye finds it. A
+ * second flash on the same element restarts the timer but keeps the styles
+ * captured by the first, so the outline can never become the "original".
+ */
 export function flashSection(target: HTMLElement): void {
-	const previous = target.style.boxShadow;
+	const inFlight = activeFlashes.get(target);
+	if (inFlight) { clearTimeout(inFlight.timer); }
+	const original = inFlight ?? { boxShadow: target.style.boxShadow, transition: target.style.transition };
 	target.style.transition = 'box-shadow 0.3s ease';
 	target.style.boxShadow = '0 0 0 2px var(--vscode-focusBorder, #3794ff)';
-	setTimeout(() => { target.style.boxShadow = previous; }, 2000);
+	const timer = setTimeout(() => {
+		target.style.boxShadow = original.boxShadow;
+		target.style.transition = original.transition;
+		activeFlashes.delete(target);
+	}, 2000);
+	activeFlashes.set(target, { boxShadow: original.boxShadow, transition: original.transition, timer });
 }
 
 export async function revealSurface(request: SurfaceRevealRequest): Promise<void> {
@@ -121,6 +135,8 @@ export async function revealSurface(request: SurfaceRevealRequest): Promise<void
 export function installSurfaceNavigation(vscode: PostMessageApi, view: string): void {
 	registerMessageHandler<{ command?: string } & Partial<SurfaceRevealRequest>>((message) => {
 		if (message?.command === 'revealSurface') {
+			// Acknowledge first, so the host stops holding the request for a replay.
+			vscode.postMessage({ command: 'surfaceRevealHandled', view });
 			void revealSurface(message as SurfaceRevealRequest);
 		}
 	});

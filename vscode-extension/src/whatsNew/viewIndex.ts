@@ -81,7 +81,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 				description: 'Estimated spend per AI provider. Click a provider to include or exclude it from the totals below.',
 				keywords: ['spend', 'price', 'filter'],
 				nav: { anchor: 'section-cost-by-provider' },
-				condition: 'When more than one provider has cost',
+				condition: 'When two or more providers have cost this month',
 			},
 			{
 				id: 'details.key-metrics',

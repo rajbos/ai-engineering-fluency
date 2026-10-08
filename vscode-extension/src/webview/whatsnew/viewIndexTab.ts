@@ -6,12 +6,25 @@ import { highlightRanges, searchViewIndex } from './viewIndexSearch';
 
 type PostMessage = (message: unknown) => void;
 
-/** Panel-lifetime state, so a refresh re-render keeps the user's place. */
-const state = {
-	query: '',
+/** The View index state worth keeping when the panel is hidden and its webview torn down. */
+export type ViewIndexPersistedState = {
+	query: string;
 	/** Node ids the user expanded or collapsed by hand; absent means the default. */
-	toggled: new Map<string, boolean>(),
+	toggled: Record<string, boolean>;
 };
+
+/**
+ * Current state. Seeded from the webview's saved state by {@link buildViewIndexTab}
+ * and handed back through its `persist` callback on every change, because the
+ * What's New panel does not retain its context while hidden — opening a view
+ * from the index hides it.
+ */
+const state: ViewIndexPersistedState = { query: '', toggled: {} };
+let persistState: (state: ViewIndexPersistedState) => void = () => {};
+
+function saveState(): void {
+	persistState({ query: state.query, toggled: { ...state.toggled } });
+}
 
 const ENTRIES = flattenViewIndex();
 const PATH_BY_ID = new Map(ENTRIES.map((entry) => [entry.id, entry.path]));
@@ -66,7 +79,7 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 		.filter((child): child is HTMLElement => child !== null);
 	const hasChildren = children.length > 0;
 	// While searching everything on the path to a match is open; otherwise honour the user's toggles.
-	const expanded = ctx.visible ? true : state.toggled.get(node.id) ?? isExpandedByDefault(node, depth);
+	const expanded = ctx.visible ? true : state.toggled[node.id] ?? isExpandedByDefault(node, depth);
 
 	const item = el('li', `index-item depth-${Math.min(depth, 3)}`);
 	item.setAttribute('role', 'treeitem');
@@ -81,7 +94,8 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 		toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
 		toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
 		toggle.addEventListener('click', () => {
-			state.toggled.set(node.id, !expanded);
+			state.toggled[node.id] = !expanded;
+			saveState();
 			ctx.rerender();
 		});
 		toggle.disabled = !!ctx.visible;
@@ -164,8 +178,15 @@ function renderTree(container: HTMLElement, status: HTMLElement, post: PostMessa
 	container.replaceChildren(tree);
 }
 
-/** Builds the View index tab's content. */
-export function buildViewIndexTab(post: PostMessage): HTMLElement {
+/** Builds the View index tab's content, restoring `saved` and reporting every change to `persist`. */
+export function buildViewIndexTab(
+	post: PostMessage,
+	saved: ViewIndexPersistedState,
+	persist: (state: ViewIndexPersistedState) => void,
+): HTMLElement {
+	state.query = typeof saved.query === 'string' ? saved.query : '';
+	state.toggled = saved.toggled && typeof saved.toggled === 'object' ? { ...saved.toggled } : {};
+	persistState = persist;
 	const panel = el('div', 'index-panel');
 
 	panel.append(el('div', 'intro', localize('viewIndex.intro')));
@@ -188,6 +209,7 @@ export function buildViewIndexTab(post: PostMessage): HTMLElement {
 	const treeContainer = el('div', 'index-tree-container');
 	input.addEventListener('input', () => {
 		state.query = input.value;
+		saveState();
 		renderTree(treeContainer, status, post);
 	});
 	input.addEventListener('keydown', (event) => {
@@ -195,6 +217,7 @@ export function buildViewIndexTab(post: PostMessage): HTMLElement {
 			event.preventDefault();
 			input.value = '';
 			state.query = '';
+			saveState();
 			renderTree(treeContainer, status, post);
 		}
 	});

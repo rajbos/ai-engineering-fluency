@@ -1088,6 +1088,16 @@ interface WorktreeCleanupDiagnostics {
 /** How long a "take me there" request waits for its panel to finish loading before it is dropped. */
 const SURFACE_REVEAL_TTL_MS = 30_000;
 
+/** A "take me there" request the host is holding until its panel can act on it. */
+type PendingSurfaceReveal = {
+	nav: ViewIndexNavigation;
+	requestedAt: number;
+	/** The panel the request is for, once the opener has returned it. */
+	panel?: vscode.WebviewPanel;
+	/** The panel that was open before, if any; while `panel` is unset, a ready from it does not count. */
+	replacedPanel?: vscode.WebviewPanel;
+};
+
 type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'agent' | 'readiness' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
@@ -1292,10 +1302,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * "Take me there" requests for a panel that was not open yet. A new panel's
 	 * script is not listening when it is created, so the request waits here until
 	 * the panel reports `surfaceNavReady`. Keyed by view; a newer request replaces
-	 * an older one, and one older than {@link SURFACE_REVEAL_TTL_MS} is dropped so
-	 * it can never replay the next time the user opens that view on their own.
+	 * an older one. A request is consumed when the webview acknowledges it
+	 * (`surfaceRevealHandled`), only ever replays into the panel it was meant for
+	 * (`panel`, or any panel other than `replacedPanel` while the opener is still
+	 * creating one), and expires after {@link SURFACE_REVEAL_TTL_MS} — so it can
+	 * never redirect a panel the user later opens on their own.
 	 */
-	private pendingSurfaceReveals: Partial<Record<FeatureViewId, { nav: ViewIndexNavigation; requestedAt: number }>> = {};
+	private pendingSurfaceReveals: Partial<Record<FeatureViewId, PendingSurfaceReveal>> = {};
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
 	/** Last time the user opened each view / tab; see `src/whatsNew/visits.ts`. */
@@ -1952,6 +1965,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// requested while the panel was still being created.
 			surfaceNavReady:        () => {
 				if (typeof message.view === 'string') { this.flushPendingSurfaceReveal(message.view as FeatureViewId); }
+			},
+			// The webview acted on a revealSurface request: nothing is left to replay.
+			surfaceRevealHandled:   () => {
+				if (typeof message.view === 'string') { delete this.pendingSurfaceReveals[message.view as FeatureViewId]; }
 			},
 			openFile:               () => {
 				if (typeof message.path === 'string' && message.path) {
@@ -2885,20 +2902,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const open = openers[view];
 		if (!open) { return; }
 		const hasTarget = !!(nav.tab || nav.subtab || nav.anchor || nav.selector);
-		const existingPanel = this.getPanelForView(view);
-		if (hasTarget) {
-			// Set before opening: a new panel (or one whose opener reloads its HTML)
-			// may report ready before `open` resolves.
-			this.pendingSurfaceReveals[view] = { nav, requestedAt: Date.now() };
-		} else {
+		if (!hasTarget) {
 			delete this.pendingSurfaceReveals[view];
+			await open();
+			return;
 		}
+		const existingPanel = this.getPanelForView(view);
+		// Set before opening: a panel the opener creates may report ready before
+		// `open` resolves. Until it does, any panel but the one being replaced qualifies.
+		const pending: PendingSurfaceReveal = { nav, requestedAt: Date.now(), replacedPanel: existingPanel };
+		this.pendingSurfaceReveals[view] = pending;
 		await open();
-		if (hasTarget && existingPanel) {
-			// Already listening, so deliver now. Revealing twice (here and again on a
-			// reload's ready) is harmless: the same tab is clicked, the same section scrolled to.
-			existingPanel.reveal(undefined, false);
-			void existingPanel.webview.postMessage({ command: 'revealSurface', ...nav });
+		const panel = this.getPanelForView(view);
+		if (this.pendingSurfaceReveals[view] !== pending) { return; } // already delivered via ready
+		if (!panel) {
+			delete this.pendingSurfaceReveals[view];
+			return;
+		}
+		pending.panel = panel;
+		if (panel === existingPanel) {
+			// The opener reused the panel. Post now; if the webview is reloading
+			// (a hidden panel without retained context) the message may be lost, so
+			// the request stays pending until the webview acknowledges it or the
+			// reloaded page reports ready.
+			panel.reveal(undefined, false);
+			void panel.webview.postMessage({ command: 'revealSurface', ...nav });
 		}
 	}
 
@@ -2906,8 +2934,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const pending = this.pendingSurfaceReveals[view];
 		const panel = this.getPanelForView(view);
 		if (!pending || !panel) { return; }
-		delete this.pendingSurfaceReveals[view];
-		if (Date.now() - pending.requestedAt > SURFACE_REVEAL_TTL_MS) { return; }
+		const isIntendedPanel = pending.panel ? panel === pending.panel : panel !== pending.replacedPanel;
+		if (!isIntendedPanel || Date.now() - pending.requestedAt > SURFACE_REVEAL_TTL_MS) {
+			delete this.pendingSurfaceReveals[view];
+			return;
+		}
+		// Left pending until the webview acknowledges it with surfaceRevealHandled.
 		void panel.webview.postMessage({ command: 'revealSurface', ...pending.nav });
 	}
 
