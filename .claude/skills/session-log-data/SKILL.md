@@ -38,7 +38,7 @@ These files are only present when the coding agent environment has Azure Storage
 
 **Date range**: Last 7 days of session data.
 
-**File formats**: Files are decompressed from `.json.gz` or `.jsonl.gz`, so a download contains both, and in recent data nearly all of them are `.jsonl`. Always search for both extensions; a `*.json`-only search silently skips most sessions.
+**File formats**: Files arrive as `.json` and `.jsonl`, decompressed from `.gz` uploads or downloaded as-is when the uploader's `blobCompressFiles` setting is off. A download contains both formats, and in recent data nearly all of them are `.jsonl`. Always search for both extensions; a `*.json`-only search silently skips most sessions.
 
 - **`.jsonl`** — one JSON event per line. The event shape depends on the editor that wrote it (Claude Code/Desktop, Copilot CLI, VS Code Chat delta logs, ...), so look up the file's editor in the [editor type manifest](#editor-type-manifest--session-logseditor-typesjson) and its schema under `docs/logFilesSchema/`. For token and model numbers, prefer the shared parsers in the repo-root `src/` (`estimateTokensFromJsonlSession()`, `getModelUsageFromSession()`) over hand-rolled `jq`.
 - **`.json`** — a whole Copilot Chat session in one document, with this structure:

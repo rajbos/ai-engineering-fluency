@@ -304,7 +304,9 @@ jobs:
 
           echo "Listing blobs in container: $AZURE_STORAGE_CONTAINER, dataset: $AZURE_DATASET_ID"
 
-          # Blob layout: {dataset}/{machine-id}/{date}/{session}.{json,jsonl}.gz (newer uploads are .jsonl)
+          # Blob layout: {dataset}/{machine-id}/{date}/{session}.{json,jsonl}[.gz]
+          # (newer uploads are .jsonl; `.gz` is omitted when the uploader's
+          # blobCompressFiles setting is off, so both forms are accepted).
           # List once (with metadata, for the editor-type manifest) so only the
           # date folders inside the window are downloaded, not the whole history.
           if ! az storage blob list \
@@ -329,7 +331,7 @@ jobs:
             const { START_DATE, END_DATE } = process.env;
             const selected = blobs.filter(b => {
               const parts = b.name.split('/');
-              return parts.length === 4 && b.name.endsWith('.gz') && parts[2] >= START_DATE && parts[2] <= END_DATE;
+              return parts.length === 4 && /\.jsonl?(\.gz)?$/.test(b.name) && parts[2] >= START_DATE && parts[2] <= END_DATE;
             });
             const manifest = {};
             for (const b of selected) {
@@ -348,28 +350,38 @@ jobs:
               --account-name "$AZURE_STORAGE_ACCOUNT" \
               --source "$AZURE_STORAGE_CONTAINER" \
               --destination ./session-logs \
-              --pattern "${AZURE_DATASET_ID}/*/${DAY}/*.gz" \
+              --pattern "${AZURE_DATASET_ID}/*/${DAY}/*.json*" \
               --auth-mode "$AUTH_MODE" \
               --no-progress --only-show-errors > /dev/null || \
               echo "::warning::Failed to download session logs for $DAY, continuing"
           done
 
-          # Count downloaded files
-          FILE_COUNT=$(find ./session-logs -name "*.gz" | wc -l)
+          # Count downloaded files, compressed or not
+          FILE_COUNT=$(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)
           echo "✅ Downloaded $FILE_COUNT session log files"
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "::warning::No session logs downloaded for dataset '$AZURE_DATASET_ID' between $START_DATE and $END_DATE - check COPILOT_DATASET_ID and the download warnings above"
           fi
 
-          # Decompress all files
-          if [ "$FILE_COUNT" -gt 0 ]; then
-            echo "📂 Decompressing session logs..."
-            find ./session-logs -name "*.gz" -exec gunzip {} \;
-            echo "✅ Session logs ready in ./session-logs"
+          # Decompress the gzipped files. `find -exec ... \;` exits 0 even when
+          # gunzip fails, so check what is left: a .gz still on disk afterwards
+          # failed to decompress. Remove it rather than hand an agent a corrupt
+          # archive; its manifest entry is pruned below.
+          GZ_COUNT=$(find ./session-logs -name "*.gz" | wc -l)
+          if [ "$GZ_COUNT" -gt 0 ]; then
+            echo "📂 Decompressing $GZ_COUNT gzipped session logs..."
+            find ./session-logs -name "*.gz" -exec gunzip {} \; 2>&1 || true
+            FAILED_GZ=$(find ./session-logs -name "*.gz" | wc -l)
+            if [ "$FAILED_GZ" -gt 0 ]; then
+              echo "::warning::$FAILED_GZ of $GZ_COUNT session logs failed to decompress and were removed"
+              find ./session-logs -name "*.gz" -delete
+            fi
           fi
+          READY_COUNT=$(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)
+          echo "✅ $READY_COUNT session logs ready in ./session-logs"
 
           # The manifest was built from the listing, before downloading. Drop
-          # entries whose decompressed file is not on disk (a failed day, a
+          # entries whose (decompressed) file is not on disk (a failed day, a
           # partial batch, a file gunzip rejected) so it only describes files
           # an agent can actually open.
           node -e "
