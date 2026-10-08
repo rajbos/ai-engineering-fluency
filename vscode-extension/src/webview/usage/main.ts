@@ -4593,17 +4593,18 @@ function buildWorktreeCleanupActions(e: WorktreeCleanupLogEntry): string {
 /** Replaces a row's actions while "Delete anyway…" runs, and shows its final state afterwards. */
 function buildWorktreeRetryArea(e: WorktreeCleanupLogEntry, retry: WorktreeRetryState | undefined): string {
 	if (!retry) { return buildWorktreeCleanupActions(e); }
+	// i18n-exempt: transient status text matching the other (baselined, unlocalized) worktree cleanup strings.
 	if (retry.status === "running") {
 		const size = e.diagnostics?.sizeBytes !== undefined ? ` (${formatFileSize(e.diagnostics.sizeBytes)})` : "";
 		return `<div class="worktree-retry-status" role="status">
-      <div>⏳ Deleting worktree${escapeHtml(size)}…</div>
+      <div>${"⏳ Deleting worktree"}${escapeHtml(size)}…</div>
       <div class="worktree-progress-bar"><div class="worktree-progress-fill indeterminate" style="width: 100%;"></div></div>
     </div>`;
 	}
 	if (retry.status === "deleted") {
-		return '<div class="worktree-retry-status success" role="status">✅ Deleted</div>';
+		return `<div class="worktree-retry-status success" role="status">${"✅ Deleted"}</div>`;
 	}
-	return `<div class="worktree-retry-status failed" role="status">❌ Delete failed: ${escapeHtml(retry.reason || "unknown error")}</div>${buildWorktreeCleanupActions(e)}`;
+	return `<div class="worktree-retry-status failed" role="status">${"❌ Delete failed:"} ${escapeHtml(retry.reason || "unknown error")}</div>${buildWorktreeCleanupActions(e)}`;
 }
 
 /** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */

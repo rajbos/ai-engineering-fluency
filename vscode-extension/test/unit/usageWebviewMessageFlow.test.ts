@@ -666,6 +666,33 @@ test('clicking "Open in VS Code" asks the host to open that worktree folder', as
 	assert.equal(posted.path, worktreePath);
 });
 
+test('"Delete anyway" shows size, then progress, then the final state on the row', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\wt\big';
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: worktreePath, branch: 'big', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.',
+		diagnostics: { sizeBytes: 5 * 1024 * 1024 },
+		processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'expected a size chip on the failed row');
+
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
+	assert.ok(harness.window.document.querySelector('.worktree-cleanup-log .worktree-progress-fill'), 'expected a progress bar while deleting');
+	assert.equal(harness.window.document.querySelector('.worktree-delete-btn'), null, 'actions are hidden while deleting');
+
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'error', reason: 'folder in use' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('folder in use'), 'expected the failure reason');
+	assert.ok(harness.window.document.querySelector('.worktree-delete-btn'), 'actions return after a failure so the user can retry');
+
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
+});
+
 test('accepts payloads relayed the way VS Code actually delivers them', async () => {
 	// The panel hung with `delivered=true` logged host-side because the webview's source-trust
 	// check compared window identities. VS Code relays from an internal window, so every
