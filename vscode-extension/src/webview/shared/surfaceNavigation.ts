@@ -34,8 +34,12 @@ type PostMessageApi = { postMessage(message: unknown): void };
 /** The tab-button classes the panels use. A `data-tab` on anything else (e.g. a panel) is not a button. */
 const TAB_BUTTON_SELECTORS = ['.tab-button', '.tab', '.eff-tab', '.tab-btn', '.wn-tab'];
 
-/** How long to wait for a tab or section to appear: panels render after their data arrives. */
-const WAIT_TIMEOUT_MS = 15000;
+/**
+ * How long one reveal may wait in total for its tab, sub-tab and section to
+ * appear (panels render after their data arrives). One budget shared by every
+ * step, matching the host's SURFACE_REVEAL_TTL_MS for the request itself.
+ */
+const REVEAL_BUDGET_MS = 30_000;
 const POLL_INTERVAL_MS = 100;
 
 function cssString(value: string): string {
@@ -45,7 +49,7 @@ function cssString(value: string): string {
 }
 
 /** Resolves with the first element `find` returns, polling until it appears or the timeout passes. */
-export function waitForElement<T extends Element>(find: () => T | null, timeoutMs = WAIT_TIMEOUT_MS): Promise<T | null> {
+export function waitForElement<T extends Element>(find: () => T | null, timeoutMs: number): Promise<T | null> {
 	const first = find();
 	if (first) { return Promise.resolve(first); }
 	return new Promise((resolve) => {
@@ -117,8 +121,10 @@ function revealHiddenAncestors(target: HTMLElement): void {
 }
 
 export async function revealSurface(request: SurfaceRevealRequest): Promise<void> {
+	const deadline = Date.now() + REVEAL_BUDGET_MS;
+	const remaining = (): number => Math.max(0, deadline - Date.now());
 	if (request.tab) {
-		const tabButton = await waitForElement(() => findTabButton(request.tab as string));
+		const tabButton = await waitForElement(() => findTabButton(request.tab as string), remaining());
 		if (tabButton) {
 			openGroupOf(tabButton);
 			tabButton.click();
@@ -126,7 +132,7 @@ export async function revealSurface(request: SurfaceRevealRequest): Promise<void
 	}
 	if (request.subtab) {
 		const subtab = await waitForElement(() =>
-			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(request.subtab as string)}"]`));
+			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(request.subtab as string)}"]`), remaining());
 		subtab?.click();
 	}
 	const find = request.anchor
@@ -135,7 +141,7 @@ export async function revealSurface(request: SurfaceRevealRequest): Promise<void
 			? () => document.querySelector<HTMLElement>(request.selector as string)
 			: null;
 	if (!find) { return; }
-	const target = await waitForElement(find);
+	const target = await waitForElement(find, remaining());
 	if (!target) { return; }
 	revealHiddenAncestors(target);
 	// Let the tab switch paint before scrolling, or the scroll measures the old layout.

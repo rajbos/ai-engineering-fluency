@@ -1,6 +1,9 @@
 /**
- * A map of everything the extension can show you: every view, its tabs (and
- * tab groups), and the sections on each tab, each with a short description.
+ * A map of everything the extension can show you: every view you can open
+ * directly, its tabs (and tab groups), and the sections on each tab, each with
+ * a short description. The Session Log Viewer is the one panel left out as a
+ * view of its own: it only opens on a specific session, so it is listed where
+ * you open it from (Recent Sessions, Diagnostics › Session Files).
  *
  * Rendered as the **View index** tab of the What's New panel, where it can be
  * fuzzy-searched and every line can open its surface — the view, the right
@@ -161,8 +164,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 					{
 						id: 'usage.sessions',
 						title: 'Recent Sessions',
-						description: 'Every recent session in a filterable table, with a lookback selector and configurable columns.',
-						keywords: ['history', 'conversations', 'chats'],
+						description: 'Every recent session in a filterable table. Open a session to read it turn by turn in the Session Log Viewer.',
+						keywords: ['history', 'conversations', 'chats', 'session log viewer', 'turns', 'columns'],
 						nav: { tab: 'sessions' },
 					},
 				],
@@ -343,7 +346,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 				nav: { tab: 'report' },
 				children: [
 					{ id: 'diagnostics.report', title: 'Report', description: 'A plain-text diagnostic report (no code or conversation content) to copy into an issue, plus the session folders per editor.', keywords: ['issue', 'bug report'], nav: { tab: 'report' } },
-					{ id: 'diagnostics.sessions', title: 'Session Files', description: 'Every session file found, per editor, with interactions, tokens and context references.', keywords: ['logs', 'files'], nav: { tab: 'sessions' } },
+					{ id: 'diagnostics.sessions', title: 'Session Files', description: 'Every session file found, per editor, with interactions and tokens. Open one in the Session Log Viewer.', keywords: ['logs', 'files', 'session log viewer'], nav: { tab: 'sessions' } },
 					{ id: 'diagnostics.cache', title: 'Cache', description: 'Cache size, age and location, and buttons to clear or reset it.', nav: { tab: 'cache' } },
 					{ id: 'diagnostics.path-analyzer', title: 'Path Analyzer', description: 'Point at a folder to see which session files the extension finds there and how it reads them.', keywords: ['folder', 'scan'], nav: { tab: 'path-analyzer' } },
 					{ id: 'diagnostics.share', title: 'Share Card', description: 'A shareable card of your AI coding toolbox for a chosen period.', keywords: ['social', 'image'], nav: { tab: 'share' } },
@@ -389,6 +392,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 						],
 					},
 					{ id: 'diagnostics.github', title: 'GitHub Auth', description: 'Sign in to GitHub for PR and cloud agent data, or disconnect.', keywords: ['login', 'token'], nav: { tab: 'github' } },
+					{ id: 'diagnostics.debug', title: 'Debug', description: 'Global state counters and dismissed flags, for working on the extension itself.', keywords: ['global state', 'notifications'], nav: { tab: 'debug' }, condition: 'Only while debugging the extension' },
 				],
 			},
 		],

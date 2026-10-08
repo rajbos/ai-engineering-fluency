@@ -42,8 +42,9 @@ test('view index: every id is unique and every line has a title and a short desc
 	}
 });
 
-test('view index: never points at the log viewer, which only opens against a session file', () => {
+test('view index: lists the log viewer only where it is opened from, since it needs a session file', () => {
 	assert.ok(!VIEW_INDEX.some((view) => view.view === 'logviewer'));
+	assert.ok(searchViewIndex(ENTRIES, 'session log viewer').matchedIds.includes('usage.sessions'));
 });
 
 test('view index: navigation is inherited from the tab and reset by a new tab', () => {

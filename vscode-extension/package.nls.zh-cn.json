@@ -705,7 +705,7 @@
   "whatsNew.tab.releases": "📣 版本",
   "whatsNew.tab.index": "🧭 视图索引",
   "whatsNew.footer": "当前运行版本 {0}。包含修复内容的完整更新日志随扩展一起提供。",
-  "viewIndex.intro": "扩展中的每个视图、标签页和部分。可按名称、显示内容或你记得的任何词搜索——搜索可容忍拼写错误和词序差异。点击某一行的打开按钮即可直接前往。",
+  "viewIndex.intro": "你可以打开的每个视图及其标签页和部分。会话日志可从“最近会话”中打开。可按名称、显示内容或你记得的任何词搜索——搜索可容忍拼写错误和词序差异。点击某一行的打开按钮即可直接前往。",
   "viewIndex.searchPlaceholder": "搜索视图、标签页和部分…",
   "viewIndex.searchLabel": "搜索视图索引",
   "viewIndex.treeLabel": "视图索引",

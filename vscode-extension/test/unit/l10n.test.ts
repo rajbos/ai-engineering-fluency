@@ -1730,7 +1730,7 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 	assert.equal(t('viewIndex.open', 'Usage › Tools'), 'Open Usage › Tools');
 	assert.equal(t('viewIndex.matchOne'), '1 match');
 	assert.equal(t('viewIndex.noMatch'), 'No matching views, tabs or sections.');
-	assert.ok(t('viewIndex.intro').startsWith('Every view, tab and section in the extension.'));
+	assert.ok(t('viewIndex.intro').startsWith('Every view you can open, with its tabs and sections.'));
 	assert.equal(t('whatsNew.tabs.label'), "What's New sections");
 	assert.equal(t('whatsNew.tab.releases'), '📣 Releases');
 	assert.equal(t('whatsNew.tab.index'), '🧭 View index');
@@ -1758,7 +1758,7 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		assert.equal(t('viewIndex.matchOne'), '1 个匹配项');
 		assert.equal(t('viewIndex.noMatchStatus', 'xyz'), '没有与“xyz”匹配的内容。请尝试更少或更短的词。');
 		assert.equal(t('viewIndex.noMatch'), '没有匹配的视图、标签页或部分。');
-		assert.ok(t('viewIndex.intro').startsWith('扩展中的每个视图、标签页和部分。'));
+		assert.ok(t('viewIndex.intro').startsWith('你可以打开的每个视图及其标签页和部分。'));
 		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
 	} finally {
 		mock.setLanguage('en');

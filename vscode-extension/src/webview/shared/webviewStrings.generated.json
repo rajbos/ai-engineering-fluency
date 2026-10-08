@@ -368,7 +368,7 @@
   "whatsNew.tab.releases": "📣 Releases",
   "whatsNew.tab.index": "🧭 View index",
   "whatsNew.footer": "Running version {0}. The full changelog, including fixes, ships with the extension.",
-  "viewIndex.intro": "Every view, tab and section in the extension. Search by name, by what it shows, or by a word you remember — the search is forgiving about typos and word order. Use the open button on a line to go straight there.",
+  "viewIndex.intro": "Every view you can open, with its tabs and sections. Session logs open from Recent Sessions. Search by name, by what it shows, or by a word you remember — the search is forgiving about typos and word order. Use the open button on a line to go straight there.",
   "viewIndex.searchPlaceholder": "Search views, tabs and sections…",
   "viewIndex.searchLabel": "Search the view index",
   "viewIndex.treeLabel": "View index",
