@@ -22,16 +22,16 @@ alters a trigger surface (see "Skill security classification" in the repository
 
 None are read or sent by the scripts. Every child process (`node esbuild.js`,
 `render-views.js`, `diff-screenshots.js`) inherits the caller's full environment
-(`execFileSync` without `env`, visual-diff.js lines 38-40), so whatever tokens the
+(`execFileSync` or `spawn` without `env`, visual-diff.js lines 46-48 and 133-135), so whatever tokens the
 operator's shell holds are visible to the build scripts under review.
 
 ## Untrusted inputs parsed
 
 - The code under review: `vscode-extension/esbuild.js` and the webview sources from the
   base commit and from the working tree are executed to build the bundles, and the
-  resulting bundles are executed in Chromium (visual-diff.js lines 100-118).
+  resulting bundles are executed in Chromium (visual-diff.js lines 108-126).
 - The base commit's `views.config.json` and fixtures, merged into a baseline registry
-  (lines 141-176). Registry fields drive file paths (`bundle`, `fixture`, `$fromRepoJson`)
+  (lines 216-251). Registry fields drive file paths (`bundle`, `fixture`, `$fromRepoJson`)
   and the UI steps replayed in the page.
 - The Playwright module, resolved by `require()` from the repo, the pinned workflow
   install and the global npm root (`lib/browser.js`).
@@ -40,15 +40,16 @@ operator's shell holds are visible to the build scripts under review.
 ## What it writes and where
 
 - `visual-output/` by default, or `--out`: `baseline/`, `current/`, `diff/` (PNGs,
-  `render-report.json`, `report.json`, `report.md`) and the temporary
-  `.baseline-registry.json`. Existing `baseline/`, `current/`, `diff/` and
-  `.baseline-worktree` under that directory are deleted first.
+  `render-report.json`, `report.json`, `report.md`), `timings.md` (phase names
+  and durations only) and the temporary `.baseline-registry.json`. Existing
+  `baseline/`, `current/`, `diff/`, `timings.md` and `.baseline-worktree` under
+  that directory are deleted first.
 - A temporary git worktree at `<out>/.baseline-worktree` containing the baseline build
   output; its `vscode-extension/node_modules` is a symlink to the working tree's
-  (lines 104-112). The worktree is removed in a `finally` block.
+  (lines 112-120). The worktree is removed in a `finally` block.
 - `vscode-extension/dist/` of the working tree (esbuild output).
 - A `mkdtemp` directory under the OS temp dir for the generated HTML pages, removed when
-  rendering ends (render-views.js lines 250, 282-285).
+  rendering ends (render-views.js lines 257, 290-293).
 
 ## External programs run
 
@@ -58,7 +59,8 @@ operator's shell holds are visible to the build scripts under review.
 - `node npm-cli.js root -g` to locate global Playwright (`lib/browser.js` line 31).
 - Chromium via Playwright, launched with default options (no flags that disable the
   sandbox).
-All use `execFileSync` with argument arrays and no shell.
+All use `execFileSync` or `spawn` with argument arrays and no shell. The two
+render processes run concurrently; each is awaited before the worktree is removed.
 
 ## Mitigations in the code
 
@@ -66,7 +68,7 @@ All use `execFileSync` with argument arrays and no shell.
   over or stashed.
 - View and state ids must match a strict allowlist, so ids cannot carry path separators
   into screenshot or temp file names (`lib/config.js` `ID_PATTERN`). The fixture file name
-  is reduced with `path.basename` (render-views.js line 108).
+  is reduced with `path.basename` (render-views.js line 114).
 - Embedded JSON is escaped with `<` so a payload cannot close the script tag
   (`lib/harness.js` lines 162-175).
 - The page gets a stub `acquireVsCodeApi` that only records messages in memory; nothing is
@@ -83,14 +85,14 @@ Recorded, not fixed here.
   operator already trusts to run locally; it must not be pointed at an unreviewed fork
   without isolation.
 - Chromium has no network restriction (no `page.route` or offline mode in
-  render-views.js lines 134-154), so a bundle under review can make outbound requests
+  render-views.js lines 140-160), so a bundle under review can make outbound requests
   while rendering. The wait uses `networkidle`.
 - `$fromRepoJson` is joined onto the repo root with no containment check
   (`lib/harness.js` lines 152-153): a fixture can embed any `.json` file readable on disk,
   for example via `../` segments, into the page and the screenshot.
 - `view.bundle` from the registry is joined into a path unvalidated (render-views.js
-  line 93), so a registry entry can load any `.js` file as the page's script.
-- `--out` is deleted into recursively (visual-diff.js lines 191-197): pointing it at a
+  line 99), so a registry entry can load any `.js` file as the page's script.
+- `--out` is deleted into recursively (visual-diff.js lines 269-276): pointing it at a
   directory that contains subdirectories named `baseline`, `current` or `diff` removes them.
 - `--base` is passed to `git merge-base`/`rev-parse` as a bare argument, so a value that
   starts with `-` is read as an option.
