@@ -395,6 +395,20 @@ export function readGitOriginUrl(repoRoot: string): string | undefined {
 	return config ? GIT_ORIGIN_URL_PATTERN.exec(config)?.[1] : undefined;
 }
 
+/**
+ * Identify the repository a checkout belongs to, so linked worktrees of one
+ * repository can be grouped. Returns the shared git directory (the same for the
+ * main checkout and every linked worktree) and the main checkout's root when it
+ * can be derived (a non-bare repository whose common dir is `<root>/.git`).
+ */
+export function resolveRepoIdentity(repoRoot: string): { key: string; mainRoot?: string } {
+	const configDir = resolveGitConfigDir(repoRoot);
+	if (!configDir) { return { key: path.resolve(repoRoot) }; }
+	const key = path.resolve(configDir);
+	const mainRoot = path.basename(key) === '.git' ? path.dirname(key) : undefined;
+	return { key, mainRoot };
+}
+
 /** Markdown files under `.github/agents/` that are documentation, not agent definitions. */
 const NON_AGENT_MARKDOWN = new Set(['readme.md', 'index.md', 'contributing.md']);
 

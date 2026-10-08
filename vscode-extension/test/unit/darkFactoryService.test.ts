@@ -88,6 +88,47 @@ test('selectRepoRoots: preserves caller ordering so the most relevant paths surv
 	assert.deepEqual(selectRepoRoots([second, first]).roots, [second, first]);
 });
 
+/** Create a linked worktree of `mainRoot`, laid out the way `git worktree add` does. */
+function makeWorktree(mainRoot: string, name: string): string {
+	const wt = fs.mkdtempSync(path.join(process.cwd(), 'df-wt-'));
+	TEMP_ROOTS.push(wt);
+	const gitDir = path.join(mainRoot, '.git', 'worktrees', name);
+	fs.mkdirSync(gitDir, { recursive: true });
+	fs.writeFileSync(path.join(gitDir, 'commondir'), '../..', 'utf8');
+	fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${gitDir}\n`, 'utf8');
+	return wt;
+}
+
+test('selectRepoRoots: groups linked worktrees under their main checkout', () => {
+	const main = makeRepo({});
+	const wtA = makeWorktree(main, 'a');
+	const wtB = makeWorktree(main, 'b');
+	const { roots, skipped } = selectRepoRoots([wtA, wtB, main]);
+	assert.deepEqual(roots, [main]);
+	assert.equal(skipped, 0);
+});
+
+test('selectRepoRoots: worktrees alone resolve to the main checkout when it exists', () => {
+	const main = makeRepo({});
+	const wt = makeWorktree(main, 'a');
+	assert.deepEqual(selectRepoRoots([wt]).roots, [main]);
+});
+
+test('selectRepoRoots: falls back to the first worktree when the main checkout is gone', () => {
+	const main = makeRepo({});
+	const wtA = makeWorktree(main, 'a');
+	const wtB = makeWorktree(main, 'b');
+	fs.rmSync(path.join(main, '.git', 'config'));
+	fs.renameSync(path.join(main, '.git'), path.join(main, '.git-moved'));
+	fs.mkdirSync(path.join(main, '.git-moved', 'x'), { recursive: true });
+	// Re-point the worktrees at a common dir that no longer sits at `<root>/.git`.
+	const common = path.join(main, '.git-moved');
+	for (const [wt, name] of [[wtA, 'a'], [wtB, 'b']]) {
+		fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(common, 'worktrees', name)}\n`, 'utf8');
+	}
+	assert.deepEqual(selectRepoRoots([wtA, wtB]).roots, [wtA]);
+});
+
 test('selectRepoRoots: caps the scan and reports how many repositories it skipped', () => {
 	const repos = Array.from({ length: MAX_SCANNED_REPOS + 3 }, () => makeRepo({}));
 	const { roots, skipped } = selectRepoRoots(repos);

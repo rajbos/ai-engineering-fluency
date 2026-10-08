@@ -21,7 +21,7 @@ import {
 	type DarkFactoryPrStats,
 	type DarkFactoryRepoSignals,
 } from '../../src/darkFactoryReadiness';
-import { collectDarkFactoryFileSignals, isGitRepoRoot, readGitOriginUrl } from '../../src/darkFactorySignals';
+import { collectDarkFactoryFileSignals, isGitRepoRoot, readGitOriginUrl, resolveRepoIdentity } from '../../src/darkFactorySignals';
 import type { DarkFactoryReport } from '../../src/types';
 import { buildGitHubHosts, parseGitHubRemote, type RepoPrStatsResult } from './githubPrService';
 
@@ -46,18 +46,23 @@ function resolveNameWithOwner(repoRoot: string, hosts: Set<string>): string | un
  */
 export function selectRepoRoots(workspacePaths: readonly string[]): { roots: string[]; skipped: number } {
 	const seen = new Set<string>();
-	const roots: string[] = [];
-	let eligible = 0;
+	// Linked worktrees share one git directory; group them so a repository is
+	// listed once. The main checkout represents the group when it still exists,
+	// otherwise the first (most relevant) worktree seen does.
+	const groups = new Map<string, string>();
 	for (const workspacePath of workspacePaths) {
 		if (!workspacePath || workspacePath.startsWith('<unresolved:')) { continue; }
 		const resolved = path.resolve(workspacePath);
 		if (seen.has(resolved)) { continue; }
 		seen.add(resolved);
 		if (!isGitRepoRoot(resolved)) { continue; }
-		eligible++;
-		if (roots.length < MAX_SCANNED_REPOS) { roots.push(resolved); }
+		const { key, mainRoot } = resolveRepoIdentity(resolved);
+		const representative = mainRoot && isGitRepoRoot(mainRoot) ? mainRoot : resolved;
+		if (!groups.has(key)) { groups.set(key, representative); }
 	}
-	return { roots, skipped: eligible - roots.length };
+	const all = [...groups.values()];
+	const roots = all.slice(0, MAX_SCANNED_REPOS);
+	return { roots, skipped: all.length - roots.length };
 }
 
 /** Index the already-fetched pull-request statistics by `owner/repo` for a cheap join. */
