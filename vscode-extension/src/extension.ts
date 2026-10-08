@@ -14026,7 +14026,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (!result) { finish("cancelled"); return; }
 
     if (!result.ok) {
-      const reason = result.stderr || "unknown error";
+      const reason = result.stderr || l10n.t('usage.worktreeCleanup.unknownError');
       vscode.window.showErrorMessage(`Could not delete worktree: ${reason}`);
       finish("error", reason);
       return;

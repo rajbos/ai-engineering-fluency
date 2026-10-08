@@ -711,7 +711,7 @@ test('the size chip reuses the scanned worktree size instead of a second disk wa
 
 test('a late delete result with no retry in flight is ignored, and empty worktrees still show a size', async () => {
 	const harness = await bootWebview(buildStats());
-	const worktreePath = 'C:\wt\empty';
+	const worktreePath = 'C:\\wt\\empty';
 	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'empty', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 0, folders: 0, bytes: 0 } });
 	harness.post({ command: 'cleanupStarted', total: 1 });
 	harness.post({
