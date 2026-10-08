@@ -2889,7 +2889,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const hasTarget = !!(nav.tab || nav.subtab || nav.anchor || nav.selector);
 		if (!hasTarget) {
 			this.surfaceReveals.clear(view);
+			const existing = this.getPanelForView(view);
 			await open();
+			// An already-open panel may still be waiting to carry out an earlier
+			// reveal; going to the view itself supersedes it.
+			if (existing && this.getPanelForView(view) === existing) {
+				void existing.webview.postMessage({ command: 'cancelReveal' });
+			}
 			return;
 		}
 		// Held before opening: a panel the opener creates may report ready before `open` resolves.

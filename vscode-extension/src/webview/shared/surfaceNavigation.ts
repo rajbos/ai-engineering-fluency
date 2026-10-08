@@ -180,11 +180,23 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 }
 
 /**
+ * Abandons any reveal still waiting for its tab or section — the user went to
+ * the view itself since, and a late scroll would yank them away from it.
+ */
+export function cancelReveal(): void {
+	revealGeneration++;
+}
+
+/**
  * Wires a panel up for host-driven navigation. Call once at module load, with
  * the panel's view id as the host knows it.
  */
 export function installSurfaceNavigation(vscode: PostMessageApi, view: string): void {
-	registerMessageHandler<{ command?: string } & Partial<SurfaceRevealRequest>>((message) => {
+	registerMessageHandler<{ command?: string } & Omit<Partial<SurfaceRevealRequest>, 'command'>>((message) => {
+		if (message?.command === 'cancelReveal') {
+			cancelReveal();
+			return;
+		}
 		if (message?.command === 'revealSurface') {
 			// Acknowledge only once the reveal landed: until then the host keeps the
 			// request, so a reload of this panel (its ready handshake) can retry it.

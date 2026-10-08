@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { SurfaceRevealQueue } from '../../src/whatsNew/surfaceRevealQueue';
-import { flashSection, installSurfaceNavigation, revealSurface } from '../../src/webview/shared/surfaceNavigation';
+import { cancelReveal, flashSection, installSurfaceNavigation, revealSurface } from '../../src/webview/shared/surfaceNavigation';
 
 // ── Host side: the request handshake ─────────────────────────────────────
 
@@ -229,4 +229,31 @@ test('installSurfaceNavigation: reports ready, then acknowledges a reveal only o
 	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'updateStats' } }));
 	await sleep(50);
 	assert.equal(posted.length, 2);
+});
+
+test('cancelReveal: a reveal still waiting never scrolls once the user opened the view itself', async () => {
+	const { window, scrolled } = installDom('<div id="root"></div>');
+	const waiting = revealSurface({ command: 'revealSurface', anchor: 'async-section' }, 2_000);
+	cancelReveal();
+	const late = window.document.createElement('div');
+	late.id = 'async-section';
+	window.document.getElementById('root')!.append(late);
+	assert.equal(await waiting, false);
+	await sleep(80);
+	assert.deepEqual(scrolled, []);
+});
+
+test('installSurfaceNavigation: a cancelReveal message abandons the waiting reveal without acknowledging it', async () => {
+	const { window, scrolled } = installDom('<div id="root"></div>');
+	const posted: unknown[] = [];
+	installSurfaceNavigation({ postMessage: (message: unknown) => { posted.push(message); } }, 'dashboard');
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', anchor: 'slow' } }));
+	await sleep(50);
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'cancelReveal' } }));
+	const late = window.document.createElement('div');
+	late.id = 'slow';
+	window.document.getElementById('root')!.append(late);
+	await sleep(250);
+	assert.deepEqual(posted, [{ command: 'surfaceNavReady', view: 'dashboard' }]);
+	assert.deepEqual(scrolled, []);
 });
