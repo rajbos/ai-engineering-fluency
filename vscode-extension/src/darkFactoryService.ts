@@ -48,6 +48,27 @@ export function parseCachedReport(value: unknown): DarkFactoryReport | undefined
 	return Number.isFinite(Date.parse(candidate.scannedAt)) ? (value as DarkFactoryReport) : undefined;
 }
 
+/**
+ * Identity of what a scan would cover: the ordered repository roots chosen from the
+ * caller's paths. A cached report is only valid for the scope it was produced for, so
+ * switching workspaces (or gaining a repository) is a cache miss, not a stale replay.
+ */
+export function readinessScopeKey(workspacePaths: readonly string[]): string {
+	return selectRepoRoots(workspacePaths).roots.join('|');
+}
+
+/** The persisted cache entry: a report plus the scope it was scanned for. */
+export interface DarkFactoryCacheEntry { scopeKey: string; report: DarkFactoryReport }
+
+/** Read a persisted entry, returning its report only when it matches `scopeKey`. */
+export function parseCacheEntry(value: unknown, scopeKey: string): DarkFactoryReport | undefined {
+	if (!value || typeof value !== 'object') { return undefined; }
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== Object.prototype && proto !== null) { return undefined; }
+	const entry = value as Partial<DarkFactoryCacheEntry>;
+	return entry.scopeKey === scopeKey ? parseCachedReport(entry.report) : undefined;
+}
+
 /** Whether a report is old enough (or its timestamp odd enough) that it should be re-scanned. */
 export function isReportStale(report: DarkFactoryReport, now: Date = new Date()): boolean {
 	const age = now.getTime() - Date.parse(report.scannedAt);

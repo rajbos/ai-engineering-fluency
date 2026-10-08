@@ -8,6 +8,8 @@ import {
 	DARK_FACTORY_CACHE_TTL_MS,
 	MAX_SCANNED_REPOS,
 	isReportStale,
+	parseCacheEntry,
+	readinessScopeKey,
 	parseCachedReport,
 	indexPrStats,
 	scanDarkFactoryReadiness,
@@ -175,6 +177,20 @@ test('parseCachedReport: accepts a report-shaped value and rejects anything else
 	for (const bad of [undefined, null, 'x', {}, { repos: [] }, { repos: {}, scannedAt: '2026-09-01T12:00:00.000Z' }, { repos: [], scannedAt: 'nope' }]) {
 		assert.equal(parseCachedReport(bad), undefined);
 	}
+});
+
+test('cache entries only replay for the workspace scope they were scanned for', () => {
+	const a = makeRepo({});
+	const b = makeRepo({});
+	const report = reportAt('2026-09-01T12:00:00.000Z');
+	const keyA = readinessScopeKey([a]);
+	const entry = { scopeKey: keyA, report };
+	assert.equal(parseCacheEntry(entry, keyA), report);
+	// Switching workspace, or gaining a repository, is a cache miss.
+	assert.equal(parseCacheEntry(entry, readinessScopeKey([b])), undefined);
+	assert.equal(parseCacheEntry(entry, readinessScopeKey([a, b])), undefined);
+	assert.equal(parseCacheEntry(report, keyA), undefined);
+	assert.equal(parseCacheEntry(undefined, keyA), undefined);
 });
 
 test('isReportStale: fresh within a day, stale beyond it, and a future timestamp is distrusted', () => {
