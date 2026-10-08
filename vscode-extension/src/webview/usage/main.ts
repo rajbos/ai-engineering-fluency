@@ -39,6 +39,7 @@ import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDete
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { formatToolEditors, sanitizeToolCallsByEditor } from './toolEditors';
 import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
 import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSanitizer';
 import { renderContextRefTable } from './contextRefTableHtml';
@@ -224,6 +225,8 @@ type UsageAnalysisStats = {
 	readinessAvailable?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
+	/** Per-tool, per-editor call counts (last 30 days); used to tag unknown-tool issue reports with the editor. */
+	toolCallsByEditor?: { [tool: string]: { [editor: string]: number } };
 	todaySessions?: TodaySessionSummary[];
 	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
@@ -839,10 +842,13 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
-function createMcpToolIssueUrl(unknownTools: string[]): string {
+function createMcpToolIssueUrl(unknownTools: string[], toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
 	const repoUrl = 'https://github.com/rajbos/ai-engineering-fluency';
 	const title = encodeURIComponent('Add missing friendly names for tools');
-	const toolList = unknownTools.map(tool => `- \`${tool}\``).join('\n');
+	const toolList = unknownTools.map(tool => {
+		const editors = formatToolEditors(tool, toolCallsByEditor);
+		return editors ? `- \`${tool}\` (seen in: ${editors})` : `- \`${tool}\``;
+	}).join('\n');
 	const body = encodeURIComponent(
 		`## Unknown Tools Found\n\n` +
 		`The following tools were detected but don't have friendly display names:\n\n` +
@@ -2011,6 +2017,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			suppressedUnknownTools: Array.isArray(raw.suppressedUnknownTools)
 				? raw.suppressedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
 				: undefined,
+			toolCallsByEditor: sanitizeToolCallsByEditor(raw.toolCallsByEditor),
 		};
 
 		// Sanitize customizationMatrix (avoid pass-through of untrusted nested fields)
@@ -5182,7 +5189,7 @@ function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number,
 function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 	const unknownTools = getUnknownMcpTools(stats);
 	if (unknownTools.length === 0) { return ''; }
-	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const issueUrl = createMcpToolIssueUrl(unknownTools, stats.toolCallsByEditor);
 	const toolListHtml = unknownTools.map(tool => {
 		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
 		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
@@ -5191,7 +5198,9 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
 		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
 		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
-		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
+		const editors = formatToolEditors(tool, stats.toolCallsByEditor);
+		if (editors) { countParts.push(editors); }
+		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${escapeHtml(countParts.join(' | '))})</span>` : '';
 		const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
 		return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
 	}).join(' ');
