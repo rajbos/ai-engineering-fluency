@@ -1,5 +1,4 @@
 // --- Node.js built-ins & VS Code ---
-import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -469,6 +468,7 @@ import {
 	type WhatsNewState,
 } from './whatsNew/announcer';
 import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from './whatsNew/visits';
+import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
