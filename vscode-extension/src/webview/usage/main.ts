@@ -2403,13 +2403,18 @@ function handleCleanupWorktreeResult(message: any): void {
 	worktreeCleanupStatus = { processed: numField(message.processed), total: numField(message.total) };
 	const rawStatus = message.status;
 	const status: WorktreeCleanupOutcome = rawStatus === "deleted" || rawStatus === "skipped" ? rawStatus : "error";
+	const entryPath = String(message.path ?? "");
+	const diagnostics = sanitizeWorktreeCleanupDiagnostics(message.diagnostics);
+	// The size comes from the scan's already-enriched row, not a second recursive disk walk per failed worktree.
+	const scanned = worktreeResults.find((w) => w.path === entryPath);
+	if (diagnostics && diagnostics.sizeBytes === undefined && scanned && knownBytes(scanned) > 0) { diagnostics.sizeBytes = knownBytes(scanned); }
 	worktreeCleanupLog.push({
-		path: String(message.path ?? ""),
+		path: entryPath,
 		branch: String(message.branch ?? "?"),
 		repoLabel: String(message.repoLabel ?? ""),
 		status,
 		reason: typeof message.reason === "string" ? message.reason : undefined,
-		diagnostics: sanitizeWorktreeCleanupDiagnostics(message.diagnostics),
+		diagnostics,
 	});
 	updateWorktreeResults();
 }
@@ -4623,7 +4628,7 @@ function renderWorktreeCleanupLog(): string {
           <span class="worktree-cleanup-log-repo">${escapeHtml(e.repoLabel)}</span>
         </div>
         <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
-        <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
+        ${retry?.status === "deleted" ? "" : `<div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>`}
         ${buildWorktreeCleanupDetailChips(e.diagnostics)}
         ${buildWorktreeRetryArea(e, retry)}
       </div>

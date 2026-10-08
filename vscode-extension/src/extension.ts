@@ -1081,8 +1081,6 @@ interface WorktreeCleanupDiagnostics {
 	modifiedFiles?: number;
 	/** Untracked files (excluding ignored ones). */
 	untrackedFiles?: number;
-	/** Total on-disk size of the worktree folder, so the user knows how much a delete frees. */
-	sizeBytes?: number;
 }
 
 type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'readiness' | 'worktrees' | 'insights' | 'corrections';
@@ -13088,9 +13086,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       const normalized = pathModule.normalize(pathToReveal);
       try {
         await fsModule.promises.stat(normalized);
-      } catch {
-        vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
-        return;
+      } catch (err) {
+        // Only a genuinely missing path is "gone"; permission/IO errors fall through to the reveal attempt.
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+          vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
+          return;
+        }
       }
       // revealFileInOS works for folders and files alike; openExternal on a folder URI is
       // silently ignored on some hosts, which made "Reveal folder" look dead.
@@ -13870,16 +13871,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * fields could be read instead of an all-or-nothing failure.
    */
   private async collectWorktreeCleanupDiagnostics(worktreeRoot: string): Promise<WorktreeCleanupDiagnostics> {
-    const [lastModified, lastCommitDate, lastCommitRelative, remoteInfo, dirty, folderStats] = await Promise.all([
+    const [lastModified, lastCommitDate, lastCommitRelative, remoteInfo, dirty] = await Promise.all([
       this.getWorktreeLastModified(worktreeRoot),
       this.runGit(["log", "-1", "--format=%cI"], worktreeRoot),
       this.runGit(["log", "-1", "--format=%cr"], worktreeRoot),
       this.getWorktreeRemoteBranchInfo(worktreeRoot),
       this.getWorktreeDirtyCounts(worktreeRoot),
-      this.computeFolderStats(worktreeRoot),
     ]);
     return {
-      sizeBytes: folderStats.bytes,
       lastModified,
       lastCommitDate: lastCommitDate.ok && lastCommitDate.stdout ? lastCommitDate.stdout : undefined,
       lastCommitRelative: lastCommitRelative.ok && lastCommitRelative.stdout ? lastCommitRelative.stdout : undefined,

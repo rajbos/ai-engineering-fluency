@@ -691,6 +691,20 @@ test('"Delete anyway" shows size, then progress, then the final state on the row
 
 	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('Could not delete worktree.'), 'a successful retry must not keep the old failure text');
+});
+
+test('the size chip reuses the scanned worktree size instead of a second disk walk', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\wt\scanned';
+	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'scanned', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 3, folders: 1, bytes: 2 * 1024 * 1024 } });
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'scanned', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.', diagnostics: { modifiedFiles: 0, untrackedFiles: 0 }, processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'expected a size chip taken from the scan result');
 });
 
 test('a new cleanup run does not inherit the previous run\'s "Delete anyway" state', async () => {
