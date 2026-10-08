@@ -1570,6 +1570,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
 	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
+	// Per-tool, per-editor call counts for the last-30-days window, so the "Report Unknown Tools"
+	// issue can say which editor each unknown tool was seen in. Reset at the top of each refresh.
+	private _toolCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	// Distinct workspace folder paths each skill was invoked from (last 30 days), used to
 	// backfill descriptions for skills whose repo isn't the one currently open (see
 	// findSkillDescriptionInWorkspaces).
@@ -6785,6 +6788,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._customizationFilesCache.clear();
 		this._pendingCustomizationScans.clear();
 		this._skillCallsByEditorAccum = new Map();
+		this._toolCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
@@ -6834,6 +6838,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days,
 			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
 			claudeDesktopCoverage: await this.computeClaudeDesktopCoverage(),
+			toolCallsByEditor: this._buildToolCallsByEditor(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -7947,6 +7952,32 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/** Plain-object snapshot of `_toolCallsByEditorAccum` for the stats payload. */
+	private _buildToolCallsByEditor(): Record<string, Record<string, number>> {
+		const out: Record<string, Record<string, number>> = {};
+		for (const [name, byEditor] of this._toolCallsByEditorAccum) {
+			out[name] = Object.fromEntries(byEditor);
+		}
+		return out;
+	}
+
+	/**
+	 * Accumulate this session's tool calls (general tools, MCP tools and MCP servers) into
+	 * `_toolCallsByEditorAccum` (toolName -> editorSource -> count).
+	 */
+	private _accumulateToolCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis): void {
+		const sources = [analysis.toolCalls.byTool, analysis.mcpTools.byTool, analysis.mcpTools.byServer];
+		if (sources.every(s => Object.keys(s).length === 0)) { return; }
+		const editorSource = this.detectEditorSource(sessionFile);
+		for (const source of sources) {
+			for (const [name, count] of Object.entries(source)) {
+				let byEditor = this._toolCallsByEditorAccum.get(name);
+				if (!byEditor) { byEditor = new Map(); this._toolCallsByEditorAccum.set(name, byEditor); }
+				byEditor.set(editorSource, (byEditor.get(editorSource) || 0) + count);
+			}
+		}
+	}
+
 	/**
 	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
 	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
@@ -8003,6 +8034,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts,
 				sessionData.workspaceFolderPath);
 			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
+			this._accumulateToolCallsByEditor(sessionFile, analysis);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
@@ -10133,6 +10165,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			backendConfigured: this.isBackendConfigured(),
 			readinessAvailable: true,
 			currentWorkspacePaths: workspacePaths,
+			toolCallsByEditor: analysisStats.toolCallsByEditor ?? {},
 			todaySessions: analysisStats.todaySessions || [],
 			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
 			insights: this.buildCurrentInsights(analysisStats),
@@ -15113,6 +15146,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       readinessAvailable: true,
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
+      toolCallsByEditor: stats.toolCallsByEditor ?? {},
       todaySessions: stats.todaySessions || [],
       claudeDesktopCoverage: stats.claudeDesktopCoverage ?? null,
       use24HourTime: this.getUse24HourTimeSetting(),
