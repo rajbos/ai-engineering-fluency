@@ -2869,6 +2869,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (nav.tab && isUsageAnalysisTab(nav.tab)) {
 				await this.showUsageAnalysisOnTab(nav.tab, nav.anchor);
 			} else {
+				// Going to the view itself supersedes a deep link still waiting for the
+				// panel to be ready, which would otherwise redirect this open later.
+				this.pendingAnalysisNavigation = undefined;
 				await this.showUsageAnalysis();
 			}
 			return;
