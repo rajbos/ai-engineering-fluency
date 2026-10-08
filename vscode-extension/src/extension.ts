@@ -320,7 +320,7 @@ import {
  */
 const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
-import { scanDarkFactoryReadiness } from './darkFactoryService';
+import { DARK_FACTORY_CACHE_KEY, isReportStale, parseCacheEntry, readinessScopeKey, scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -10048,7 +10048,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
-			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId)),
+			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId, message.force)),
 			checkCcrActivity: (message) => {
 				const owner = typeof message.owner === 'string' ? message.owner : '';
 				const repo = typeof message.repo === 'string' ? message.repo : '';
@@ -10934,10 +10934,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
 	 * already fetched, so opening AI Readiness issues no extra GitHub calls.
 	 */
-	private runDarkFactoryScan(): DarkFactoryReport {
-		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+	private runDarkFactoryScan(workspacePaths: readonly string[]): DarkFactoryReport {
 		return scanDarkFactoryReadiness({
-			workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
 		});
@@ -10948,17 +10947,45 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		await this.showUsageAnalysisOnTab('readiness');
 	}
 
-	private loadReadinessForUsage(requestId: unknown): void {
+	/**
+	 * Serve the readiness report, cache-first.
+	 *
+	 * A cached report is posted immediately so the tab is usable at once; a fresh scan
+	 * then runs in the background only when that cache is over a day old, or when the
+	 * user asked for one (`force`). With no cache the scan runs straight away.
+	 */
+	/** Open folders first, then every workspace path the usage matrix knows about. */
+	private darkFactoryCandidatePaths(): string[] {
+		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+		return [...openFolders, ...this._buildWorkspacePaths()];
+	}
+
+	private loadReadinessForUsage(requestId: unknown, force: unknown): void {
 		const panel = this.analysisPanel;
 		if (!panel) { return; }
 		if (typeof requestId !== 'number' || !Number.isSafeInteger(requestId) || requestId < 1) {
 			this.warn('AI Readiness: received an invalid scan request id');
 			return;
 		}
+		const workspacePaths = this.darkFactoryCandidatePaths();
+		const scopeKey = readinessScopeKey(workspacePaths);
+		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey, this.githubSession !== undefined);
+		const needsScan = force === true || !cached || isReportStale(cached);
+		if (cached && force !== true) {
+			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });
+		}
+		if (!needsScan) { return; }
+		// Deferred so the cached report above paints before the synchronous scan blocks the host.
+		setTimeout(() => this.scanReadinessAndPost(panel, requestId, workspacePaths, scopeKey), 0);
+	}
+
+	private scanReadinessAndPost(panel: vscode.WebviewPanel, requestId: number, workspacePaths: readonly string[], scopeKey: string): void {
 		try {
-			const report = this.runDarkFactoryScan();
+			const report = this.runDarkFactoryScan(workspacePaths);
+			Promise.resolve(this.context.globalState.update(DARK_FACTORY_CACHE_KEY, { scopeKey, report }))
+				.catch(err => this.warn(`Dark Factory readiness cache could not be saved: ${err}`));
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, refreshing: false });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
