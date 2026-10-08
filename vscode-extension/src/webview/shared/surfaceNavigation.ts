@@ -138,9 +138,9 @@ function targetFinder(request: SurfaceRevealRequest): (() => HTMLElement | null)
  * request took over — in which case nothing has been acknowledged and the
  * host still holds the request.
  */
-export async function revealSurface(request: SurfaceRevealRequest): Promise<boolean> {
+export async function revealSurface(request: SurfaceRevealRequest, budgetMs = REVEAL_BUDGET_MS): Promise<boolean> {
 	const generation = ++revealGeneration;
-	const deadline = Date.now() + REVEAL_BUDGET_MS;
+	const deadline = Date.now() + budgetMs;
 	const remaining = (): number => Math.max(0, deadline - Date.now());
 	const superseded = (): boolean => generation !== revealGeneration;
 	const tab = request.tab;
