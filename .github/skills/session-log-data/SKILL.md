@@ -24,7 +24,7 @@ These files are only present when the coding agent environment has Azure Storage
 
 ### 1. Session Log Files — `./session-logs/`
 
-**What**: Raw GitHub Copilot Chat session log files downloaded from Azure Blob Storage. These contain the full conversation history including prompts, responses, model information, and tool calls.
+**What**: Raw AI-coding session log files (Copilot Chat, Copilot CLI, Claude Code/Desktop and other supported editors) downloaded from Azure Blob Storage. These contain the full conversation history including prompts, responses, model information, and tool calls.
 
 **Structure**:
 ```
