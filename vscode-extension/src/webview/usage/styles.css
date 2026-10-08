@@ -1391,6 +1391,21 @@ background: var(--bg-tertiary);
 	color: var(--vscode-errorForeground, #f14c4c);
 }
 
+.worktree-retry-status {
+	margin-top: 8px;
+	font-size: 12px;
+}
+
+.worktree-retry-status.success {
+	color: var(--success-color, #3fb950);
+	font-weight: 600;
+}
+
+.worktree-retry-status.failed {
+	color: var(--danger-color, #f85149);
+	margin-bottom: 4px;
+}
+
 .worktree-cleanup-log-actions {
 	display: flex;
 	flex-wrap: wrap;

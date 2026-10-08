@@ -513,7 +513,11 @@ type WorktreeCleanupDiagnostics = {
 	behind?: number;
 	modifiedFiles?: number;
 	untrackedFiles?: number;
+	sizeBytes?: number;
 };
+/** Live state of a "Delete anyway…" retry on a cleanup-log row, keyed by worktree path. */
+type WorktreeRetryState = { status: "running" | "deleted" | "error"; reason?: string };
+const worktreeRetryState = new Map<string, WorktreeRetryState>();
 type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string; diagnostics?: WorktreeCleanupDiagnostics };
 let worktreeCleanupLog: WorktreeCleanupLogEntry[] = [];
 
@@ -2424,7 +2428,30 @@ function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagno
 		behind: num(d.behind),
 		modifiedFiles: num(d.modifiedFiles),
 		untrackedFiles: num(d.untrackedFiles),
+		sizeBytes: num(d.sizeBytes),
 	};
+}
+
+/** The extension passed its confirmation and began removing a worktree from the cleanup report. */
+function handleWorktreeDeleteStarted(message: any): void {
+	const p = String(message.path ?? "");
+	if (!p) { return; }
+	worktreeRetryState.set(p, { status: "running" });
+	updateWorktreeResults();
+}
+
+/** Final outcome of a "Delete anyway…" retry; "cancelled" (modal dismissed) just clears the state. */
+function handleWorktreeDeleteResult(message: any): void {
+	const p = String(message.path ?? "");
+	if (!p) { return; }
+	if (message.status === "deleted") {
+		worktreeRetryState.set(p, { status: "deleted" });
+	} else if (message.status === "error") {
+		worktreeRetryState.set(p, { status: "error", reason: typeof message.reason === "string" ? message.reason : "unknown error" });
+	} else {
+		worktreeRetryState.delete(p);
+	}
+	updateWorktreeResults();
 }
 
 function handleCleanupComplete(): void {
@@ -2503,6 +2530,8 @@ const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeEnrichProgress: handleWorktreeEnrichProgress,
 	worktreeEnriched: handleWorktreeEnriched,
 	worktreeDeleted: handleWorktreeDeleted,
+	worktreeDeleteStarted: handleWorktreeDeleteStarted,
+	worktreeDeleteResult: handleWorktreeDeleteResult,
 	worktreeScanComplete: () => handleWorktreeScanComplete(),
 	worktreeScanCancelled: () => handleWorktreeScanCancelled(),
 	worktreeBackgroundResults: handleWorktreeBackgroundResults,
@@ -4489,6 +4518,9 @@ function worktreeChip(icon: string, text: string, title: string, danger = false)
 /** "Last updated" / "Last commit" chips — how stale (or how live) this worktree is. */
 function buildWorktreeAgeChips(d: WorktreeCleanupDiagnostics): string[] {
 	const chips: string[] = [];
+	if (d.sizeBytes !== undefined) {
+		chips.push(worktreeChip("💾", `Size: ${formatFileSize(d.sizeBytes)}`, `${d.sizeBytes.toLocaleString()} bytes on disk`));
+	}
 	const lastModified = formatWorktreeTimestamp(d.lastModified);
 	if (lastModified) {
 		chips.push(worktreeChip("🕒", `Last updated: ${lastModified}`, "Newest file modification at the worktree root"));
@@ -4558,12 +4590,29 @@ function buildWorktreeCleanupActions(e: WorktreeCleanupLogEntry): string {
     </div>`;
 }
 
+/** Replaces a row's actions while "Delete anyway…" runs, and shows its final state afterwards. */
+function buildWorktreeRetryArea(e: WorktreeCleanupLogEntry, retry: WorktreeRetryState | undefined): string {
+	if (!retry) { return buildWorktreeCleanupActions(e); }
+	if (retry.status === "running") {
+		const size = e.diagnostics?.sizeBytes !== undefined ? ` (${formatFileSize(e.diagnostics.sizeBytes)})` : "";
+		return `<div class="worktree-retry-status" role="status">
+      <div>⏳ Deleting worktree${escapeHtml(size)}…</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill indeterminate" style="width: 100%;"></div></div>
+    </div>`;
+	}
+	if (retry.status === "deleted") {
+		return '<div class="worktree-retry-status success" role="status">✅ Deleted</div>';
+	}
+	return `<div class="worktree-retry-status failed" role="status">❌ Delete failed: ${escapeHtml(retry.reason || "unknown error")}</div>${buildWorktreeCleanupActions(e)}`;
+}
+
 /** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */
 function renderWorktreeCleanupLog(): string {
 	const notable = worktreeCleanupLog.filter((e) => e.status !== "deleted");
 	if (notable.length === 0) { return ""; }
 	const rows = notable.map((e) => {
-		const icon = e.status === "skipped" ? "⏭️" : "❌";
+		const retry = worktreeRetryState.get(e.path);
+		const icon = retry?.status === "deleted" ? "✅" : e.status === "skipped" ? "⏭️" : "❌";
 		return `<div class="worktree-cleanup-log-row">
       <span>${icon}</span>
       <div class="worktree-cleanup-log-details">
@@ -4574,7 +4623,7 @@ function renderWorktreeCleanupLog(): string {
         <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
         <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
         ${buildWorktreeCleanupDetailChips(e.diagnostics)}
-        ${buildWorktreeCleanupActions(e)}
+        ${buildWorktreeRetryArea(e, retry)}
       </div>
     </div>`;
 	}).join("");
