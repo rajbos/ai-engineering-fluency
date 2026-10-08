@@ -1,6 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { formatToolEditors, sanitizeToolCallsByEditor } from '../../src/webview/usage/toolEditors';
+import { formatToolEditors, sanitizeToolCallsByEditor, toolCallsByEditorToRecord } from '../../src/webview/usage/toolEditors';
 
 test('sanitizeToolCallsByEditor: keeps positive finite counts and drops malformed entries', () => {
     const out = sanitizeToolCallsByEditor({
@@ -40,4 +40,13 @@ test('sanitizeToolCallsByEditor: __proto__ / constructor keys stay own data and 
 test('formatToolEditors: ignores inherited properties like constructor', () => {
     assert.equal(formatToolEditors('constructor', {}), '');
     assert.equal(formatToolEditors('__proto__', {}), '');
+});
+
+test('toolCallsByEditorToRecord: __proto__ tool survives a JSON round trip', () => {
+    const accum = new Map([['__proto__', new Map([['VS Code', 3]])], ['t', new Map([['CLI', 1]])]]);
+    const record = toolCallsByEditorToRecord(accum);
+    const roundTripped = JSON.parse(JSON.stringify(record));
+    assert.deepEqual(Object.keys(roundTripped).sort(), ['__proto__', 't']);
+    assert.equal(sanitizeToolCallsByEditor(roundTripped) !== undefined, true);
+    assert.equal(Object.getOwnPropertyDescriptor(sanitizeToolCallsByEditor(roundTripped), '__proto__')?.value['VS Code'], 3);
 });

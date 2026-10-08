@@ -27,3 +27,12 @@ export function formatToolEditors(tool: string, toolCallsByEditor?: ToolCallsByE
 	const byEditor = toolCallsByEditor[tool];
 	return Object.entries(byEditor).sort((a, b) => b[1] - a[1]).map(([editor]) => editor).join(', ');
 }
+
+/**
+ * Host-side snapshot of the accumulator (tool -> editor -> count) as plain own-property
+ * objects, so a tool named `__proto__` survives JSON serialization instead of being
+ * swallowed by the prototype setter.
+ */
+export function toolCallsByEditorToRecord(accum: ReadonlyMap<string, ReadonlyMap<string, number>>): ToolCallsByEditor {
+	return Object.fromEntries([...accum].map(([tool, byEditor]) => [tool, Object.fromEntries(byEditor)]));
+}

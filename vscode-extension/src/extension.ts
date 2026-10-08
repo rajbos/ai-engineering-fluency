@@ -1,4 +1,5 @@
 // --- Node.js built-ins & VS Code ---
+import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7954,11 +7955,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Plain-object snapshot of `_toolCallsByEditorAccum` for the stats payload. */
 	private _buildToolCallsByEditor(): Record<string, Record<string, number>> {
-		const out: Record<string, Record<string, number>> = {};
-		for (const [name, byEditor] of this._toolCallsByEditorAccum) {
-			out[name] = Object.fromEntries(byEditor);
-		}
-		return out;
+		return toolCallsByEditorToRecord(this._toolCallsByEditorAccum);
 	}
 
 	/**
