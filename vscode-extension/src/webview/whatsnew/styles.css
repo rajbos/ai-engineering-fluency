@@ -386,6 +386,21 @@ body {
 	opacity: 0.6;
 }
 
+.index-keyword {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 10px;
+	padding: 0 6px;
+	border-radius: 8px;
+	background: var(--bg-tertiary, rgb(128 128 128 / 15%));
+	color: var(--text-secondary);
+}
+
+.index-keyword .codicon {
+	font-size: 10px;
+}
+
 .index-mark {
 	background: rgb(250 204 21 / 35%);
 	color: inherit;

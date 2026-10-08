@@ -1086,7 +1086,7 @@ interface WorktreeCleanupDiagnostics {
 }
 
 /** How long a "take me there" request waits for its panel to finish loading before it is dropped. */
-const SURFACE_REVEAL_TTL_MS = 30_000;
+const SURFACE_REVEAL_TTL_MS = 60_000;
 
 /** A "take me there" request the host is holding until its panel can act on it. */
 type PendingSurfaceReveal = {

@@ -327,8 +327,19 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 		keywords: ['team', 'sharing', 'leaderboard'],
 		condition: 'When a backend is configured',
 		children: [
-			{ id: 'dashboard.personal', title: 'Your Summary', description: 'Your synced tokens, interactions, cost, devices and workspaces, with a model breakdown.', nav: { anchor: 'section-personal-summary' } },
-			{ id: 'dashboard.team', title: 'Team Comparison', description: 'Team totals and a leaderboard with each member\'s fluency score breakdown.', keywords: ['leaderboard'], nav: { anchor: 'section-team-comparison' } },
+			{
+				id: 'dashboard.azure',
+				title: 'Azure Dashboard',
+				description: 'Usage synced through Azure Storage: your own totals and how the team compares.',
+				keywords: ['azure storage'],
+				// No `tab`: with only Azure configured there is no tab bar. Scrolling to a
+				// section inside the hidden Azure panel switches to its tab when there is one.
+				nav: { anchor: 'section-personal-summary' },
+				children: [
+					{ id: 'dashboard.personal', title: 'Your Summary', description: 'Your synced tokens, interactions, cost, devices and workspaces, with a model breakdown.', nav: { anchor: 'section-personal-summary' } },
+					{ id: 'dashboard.team', title: 'Team Comparison', description: 'Team totals and a leaderboard with each member\'s fluency score breakdown.', keywords: ['leaderboard'], nav: { anchor: 'section-team-comparison' } },
+				],
+			},
 			{ id: 'dashboard.team-server', title: 'Team Server', description: 'The team server\'s own dashboard, when both Azure and a team server are configured.', nav: { tab: 'teamServer' }, condition: 'When both backends are configured' },
 		],
 	},

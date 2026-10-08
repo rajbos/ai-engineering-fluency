@@ -54,6 +54,8 @@ test('view index: navigation is inherited from the tab and reset by a new tab', 
 	assert.deepEqual(findViewIndexEntry('diagnostics.backend.team-server')?.nav, { tab: 'backend', subtab: 'backend-teamserver' });
 	assert.deepEqual(findViewIndexEntry('maturity.radar')?.nav, { selector: '.radar-wrapper' });
 	assert.deepEqual(findViewIndexEntry('details')?.nav, {});
+	assert.deepEqual(findViewIndexEntry('dashboard.azure')?.nav, { anchor: 'section-personal-summary' });
+	assert.deepEqual(findViewIndexEntry('dashboard.team')?.nav, { anchor: 'section-team-comparison' });
 	assert.deepEqual(findViewIndexEntry('usage.tools.latency')?.path, ['AI Usage Analysis', 'Workspace', 'Tools & Integrations', 'Tool latency profile']);
 	assert.equal(findViewIndexEntry('no-such-entry'), null);
 });

@@ -72,6 +72,66 @@ type RenderContext = {
 	rerender: () => void;
 };
 
+function buildToggle(node: ViewIndexNode, hasChildren: boolean, expanded: boolean, ctx: RenderContext): HTMLButtonElement {
+	const toggle = el('button', 'index-toggle');
+	toggle.type = 'button';
+	toggle.id = `index-toggle-${node.id}`;
+	if (!hasChildren) {
+		toggle.classList.add('index-toggle-leaf');
+		toggle.disabled = true;
+		toggle.setAttribute('aria-hidden', 'true');
+		toggle.tabIndex = -1;
+		return toggle;
+	}
+	toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
+	toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
+	toggle.setAttribute('aria-expanded', String(expanded));
+	toggle.addEventListener('click', () => {
+		state.toggled[node.id] = !expanded;
+		saveState();
+		ctx.rerender();
+		// The re-render replaced this button; keep keyboard focus on its successor.
+		document.getElementById(toggle.id)?.focus();
+	});
+	toggle.disabled = !!ctx.visible;
+	return toggle;
+}
+
+/**
+ * A line can match on a keyword that appears nowhere on screen ("slow" →
+ * Tool latency profile). Chips for the keywords that hit make the match explain itself.
+ */
+function buildKeywordChips(node: ViewIndexNode, query: string): HTMLElement[] {
+	if (!query) { return []; }
+	return (node.keywords ?? [])
+		.filter((keyword) => highlightRanges(keyword, query).length > 0)
+		.map((keyword) => {
+			const chip = el('span', 'index-keyword');
+			chip.append(el('span', 'codicon codicon-tag'));
+			appendHighlighted(chip, keyword, query);
+			return chip;
+		});
+}
+
+function buildText(node: ViewIndexNode, query: string): HTMLElement {
+	const titleLine = el('div', 'index-title-line');
+	const title = el('span', 'index-title');
+	appendHighlighted(title, node.title, query);
+	titleLine.append(title);
+	if (node.condition) {
+		const condition = el('span', 'index-condition');
+		appendHighlighted(condition, node.condition, query);
+		titleLine.append(condition);
+	}
+	titleLine.append(...buildKeywordChips(node, query));
+	const description = el('div', 'index-description');
+	appendHighlighted(description, node.description, query);
+	description.title = node.description;
+	const text = el('div', 'index-text');
+	text.append(titleLine, description);
+	return text;
+}
+
 function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTMLElement | null {
 	if (ctx.visible && !ctx.visible.has(node.id)) { return null; }
 	const children = (node.children ?? [])
@@ -87,43 +147,9 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 	item.dataset.entryId = node.id;
 	if (ctx.visible && !ctx.matched.has(node.id)) { item.classList.add('index-context'); }
 
+	const toggle = buildToggle(node, hasChildren, expanded, ctx);
 	const row = el('div', 'index-row');
-	const toggle = el('button', 'index-toggle');
-	toggle.type = 'button';
-	toggle.id = `index-toggle-${node.id}`;
-	if (hasChildren) {
-		toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
-		toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
-		toggle.setAttribute('aria-expanded', String(expanded));
-		toggle.addEventListener('click', () => {
-			state.toggled[node.id] = !expanded;
-			saveState();
-			ctx.rerender();
-			// The re-render replaced this button; keep keyboard focus on its successor.
-			document.getElementById(toggle.id)?.focus();
-		});
-		toggle.disabled = !!ctx.visible;
-	} else {
-		toggle.classList.add('index-toggle-leaf');
-		toggle.disabled = true;
-		toggle.setAttribute('aria-hidden', 'true');
-		toggle.tabIndex = -1;
-	}
-
-	const text = el('div', 'index-text');
-	const titleLine = el('div', 'index-title-line');
-	const title = el('span', 'index-title');
-	appendHighlighted(title, node.title, ctx.query);
-	titleLine.append(title);
-	if (node.condition) {
-		titleLine.append(el('span', 'index-condition', node.condition));
-	}
-	const description = el('div', 'index-description');
-	appendHighlighted(description, node.description, ctx.query);
-	description.title = node.description;
-	text.append(titleLine, description);
-
-	row.append(toggle, text, buildOpenButton(node, ctx.post));
+	row.append(toggle, buildText(node, ctx.query), buildOpenButton(node, ctx.post));
 	item.append(row);
 
 	if (hasChildren && expanded) {

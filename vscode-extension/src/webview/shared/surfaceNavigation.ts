@@ -36,10 +36,14 @@ const TAB_BUTTON_SELECTORS = ['.tab-button', '.tab', '.eff-tab', '.tab-btn', '.w
 
 /**
  * How long one reveal may wait in total for its tab, sub-tab and section to
- * appear (panels render after their data arrives). One budget shared by every
- * step, matching the host's SURFACE_REVEAL_TTL_MS for the request itself.
+ * appear (panels render after their data arrives — the dashboard can take a
+ * while to load from a backend). One budget shared by every step, matching the
+ * host's SURFACE_REVEAL_TTL_MS for the request itself.
  */
-const REVEAL_BUDGET_MS = 30_000;
+const REVEAL_BUDGET_MS = 60_000;
+
+/** Bumped by every new request, so a newer reveal supersedes one still waiting. */
+let revealGeneration = 0;
 const POLL_INTERVAL_MS = 100;
 
 function cssString(value: string): string {
@@ -120,35 +124,50 @@ function revealHiddenAncestors(target: HTMLElement): void {
 	}
 }
 
-export async function revealSurface(request: SurfaceRevealRequest): Promise<void> {
+/** How to find the element a request scrolls to, or null when it names none. */
+function targetFinder(request: SurfaceRevealRequest): (() => HTMLElement | null) | null {
+	const { anchor, selector } = request;
+	if (anchor) { return () => document.getElementById(anchor); }
+	if (selector) { return () => document.querySelector<HTMLElement>(selector); }
+	return null;
+}
+
+/**
+ * Carries out a reveal. Resolves `true` once every requested step was found
+ * and acted on, `false` if one never appeared within the budget or a newer
+ * request took over — in which case nothing has been acknowledged and the
+ * host still holds the request.
+ */
+export async function revealSurface(request: SurfaceRevealRequest): Promise<boolean> {
+	const generation = ++revealGeneration;
 	const deadline = Date.now() + REVEAL_BUDGET_MS;
 	const remaining = (): number => Math.max(0, deadline - Date.now());
-	if (request.tab) {
-		const tabButton = await waitForElement(() => findTabButton(request.tab as string), remaining());
-		if (tabButton) {
-			openGroupOf(tabButton);
-			tabButton.click();
-		}
+	const superseded = (): boolean => generation !== revealGeneration;
+	const tab = request.tab;
+	if (tab) {
+		const tabButton = await waitForElement(() => findTabButton(tab), remaining());
+		if (!tabButton || superseded()) { return false; }
+		openGroupOf(tabButton);
+		tabButton.click();
 	}
-	if (request.subtab) {
+	const subtabId = request.subtab;
+	if (subtabId) {
 		const subtab = await waitForElement(() =>
-			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(request.subtab as string)}"]`), remaining());
-		subtab?.click();
+			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(subtabId)}"]`), remaining());
+		if (!subtab || superseded()) { return false; }
+		subtab.click();
 	}
-	const find = request.anchor
-		? () => document.getElementById(request.anchor as string)
-		: request.selector
-			? () => document.querySelector<HTMLElement>(request.selector as string)
-			: null;
-	if (!find) { return; }
+	const find = targetFinder(request);
+	if (!find) { return true; }
 	const target = await waitForElement(find, remaining());
-	if (!target) { return; }
+	if (!target || superseded()) { return false; }
 	revealHiddenAncestors(target);
 	// Let the tab switch paint before scrolling, or the scroll measures the old layout.
 	setTimeout(() => {
 		target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 		flashSection(target);
 	}, 50);
+	return true;
 }
 
 /**
@@ -158,9 +177,11 @@ export async function revealSurface(request: SurfaceRevealRequest): Promise<void
 export function installSurfaceNavigation(vscode: PostMessageApi, view: string): void {
 	registerMessageHandler<{ command?: string } & Partial<SurfaceRevealRequest>>((message) => {
 		if (message?.command === 'revealSurface') {
-			// Acknowledge first, so the host stops holding the request for a replay.
-			vscode.postMessage({ command: 'surfaceRevealHandled', view });
-			void revealSurface(message as SurfaceRevealRequest);
+			// Acknowledge only once the reveal landed: until then the host keeps the
+			// request, so a reload of this panel (its ready handshake) can retry it.
+			void revealSurface(message as SurfaceRevealRequest).then((landed) => {
+				if (landed) { vscode.postMessage({ command: 'surfaceRevealHandled', view }); }
+			});
 		}
 	});
 	vscode.postMessage({ command: 'surfaceNavReady', view });
