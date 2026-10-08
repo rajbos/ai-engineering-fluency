@@ -1728,3 +1728,30 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		mock.setLanguage('en');
 	}
 });
+
+const WORKTREE_CLEANUP_KEYS: Record<string, { en: string; zh: string }> = {
+	'usage.worktreeCleanup.sizeChip': { en: 'Size: {0}', zh: '大小：{0}' },
+	'usage.worktreeCleanup.sizeChipTitle': { en: '{0} bytes on disk', zh: '磁盘占用 {0} 字节' },
+	'usage.worktreeCleanup.deleting': { en: '⏳ Deleting worktree{0}…', zh: '⏳ 正在删除工作树{0}…' },
+	'usage.worktreeCleanup.deleted': { en: '✅ Deleted', zh: '✅ 已删除' },
+	'usage.worktreeCleanup.deleteFailed': { en: '❌ Delete failed: {0}', zh: '❌ 删除失败：{0}' },
+	'usage.worktreeCleanup.unknownError': { en: 'unknown error', zh: '未知错误' },
+	'usage.worktreeCleanup.revealMissing': { en: '"{0}" no longer exists on disk.', zh: '“{0}”在磁盘上已不存在。' },
+};
+
+test('worktree cleanup delete-feedback keys resolve to their English text', () => {
+	for (const [key, { en }] of Object.entries(WORKTREE_CLEANUP_KEYS)) {
+		assert.equal(t(key), en, `en value for ${key}`);
+	}
+});
+
+test('worktree cleanup delete-feedback keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, { zh }] of Object.entries(WORKTREE_CLEANUP_KEYS)) {
+			assert.equal(t(key), zh, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});

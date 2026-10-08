@@ -226,6 +226,44 @@
           "expect": "#tab-panel-worktrees"
         },
         {
+          "id": "worktree-delete-running",
+          "title": "Workspace › Worktrees › Delete anyway (running)",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"worktrees\"]" },
+            { "post": { "command": "cleanupStarted", "total": 1 } },
+            { "post": { "command": "cleanupWorktreeResult", "path": "C:\\wt\\stale-branch", "branch": "stale-branch", "repoLabel": "repo", "status": "error", "reason": "Could not delete worktree: fatal: working trees containing submodules cannot be moved or removed", "diagnostics": { "sizeBytes": 734003200, "lastModified": "2026-09-01T08:30:00.000Z", "lastCommitRelative": "2 months ago", "remoteStatus": "none", "modifiedFiles": 0, "untrackedFiles": 0 }, "processed": 1, "total": 1 } },
+            { "post": { "command": "cleanupComplete" } },
+            { "post": { "command": "worktreeDeleteStarted", "path": "C:\\wt\\stale-branch" } }
+          ],
+          "expect": ".worktree-cleanup-log .worktree-retry-status"
+        },
+        {
+          "id": "worktree-delete-failed",
+          "title": "Workspace › Worktrees › Delete anyway (failed)",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"worktrees\"]" },
+            { "post": { "command": "cleanupStarted", "total": 1 } },
+            { "post": { "command": "cleanupWorktreeResult", "path": "C:\\wt\\stale-branch", "branch": "stale-branch", "repoLabel": "repo", "status": "error", "reason": "Could not delete worktree: fatal: working trees containing submodules cannot be moved or removed", "diagnostics": { "sizeBytes": 734003200, "lastModified": "2026-09-01T08:30:00.000Z", "lastCommitRelative": "2 months ago", "remoteStatus": "none", "modifiedFiles": 0, "untrackedFiles": 0 }, "processed": 1, "total": 1 } },
+            { "post": { "command": "cleanupComplete" } },
+            { "post": { "command": "worktreeDeleteStarted", "path": "C:\\wt\\stale-branch" } },
+            { "post": { "command": "worktreeDeleteResult", "path": "C:\\wt\\stale-branch", "status": "error", "reason": "The process cannot access the file because it is being used by another process" } }
+          ],
+          "expect": ".worktree-cleanup-log .worktree-retry-status"
+        },
+        {
+          "id": "worktree-delete-deleted",
+          "title": "Workspace › Worktrees › Delete anyway (deleted)",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"worktrees\"]" },
+            { "post": { "command": "cleanupStarted", "total": 1 } },
+            { "post": { "command": "cleanupWorktreeResult", "path": "C:\\wt\\stale-branch", "branch": "stale-branch", "repoLabel": "repo", "status": "error", "reason": "Could not delete worktree: fatal: working trees containing submodules cannot be moved or removed", "diagnostics": { "sizeBytes": 734003200, "lastModified": "2026-09-01T08:30:00.000Z", "lastCommitRelative": "2 months ago", "remoteStatus": "none", "modifiedFiles": 0, "untrackedFiles": 0 }, "processed": 1, "total": 1 } },
+            { "post": { "command": "cleanupComplete" } },
+            { "post": { "command": "worktreeDeleteStarted", "path": "C:\\wt\\stale-branch" } },
+            { "post": { "command": "worktreeDeleteResult", "path": "C:\\wt\\stale-branch", "status": "deleted" } }
+          ],
+          "expect": ".worktree-cleanup-log .worktree-retry-status"
+        },
+        {
           "id": "insights",
           "title": "Coaching › Insights tab",
           "steps": [{ "click": ".group-tab[data-group=\"coaching\"]" }, { "click": ".tab-button[data-tab=\"insights\"]" }],

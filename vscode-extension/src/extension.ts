@@ -13144,14 +13144,21 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       const pathModule = require("path");
       const normalized = pathModule.normalize(pathToReveal);
       try {
-        const stat = await fsModule.promises.stat(normalized);
-        if (stat.isDirectory()) {
-          await vscode.env.openExternal(vscode.Uri.file(normalized));
-        } else {
-          await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+        await fsModule.promises.stat(normalized);
+      } catch (err) {
+        // Only a genuinely missing path is "gone"; permission/IO errors fall through to the reveal attempt.
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT" || code === "ENOTDIR") {
+          vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
+          return;
         }
-      } catch {
+      }
+      // revealFileInOS works for folders and files alike; openExternal on a folder URI is
+      // silently ignored on some hosts, which made "Reveal folder" look dead.
+      try {
         await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+      } catch {
+        await vscode.env.openExternal(vscode.Uri.file(normalized));
       }
     } catch {
       vscode.window.showErrorMessage("Could not reveal: " + pathToReveal);
@@ -14055,27 +14062,39 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const { worktreePath, branch, repoLabel, pushed } = this._parseDeleteWorktreeMessage(message);
     if (!worktreePath) { return; }
 
-    if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { return; }
+    // Progress/outcome messages let the cleanup report show a bar and the final state for the row.
+    const post = (msg: Record<string, unknown>) => {
+      if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) { this.analysisPanel.webview.postMessage(msg); }
+    };
+    const finish = (status: "deleted" | "error" | "cancelled", reason?: string) =>
+      post({ command: "worktreeDeleteResult", path: worktreePath, status, reason });
+
+    if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { finish("cancelled"); return; }
+
+    post({ command: "worktreeDeleteStarted", path: worktreePath });
 
     const mainRepoRoot = await this.resolveMainRepoRoot(worktreePath);
     if (!mainRepoRoot || path.resolve(mainRepoRoot).toLowerCase() === path.resolve(worktreePath).toLowerCase()) {
-      vscode.window.showErrorMessage(`Could not safely locate the main repository for "${worktreePath}". Remove it manually with "git worktree remove".`);
+      const reason = `Could not safely locate the main repository for "${worktreePath}". Remove it manually with "git worktree remove".`;
+      vscode.window.showErrorMessage(reason);
+      finish("error", reason);
       return;
     }
 
     const result = await this._removeWorktreeWithFallback(mainRepoRoot, worktreePath);
-    if (!result) { return; }
+    if (!result) { finish("cancelled"); return; }
 
     if (!result.ok) {
-      vscode.window.showErrorMessage(`Could not delete worktree: ${result.stderr || "unknown error"}`);
+      const reason = result.stderr || l10n.t('usage.worktreeCleanup.unknownError');
+      vscode.window.showErrorMessage(`Could not delete worktree: ${reason}`);
+      finish("error", reason);
       return;
     }
 
     this.log(`🗑️ Deleted worktree: ${worktreePath}`);
     vscode.window.showInformationMessage(`Deleted worktree "${branch}" (${repoLabel}).`);
-    if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
-      this.analysisPanel.webview.postMessage({ command: "worktreeDeleted", path: worktreePath });
-    }
+    post({ command: "worktreeDeleted", path: worktreePath });
+    finish("deleted");
   }
 
   /**

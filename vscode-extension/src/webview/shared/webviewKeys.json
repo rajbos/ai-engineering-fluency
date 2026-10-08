@@ -357,5 +357,11 @@
   "usage.toolCuration.summary.unusedSkills",
   "usage.toolCuration.help.unusedSkills",
   "usage.toolCuration.summary.builtin",
-  "usage.toolCuration.help.builtin"
+  "usage.toolCuration.help.builtin",
+  "usage.worktreeCleanup.sizeChip",
+  "usage.worktreeCleanup.sizeChipTitle",
+  "usage.worktreeCleanup.deleting",
+  "usage.worktreeCleanup.deleted",
+  "usage.worktreeCleanup.deleteFailed",
+  "usage.worktreeCleanup.unknownError"
 ]

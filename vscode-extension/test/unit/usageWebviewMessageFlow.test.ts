@@ -671,6 +671,89 @@ test('clicking "Open in VS Code" asks the host to open that worktree folder', as
 	assert.equal(posted.path, worktreePath);
 });
 
+test('"Delete anyway" shows size, then progress, then the final state on the row', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\big';
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: worktreePath, branch: 'big', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.',
+		diagnostics: { sizeBytes: 5 * 1024 * 1024 },
+		processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'expected a size chip on the failed row');
+
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
+	assert.ok(harness.window.document.querySelector('.worktree-cleanup-log .worktree-progress-fill'), 'expected a progress bar while deleting');
+	assert.equal(harness.window.document.querySelector('.worktree-delete-btn'), null, 'actions are hidden while deleting');
+
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'error', reason: 'folder in use' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('folder in use'), 'expected the failure reason');
+	assert.ok(harness.window.document.querySelector('.worktree-delete-btn'), 'actions return after a failure so the user can retry');
+
+	// The user retries after the failure; the host announces the new attempt before its result.
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('Could not delete worktree.'), 'a successful retry must not keep the old failure text');
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted') && harness.window.document.body.textContent?.includes('1 deleted'), 'the summary must count the retried worktree as deleted');
+	assert.ok(harness.window.document.body.textContent?.includes('0 errors'), 'the summary must not keep the original error count');
+});
+
+test('the size chip reuses the scanned worktree size instead of a second disk walk', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\scanned';
+	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'scanned', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 3, folders: 1, bytes: 2 * 1024 * 1024 } });
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'scanned', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.', diagnostics: { modifiedFiles: 0, untrackedFiles: 0 }, processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'expected a size chip taken from the scan result');
+});
+
+test('a late delete result with no retry in flight is ignored, and empty worktrees still show a size', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\empty';
+	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'empty', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 0, folders: 0, bytes: 0 } });
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'empty', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.', diagnostics: { modifiedFiles: 0, untrackedFiles: 0 }, processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'a zero-byte worktree still reports its size');
+
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('✅ Deleted'), 'a result without a running retry must not decorate the row');
+});
+
+test('a new cleanup run does not inherit the previous run\'s "Delete anyway" state', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\again';
+	const result = {
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'again', repoLabel: 'repo',
+		status: 'error', reason: 'Could not delete worktree.', processed: 1, total: 1,
+	};
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post(result);
+	harness.post({ command: 'cleanupComplete' });
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'));
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post(result);
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('✅ Deleted'), 'stale deleted state leaked into the new run');
+	assert.ok(harness.window.document.querySelector('.worktree-delete-btn'), 'the fresh row offers Delete anyway again');
+});
+
 test('accepts payloads relayed the way VS Code actually delivers them', async () => {
 	// The panel hung with `delivered=true` logged host-side because the webview's source-trust
 	// check compared window identities. VS Code relays from an internal window, so every
