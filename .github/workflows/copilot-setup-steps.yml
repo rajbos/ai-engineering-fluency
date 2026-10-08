@@ -358,7 +358,7 @@ jobs:
           FILE_COUNT=$(find ./session-logs -name "*.gz" | wc -l)
           echo "✅ Downloaded $FILE_COUNT session log files"
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "::warning::No session logs for dataset '$AZURE_DATASET_ID' between $START_DATE and $END_DATE - check COPILOT_DATASET_ID"
+            echo "::warning::No session logs downloaded for dataset '$AZURE_DATASET_ID' between $START_DATE and $END_DATE - check COPILOT_DATASET_ID and the download warnings above"
           fi
 
           # Decompress all files
@@ -367,6 +367,20 @@ jobs:
             find ./session-logs -name "*.gz" -exec gunzip {} \;
             echo "✅ Session logs ready in ./session-logs"
           fi
+
+          # The manifest was built from the listing, before downloading. Drop
+          # entries whose decompressed file is not on disk (a failed day, a
+          # partial batch, a file gunzip rejected) so it only describes files
+          # an agent can actually open.
+          node -e "
+            const fs = require('fs');
+            const file = './session-logs/.editor-types.json';
+            const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const kept = Object.fromEntries(Object.entries(manifest).filter(([p]) => fs.existsSync('./session-logs/' + p)));
+            fs.writeFileSync(file, JSON.stringify(kept, null, 2));
+            const dropped = Object.keys(manifest).length - Object.keys(kept).length;
+            if (dropped > 0) console.log('::warning::Dropped ' + dropped + ' editor-type manifest entries for files that were not downloaded');
+          " || echo "::warning::Failed to reconcile the editor-type manifest with the downloaded files"
 
       - name: Display session log summary
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}
