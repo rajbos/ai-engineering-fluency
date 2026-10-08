@@ -320,7 +320,7 @@ import {
  */
 const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
-import { scanDarkFactoryReadiness } from './darkFactoryService';
+import { DARK_FACTORY_CACHE_KEY, isReportStale, parseCachedReport, scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -10017,7 +10017,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
-			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId)),
+			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId, message.force)),
 			checkCcrActivity: (message) => {
 				const owner = typeof message.owner === 'string' ? message.owner : '';
 				const repo = typeof message.repo === 'string' ? message.repo : '';
@@ -10916,17 +10916,36 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		await this.showUsageAnalysisOnTab('readiness');
 	}
 
-	private loadReadinessForUsage(requestId: unknown): void {
+	/**
+	 * Serve the readiness report, cache-first.
+	 *
+	 * A cached report is posted immediately so the tab is usable at once; a fresh scan
+	 * then runs in the background only when that cache is over a day old, or when the
+	 * user asked for one (`force`). With no cache the scan runs straight away.
+	 */
+	private loadReadinessForUsage(requestId: unknown, force: unknown): void {
 		const panel = this.analysisPanel;
 		if (!panel) { return; }
 		if (typeof requestId !== 'number' || !Number.isSafeInteger(requestId) || requestId < 1) {
 			this.warn('AI Readiness: received an invalid scan request id');
 			return;
 		}
+		const cached = parseCachedReport(this.context.globalState.get(DARK_FACTORY_CACHE_KEY));
+		const needsScan = force === true || !cached || isReportStale(cached);
+		if (cached && force !== true) {
+			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });
+		}
+		if (!needsScan) { return; }
+		// Deferred so the cached report above paints before the synchronous scan blocks the host.
+		setTimeout(() => this.scanReadinessAndPost(panel, requestId), 0);
+	}
+
+	private scanReadinessAndPost(panel: vscode.WebviewPanel, requestId: number): void {
 		try {
 			const report = this.runDarkFactoryScan();
+			void this.context.globalState.update(DARK_FACTORY_CACHE_KEY, report);
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, refreshing: false });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);

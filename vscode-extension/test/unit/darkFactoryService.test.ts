@@ -5,7 +5,10 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
+	DARK_FACTORY_CACHE_TTL_MS,
 	MAX_SCANNED_REPOS,
+	isReportStale,
+	parseCachedReport,
 	indexPrStats,
 	scanDarkFactoryReadiness,
 	selectRepoRoots,
@@ -134,6 +137,28 @@ test('selectRepoRoots: caps the scan and reports how many repositories it skippe
 	const { roots, skipped } = selectRepoRoots(repos);
 	assert.equal(roots.length, MAX_SCANNED_REPOS);
 	assert.equal(skipped, 3);
+});
+
+// ---------------------------------------------------------------------------
+// readiness report cache
+// ---------------------------------------------------------------------------
+
+const reportAt = (scannedAt: string) => ({ scannedAt, repos: [] }) as never;
+
+test('parseCachedReport: accepts a report-shaped value and rejects anything else', () => {
+	const ok = reportAt('2026-09-01T12:00:00.000Z');
+	assert.equal(parseCachedReport(ok), ok);
+	for (const bad of [undefined, null, 'x', {}, { repos: [] }, { repos: {}, scannedAt: '2026-09-01T12:00:00.000Z' }, { repos: [], scannedAt: 'nope' }]) {
+		assert.equal(parseCachedReport(bad), undefined);
+	}
+});
+
+test('isReportStale: fresh within a day, stale beyond it, and a future timestamp is distrusted', () => {
+	const now = new Date('2026-09-02T12:00:00.000Z');
+	assert.equal(isReportStale(reportAt('2026-09-02T11:00:00.000Z'), now), false);
+	assert.equal(isReportStale(reportAt(new Date(now.getTime() - DARK_FACTORY_CACHE_TTL_MS).toISOString()), now), false);
+	assert.equal(isReportStale(reportAt(new Date(now.getTime() - DARK_FACTORY_CACHE_TTL_MS - 1).toISOString()), now), true);
+	assert.equal(isReportStale(reportAt('2026-09-03T12:00:00.000Z'), now), true);
 });
 
 // ---------------------------------------------------------------------------

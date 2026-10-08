@@ -32,6 +32,26 @@ import { buildGitHubHosts, parseGitHubRemote, type RepoPrStatsResult } from './g
  */
 export const MAX_SCANNED_REPOS = 25;
 
+/** `globalState` key holding the last readiness report, shown instantly on the next open. */
+export const DARK_FACTORY_CACHE_KEY = 'darkFactory.reportCache';
+
+/** A cached report older than this is re-scanned in the background (a manual refresh always is). */
+export const DARK_FACTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Narrow an untrusted persisted value to a usable report, or `undefined` when it is not one. */
+export function parseCachedReport(value: unknown): DarkFactoryReport | undefined {
+	if (!value || typeof value !== 'object') { return undefined; }
+	const candidate = value as Partial<DarkFactoryReport>;
+	if (!Array.isArray(candidate.repos) || typeof candidate.scannedAt !== 'string') { return undefined; }
+	return Number.isFinite(Date.parse(candidate.scannedAt)) ? (value as DarkFactoryReport) : undefined;
+}
+
+/** Whether a report is old enough (or its timestamp odd enough) that it should be re-scanned. */
+export function isReportStale(report: DarkFactoryReport, now: Date = new Date()): boolean {
+	const age = now.getTime() - Date.parse(report.scannedAt);
+	return !(age >= 0 && age <= DARK_FACTORY_CACHE_TTL_MS);
+}
+
 /** Resolve `owner/repo` from a repository's `origin` remote, when it is a GitHub one. */
 function resolveNameWithOwner(repoRoot: string, hosts: Set<string>): string | undefined {
 	const origin = readGitOriginUrl(repoRoot);

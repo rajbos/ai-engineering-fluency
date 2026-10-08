@@ -49,7 +49,7 @@ describe('buildDarkFactorySectionHtml', () => {
 	test('states that readiness is per repository and that stage 5 is never awarded', () => {
 		const html = buildDarkFactorySectionHtml(report([repoReport()]));
 		assert.match(html, /per repository and never per person/);
-		assert.match(html, /never tells you that you are ready to go dark/);
+		assert.match(html, /A checklist, not a green light/);
 		assert.match(html, /Stage 5 is not\./);
 	});
 
