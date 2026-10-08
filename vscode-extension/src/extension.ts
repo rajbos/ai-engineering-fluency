@@ -13088,7 +13088,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         await fsModule.promises.stat(normalized);
       } catch (err) {
         // Only a genuinely missing path is "gone"; permission/IO errors fall through to the reveal attempt.
-        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT" || code === "ENOTDIR") {
           vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
           return;
         }

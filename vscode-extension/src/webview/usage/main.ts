@@ -2407,7 +2407,7 @@ function handleCleanupWorktreeResult(message: any): void {
 	const diagnostics = sanitizeWorktreeCleanupDiagnostics(message.diagnostics);
 	// The size comes from the scan's already-enriched row, not a second recursive disk walk per failed worktree.
 	const scanned = worktreeResults.find((w) => w.path === entryPath);
-	if (diagnostics && diagnostics.sizeBytes === undefined && scanned && knownBytes(scanned) > 0) { diagnostics.sizeBytes = knownBytes(scanned); }
+	if (diagnostics && diagnostics.sizeBytes === undefined && scanned && !isWorktreePending(scanned)) { diagnostics.sizeBytes = knownBytes(scanned); }
 	worktreeCleanupLog.push({
 		path: entryPath,
 		branch: String(message.branch ?? "?"),
@@ -2451,6 +2451,8 @@ function handleWorktreeDeleteStarted(message: any): void {
 function handleWorktreeDeleteResult(message: any): void {
 	const p = String(message.path ?? "");
 	if (!p) { return; }
+	// A final result only means something for a retry still in flight; scan/cleanup clear the map, so a late result must not repopulate it.
+	if ((message.status === "deleted" || message.status === "error") && worktreeRetryState.get(p)?.status !== "running") { return; }
 	if (message.status === "deleted") {
 		worktreeRetryState.set(p, { status: "deleted" });
 	} else if (message.status === "error") {

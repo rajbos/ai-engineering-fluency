@@ -689,6 +689,8 @@ test('"Delete anyway" shows size, then progress, then the final state on the row
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('folder in use'), 'expected the failure reason');
 	assert.ok(harness.window.document.querySelector('.worktree-delete-btn'), 'actions return after a failure so the user can retry');
 
+	// The user retries after the failure; the host announces the new attempt before its result.
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
 	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
 	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('Could not delete worktree.'), 'a successful retry must not keep the old failure text');
@@ -707,6 +709,22 @@ test('the size chip reuses the scanned worktree size instead of a second disk wa
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'expected a size chip taken from the scan result');
 });
 
+test('a late delete result with no retry in flight is ignored, and empty worktrees still show a size', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\wt\empty';
+	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'empty', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 0, folders: 0, bytes: 0 } });
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'empty', repoLabel: 'repo', status: 'error',
+		reason: 'Could not delete worktree.', diagnostics: { modifiedFiles: 0, untrackedFiles: 0 }, processed: 1, total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Size: '), 'a zero-byte worktree still reports its size');
+
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('✅ Deleted'), 'a result without a running retry must not decorate the row');
+});
+
 test('a new cleanup run does not inherit the previous run\'s "Delete anyway" state', async () => {
 	const harness = await bootWebview(buildStats());
 	const worktreePath = 'C:\\wt\\again';
@@ -718,6 +736,7 @@ test('a new cleanup run does not inherit the previous run\'s "Delete anyway" sta
 	harness.post({ command: 'cleanupStarted', total: 1 });
 	harness.post(result);
 	harness.post({ command: 'cleanupComplete' });
+	harness.post({ command: 'worktreeDeleteStarted', path: worktreePath });
 	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'));
 
