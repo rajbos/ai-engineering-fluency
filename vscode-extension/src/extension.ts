@@ -2873,6 +2873,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// panel to be ready, which would otherwise redirect this open later.
 				this.pendingAnalysisNavigation = undefined;
 				await this.showUsageAnalysis();
+				this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
 			}
 			return;
 		}
@@ -2896,10 +2897,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.surfaceReveals.clear(view);
 			const existing = this.getPanelForView(view);
 			await open();
+			const panel = this.getPanelForView(view);
+			// Most openers create their panel with preserveFocus; bring it forward.
+			panel?.reveal(undefined, false);
 			// An already-open panel may still be waiting to carry out an earlier
 			// reveal; going to the view itself supersedes it.
-			if (existing && this.getPanelForView(view) === existing) {
-				void existing.webview.postMessage({ command: 'cancelReveal' });
+			if (panel && panel === existing) {
+				void panel.webview.postMessage({ command: 'cancelReveal' });
 			}
 			return;
 		}
