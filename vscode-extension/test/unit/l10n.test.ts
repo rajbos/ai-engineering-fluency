@@ -1723,6 +1723,17 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 	assert.equal(t('viewIndex.matchMany', '3'), '3 matches');
 	assert.equal(t('viewIndex.noMatchStatus', 'xyz'), 'Nothing matches “xyz”. Try fewer or shorter words.');
 	assert.equal(t('viewIndex.searchPlaceholder'), 'Search views, tabs and sections…');
+	assert.equal(t('viewIndex.searchLabel'), 'Search the view index');
+	assert.equal(t('viewIndex.treeLabel'), 'View index');
+	assert.equal(t('viewIndex.expand', 'Usage'), 'Expand Usage');
+	assert.equal(t('viewIndex.collapse', 'Usage'), 'Collapse Usage');
+	assert.equal(t('viewIndex.open', 'Usage › Tools'), 'Open Usage › Tools');
+	assert.equal(t('viewIndex.matchOne'), '1 match');
+	assert.equal(t('viewIndex.noMatch'), 'No matching views, tabs or sections.');
+	assert.ok(t('viewIndex.intro').startsWith('Every view, tab and section in the extension.'));
+	assert.equal(t('whatsNew.tabs.label'), "What's New sections");
+	assert.equal(t('whatsNew.tab.releases'), '📣 Releases');
+	assert.equal(t('whatsNew.tab.index'), '🧭 View index');
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View：成功 30 次，失败 10 次');
@@ -1735,6 +1746,19 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		assert.equal(t('viewIndex.summary', '97', '10'), '10 个视图中共 97 个条目');
 		assert.equal(t('viewIndex.matchMany', '3'), '3 个匹配项');
 		assert.equal(t('whatsNew.tab.index'), '🧭 视图索引');
+		assert.equal(t('whatsNew.tab.releases'), '📣 版本');
+		assert.equal(t('whatsNew.tabs.label'), '新增功能分区');
+		assert.equal(t('whatsNew.footer', '0.19.1'), '当前运行版本 0.19.1。包含修复内容的完整更新日志随扩展一起提供。');
+		assert.equal(t('viewIndex.searchPlaceholder'), '搜索视图、标签页和部分…');
+		assert.equal(t('viewIndex.searchLabel'), '搜索视图索引');
+		assert.equal(t('viewIndex.treeLabel'), '视图索引');
+		assert.equal(t('viewIndex.expand', 'X'), '展开 X');
+		assert.equal(t('viewIndex.collapse', 'X'), '折叠 X');
+		assert.equal(t('viewIndex.open', 'X'), '打开 X');
+		assert.equal(t('viewIndex.matchOne'), '1 个匹配项');
+		assert.equal(t('viewIndex.noMatchStatus', 'xyz'), '没有与“xyz”匹配的内容。请尝试更少或更短的词。');
+		assert.equal(t('viewIndex.noMatch'), '没有匹配的视图、标签页或部分。');
+		assert.ok(t('viewIndex.intro').startsWith('扩展中的每个视图、标签页和部分。'));
 		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
 	} finally {
 		mock.setLanguage('en');

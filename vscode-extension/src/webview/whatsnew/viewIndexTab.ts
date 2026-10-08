@@ -90,6 +90,7 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 	const row = el('div', 'index-row');
 	const toggle = el('button', 'index-toggle');
 	toggle.type = 'button';
+	toggle.id = `index-toggle-${node.id}`;
 	if (hasChildren) {
 		toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
 		toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
@@ -98,6 +99,8 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 			state.toggled[node.id] = !expanded;
 			saveState();
 			ctx.rerender();
+			// The re-render replaced this button; keep keyboard focus on its successor.
+			document.getElementById(toggle.id)?.focus();
 		});
 		toggle.disabled = !!ctx.visible;
 	} else {

@@ -100,6 +100,22 @@ export function flashSection(target: HTMLElement): void {
 	activeFlashes.set(target, { boxShadow: original.boxShadow, transition: original.transition, timer });
 }
 
+/**
+ * A section can sit inside a tab panel that is currently hidden — e.g. the
+ * dashboard's Azure sections while its Team Server tab is showing. Click the
+ * tab that controls the nearest hidden ancestor (found by `aria-controls`), so
+ * the scroll lands on something visible.
+ */
+function revealHiddenAncestors(target: HTMLElement): void {
+	for (let node: HTMLElement | null = target; node; node = node.parentElement) {
+		if (!node.id) { continue; }
+		const hidden = node.hidden || getComputedStyle(node).display === 'none';
+		if (!hidden) { continue; }
+		const controller = document.querySelector<HTMLElement>(`[aria-controls="${cssString(node.id)}"]`);
+		controller?.click();
+	}
+}
+
 export async function revealSurface(request: SurfaceRevealRequest): Promise<void> {
 	if (request.tab) {
 		const tabButton = await waitForElement(() => findTabButton(request.tab as string));
@@ -121,6 +137,7 @@ export async function revealSurface(request: SurfaceRevealRequest): Promise<void
 	if (!find) { return; }
 	const target = await waitForElement(find);
 	if (!target) { return; }
+	revealHiddenAncestors(target);
 	// Let the tab switch paint before scrolling, or the scroll measures the old layout.
 	setTimeout(() => {
 		target.scrollIntoView({ behavior: 'smooth', block: 'start' });
