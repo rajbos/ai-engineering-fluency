@@ -267,16 +267,18 @@ jobs:
           # Create directory for session logs
           mkdir -p ./session-logs
           
-          # Calculate date range (last 7 days)
+          # Calculate date range: the last 7 UTC calendar dates including today
+          # (today and the 6 before it - an inclusive range starting 7 days ago
+          # would cover 8 dates)
           # Use GNU date if available, otherwise BSD date (macOS)
           if date --version >/dev/null 2>&1; then
             # GNU date (Linux)
             END_DATE=$(date -u +%Y-%m-%d)
-            START_DATE=$(date -u -d '7 days ago' +%Y-%m-%d)
+            START_DATE=$(date -u -d '6 days ago' +%Y-%m-%d)
           else
             # BSD date (macOS)
             END_DATE=$(date -u +%Y-%m-%d)
-            START_DATE=$(date -u -v-7d +%Y-%m-%d)
+            START_DATE=$(date -u -v-6d +%Y-%m-%d)
           fi
           
           echo "Date range: $START_DATE to $END_DATE"
@@ -432,7 +434,9 @@ jobs:
 
           # Calculate date range
           END_DATE=$(date -u +%Y-%m-%d)
-          START_DATE=$(date -u -d "${AZURE_TABLE_DATA_DAYS} days ago" +%Y-%m-%d)
+          # N calendar dates including today, so start N-1 days back (starting N
+          # days back would fetch N+1 dates).
+          START_DATE=$(date -u -d "$((AZURE_TABLE_DATA_DAYS - 1)) days ago" +%Y-%m-%d)
           echo "Date range: $START_DATE to $END_DATE"
 
           # Build command arguments

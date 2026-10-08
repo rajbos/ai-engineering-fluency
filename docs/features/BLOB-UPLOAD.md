@@ -131,7 +131,7 @@ Session logs uploaded to blob storage can be downloaded and made available to th
    The coding agent workflow needs Azure credentials to download blobs.
 
    **Option A: Storage Shared Key (built in)**
-   Add the secret `COPILOT_STORAGE_KEY` with the storage account key to the `copilot` environment. The provided workflow uses it automatically (`--auth-mode key`) for both the blob download and the Table Storage download. No workflow changes are needed.
+   Add the secret `COPILOT_STORAGE_KEY` with the storage account key to the `copilot` environment. The provided workflow uses it automatically in both download steps, through two different mechanisms: the blob download sets it as `AZURE_STORAGE_KEY` and runs `az storage` with `--auth-mode key`, and the Table Storage download passes it to the `load-table-data.js` loader as `--sharedKey`. No workflow changes are needed.
 
    **Option B: Federated Identity**
    If you would rather not store a key, add an `azure/login` step before the download step. The workflow falls back to `--auth-mode login` when `COPILOT_STORAGE_KEY` is not set and an Azure login is present. This requires `id-token: write` on the job and a federated credential for the `copilot` environment:
