@@ -408,8 +408,20 @@ export function resolveRepoIdentity(repoRoot: string): { key: string; isMainChec
 	// points at the physical path still share one key.
 	const key = canonicalPath(configDir);
 	// The main checkout is the one whose own `.git` directory *is* the common dir (a bare repo has none).
-	const isMainCheckout = path.basename(key) === '.git' && !isBareRepository(key) && path.dirname(key) === canonicalPath(repoRoot);
-	return { key, isMainCheckout };
+	return { key, isMainCheckout: !isLinkedWorktree(repoRoot) && !isBareRepository(key) };
+}
+
+/**
+ * A linked worktree's `.git` is a pointer file whose gitdir carries a `commondir`
+ * link back to the shared repository. A normal checkout (`.git` directory), a
+ * submodule and a checkout made with `--separate-git-dir` have no such link, so
+ * they are main checkouts even though their `.git` is not at `<root>/.git`.
+ */
+function isLinkedWorktree(repoRoot: string): boolean {
+	const gitPath = path.join(repoRoot, '.git');
+	if (probePath(gitPath) !== 'file') { return false; }
+	const match = /^gitdir:\s*(.+)$/m.exec(readPointerFile(gitPath) ?? '');
+	return !!match && readPointerFile(path.join(path.resolve(repoRoot, match[1].trim()), 'commondir')) !== undefined;
 }
 
 /** `realpath` when the path exists, otherwise the plain resolved path. */

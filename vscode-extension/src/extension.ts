@@ -10937,7 +10937,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 		const workspacePaths = this.darkFactoryCandidatePaths();
 		const scopeKey = readinessScopeKey(workspacePaths);
-		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey);
+		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey, this.githubSession !== undefined);
 		const needsScan = force === true || !cached || isReportStale(cached);
 		if (cached && force !== true) {
 			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });

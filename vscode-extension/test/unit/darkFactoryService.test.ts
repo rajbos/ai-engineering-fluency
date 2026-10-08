@@ -141,6 +141,39 @@ test('selectRepoRoots: a bare repository named .git is not mistaken for a main c
 	assert.deepEqual(selectRepoRoots([wt]).roots, [wt]);
 });
 
+test('selectRepoRoots: a main checkout with a separate git dir is still preferred over its worktree', () => {
+	const sep = fs.mkdtempSync(path.join(process.cwd(), 'df-sepgit-'));
+	TEMP_ROOTS.push(sep);
+	fs.writeFileSync(path.join(sep, 'config'), '[core]\n', 'utf8');
+	const main = fs.mkdtempSync(path.join(process.cwd(), 'df-sepmain-'));
+	TEMP_ROOTS.push(main);
+	fs.writeFileSync(path.join(main, '.git'), `gitdir: ${sep}\n`, 'utf8');
+	const wtGitDir = path.join(sep, 'worktrees', 'a');
+	fs.mkdirSync(wtGitDir, { recursive: true });
+	fs.writeFileSync(path.join(wtGitDir, 'commondir'), '../..', 'utf8');
+	const wt = fs.mkdtempSync(path.join(process.cwd(), 'df-sepwt-'));
+	TEMP_ROOTS.push(wt);
+	fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${wtGitDir}\n`, 'utf8');
+	assert.deepEqual(selectRepoRoots([wt, main]).roots, [main]);
+});
+
+test('readinessScopeKey: crossing the scan cap changes the key even though the selected roots do not', () => {
+	const repos = Array.from({ length: MAX_SCANNED_REPOS }, () => makeRepo({}));
+	const before = readinessScopeKey(repos);
+	const after = readinessScopeKey([...repos, makeRepo({})]);
+	assert.notEqual(before, after);
+});
+
+test('parseCacheEntry: a report with GitHub evidence is withheld while signed out, a filesystem-only one is kept', () => {
+	const a = makeRepo({});
+	const key = readinessScopeKey([a]);
+	const withApi = { ...(reportAt('2026-09-01T12:00:00.000Z') as object), apiSignalsIncluded: true } as never;
+	const fsOnly = { ...(reportAt('2026-09-01T12:00:00.000Z') as object), apiSignalsIncluded: false } as never;
+	assert.equal(parseCacheEntry({ scopeKey: key, report: withApi }, key, true), withApi);
+	assert.equal(parseCacheEntry({ scopeKey: key, report: withApi }, key, false), undefined);
+	assert.equal(parseCacheEntry({ scopeKey: key, report: fsOnly }, key, false), fsOnly);
+});
+
 test('selectRepoRoots: a symlinked main checkout and its worktree are one repository', (t) => {
 	const main = makeRepo({});
 	const wt = makeWorktree(main, 'a');

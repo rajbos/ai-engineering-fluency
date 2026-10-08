@@ -54,19 +54,28 @@ export function parseCachedReport(value: unknown): DarkFactoryReport | undefined
  * switching workspaces (or gaining a repository) is a cache miss, not a stale replay.
  */
 export function readinessScopeKey(workspacePaths: readonly string[]): string {
-	return selectRepoRoots(workspacePaths).roots.join('|');
+	// The skipped count is part of the scope: crossing the scan cap changes the overview
+	// without changing the selected roots.
+	const { roots, skipped } = selectRepoRoots(workspacePaths);
+	return `${roots.join('|')}#${skipped}`;
 }
 
 /** The persisted cache entry: a report plus the scope it was scanned for. */
 export interface DarkFactoryCacheEntry { scopeKey: string; report: DarkFactoryReport }
 
-/** Read a persisted entry, returning its report only when it matches `scopeKey`. */
-export function parseCacheEntry(value: unknown, scopeKey: string): DarkFactoryReport | undefined {
+/**
+ * Read a persisted entry, returning its report only when it matches `scopeKey`.
+ * A report carrying GitHub-derived evidence is withheld unless `apiEvidenceAllowed`,
+ * so signing out cannot be undone by reopening the view.
+ */
+export function parseCacheEntry(value: unknown, scopeKey: string, apiEvidenceAllowed = true): DarkFactoryReport | undefined {
 	if (!value || typeof value !== 'object') { return undefined; }
 	const proto = Object.getPrototypeOf(value);
 	if (proto !== Object.prototype && proto !== null) { return undefined; }
 	const entry = value as Partial<DarkFactoryCacheEntry>;
-	return entry.scopeKey === scopeKey ? parseCachedReport(entry.report) : undefined;
+	if (entry.scopeKey !== scopeKey) { return undefined; }
+	const report = parseCachedReport(entry.report);
+	return report && (apiEvidenceAllowed || !report.apiSignalsIncluded) ? report : undefined;
 }
 
 /** Whether a report is old enough (or its timestamp odd enough) that it should be re-scanned. */
