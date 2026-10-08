@@ -139,7 +139,7 @@ When running as the GitHub Copilot Coding Agent (bootstrapped via `.github/workf
 
 These hydrated files are generated output, not source. `session-logs/` and `usage-data/` are git-ignored; **never commit or force-add them** to a PR (they are not on `main`).
 
-These files are only available when the repository's `copilot` GitHub environment has `COPILOT_STORAGE_ACCOUNT` configured. See the `session-log-data` skill in `.github/skills/session-log-data/SKILL.md` for data schemas, analysis examples, and cost estimation.
+The session logs and aggregated usage data are only available when the repository's `copilot` GitHub environment has `COPILOT_STORAGE_ACCOUNT` configured. See the `session-log-data` skill in `.github/skills/session-log-data/SKILL.md` for data schemas, analysis examples, and cost estimation.
 
 To check if data is available:
 ```bash
