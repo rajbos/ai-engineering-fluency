@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { SurfaceRevealQueue } from '../../src/whatsNew/surfaceRevealQueue';
-import { flashSection, revealSurface } from '../../src/webview/shared/surfaceNavigation';
+import { flashSection, installSurfaceNavigation, revealSurface } from '../../src/webview/shared/surfaceNavigation';
 
 // ── Host side: the request handshake ─────────────────────────────────────
 
@@ -116,6 +116,7 @@ function installDom(html: string): { window: JSDOM['window']; scrolled: string[]
 	const globals = globalThis as unknown as Record<string, unknown>;
 	globals.document = dom.window.document;
 	globals.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+	globals.window = dom.window;
 	return { window: dom.window, scrolled };
 }
 
@@ -185,4 +186,33 @@ test('flashSection: overlapping flashes restore the original inline styles', asy
 	t.mock.timers.tick(2_000);
 	assert.equal(target.style.boxShadow, '1px 1px red');
 	assert.equal(target.style.transition, 'opacity 1s');
+});
+
+test('installSurfaceNavigation: reports ready, then acknowledges a reveal only once it has landed', async () => {
+	const { window } = installDom('<div id="present">Here</div>');
+	const posted: unknown[] = [];
+	installSurfaceNavigation({ postMessage: (message: unknown) => { posted.push(message); } }, 'chart');
+	assert.deepEqual(posted, [{ command: 'surfaceNavReady', view: 'chart' }]);
+
+	// A reveal whose section is not there yet: no acknowledgement, so the host keeps the request.
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', anchor: 'later' } }));
+	await sleep(250);
+	assert.equal(posted.length, 1);
+
+	// A reveal that lands — superseding the one still waiting — is acknowledged once.
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', anchor: 'present' } }));
+	await sleep(150);
+	assert.deepEqual(posted.slice(1), [{ command: 'surfaceRevealHandled', view: 'chart' }]);
+
+	// The superseded reveal never acknowledges, even once its section appears.
+	const late = window.document.createElement('div');
+	late.id = 'later';
+	window.document.body.append(late);
+	await sleep(250);
+	assert.equal(posted.length, 2);
+
+	// Unrelated messages are ignored.
+	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'updateStats' } }));
+	await sleep(50);
+	assert.equal(posted.length, 2);
 });
