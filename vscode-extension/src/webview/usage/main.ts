@@ -39,6 +39,7 @@ import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDete
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { formatToolEditors, sanitizeToolCallsByEditor } from './toolEditors';
 import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
 import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSanitizer';
 import { renderContextRefTable } from './contextRefTableHtml';
@@ -839,13 +840,6 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
 	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
 	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
-}
-
-/** Editors a tool was seen in, most-used first, e.g. "Claude Code (CLI), VS Code". Empty when unknown. */
-function formatToolEditors(tool: string, toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
-	const byEditor = toolCallsByEditor?.[tool];
-	if (!byEditor) { return ''; }
-	return Object.entries(byEditor).sort((a, b) => b[1] - a[1]).map(([editor]) => editor).join(', ');
 }
 
 function createMcpToolIssueUrl(unknownTools: string[], toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
@@ -1999,21 +1993,6 @@ function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'serverMemoriesAnalysis')) {
 		sanitized.serverMemoriesAnalysis = _sanitizeServerMemoriesAnalysis(raw.serverMemoriesAnalysis);
 	}
-}
-
-/** Keep only `{ tool: { editor: number } }` entries with finite positive counts. */
-function sanitizeToolCallsByEditor(raw: any): { [tool: string]: { [editor: string]: number } } | undefined {
-	if (!raw || typeof raw !== 'object') { return undefined; }
-	const out: { [tool: string]: { [editor: string]: number } } = {};
-	for (const [tool, byEditor] of Object.entries(raw)) {
-		if (!byEditor || typeof byEditor !== 'object') { continue; }
-		for (const [editor, count] of Object.entries(byEditor as Record<string, unknown>)) {
-			if (typeof count === 'number' && Number.isFinite(count) && count > 0) {
-				(out[tool] ??= {})[editor] = count;
-			}
-		}
-	}
-	return out;
 }
 
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
