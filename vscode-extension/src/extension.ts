@@ -7969,6 +7969,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const sources = [analysis.toolCalls.byTool, analysis.mcpTools.byTool, analysis.mcpTools.byServer];
 		if (sources.every(s => Object.keys(s).length === 0)) { return; }
 		const editorSource = this.detectEditorSource(sessionFile);
+		// 'Unknown' means no editor could be identified; leave it out so reports fall back to the no-editor format.
+		if (editorSource === 'Unknown') { return; }
 		for (const source of sources) {
 			for (const [name, count] of Object.entries(source)) {
 				let byEditor = this._toolCallsByEditorAccum.get(name);
