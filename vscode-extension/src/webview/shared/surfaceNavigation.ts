@@ -42,6 +42,9 @@ const TAB_BUTTON_SELECTORS = ['.tab-button', '.tab', '.eff-tab', '.tab-btn', '.w
  */
 const REVEAL_BUDGET_MS = 60_000;
 
+/** How long to let a tab switch paint before measuring where to scroll. */
+const PAINT_DELAY_MS = 50;
+
 /** Bumped by every new request, so a newer reveal supersedes one still waiting. */
 let revealGeneration = 0;
 const POLL_INTERVAL_MS = 100;
@@ -159,14 +162,20 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 	}
 	const find = targetFinder(request);
 	if (!find) { return true; }
-	const target = await waitForElement(find, remaining());
+	const found = await waitForElement(find, remaining());
+	if (!found || superseded()) { return false; }
+	revealHiddenAncestors(found);
+	// Let the tab switch paint before scrolling, or the scroll measures the old
+	// layout. Then look the section up again: a panel can replace its whole DOM
+	// in that window (the dashboard swaps cached data for fresh), which would
+	// leave `found` detached and the scroll landing nowhere.
+	await new Promise((resolve) => setTimeout(resolve, PAINT_DELAY_MS));
+	if (superseded()) { return false; }
+	const target = found.isConnected ? found : await waitForElement(find, remaining());
 	if (!target || superseded()) { return false; }
 	revealHiddenAncestors(target);
-	// Let the tab switch paint before scrolling, or the scroll measures the old layout.
-	setTimeout(() => {
-		target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-		flashSection(target);
-	}, 50);
+	target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	flashSection(target);
 	return true;
 }
 

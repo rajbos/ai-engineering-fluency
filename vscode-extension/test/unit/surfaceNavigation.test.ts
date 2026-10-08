@@ -163,6 +163,20 @@ test('revealSurface: a newer request supersedes one still waiting', async () => 
 	assert.equal(await first, false, 'the older reveal must not scroll away from the newer one');
 });
 
+test('revealSurface: scrolls to the fresh section when the panel replaces its DOM mid-reveal', async () => {
+	const { window, scrolled } = installDom('<div id="root"><div id="section-x" data-gen="cached"></div></div>');
+	const reveal = revealSurface({ command: 'revealSurface', anchor: 'section-x' }, 2_000);
+	// The dashboard swaps cached data for fresh inside the paint delay.
+	const root = window.document.getElementById('root')!;
+	const fresh = window.document.createElement('div');
+	fresh.id = 'section-x';
+	fresh.dataset.gen = 'fresh';
+	root.replaceChildren(fresh);
+	assert.equal(await reveal, true);
+	assert.deepEqual(scrolled, ['section-x']);
+	assert.equal(fresh.style.boxShadow !== '', true, 'the live element is the one highlighted');
+});
+
 test('revealSurface: switches to the tab that controls a hidden section', async () => {
 	const { window } = installDom(`
 		<button id="tab-azure" aria-controls="azure-content">Azure</button>

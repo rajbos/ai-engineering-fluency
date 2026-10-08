@@ -609,6 +609,7 @@ function buildTeamServerPanel(url: string): HTMLElement {
   const panel = el("div", "team-server-panel");
 
   const card = el("div", "team-server-card");
+  card.id = "section-team-server";
 
   const header = el("div", "config-card-header");
   const icon = el("span", "config-card-icon", "🖥️");

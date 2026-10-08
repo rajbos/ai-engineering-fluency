@@ -335,12 +335,13 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 				// No `tab`: with only Azure configured there is no tab bar. Scrolling to a
 				// section inside the hidden Azure panel switches to its tab when there is one.
 				nav: { anchor: 'section-personal-summary' },
+				condition: 'When Azure Storage is configured',
 				children: [
 					{ id: 'dashboard.personal', title: 'Your Summary', description: 'Your synced tokens, interactions, cost, devices and workspaces, with a model breakdown.', nav: { anchor: 'section-personal-summary' } },
 					{ id: 'dashboard.team', title: 'Team Comparison', description: 'Team totals and a leaderboard with each member\'s fluency score breakdown.', keywords: ['leaderboard'], nav: { anchor: 'section-team-comparison' } },
 				],
 			},
-			{ id: 'dashboard.team-server', title: 'Team Server', description: 'The team server\'s own dashboard, when both Azure and a team server are configured.', nav: { tab: 'teamServer' }, condition: 'When both backends are configured' },
+			{ id: 'dashboard.team-server', title: 'Team Server', description: 'A launch card for the team server\'s own web dashboard.', nav: { anchor: 'section-team-server' }, condition: 'When a team server is configured' },
 		],
 	},
 	{
