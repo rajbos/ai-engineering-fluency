@@ -696,7 +696,7 @@ test('"Delete anyway" shows size, then progress, then the final state on the row
 
 test('the size chip reuses the scanned worktree size instead of a second disk walk', async () => {
 	const harness = await bootWebview(buildStats());
-	const worktreePath = 'C:\wt\scanned';
+	const worktreePath = 'C:\\wt\\scanned';
 	harness.post({ command: 'worktreeFound', worktree: { path: worktreePath, repoLabel: 'repo', branch: 'scanned', lastCommit: '', lastCommitDate: null, pushed: 'yes', files: 3, folders: 1, bytes: 2 * 1024 * 1024 } });
 	harness.post({ command: 'cleanupStarted', total: 1 });
 	harness.post({

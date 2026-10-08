@@ -1397,12 +1397,12 @@ background: var(--bg-tertiary);
 }
 
 .worktree-retry-status.success {
-	color: var(--success-color, #3fb950);
+	color: var(--success-fg);
 	font-weight: 600;
 }
 
 .worktree-retry-status.failed {
-	color: var(--danger-color, #f85149);
+	color: var(--error-fg);
 	margin-bottom: 4px;
 }
 
