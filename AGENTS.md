@@ -135,6 +135,10 @@ When running as the GitHub Copilot Coding Agent (bootstrapped via `.github/workf
 - **`./session-logs/`**: Raw Copilot Chat session log files (last 7 days) from Azure Blob Storage.
 - **`./usage-data/usage-agg-daily.json`**: Aggregated daily token usage data (last 30 days) from Azure Table Storage.
 
+- **`./usage-data/agent-sessions.json`**: Cloud-agent session counts and fetch timestamps written by `scripts/fetch-agent-sessions.js`.
+
+These hydrated files are generated output, not source. `session-logs/` and `usage-data/` are git-ignored; **never commit or force-add them** to a PR (they are not on `main`).
+
 These files are only available when the repository's `copilot` GitHub environment has `COPILOT_STORAGE_ACCOUNT` configured. See the `session-log-data` skill in `.github/skills/session-log-data/SKILL.md` for data schemas, analysis examples, and cost estimation.
 
 To check if data is available:
