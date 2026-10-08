@@ -53,11 +53,14 @@ export function parseCachedReport(value: unknown): DarkFactoryReport | undefined
  * caller's paths. A cached report is only valid for the scope it was produced for, so
  * switching workspaces (or gaining a repository) is a cache miss, not a stale replay.
  */
-export function readinessScopeKey(workspacePaths: readonly string[]): string {
+export function readinessScopeKey(workspacePaths: readonly string[], prStats?: RepoPrStatsResult): string {
 	// The skipped count is part of the scope: crossing the scan cap changes the overview
-	// without changing the selected roots.
+	// without changing the selected roots. The pull-request evidence is too, so a report
+	// scanned before PR data arrived is not replayed once it has. JSON keeps the
+	// boundaries unambiguous (a path may itself contain any separator character).
 	const { roots, skipped } = selectRepoRoots(workspacePaths);
-	return `${roots.join('|')}#${skipped}`;
+	const evidence = [...indexPrStats(prStats)].map(([repo, stats]) => [repo, stats.totalPrs, stats.aiAuthoredPrs, stats.error ?? null]).sort();
+	return JSON.stringify([roots, skipped, evidence]);
 }
 
 /** The persisted cache entry: a report plus the scope it was scanned for. */

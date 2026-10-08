@@ -73,6 +73,8 @@ test('AI Readiness is a host-gated Usage Analysis tab with a lazy, refreshable s
 		tab.invalidate();
 		tab.startIfNeeded();
 		assert.equal(messages.at(-1)?.requestId, 6);
+		// After a full refresh the host must not answer from a cache that predates it.
+		assert.equal((messages.at(-1) as { force?: boolean }).force, true);
 		tab.handleMessage({ command: 'readinessScanFailed', requestId: 6 });
 		assert.ok(dom.window.document.querySelector('[role="alert"]'));
 		assert.equal(tab.handleMessage({ command: 'unrelated' }), false);

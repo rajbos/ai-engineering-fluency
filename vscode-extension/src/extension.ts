@@ -10936,10 +10936,10 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			return;
 		}
 		const workspacePaths = this.darkFactoryCandidatePaths();
-		const scopeKey = readinessScopeKey(workspacePaths);
+		const scopeKey = readinessScopeKey(workspacePaths, this._lastRepoPrStats);
 		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey, this.githubSession !== undefined);
 		const needsScan = force === true || !cached || isReportStale(cached);
-		if (cached && force !== true) {
+		if (cached) {
 			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });
 		}
 		if (!needsScan) { return; }

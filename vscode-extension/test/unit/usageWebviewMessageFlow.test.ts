@@ -427,6 +427,8 @@ test('AI Readiness deep link waits for stats and ignores responses from before a
 	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
 	await harness.settle();
 	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 3);
+	// A full refresh forces the next readiness scan past the host's cache.
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.force, true);
 	harness.post({ command: 'readinessLoaded', requestId: 1, report: { repos: [] } });
 	await harness.settle();
 	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);

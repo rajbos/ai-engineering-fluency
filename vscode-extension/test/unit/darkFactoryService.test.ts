@@ -157,6 +157,27 @@ test('selectRepoRoots: a main checkout with a separate git dir is still preferre
 	assert.deepEqual(selectRepoRoots([wt, main]).roots, [main]);
 });
 
+test('readinessScopeKey: roots keep their boundaries, so a root containing a separator cannot collide', () => {
+	const a = makeRepo({});
+	const b = makeRepo({});
+	// Serialised as structured JSON, not a delimiter-joined string: the roots array is
+	// recoverable intact whatever characters a path contains (POSIX allows `|`).
+	const [roots, skipped] = JSON.parse(readinessScopeKey([a, b])) as [string[], number];
+	assert.deepEqual(roots, [a, b]);
+	assert.equal(skipped, 0);
+});
+
+test('readinessScopeKey: PR evidence arriving or changing is a different scope', () => {
+	const a = makeRepo({});
+	const none = readinessScopeKey([a]);
+	const some = readinessScopeKey([a], prStats([{ owner: 'rajbos', repo: 'demo', totalPrs: 3, aiAuthoredPrs: 1 }]));
+	const more = readinessScopeKey([a], prStats([{ owner: 'rajbos', repo: 'demo', totalPrs: 4, aiAuthoredPrs: 1 }]));
+	assert.notEqual(none, some);
+	assert.notEqual(some, more);
+	// Signed-out (unauthenticated) stats contribute nothing, same as no stats.
+	assert.equal(readinessScopeKey([a], prStats([{ owner: 'rajbos', repo: 'demo' }], false)), none);
+});
+
 test('readinessScopeKey: crossing the scan cap changes the key even though the selected roots do not', () => {
 	const repos = Array.from({ length: MAX_SCANNED_REPOS }, () => makeRepo({}));
 	const before = readinessScopeKey(repos);

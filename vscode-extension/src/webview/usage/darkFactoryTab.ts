@@ -15,6 +15,8 @@ export class DarkFactoryTab {
 	private available = false;
 	/** A cached report is on screen while a fresh scan runs in the background. */
 	private refreshing = false;
+	/** Set by `invalidate()`: the next scan request asks the host to skip its cache. */
+	private forceNextScan = false;
 
 	constructor(
 		private readonly postMessage: (message: OutgoingMessage) => void,
@@ -89,6 +91,10 @@ export class DarkFactoryTab {
 	/** `force` is the Refresh button: re-scan even when the cached report is recent. */
 	requestScan(force = false): void {
 		if (!this.available || this.status === 'loading' || this.refreshing) { return; }
+		// A full Usage Analysis refresh invalidated this tab: its next scan must not be
+		// answered from a cached report that predates the refresh.
+		force = force || this.forceNextScan;
+		this.forceNextScan = false;
 		const hasReport = this.status === 'loaded' && !!this.report;
 		// Keep showing what we have while a forced refresh runs.
 		if (hasReport) { this.refreshing = true; } else { this.status = 'loading'; }
@@ -99,6 +105,7 @@ export class DarkFactoryTab {
 	invalidate(): void {
 		this.status = 'idle';
 		this.refreshing = false;
+		this.forceNextScan = true;
 		// The host replays its cached report on the next open, so nothing is lost by dropping this one.
 		this.report = undefined;
 		this.requestId++;
