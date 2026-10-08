@@ -28,6 +28,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.5.3</h3>
+        <ul>
+            <li>Fixed a startup error on IntelliJ Platform 2026.2 and newer caused by the JCEF classloader split</li>
+        </ul>
         <h3>0.5.2</h3>
         <ul>
             <li>Updated shared webview bundles: grouped Usage Analysis tabs, official editor logos in the Chart view</li>
