@@ -29,7 +29,11 @@ the CLI's Customization evidence counts repositories, not folders.
      `<repo>/.claude/worktrees/<name>` (Claude Code CLI) and
      `<root>/copilot-worktrees/<repo>/<name>` (Copilot app; anchored on `<root>/repos/<repo>`
      when that checkout exists). These need no disk access, so they work for folders that are
-     already deleted and for WSL / remote paths.
+     already deleted and for WSL / remote paths. The two Claude layouts look alike when the
+     session cwd is a sub-folder of a worktree; the folder above `.claude` decides: it is the
+     repository when it is itself in the workspace list or has a `.git`, the desktop layout when
+     it is a home directory (`/home/<user>`, `/Users/<user>`, `C:\Users\<user>`, `/root`,
+     `/mnt/<drive>/Users/<user>`), and the repository otherwise.
    - Case-only differences on Windows and macOS.
    - A WSL / SSH path seen on Windows that has the same folder name as a local checkout.
 4. **Sibling artefact folders** — `<repo>-wt`, `<repo>-<word>-wt` and `<repo>-<hex>` join the

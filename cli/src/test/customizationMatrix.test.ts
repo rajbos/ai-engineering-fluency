@@ -114,7 +114,7 @@ test('buildCustomizationMatrix: grouped totals match the shared grouping the ext
 		const folders = [
 			path.join(root, 'code', 'widget'),
 			path.join(root, 'clones', 'widget'),
-			path.join(root, 'home', '.claude', 'worktrees', 'widget', 'goofy-wozniak-42f712'),
+			path.join(root, '.copilot', 'copilot-worktrees', 'widget', 'goofy-wozniak-42f712'),
 			path.join(root, 'scratch', 'groups-dashboard-layout-85ed99'),
 		];
 		for (const dir of folders) { fs.mkdirSync(dir, { recursive: true }); }

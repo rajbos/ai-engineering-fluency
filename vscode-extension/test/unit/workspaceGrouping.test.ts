@@ -465,6 +465,63 @@ test('matchWorktreeConvention reads the three layouts', () => {
 	);
 	assert.deepEqual(matchWorktreeConvention('C:\\u\\.copilot\\copilot-worktrees\\repo\\w'), { repoName: 'repo', anchorPath: 'C:\\u\\.copilot\\copilot-worktrees\\repo', anchorIsCheckout: false });
 	assert.equal(matchWorktreeConvention('/home/u/.claude/worktrees'), undefined);
+	assert.equal(matchWorktreeConvention('/home/u/code/repo'), undefined);
+});
+
+test('matchWorktreeConvention: an in-repo worktree sub-folder is read without disk access', () => {
+	const inRepo = { repoName: 'widget', anchorPath: '/src/widget', anchorIsCheckout: true };
+	// No probes at all (deleted checkout, WSL path): the folder above .claude is not a home directory.
+	assert.deepEqual(matchWorktreeConvention('/src/widget/.claude/worktrees/agent/server'), inRepo);
+	assert.deepEqual(matchWorktreeConvention('/src/widget/.claude/worktrees/agent/server', () => false), inRepo, 'deleted checkout');
+	assert.deepEqual(matchWorktreeConvention('/home/dev/widget/.claude/worktrees/agent/a/b'), { ...inRepo, anchorPath: '/home/dev/widget' });
+	assert.deepEqual(
+		matchWorktreeConvention('C:\\code\\widget\\.claude\\worktrees\\agent\\server'),
+		{ repoName: 'widget', anchorPath: 'C:\\code\\widget', anchorIsCheckout: true },
+	);
+});
+
+test('matchWorktreeConvention: the desktop layout is recognised by its home-directory parent', () => {
+	for (const home of ['/home/dev', '/Users/dev', '/root', 'C:\\Users\\dev', '/mnt/c/Users/dev', 'C:\\Documents and Settings\\dev']) {
+		const sep = home.includes('\\') ? '\\' : '/';
+		const wt = [home, '.claude', 'worktrees', 'acme', 'goofy-wozniak-42f712', 'server'].join(sep);
+		assert.equal(matchWorktreeConvention(wt)?.repoName, 'acme', home);
+		assert.equal(matchWorktreeConvention(wt)?.anchorIsCheckout, false, home);
+	}
+});
+
+test('matchWorktreeConvention: a home directory that is itself a known workspace or checkout is the repository', () => {
+	const wt = '/home/dev/.claude/worktrees/agent/server';
+	const expected = { repoName: 'dev', anchorPath: '/home/dev', anchorIsCheckout: true };
+	assert.deepEqual(matchWorktreeConvention(wt, undefined, p => p === '/home/dev'), expected);
+	assert.deepEqual(matchWorktreeConvention(wt, p => p === '/home/dev/.git'), expected);
+});
+
+test('in-repo worktree sub-folders group with their repository when the checkout is gone or the path is WSL', () => {
+	for (const [platform, repo, wt] of [
+		['linux', '/src/widget', '/src/widget/.claude/worktrees/agent-a1b2c3/server'],
+		['win32', '/home/dev/src/widget', '/home/dev/src/widget/.claude/worktrees/agent-a1b2c3/server'],
+		['win32', 'C:\\code\\widget', 'C:\\code\\widget\\.claude\\worktrees\\agent-a1b2c3\\server'],
+	]) {
+		for (const p of [probes(platform), { platform }]) {
+			const groups = groupWorkspaces([entry(repo, 2, 2), entry(wt, 1, 1)], p);
+			assert.equal(groups.length, 1, `${platform} ${wt}`);
+			assert.equal(groups[0].canonicalPath, repo);
+			assert.equal(groups[0].displayName, 'widget');
+		}
+		// Only the worktree is in the list: it is still named after the repository, not `agent-…`.
+		const [alone] = groupWorkspaces([entry(wt, 1, 1)], probes(platform));
+		assert.equal(alone.displayName, 'widget');
+		assert.deepEqual(detectArtefactWorkspaceNames([alone]), []);
+	}
+});
+
+test('a dotfiles home repository in the list claims its own .claude/worktrees sub-folders', () => {
+	const groups = groupWorkspaces([entry('/home/dev', 1, 1), entry('/home/dev/.claude/worktrees/agent/server', 1, 1)], probes('linux'));
+	assert.equal(groups.length, 1);
+	assert.equal(groups[0].canonicalPath, '/home/dev');
+});
+
+test('matchWorktreeConvention: unrelated paths do not match', () => {
 	assert.equal(matchWorktreeConvention('/home/u/.copilot/copilot-worktrees/repo'), undefined);
 	assert.equal(matchWorktreeConvention('/home/u/code/repo'), undefined);
 });

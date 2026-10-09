@@ -187,6 +187,19 @@ function artefactStems(name: string): string[] {
 
 // ── Worktree path conventions ─────────────────────────────────────────────────
 
+/**
+ * True for a user home directory: `/home/<user>`, `/Users/<user>`, `/root`,
+ * `C:\Users\<user>`, `C:\Documents and Settings\<user>`, or a WSL mount of one
+ * (`/mnt/c/Users/<user>`).
+ */
+function looksLikeHomeDirectory(segments: string[]): boolean {
+	let rest = segments.filter(s => s.length > 0).map(s => s.toLowerCase());
+	if (rest.length > 0 && /^[a-z]:$/.test(rest[0])) { rest = rest.slice(1); }
+	if (rest.length > 1 && rest[0] === 'mnt' && /^[a-z]$/.test(rest[1])) { rest = rest.slice(2); }
+	if (rest.length === 1) { return rest[0] === 'root'; }
+	return rest.length === 2 && ['home', 'users', 'documents and settings'].includes(rest[0]);
+}
+
 interface ConventionMatch {
 	/** Repository name the convention names. */
 	repoName: string;
@@ -202,35 +215,52 @@ interface ConventionMatch {
  *    `<root>/repos/<repo>` when that checkout exists, else `<root>/copilot-worktrees/<repo>`.
  *  - `<home>/.claude/worktrees/<repo>/<name>[/…]` (Claude desktop app).
  *  - `<repo>/.claude/worktrees/<name>[/…]` (Claude Code CLI, worktree inside the repo).
+ *
+ * The two Claude layouts look alike when the cwd is a sub-folder of the worktree. The folder
+ * above `.claude` decides: it is the repository when it is itself a known workspace
+ * (`isWorkspace`) or holds a `.git`, the desktop layout when it is a home directory, and the
+ * repository otherwise — so the call works without disk access (deleted folders, WSL paths).
  */
-export function matchWorktreeConvention(folderPath: string, pathExists?: (p: string) => boolean): ConventionMatch | undefined {
+export function matchWorktreeConvention(
+	folderPath: string,
+	pathExists?: (p: string) => boolean,
+	isWorkspace?: (p: string) => boolean,
+): ConventionMatch | undefined {
 	const segments = splitSegments(folderPath);
-	const lower = segments.map(s => s.toLowerCase());
 	const sep = separatorOf(folderPath);
+	return matchCopilotWorktree(segments, sep, pathExists) ?? matchClaudeWorktree(segments, sep, pathExists, isWorkspace);
+}
 
-	const copilotIdx = lower.lastIndexOf('copilot-worktrees');
-	if (copilotIdx !== -1 && copilotIdx + 2 < segments.length && segments[copilotIdx + 2] !== '') {
-		const repoName = segments[copilotIdx + 1];
-		const reposPath = joinSegments([...segments.slice(0, copilotIdx), 'repos', repoName], sep);
-		const reposExists = pathExists?.(reposPath) ?? false;
-		const anchorPath = reposExists ? reposPath : joinSegments(segments.slice(0, copilotIdx + 2), sep);
-		return { repoName, anchorPath, anchorIsCheckout: reposExists };
-	}
+/** `<root>/copilot-worktrees/<repo>/<name>[/…]`. */
+function matchCopilotWorktree(segments: string[], sep: string, pathExists?: (p: string) => boolean): ConventionMatch | undefined {
+	const idx = segments.map(s => s.toLowerCase()).lastIndexOf('copilot-worktrees');
+	if (idx === -1 || idx + 2 >= segments.length || segments[idx + 2] === '') { return undefined; }
+	const repoName = segments[idx + 1];
+	const reposPath = joinSegments([...segments.slice(0, idx), 'repos', repoName], sep);
+	const reposExists = pathExists?.(reposPath) ?? false;
+	const anchorPath = reposExists ? reposPath : joinSegments(segments.slice(0, idx + 2), sep);
+	return { repoName, anchorPath, anchorIsCheckout: reposExists };
+}
 
-	for (let i = lower.length - 2; i >= 1; i--) {
-		if (lower[i] !== '.claude' || lower[i + 1] !== 'worktrees') { continue; }
-		const after = segments.slice(i + 2).filter(s => s.length > 0);
-		if (after.length === 0) { return undefined; }
-		const repoRoot = joinSegments(segments.slice(0, i), sep);
-		const repoRootIsCheckout = pathExists?.(`${repoRoot}${sep}.git`) ?? false;
-		if (after.length === 1 || repoRootIsCheckout) {
-			// In-repo layout: `<repo>/.claude/worktrees/<name>`.
-			return { repoName: workspaceBasename(repoRoot), anchorPath: repoRoot, anchorIsCheckout: true };
-		}
+/** `<home>/.claude/worktrees/<repo>/<name>[/…]` or `<repo>/.claude/worktrees/<name>[/…]`. */
+function matchClaudeWorktree(
+	segments: string[], sep: string,
+	pathExists?: (p: string) => boolean, isWorkspace?: (p: string) => boolean,
+): ConventionMatch | undefined {
+	const lower = segments.map(s => s.toLowerCase());
+	let i = lower.length - 2;
+	while (i >= 1 && !(lower[i] === '.claude' && lower[i + 1] === 'worktrees')) { i--; }
+	if (i < 1) { return undefined; }
+	const after = segments.slice(i + 2).filter(s => s.length > 0);
+	if (after.length === 0) { return undefined; }
+	const repoRoot = joinSegments(segments.slice(0, i), sep);
+	const repoRootIsRepository = (isWorkspace?.(repoRoot) ?? false) || (pathExists?.(`${repoRoot}${sep}.git`) ?? false);
+	if (!repoRootIsRepository && looksLikeHomeDirectory(segments.slice(0, i))) {
 		// Desktop layout: `<home>/.claude/worktrees/<repo>/<name>`.
 		return { repoName: after[0], anchorPath: joinSegments(segments.slice(0, i + 3), sep), anchorIsCheckout: false };
 	}
-	return undefined;
+	// In-repo layout: `<repo>/.claude/worktrees/<name>`.
+	return { repoName: workspaceBasename(repoRoot), anchorPath: repoRoot, anchorIsCheckout: true };
 }
 
 // ── Union-find with a "different repositories" veto ───────────────────────────
@@ -327,7 +357,10 @@ class NodeList {
 	}
 }
 
-function inputNode(entry: WorkspaceUsageEntry, probes: WorkspaceGroupingProbes, pathExists: (p: string) => boolean): { node: Node; repoId?: string } {
+function inputNode(
+	entry: WorkspaceUsageEntry, probes: WorkspaceGroupingProbes,
+	pathExists: (p: string) => boolean, isWorkspace: (p: string) => boolean,
+): { node: Node; repoId?: string } {
 	const remote = isRemotePath(entry.path, probes.platform);
 	const git = !remote && pathExists(entry.path) ? probes.readGitInfo?.(entry.path) : undefined;
 	return {
@@ -340,7 +373,7 @@ function inputNode(entry: WorkspaceUsageEntry, probes: WorkspaceGroupingProbes, 
 			mainWorktreePath: git?.mainWorktreePath,
 			// Layout rules need no disk access, so they also apply to WSL / remote paths; only the
 			// existence checks are skipped there, since the local probes cannot see that filesystem.
-			convention: matchWorktreeConvention(entry.path, remote ? undefined : pathExists),
+			convention: matchWorktreeConvention(entry.path, remote ? undefined : pathExists, isWorkspace),
 		},
 		repoId: repositoryIdentity(entry.repository) ?? repositoryIdentity(git?.remote),
 	};
@@ -426,6 +459,8 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 	// Every pass walks nodes in index order, so index them by path: the result then depends
 	// only on the set of entries, never on the order they arrived in.
 	const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+	const workspaceKeys = new Set(sorted.filter(e => !isUnresolved(e.path)).map(e => samePathKey(e.path, platform)));
+	const isWorkspace = (p: string): boolean => workspaceKeys.has(samePathKey(p, platform));
 	for (const entry of sorted) {
 		if (isUnresolved(entry.path)) {
 			passthrough.push({
@@ -434,7 +469,7 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 			});
 			continue;
 		}
-		const { node, repoId } = inputNode(entry, probes, pathExists);
+		const { node, repoId } = inputNode(entry, probes, pathExists, isWorkspace);
 		list.add(node, repoId);
 	}
 	const anchorOf = addAnchors(list, platform);
