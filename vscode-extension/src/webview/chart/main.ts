@@ -1,10 +1,9 @@
-// @ts-nocheck // Chart.js ESM bundle is loaded dynamically; skip CJS resolution noise
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { buildEditorLogo, syncLogoTheme } from '../shared/editorLogos';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
+import { createPeriodSelector, PERIOD_LABELS as TIME_WINDOW_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
 import { applyWebviewLocale } from '../shared/webviewLocale';
@@ -16,10 +15,10 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 
-type ChartModule = typeof import('chart.js/auto');
+type ChartModule = typeof import('chart.js/auto', { with: { 'resolution-mode': 'import' } });
 type ChartConstructor = ChartModule['default'];
 type ChartInstance = InstanceType<ChartConstructor>;
-type ChartConfig = import('chart.js').ChartConfiguration<'bar' | 'line', number[], string>;
+type ChartConfig = import('chart.js', { with: { 'resolution-mode': 'import' } }).ChartConfiguration<'bar' | 'line', number[], string>;
 
 type ModelDataset = { label: string; data: number[]; backgroundColor: string; borderColor: string; borderWidth: number };
 type EditorDataset = ModelDataset;
@@ -27,7 +26,7 @@ type RepositoryDataset = ModelDataset & { fullRepo?: string };
 
 type ChartPeriodData = {
 	labels: string[];
-	periodKeys?: string[];
+	periodKeys: string[];
 	tokensData: number[];
 	sessionsData: number[];
 	modelDatasets: ModelDataset[];
@@ -105,9 +104,7 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 	getState: () => TState | undefined;
 };
 
-type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
-
-const vscode: VSCodeApi = acquireVsCodeApi();
+const vscode = acquireVsCodeApi<ChartWebviewState>();
 const initialData = getWindowData<InitialChartData & { localization?: Record<string, string> }>('__INITIAL_CHART__');
 
 // Initialize localization for webview
@@ -123,13 +120,17 @@ async function loadChartModule(): Promise<void> {
 	const mod = await import('chart.js/auto');
 	Chart = mod.default;
 }
-let currentMetric: 'tokens' | 'output' | 'cost' | 'sessions' = 'tokens';
-let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory' = 'total';
+// Named so module-level annotations get the full union: `typeof currentMetric` here would be
+// narrowed by control flow to the initial literal ('tokens' / 'total').
+type ChartMetric = 'tokens' | 'output' | 'cost' | 'sessions';
+type ChartSplit = 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory';
+let currentMetric: ChartMetric = 'tokens';
+let currentSplit: ChartSplit = 'total';
 let currentPeriod: ChartPeriod = 'day';
 let currentTimeWindow: ChartTimeWindow = 'last30';
 // Stores state to restore after a background data update re-initializes the chart
-let pendingMetric: typeof currentMetric | null = null;
-let pendingSplit: typeof currentSplit | null = null;
+let pendingMetric: ChartMetric | null = null;
+let pendingSplit: ChartSplit | null = null;
 let pendingPeriod: ChartPeriod | null = null;
 
 type DisplayMode = 'actual' | 'rolling';
@@ -215,18 +216,11 @@ function getChartTitle(): string {
 	if (currentMetric === 'output') {
 		return periodMeta.outputTitle;
 	}
-	if (currentMetric === 'sessions') {
-		return periodMeta.sessionsTitle;
-	}
 	let titleText = periodMeta.title;
 	if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 		titleText += ` (${getRollingLabel()})`;
 	}
 	return titleText;
-}
-
-function getAggregationIndicator(): string {
-	return PERIOD_LABELS[currentPeriod].aggregationLabel;
 }
 
 /** Returns period data for the current period, falling back to legacy flat fields. */
@@ -252,7 +246,7 @@ function getActivePeriodData(data: InitialChartData): ChartPeriodData {
 			avgCostPerPeriod: 0,
 		};
 	}
-	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
+	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod) as ChartPeriodData;
 }
 
 const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; aggregationLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string; sessionsTitle: string; avgSessionsLabel: string }> = {
@@ -703,14 +697,6 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	chart = new Chart(ctx, createConfig(data));
 }
 
-function clampSplitForMetric(metric: typeof currentMetric): void {
-	const normalizedSplit = currentSplit === 'taskCategory' ? 'task' : currentSplit;
-	if (metric === 'cost' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; return; }
-	if (metric === 'output' && (normalizedSplit === 'model' || normalizedSplit === 'provider' || normalizedSplit === 'task')) { currentSplit = 'total'; return; }
-	if (metric === 'tokens' && normalizedSplit === 'language') { currentSplit = 'total'; return; }
-	if (metric === 'sessions' && normalizedSplit !== 'total' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; }
-}
-
 async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
 	currentSplit = getPreferredSplitForMetric(metric, currentSplit);
@@ -766,7 +752,7 @@ function isSplitSupported(metric: typeof currentMetric, split: typeof currentSpl
 		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
 	}
 	if (metric === 'output') {
-		return normalized !== 'model' && normalized !== 'provider' && normalized !== 'task' && normalized !== 'taskCategory';
+		return normalized !== 'model' && normalized !== 'provider' && normalized !== 'task';
 	}
 	return normalized !== 'language' && normalized !== 'provider';
 }
@@ -901,13 +887,13 @@ function getChartColors(): ChartColors {
 
 function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
 	const title = !periodsReady && (currentTimeWindow === 'last90' || currentTimeWindow === 'allTime')
-		? `${PERIOD_LABELS[currentTimeWindow]} (loading history…)`
-		: PERIOD_LABELS[currentTimeWindow];
+		? `${TIME_WINDOW_LABELS[currentTimeWindow]} (loading history…)`
+		: TIME_WINDOW_LABELS[currentTimeWindow];
 	return {
 		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
-			title: { display: true, text: title, color: c.textColor, font: { size: 14, weight: 'bold' }, padding: { top: 4, bottom: 12 } },
+			title: { display: true, text: title, color: c.textColor, font: { size: 14, weight: 'bold' as const }, padding: { top: 4, bottom: 12 } },
 			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
 			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
@@ -1125,8 +1111,6 @@ function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<ty
 	const lastIdx = period.costData.length - 1;
 	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
 	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0), backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: 'rgba(34, 197, 94, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
-	const budget = monthlyBudget;
-	const budgetDs = budget > 0 && currentPeriod === 'month' ? [{ label: `Monthly Budget ($${budget.toFixed(2)})`, data: period.labels.map(() => budget), type: 'line' as const, borderColor: 'rgba(255, 165, 0, 0.9)', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, yAxisID: 'y' }] : [];
 	const rollingLabel = getRollingLabel();
 	const showBudgetLine = currentPeriod === 'month' && monthlyBudget > 0;
 	const budgetLinePlugin = showBudgetLine ? buildBudgetLinePlugin(monthlyBudget) : null;
@@ -1383,7 +1367,7 @@ function createConfig(data: InitialChartData): ChartConfig {
 }
 
 
-type MetricSplit = { metric: typeof currentMetric; split: typeof currentSplit };
+type MetricSplit = { metric: ChartMetric; split: ChartSplit };
 
 function migrateViewKey(view: string): MetricSplit {
 	const map: Record<string, MetricSplit> = {
@@ -1396,29 +1380,6 @@ function migrateViewKey(view: string): MetricSplit {
 		taskCategory: { metric: 'tokens', split: 'task' },
 	};
 	return map[view] ?? { metric: 'tokens', split: 'total' };
-}
-
-function applyInitialChartState(data: InitialChartData): void {
-	if (data.initialPeriod) { currentPeriod = data.initialPeriod; }
-	if (data.initialMetric) { currentMetric = data.initialMetric; }
-	if (data.initialSplit) { currentSplit = data.initialSplit; return; }
-	if (!data.initialView) { return; }
-	const m = migrateViewKey(data.initialView);
-	currentMetric = m.metric;
-	currentSplit = m.split;
-}
-
-function applySavedChartState(saved: ChartWebviewState): void {
-	currentPeriod = saved.period;
-	currentDisplayMode = saved.displayMode;
-	if (saved.view && !saved.metric) {
-		const m = migrateViewKey(saved.view);
-		currentMetric = m.metric;
-		currentSplit = m.split;
-		return;
-	}
-	currentMetric = saved.metric ?? 'tokens';
-	currentSplit = saved.split ?? 'total';
 }
 
 function restoreChartState(initialData: InitialChartData): void {
@@ -1468,7 +1429,7 @@ async function bootstrap(): Promise<void> {
 void bootstrap();
 
 // Listen for background data updates from the extension
-registerMessageHandler((message) => {
+registerMessageHandler<{ command?: string; data?: unknown }>((message) => {
 	if (message.command === 'updateChartData') {
 		// Save current toggles for restoration after chart re-initializes
 		pendingMetric = currentMetric;
