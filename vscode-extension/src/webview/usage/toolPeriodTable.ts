@@ -140,7 +140,10 @@ export interface McpPeriodTablesInput {
 	byServer: ToolPeriodCounts;
 	byTool: ToolPeriodCounts;
 	totals: ToolPeriodTotals;
+	/** Display names for By Tool rows. */
 	nameResolver: (id: string) => string;
+	/** Display names for By Server rows (server ids have their own friendly-name mappings). */
+	serverNameResolver: (id: string) => string;
 	view: McpPeriodView;
 }
 
@@ -152,7 +155,7 @@ export function buildMcpPeriodTablesHtml(input: McpPeriodTablesInput): string {
 	};
 	const serverTable = buildToolPeriodTableHtml(input.byServer, input.totals, {
 		limitPerPeriod: 200,
-		nameResolver: id => id,
+		nameResolver: input.serverNameResolver,
 		firstColumnKey: 'usage.toolPeriod.colServer',
 		totalLabelKey: 'usage.toolPeriod.totalMcpCalls',
 		emptyKey: 'usage.toolPeriod.emptyMcp',

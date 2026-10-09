@@ -7,6 +7,7 @@ import { buildFilterPillGroupHtml, type SessionFilterOption } from './sessionFil
 import { escapeHtml, formatAbsoluteDate, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize, localizeFormat } from '../shared/localization';
+import { createViewStateManager } from '../shared/viewState';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import { renderCcrCheckButtonHtml, wireCcrActivityButtons, renderCcrActivityResult } from './ccrActivity';
@@ -362,22 +363,24 @@ interface RepoAnalysisRecord {
 }
 
 /** Webview state persisted by VS Code across tab switches (survives the panel being hidden). */
-interface UsageWebviewState {
-	aboutCollapsed?: boolean;
-	mcpPeriodView?: McpPeriodView;
-}
+type UsageWebviewState = {
+	aboutCollapsed: boolean;
+	mcpPeriodView: McpPeriodView;
+};
 
 const vscode = acquireVsCodeApi<UsageWebviewState>();
+const usageState = createViewStateManager<UsageWebviewState>(vscode, { aboutCollapsed: false, mcpPeriodView: 'server' });
+const restoredUsageState = usageState.restore();
 const notifyUsageWebviewReady = createUsageWebviewReadyNotifier(
 	(message) => vscode.postMessage(message),
 );
 const curationTraceOnceKeys = new Set<string>();
 
 /** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
-let aboutCollapsed = vscode.getState()?.aboutCollapsed ?? false;
+let aboutCollapsed = restoredUsageState.aboutCollapsed === true;
 
 /** MCP Tools section By Server / By Tool toggle, restored from webview state. */
-let mcpPeriodView: McpPeriodView = isMcpPeriodView(vscode.getState()?.mcpPeriodView) ? vscode.getState()!.mcpPeriodView! : 'server';
+let mcpPeriodView: McpPeriodView = isMcpPeriodView(restoredUsageState.mcpPeriodView) ? restoredUsageState.mcpPeriodView : 'server';
 
 function traceCuration(stage: string, details?: Record<string, unknown>): void {
 	try {
@@ -831,16 +834,19 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+	Object.entries(stats.lastMonth.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	// Also collect MCP server names — the "By Server" tables render them through the
 	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
 	// would otherwise show raw without ever being flagged as missing.
 	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
 	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
 	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.lastMonth.mcpTools.byServer).forEach(server => allTools.add(server));
 	// Also collect all general tool calls so non-MCP tools without friendly names are caught
 	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
+	Object.entries(stats.lastMonth.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 
 	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
 	
@@ -2558,7 +2564,7 @@ function runTabFirstVisitEffects(tab: string): void {
 /**
  * The leaf tab each group was last left on, so re-opening a group returns the user to where they
  * were instead of resetting them to its first tab. Lives only in memory, like `activeTab` itself
- * — neither is written to `vscode.setState()` (`UsageWebviewState` holds only `aboutCollapsed`),
+ * — neither is written to `vscode.setState()` (`UsageWebviewState` holds only `aboutCollapsed` and `mcpPeriodView`),
  * so a panel that is disposed and recreated legitimately starts over at the default tab.
  */
 const lastTabPerGroup: Record<string, string> = {};
@@ -3263,6 +3269,7 @@ function buildMcpToolsSectionHtml(stats: UsageAnalysisStats): string {
 				byTool: { today: stats.today.mcpTools.byTool, last30Days: stats.last30Days.mcpTools.byTool, lastMonth: stats.lastMonth.mcpTools.byTool },
 				totals: { today: stats.today.mcpTools.total, last30Days: stats.last30Days.mcpTools.total, lastMonth: stats.lastMonth.mcpTools.total },
 				nameResolver: lookupMcpToolName,
+				serverNameResolver: lookupToolName,
 				view: mcpPeriodView,
 			})}
 		</div>`;
@@ -5147,13 +5154,17 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 	if (unknownTools.length === 0) { return ''; }
 	const issueUrl = createMcpToolIssueUrl(unknownTools, stats.toolCallsByEditor);
 	const toolListHtml = unknownTools.map(tool => {
-		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
-		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
-		const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
+		// Server ids are collected alongside tool ids, so count them from byServer too.
+		const countIn = (p: UsageAnalysisPeriod): number => (p.toolCalls.byTool[tool] || 0) + (p.mcpTools.byTool[tool] || 0) + (p.mcpTools.byServer[tool] || 0);
+		const todayCount = countIn(stats.today);
+		const last30Count = countIn(stats.last30Days);
+		const monthCount = countIn(stats.month);
+		const lastMonthCount = countIn(stats.lastMonth);
 		const countParts: string[] = [];
 		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
 		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
 		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
+		if (lastMonthCount > 0) { countParts.push(`${lastMonthCount} last month`); }
 		const editors = formatToolEditors(tool, stats.toolCallsByEditor);
 		if (editors) { countParts.push(editors); }
 		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${escapeHtml(countParts.join(' | '))})</span>` : '';
@@ -5777,7 +5788,7 @@ function wireAboutInfoToggle(): void {
 		body.style.display = aboutCollapsed ? 'none' : '';
 		toggle.setAttribute('aria-expanded', String(!aboutCollapsed));
 		if (chevron) { chevron.textContent = aboutCollapsed ? '▸' : '▾'; }
-		vscode.setState({ ...(vscode.getState() ?? {}), aboutCollapsed });
+		usageState.patch({ aboutCollapsed });
 	};
 	toggle.addEventListener('click', applyToggle);
 	toggle.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -5803,7 +5814,7 @@ function wireMcpPeriodToggle(): void {
 			}
 			document.getElementById('mcp-period-server')?.toggleAttribute('hidden', view !== 'server');
 			document.getElementById('mcp-period-tool')?.toggleAttribute('hidden', view !== 'tool');
-			vscode.setState({ ...(vscode.getState() ?? {}), mcpPeriodView: view });
+			usageState.patch({ mcpPeriodView: view });
 		});
 	}
 }

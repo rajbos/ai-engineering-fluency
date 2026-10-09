@@ -153,12 +153,13 @@ test('buildToolPeriodTableHtml: ids sharing a friendly name stay separate rows w
     assert.ok(!rows[2].includes('tool-period-id'), 'unique names get no hint');
 });
 
-test('buildMcpPeriodTablesHtml: By Server is default, By Tool is hidden and uses the MCP name resolver', () => {
+test('buildMcpPeriodTablesHtml: By Server is default with server names resolved, By Tool is hidden and uses the MCP tool resolver', () => {
     const html = buildMcpPeriodTablesHtml({
         byServer: { today: { github: 2 }, last30Days: { github: 9, playwright: 4 }, lastMonth: {} },
         byTool: { today: {}, last30Days: { 'github/create_issue': 5 }, lastMonth: {} },
         totals: { today: 2, last30Days: 13, lastMonth: 0 },
         nameResolver: id => `Friendly ${id}`,
+        serverNameResolver: id => (id === 'github' ? 'GitHub MCP' : id),
         view: 'server',
     });
     assert.ok(html.includes('data-mcp-view="server" aria-pressed="true"'));
@@ -166,6 +167,8 @@ test('buildMcpPeriodTablesHtml: By Server is default, By Tool is hidden and uses
     assert.ok(html.includes('<div id="mcp-period-server" class="tool-period-view">'));
     assert.ok(html.includes('<div id="mcp-period-tool" class="tool-period-view" hidden>'));
     assert.ok(html.includes('Friendly github/create_issue'));
+    assert.ok(html.includes('<strong title="github">GitHub MCP</strong>'), 'server ids go through the server resolver');
+    assert.ok(html.includes('<strong title="playwright">playwright</strong>'));
     assert.ok(html.includes('<th class="tool-period-name">Server</th>'));
     assert.equal((html.match(/Total MCP calls/g) ?? []).length, 2);
 });
@@ -176,6 +179,7 @@ test('buildMcpPeriodTablesHtml: By Tool view shows the tool table and the server
         byTool: { today: {}, last30Days: {}, lastMonth: {} },
         totals: { today: 0, last30Days: 0, lastMonth: 0 },
         nameResolver: identity,
+        serverNameResolver: identity,
         view: 'tool',
     });
     assert.ok(html.includes('<div id="mcp-period-server" class="tool-period-view" hidden>'));
@@ -191,6 +195,7 @@ test('buildMcpPeriodTablesHtml: By Server lists every server, By Tool caps at to
         byTool: { today: {}, last30Days: many, lastMonth: {} },
         totals: { today: 0, last30Days: 120, lastMonth: 0 },
         nameResolver: identity,
+        serverNameResolver: identity,
         view: 'server',
     });
     const server = html.slice(html.indexOf('mcp-period-server'), html.indexOf('mcp-period-tool'));
