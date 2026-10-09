@@ -119,6 +119,34 @@ test('surface reveal queue: a late acknowledgement for a replaced request leaves
 	assert.equal(queue.peek('chart'), undefined);
 });
 
+test('surface reveal queue: a panel bound at creation cannot be replaced by one reopened by hand before the opener resolves', () => {
+	const { queue } = makeQueue();
+	const created = { name: 'created' };
+	const reopened = { name: 'reopened' };
+	queue.request('chart', { anchor: 'a' }, undefined);
+	queue.bind('chart', created);
+	// The user closes `created` while its opener still loads data, then reopens the view.
+	assert.equal(queue.ready('chart', reopened), null);
+	assert.equal(queue.peek('chart'), undefined);
+	assert.equal(queue.opened('chart', reopened), null);
+});
+
+test('surface reveal queue: an opener that resolves on a different panel than the bound one drops the request', () => {
+	const { queue } = makeQueue();
+	queue.request('chart', { anchor: 'a' }, undefined);
+	queue.bind('chart', { name: 'created' });
+	assert.equal(queue.opened('chart', { name: 'other' }), null);
+	assert.equal(queue.peek('chart'), undefined);
+});
+
+test('surface reveal queue: bind ignores the panel being replaced and an already-bound request', () => {
+	const { queue } = makeQueue();
+	const existing = { name: 'existing' };
+	queue.request('chart', { tab: 't' }, existing);
+	queue.bind('chart', existing);
+	assert.deepEqual(queue.opened('chart', existing), { tab: 't' }, 'still treated as a reused panel');
+});
+
 // ── Webview side: carrying out a reveal ──────────────────────────────────
 
 /** Installs a jsdom document as the globals the webview helper reads, and records scrolls. */

@@ -2908,8 +2908,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		// Held before opening: a panel the opener creates may report ready before `open` resolves.
-		this.surfaceReveals.request(view, nav, this.getPanelForView(view));
-		await open();
+		const existingPanel = this.getPanelForView(view);
+		this.surfaceReveals.request(view, nav, existingPanel);
+		const opening = open();
+		// Openers create their panel before their first await (and then load data),
+		// so a new panel already exists here: bind the request to it now.
+		const created = this.getPanelForView(view);
+		if (created && created !== existingPanel) { this.surfaceReveals.bind(view, created); }
+		await opening;
 		const panel = this.getPanelForView(view);
 		const postNow = this.surfaceReveals.opened(view, panel);
 		if (!panel) { return; }

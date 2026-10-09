@@ -63,6 +63,19 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 	}
 
 	/**
+	 * Binds the request for `view` to `panel` as soon as the opener has created
+	 * it — before the opener's own await on data resolves — so a panel the user
+	 * closes and reopens by hand in that window can never claim the request.
+	 * Ignored once the request is already bound.
+	 */
+	bind(view: TKey, panel: TPanel): void {
+		const entry = this.pending.get(view);
+		if (entry && entry.panel === undefined && panel !== entry.replacedPanel) {
+			entry.panel = panel;
+		}
+	}
+
+	/**
 	 * The opener for `view` resolved and left `panel` open (or none). Returns
 	 * the navigation to post now when the panel was reused — no ready handshake
 	 * may follow — else null. It returns the request *currently* held, so an
@@ -73,7 +86,9 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 	opened(view: TKey, panel: TPanel | undefined): TNav | null {
 		const entry = this.pending.get(view);
 		if (!entry) { return null; } // already delivered through ready() and handled
-		if (!panel) {
+		if (!panel || (entry.panel !== undefined && panel !== entry.panel)) {
+			// No panel, or not the one the request was bound to (the user closed it
+			// and opened another by hand): drop the request rather than redirect.
 			this.pending.delete(view);
 			return null;
 		}
