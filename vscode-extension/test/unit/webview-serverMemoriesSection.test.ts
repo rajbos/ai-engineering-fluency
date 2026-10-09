@@ -9,6 +9,8 @@ import {
 	buildServerMemoriesSectionHtml,
 	sanitizeServerMemoriesAnalysis,
 	serverMemoriesMessageForClick,
+	wireServerMemoriesButtons,
+	type ServerMemoriesMessage,
 } from '../../src/webview/usage/serverMemories';
 
 setFormatLocale('en-US');
@@ -133,4 +135,50 @@ test('sanitizeServerMemoriesAnalysis keeps the new fields and drops malformed on
 	assert.equal(sanitized.topPromotionGroups[0].prompt, undefined);
 	assert.deepEqual(sanitized.documentedMemories, [{ subject: 's', fact: 'f', files: [{ path: 'AGENTS.md' }] }]);
 	assert.equal(sanitized.repoRoot, 'C:\\code\\<repo>');
+});
+
+/** Run `fn` with `document` pointing at a JSDOM page holding the rendered section. */
+function withSectionDocument(analysis: ServerMemoriesAnalysisView, fn: (doc: Document) => void): void {
+	const dom = new JSDOM(`<body>${buildServerMemoriesSectionHtml(analysis)}</body>`);
+	const globals = globalThis as { document?: Document };
+	const previous = globals.document;
+	globals.document = dom.window.document;
+	try {
+		fn(dom.window.document);
+	} finally {
+		globals.document = previous;
+		dom.window.close();
+	}
+}
+
+test('wireServerMemoriesButtons posts exactly one message per click', () => {
+	withSectionDocument(view(), doc => {
+		const posted: ServerMemoriesMessage[] = [];
+		wireServerMemoriesButtons(message => posted.push(message));
+		(doc.querySelector('.server-memory-draft-btn') as HTMLElement).click();
+		(doc.querySelector('.server-memory-open-btn') as HTMLElement).click();
+		(doc.querySelector('table') as HTMLElement).click();
+		assert.deepEqual(posted, [
+			{ command: 'draftCopilotChatWithPrompt', prompt: 'Move "caching" <now> & verify' },
+			{ command: 'openFile', path: 'C:\\code\\repo\\AGENTS.md' },
+		]);
+	});
+});
+
+test('wireServerMemoriesButtons is idempotent across repeated renders of the same section', () => {
+	withSectionDocument(view(), doc => {
+		const posted: ServerMemoriesMessage[] = [];
+		wireServerMemoriesButtons(message => posted.push(message));
+		wireServerMemoriesButtons(message => posted.push(message));
+		wireServerMemoriesButtons(message => posted.push(message));
+		(doc.querySelector('.server-memory-draft-btn') as HTMLElement).click();
+		assert.equal(posted.length, 1, 'a second wiring must not stack another listener');
+	});
+});
+
+test('wireServerMemoriesButtons does nothing when the section is not rendered', () => {
+	withSectionDocument(view({ error: 'x' }), doc => {
+		doc.getElementById('section-server-memories')?.remove();
+		assert.doesNotThrow(() => wireServerMemoriesButtons(() => assert.fail('nothing to click')));
+	});
 });

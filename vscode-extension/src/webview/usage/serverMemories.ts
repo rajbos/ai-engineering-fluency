@@ -282,9 +282,18 @@ export function serverMemoriesMessageForClick(target: Element | null): ServerMem
 	return null;
 }
 
-/** Wire the section's buttons. Call after every render that rebuilds the section. */
+/**
+ * Wire the section's buttons with one delegated listener. Safe to call after every render:
+ * a section element that is already wired is skipped (same `data-*` guard as
+ * `wireCurationButtons` in `main.ts`), so a render that keeps the element cannot stack a
+ * second listener and post every click twice. A rebuilt section is a new element and is
+ * wired afresh.
+ */
 export function wireServerMemoriesButtons(postMessage: (message: ServerMemoriesMessage) => void): void {
-	document.getElementById('section-server-memories')?.addEventListener('click', event => {
+	const section = document.getElementById('section-server-memories');
+	if (!section || section.dataset.serverMemoriesWired === 'true') { return; }
+	section.dataset.serverMemoriesWired = 'true';
+	section.addEventListener('click', event => {
 		const message = serverMemoriesMessageForClick(event.target as Element | null);
 		if (message) { postMessage(message); }
 	});

@@ -654,6 +654,22 @@ function classifyCitations(citations: string[]): { checkable: string[]; instruct
 	return { checkable, instructionFiles };
 }
 
+/**
+ * Probe a memory's checkable citations in one pass: which are missing from the tree, and
+ * whether any surviving one is a regular file (the evidence a promotion needs). Each path is
+ * probed once, rather than re-scanning the missing list per citation.
+ */
+function probeCitations(checkable: string[], deps: ServerMemoryAnalysisDeps): { missing: string[]; live: boolean } {
+	const missing: string[] = [];
+	const isRegularFile = deps.isRegularFile ?? (() => true);
+	let live = false;
+	for (const filePath of checkable) {
+		if (!deps.fileExists(filePath)) { missing.push(filePath); continue; }
+		if (!live && isRegularFile(filePath)) { live = true; }
+	}
+	return { missing, live };
+}
+
 /** Classify every memory once: subject, whether it is documented, code-derived, and stale. */
 function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps): MemoryScan {
 	const scan: MemoryScan = {
@@ -682,9 +698,8 @@ function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps):
 			scan.documented.push({ id: memory.id, subject: memory.subject, fact: memory.fact, instructionFiles: Array.from(instructionFiles) });
 		}
 
-		const missing = checkable.filter(filePath => !deps.fileExists(filePath));
-		const isRegularFile = deps.isRegularFile ?? (() => true);
-		if (checkable.some(filePath => !missing.includes(filePath) && isRegularFile(filePath))) { scan.liveIds.add(memory.id); }
+		const { missing, live } = probeCitations(checkable, deps);
+		if (live) { scan.liveIds.add(memory.id); }
 		if (missing.length > 0) {
 			scan.staleCitations.push({
 				id: memory.id,
@@ -939,8 +954,7 @@ export interface PromotionTargetProbeDeps extends RepoFileExistsDeps {
  */
 export function createPromotionTargetProbe(repoRoot: string, deps?: PromotionTargetProbeDeps): PromotionTargetProbe {
 	const io: PromotionTargetProbeDeps = deps ?? defaultPromotionTargetProbeDeps();
-	let realRoot: string;
-	try { realRoot = io.realpathSync(io.resolve(repoRoot)); } catch { realRoot = io.resolve(repoRoot); }
+	const realRoot = resolveRealRoot(io, repoRoot);
 
 	return (relativePath: string): PromotionTargetStatus => {
 		if (!isSafeRepoRelativePath(relativePath)) { return 'unsafe'; }
