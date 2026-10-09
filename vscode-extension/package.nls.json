@@ -680,6 +680,7 @@
   "viewIndex.matchMany": "{0} matches",
   "viewIndex.noMatchStatus": "Nothing matches “{0}”. Try fewer or shorter words.",
   "viewIndex.noMatch": "No matching views, tabs or sections.",
+  "whatsNew.logviewerHint": "Open a session from this list to see it in the Session Log Viewer.",
   "whatsNew.release.0.19.0.headline": "Usage Analysis is now organized into Usage, Workspace, GitHub and Coaching groups, with banded sections, official editor logos in the Chart view and Copilot budget for every signed-in GitHub account.",
   "whatsNew.release.0.18.3.headline": "A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.",
   "whatsNew.release.0.18.2.headline": "See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.",
