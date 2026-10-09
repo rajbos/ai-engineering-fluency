@@ -276,16 +276,25 @@ function unwrapCacheEntries(data) {
 function readCacheFile() {
     const possiblePaths = getCacheFilePaths();
     
+    // Open once and check/read through the same descriptor, so the file that was checked is
+    // the file that is read. O_NOFOLLOW (POSIX only) makes open() refuse a symlink.
+    const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
     for (const filePath of possiblePaths) {
+        let fd;
         try {
-            if (fs.lstatSync(filePath).isFile()) {
-                const content = fs.readFileSync(filePath, 'utf8');
+            fd = fs.openSync(filePath, openFlags);
+            if (fs.fstatSync(fd).isFile()) {
+                const content = fs.readFileSync(fd, 'utf8');
                 const data = unwrapCacheEntries(JSON.parse(content));
                 return { success: true, data, filePath };
             }
         } catch (error) {
             // Continue to next path if this one fails
             continue;
+        } finally {
+            if (fd !== undefined) {
+                fs.closeSync(fd);
+            }
         }
     }
 

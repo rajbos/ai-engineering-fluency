@@ -236,3 +236,14 @@ test('--last caps results at 100 and rejects invalid values', (t) => {
         assert.equal(result.status, 2, `expected --last ${invalid} to fail`);
     }
 });
+
+test('refuses a symlink at a candidate cache path', { skip: process.platform === 'win32' && 'O_NOFOLLOW is POSIX-only' }, (t) => {
+    const fixture = createFixture(t);
+    const target = path.join(fixture.temp, 'planted.json');
+    fs.writeFileSync(target, JSON.stringify({ planted: { tokens: 999 } }));
+    fs.symlinkSync(target, path.join(fixture.storage, 'cache_prod.snapshot.json'));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout.includes('999'), false);
+});

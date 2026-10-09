@@ -23,7 +23,7 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 
 ## What This Skill Does
 
-1. **Reads actual cache data** - Loads real cache data from export files on disk
+1. **Reads actual cache data** - Loads the extension's shared cache snapshot from disk
 2. **Scoped search locations** - Checks only VS Code globalStorage, not temp or current directories
 3. **Helps debugging** - Inspect what's being cached and when
 4. **Supports development** - Iterate with real data structures when building features
@@ -42,13 +42,9 @@ The extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot
 
 ## Important Note
 
-The extension stores its cache in VS Code's internal globalState (SQLite database `state.vscdb`), which is not directly accessible from external scripts. To use this skill with real data:
+The extension stores its cache in VS Code's internal globalState (SQLite database `state.vscdb`), which external scripts cannot read directly. It also mirrors that cache to the shared snapshot file (`cache_prod.snapshot.json` / `cache_dev.snapshot.json`) in its globalStorage directory, and that file is what this script reads. No manual export is needed once the extension has run. A legacy `session-cache.json` written by tests or by hand is still accepted as a fallback.
 
-1. **Export from extension**: Add functionality to export cache to disk
-2. **Export from tests**: Test code can write cache data to one of the expected locations
-3. **Manual export**: Extract cache from globalState and save to disk
-
-To access real cache data, use the extension's API:
+Inside the extension, the same data is available through its API:
 
 ```typescript
 // In extension.ts or any file with access to ExtensionContext

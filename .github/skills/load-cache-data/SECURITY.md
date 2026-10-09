@@ -31,7 +31,7 @@ None. It reads `APPDATA` and `XDG_CONFIG_HOME` only to build candidate paths.
   (`getCacheFilePaths`, line 139). These are in the user's own profile directory.
 - The OS temp directory and the current working directory are no longer candidates, so a
   file planted there is not read.
-- The content is `JSON.parse`d (line 283) and filtered before printing; nothing in it is
+- The content is `JSON.parse`d (line 288) and filtered before printing; nothing in it is
   executed.
 
 ## What it writes and where
@@ -63,8 +63,10 @@ None.
   requires `--include-sensitive`.
 - `--last` must be all digits and at least 1, otherwise the script exits 2; it is capped at
   100 entries (`parseLastCount`, line 34).
-- Only the user's VS Code globalStorage directories are searched. `fs.lstatSync(...).isFile()`
-  (line 281) means a symlink at a candidate path is not followed.
+- Only the user's VS Code globalStorage directories are searched. Each candidate is opened
+  once and checked with `fstatSync(fd).isFile()` and read through that same descriptor
+  (`readCacheFile`), so it cannot be swapped between check and read. On POSIX the open uses
+  `O_NOFOLLOW`, so a symlink at a candidate path is refused.
 - A file that fails to parse is skipped and the search moves on.
 
 ## Known gaps
@@ -75,5 +77,7 @@ None.
   printed as-is.
 - With `--include-sensitive`, session titles (which can echo a prompt), first user prompts,
   correction snippets and local paths are printed unfiltered by design.
+- On Windows `O_NOFOLLOW` does not exist, so a symlink at a candidate path is followed to its
+  target (creating one there needs write access to the user's profile directory).
 - `load-cache-data.test.js` is not run by any CI workflow; it runs only when invoked
   manually with `node --test`.

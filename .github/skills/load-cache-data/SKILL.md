@@ -116,7 +116,7 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 `--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), unrecognized fields are omitted, and maps keyed by file paths or names are dropped: `usageAnalysis.contextReferences.byPath`, plus `languageUsage` and `usageAnalysis.editScope.languageUsage` (keyed by file extension, or by the whole basename for extensionless files such as `Dockerfile`). Even with `--include-sensitive`, credentials in a repository URL (`https://user:token@host/...`) are stripped.
 
 **What it does:**
-- Searches for cache export files in known locations
+- Searches for the extension's cache snapshot in known locations
 - Reads actual cache data if a file exists
 - Displays cache entries sorted by most recent modification, with identifying fields omitted by default
 - Shows detailed token counts, model usage, and usage analysis
@@ -125,7 +125,7 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 
 The script reads the first of these files it finds:
 
-1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\<extension id>\`, looking for `cache_prod.snapshot.json`, then `cache_dev.snapshot.json` (the shared snapshot `CacheManager` writes; the entries are unwrapped from its envelope), then a legacy flat `session-cache.json` export. The extension id is the extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename)
+1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\<extension id>\`, looking for `cache_prod.snapshot.json`, then `cache_dev.snapshot.json` (the shared snapshot `CacheManager` writes; the entries are unwrapped from its envelope), then a legacy flat `session-cache.json` export. The extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename)
    - The Windows, macOS, and Linux locations are derived from the VS Code user-data directory.
    - Also checks other VS Code variants (Insiders, Cursor, VSCodium, etc.).
 
