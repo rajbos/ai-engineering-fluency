@@ -429,8 +429,8 @@ const INSIGHT_FOCUS_WINDOW_MS = 4000;
 let focusedInsightAnchor: { anchor: string; until: number } | null = null;
 /** The node the last anchor scroll targeted, so a re-apply can tell a rebuild from a repeat. */
 let lastAnchorScrollTarget: HTMLElement | null = null;
-/** Handle of a deferred scroll to an insight card, so navigating away before it fires cancels it. */
-let pendingInsightScrollTimer: ReturnType<typeof setTimeout> | null = null;
+/** Handle of a deferred anchor scroll (section or insight card), so navigating away or a host cancel before it fires stops it. */
+let pendingAnchorScrollTimer: ReturnType<typeof setTimeout> | null = null;
 /** Elements with a highlight flash still in flight, with the styling their timer will restore. */
 const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -6332,14 +6332,13 @@ function scrollToPendingTabAnchor(): void {
 		pendingTabAnchor = null;
 		lastAnchorScrollTarget = anchor;
 		const timer = setTimeout(() => {
-			if (pendingInsightScrollTimer === timer) { pendingInsightScrollTimer = null; }
+			if (pendingAnchorScrollTimer === timer) { pendingAnchorScrollTimer = null; }
 			anchor.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
 			flashAnchorHighlight(anchor);
 		}, 50);
-		// Only an insight scroll is tracked, and so only it is cancellable: navigating away inside
-		// the defer would otherwise still scroll and flash the card the user just left behind.
-		// Section anchors keep their existing fire-and-forget behaviour.
-		if (isInsightCardAnchor(anchor.id)) { pendingInsightScrollTimer = timer; }
+		// Tracked for every anchor, so navigating away inside the defer — or the host cancelling
+		// with cancelPendingNavigation — stops it scrolling and flashing what the user left behind.
+		pendingAnchorScrollTimer = timer;
 	}
 }
 
@@ -6382,9 +6381,9 @@ function flashAnchorHighlight(element: HTMLElement): void {
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
 	pendingTabAnchor = null;
-	if (pendingInsightScrollTimer !== null) {
-		clearTimeout(pendingInsightScrollTimer);
-		pendingInsightScrollTimer = null;
+	if (pendingAnchorScrollTimer !== null) {
+		clearTimeout(pendingAnchorScrollTimer);
+		pendingAnchorScrollTimer = null;
 	}
 }
 
