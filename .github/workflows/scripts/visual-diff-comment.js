@@ -305,9 +305,12 @@ function renderImages(lines, shown, plan, titles) {
     while (row.length < columns) row.push(' ');
     lines.push(`| ${row.join(' | ')} |`);
   }
-  lines.push('', '<sub>Magenta marks changed pixels; the rest is the new screenshot, dimmed. Click an image for full size.</sub>', '');
-
+  // Added and removed views show the screenshot itself, not a diff, so the
+  // magenta legend only belongs when a changed view is in the grid.
   const pairs = shown.filter((c) => c.status === 'changed');
+  const legend = pairs.length > 0 ? 'Magenta marks changed pixels; the rest is the new screenshot, dimmed. ' : '';
+  lines.push('', `<sub>${legend}Click an image for full size.</sub>`, '');
+
   if (pairs.length > 0) {
     lines.push(`<details><summary>Before and after screenshots (${pairs.length})</summary>`, '');
     for (const c of pairs) {

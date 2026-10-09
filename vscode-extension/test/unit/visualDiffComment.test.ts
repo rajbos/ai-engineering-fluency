@@ -231,6 +231,23 @@ test('renderBody emits no image grid when no row has inline images', () => {
 	assert.ok(!body.includes('![') && !/^\|\s*\|$/m.test(body), 'no empty or zero-column table');
 });
 
+test('renderBody explains magenta only when the grid holds a diff', () => {
+	const summary = { changed: 0, unchanged: 0, added: 1, removed: 0 };
+	const added: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'added' };
+	const shot = [{ kind: 'After', file: 'visual-output/current/usage.dark.png', alt: 'New view' }];
+	const addedOnly = publisher.renderBody({ summary, comparisons: [added] }, OPTS, new Map(), { attachments: shot, inline: new Map([['usage.dark', shot]]) }, { withImages: true });
+	assert.ok(addedOnly.includes('Click an image for full size'));
+	assert.ok(!addedOnly.includes('Magenta'), 'an added screenshot is not a diff');
+	assert.ok(!addedOnly.includes('Before and after'), 'no fold without a changed view');
+
+	const changed: Comparison = { view: 'usage', state: null, theme: 'light', status: 'changed', changedPercent: 1, changedPixels: 10 };
+	const files = ['Before', 'After', 'Diff'].map((kind) => ({ kind, file: `visual-output/x/${kind}.png`, alt: kind }));
+	const both = publisher.renderBody(
+		{ summary: { ...summary, changed: 1 }, comparisons: [added, changed] }, OPTS, new Map(),
+		{ attachments: [...shot, ...files], inline: new Map([['usage.dark', shot], ['usage.light', files]]) }, { withImages: true });
+	assert.ok(both.includes('Magenta marks changed pixels'));
+});
+
 test('renderBody reports an all-clear without a table when nothing changed', () => {
 	const summary = { changed: 0, unchanged: 3, added: 0, removed: 0 };
 	const rows: Comparison[] = [1, 2, 3].map((i) => ({ view: `v${i}`, state: null, theme: 'dark', status: 'unchanged' }));
