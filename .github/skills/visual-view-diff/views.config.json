@@ -117,6 +117,16 @@
           "expect": "#paged-table-root-builtin"
         },
         {
+          "id": "tools-skill-suggestions-expanded",
+          "title": "Workspace tools with a Skill Suggestions sessions table expanded",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
+            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details > summary" }
+          ],
+          "expect": "#paged-table-root-skill-sessions-0"
+        },
+        {
           "id": "health",
           "title": "Workspace › Workspace Health tab",
           "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }],

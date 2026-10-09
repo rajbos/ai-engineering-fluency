@@ -198,6 +198,23 @@ function cellHtml(value: string | { html: string }): string {
 	return typeof value === 'string' ? escapeHtml(value) : value.html;
 }
 
+/**
+ * Previous/next pager for a paged list, or a "Showing X–Y of N" summary when
+ * everything fits on one page. Shared by tables and paged card lists.
+ */
+export function renderPagedTablePager<Row>(tableId: string, ariaLabel: string, page: PagedTablePage<Row>, pageSize = DEFAULT_PAGED_TABLE_PAGE_SIZE): string {
+	const summary = page.filteredCount <= pageSize
+		? `<span class="paged-table-summary" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(localizeFormat('usage.pagedTable.showing', page.firstRow, page.lastRow, page.filteredCount))}</span>`
+		: '';
+	return page.pageCount > 1
+		? `<nav class="paged-table-pager" aria-label="${escapeHtml(ariaLabel)}" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;font-size:11px;color:var(--text-secondary);">
+			<button type="button" data-paged-table="${escapeHtml(tableId)}" data-paged-direction="previous" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
+			<span>${escapeHtml(localizeFormat('usage.pagedTable.page', page.page, page.pageCount, page.firstRow, page.lastRow, page.filteredCount))}</span>
+			<button type="button" data-paged-table="${escapeHtml(tableId)}" data-paged-direction="next" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
+		</nav>`
+		: summary;
+}
+
 export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): string {
 	const state = getPagedTableState(
 		options.tableId,
@@ -230,16 +247,7 @@ export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): st
 			return `<td${column.align === 'right' ? ' class="num"' : ''} style="padding:5px 8px; color:var(--text-primary); font-size:12px;${column.align === 'right' ? ' text-align:right;' : ''}">${cellHtml(value)}</td>`;
 		}).join('')}</tr>`).join('')
 		: `<tr><td class="paged-table-empty" colspan="${visibleColumns.length}" style="padding:8px;color:var(--text-secondary);font-size:12px;">${escapeHtml(options.emptyMessage)}</td></tr>`;
-	const summary = page.filteredCount <= (options.pageSize ?? DEFAULT_PAGED_TABLE_PAGE_SIZE)
-		? `<span class="paged-table-summary" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(localizeFormat('usage.pagedTable.showing', page.firstRow, page.lastRow, page.filteredCount))}</span>`
-		: '';
-	const pager = page.pageCount > 1
-		? `<nav class="paged-table-pager" aria-label="${escapeHtml(options.ariaLabel)}" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;font-size:11px;color:var(--text-secondary);">
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-direction="previous" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
-			<span>${escapeHtml(localizeFormat('usage.pagedTable.page', page.page, page.pageCount, page.firstRow, page.lastRow, page.filteredCount))}</span>
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-direction="next" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
-		</nav>`
-		: summary;
+	const pager = renderPagedTablePager(options.tableId, options.ariaLabel, page, options.pageSize);
 	return `<div id="paged-table-root-${escapeHtml(options.tableId)}" class="paged-table-root">
 		<table class="paged-table" aria-label="${escapeHtml(options.ariaLabel)}">
 			<thead><tr>${headers}</tr></thead>
