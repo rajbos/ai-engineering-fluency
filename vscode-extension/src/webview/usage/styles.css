@@ -1916,6 +1916,7 @@ background: var(--bg-tertiary);
 .agentic-definition summary {
 	cursor: pointer;
 	color: var(--link-color);
+}
 
 /* ── Tool execution sections (reliability / latency / MCP health / cost-vs-speed) ── */
 .tool-exec-chart-wrap {
