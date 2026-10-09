@@ -1294,6 +1294,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * them. See whatsNew/surfaceRevealQueue.ts for the handshake.
 	 */
 	private readonly surfaceReveals = new SurfaceRevealQueue<FeatureViewId, ViewIndexNavigation, vscode.WebviewPanel>(SURFACE_REVEAL_TTL_MS);
+	/** Bumped by every navigation, so a slow opener never focuses its panel after a newer one started. */
+	private surfaceNavGeneration = 0;
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
 	/** Last time the user opened each view / tab; see `src/whatsNew/visits.ts`. */
@@ -2893,8 +2895,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// panel to be ready, which would otherwise redirect this open later.
 				this.pendingAnalysisNavigation = undefined;
 				const wasOpen = this.analysisPanel;
-				await this.showUsageAnalysis();
-				this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+				await this.runOpenerFocused('usage', () => this.showUsageAnalysis());
 				// A deep link that already reached the webview may still be waiting for its
 				// section to render; drop that too.
 				if (wasOpen && wasOpen === this.analysisPanel) {
@@ -2922,10 +2923,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!hasTarget) {
 			this.surfaceReveals.clear(view);
 			const existing = this.getPanelForView(view);
-			await open();
-			const panel = this.getPanelForView(view);
-			// Most openers create their panel with preserveFocus; bring it forward.
-			panel?.reveal(undefined, false);
+			const panel = await this.runOpenerFocused(view, open);
 			// An already-open panel may still be waiting to carry out an earlier
 			// reveal; going to the view itself supersedes it.
 			if (panel && panel === existing) {
@@ -2936,18 +2934,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Held before opening: a panel the opener creates may report ready before `open` resolves.
 		const existingPanel = this.getPanelForView(view);
 		this.surfaceReveals.request(view, nav, existingPanel);
-		const opening = open();
-		// Openers create their panel before their first await (and then load data),
-		// so a new panel already exists here: bind the request to it now.
-		const created = this.getPanelForView(view);
-		if (created && created !== existingPanel) { this.surfaceReveals.bind(view, created); }
-		await opening;
-		const panel = this.getPanelForView(view);
+		const panel = await this.runOpenerFocused(view, open, (created) => {
+			// A new panel exists once the opener's synchronous part ran: bind the
+			// request to it now, before the opener's data load resolves.
+			if (created !== existingPanel) { this.surfaceReveals.bind(view, created); }
+		});
 		const postNow = this.surfaceReveals.opened(view, panel);
 		if (!panel) { return; }
-		// Bring the destination forward and focus it, new or reused: most openers
-		// create their panel with preserveFocus, which would leave it in the background.
-		panel.reveal(undefined, false);
 		if (postNow) {
 			// The opener reused the panel. Post now; if the webview is reloading
 			// (a hidden panel without retained context) the message may be lost, so
@@ -2955,6 +2948,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// reloaded page reports ready.
 			void panel.webview.postMessage({ command: 'revealSurface', requestId: this.surfaceReveals.currentId(view), ...postNow });
 		}
+	}
+
+	/**
+	 * Runs a view's opener and focuses its panel. Openers create their panel (with
+	 * preserveFocus) before their first await and then load data, so the panel is
+	 * focused right when it appears — not after a slow load, by which time the user
+	 * may be somewhere else. Only if no panel existed synchronously is it focused
+	 * after the opener resolves, and then only if no newer navigation started since.
+	 * `onPanel` sees the panel as soon as it exists.
+	 */
+	private async runOpenerFocused(
+		view: FeatureViewId,
+		open: () => Promise<void>,
+		onPanel?: (panel: vscode.WebviewPanel) => void,
+	): Promise<vscode.WebviewPanel | undefined> {
+		const generation = ++this.surfaceNavGeneration;
+		const opening = open();
+		const early = this.getPanelForView(view);
+		if (early) {
+			onPanel?.(early);
+			early.reveal(undefined, false);
+		}
+		await opening;
+		const panel = this.getPanelForView(view);
+		if (panel && !early && generation === this.surfaceNavGeneration) {
+			onPanel?.(panel);
+			panel.reveal(undefined, false);
+		}
+		return panel;
 	}
 
 	private flushPendingSurfaceReveal(view: FeatureViewId): void {
@@ -10056,8 +10078,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
 		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
-		await this.showUsageAnalysis();
-		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+		await this.runOpenerFocused('usage', () => this.showUsageAnalysis());
 		await this.flushPendingAnalysisNavigation();
 	}
 
