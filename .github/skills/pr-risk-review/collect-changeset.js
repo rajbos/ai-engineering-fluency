@@ -394,28 +394,26 @@ function computeBaseline(signals, size, files) {
 
 // Characters a file name can carry that would render as nothing, reorder the
 // text around them, or break the line: shown as visible `\u{…}` escapes so the
-// reviewer, the step summary and the model all see the same name.
-const HIDDEN_IN_NAMES =
-  /[\u0000-\u001F\u007F-\u009F\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFE00-\uFE0F]|[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+// reviewer, the step summary and the model all see the same name. `|` and `\`
+// are written the same way: a pipe splits a table row even inside a code span,
+// and the usual `\|` escape can be cancelled by a backslash in the name itself
+// (`a\|b` -> `a\\|b`). A visible escape has neither problem, and escaping both
+// in one pass means no step ever adds a backslash that a later step re-reads.
+const ESCAPE_IN_NAMES =
+  /[\\|\u0000-\u001F\u007F-\u009F­͏؜᠎​-‏‪-‮⁠-⁤⁦-⁯﻿︀-️]|[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 /**
  * Render an author-controlled file name as an inline code span that is safe
  * inside a Markdown table row. The PR author picks every byte of a file name,
  * so it may contain backticks (closing our span early and letting the rest
- * render as Markdown), pipes (splitting the row), newlines, or invisible and
- * bidirectional characters.
+ * render as Markdown), pipes (splitting the row), backslashes, newlines, or
+ * invisible and bidirectional characters.
  */
 function codeSpan(value) {
-  const text = String(value)
-    // Backslashes first, shown as a visible `\u{5C}` like the characters below.
-    // Left alone, a name ending `\` before a `|` would consume the escape we
-    // add to that pipe (`a\|b` -> `a\\|b`) and split the table row anyway — the
-    // parity case cell() in render-comment.js handles by doubling. Doubling
-    // would show inside a code span, so the escape form is used instead.
-    .replace(/\\/g, '\\u{5C}')
-    .replace(HIDDEN_IN_NAMES, (ch) => `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`)
-    // GFM splits table rows on `|` even inside a code span unless escaped.
-    .replace(/\|/g, '\\|');
+  const text = String(value).replace(
+    ESCAPE_IN_NAMES,
+    (ch) => `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`
+  );
   // A code span is closed by a backtick run of the same length as its opener,
   // so open with one longer than any run inside.
   const longestRun = Math.max(0, ...(text.match(/`+/g) || []).map((run) => run.length));

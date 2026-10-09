@@ -1,7 +1,7 @@
 'use strict';
 
 // Regression tests for the pr-risk-review scripts (issue #2307).
-// Run with: node --test .github/skills/pr-risk-review/tests/
+// Run with: node --test .github/skills/pr-risk-review/tests/pr-risk-review.test.js
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -201,22 +201,21 @@ test('collect-changeset: --base/--head values starting with "-" are rejected', (
 // ── collect-changeset.js codeSpan() ─────────────────────────────────────────
 
 test('codeSpan: backticks, pipes, newlines and bidi in file names cannot break the table', () => {
-  const span = codeSpan('a`b|c\nd\u202Ee.txt');
+  const span = codeSpan('a`b|c\nd‮e.txt');
   assert.ok(!span.includes('\n'));
-  assert.ok(!span.includes('\u202E'));
+  assert.ok(!span.includes('‮'));
+  assert.ok(!span.includes('|'), span);
   assert.ok(span.includes('\\u{202E}'));
-  assert.ok(span.includes('\\|'));
-  assert.ok(!/(^|[^\\])\|/.test(span), span);
+  assert.ok(span.includes('\\u{7C}'));
   assert.ok(span.startsWith('``') && span.endsWith('``'), span);
 });
 
-test('codeSpan: a backslash before a pipe cannot consume the pipe escape', () => {
+test('codeSpan: a backslash before a pipe cannot split the row', () => {
   for (const name of ['a\\|b', 'a\\\\|b', 'trailing\\', '\\|']) {
     const span = codeSpan(name);
-    // Every `|` must be preceded by an odd number of backslashes, i.e. escaped.
-    for (const match of span.matchAll(/(\\*)\|/g)) {
-      assert.equal(match[1].length % 2, 1, `${JSON.stringify(name)} -> ${span}`);
-    }
+    assert.ok(!span.includes('|'), `${JSON.stringify(name)} -> ${span}`);
+    // The only backslashes left are the ones opening our own `\u{...}` escapes.
+    assert.ok(!/\\(?!u\{)/.test(span), `${JSON.stringify(name)} -> ${span}`);
     assert.ok(span.includes('\\u{5C}'), span);
   }
 });

@@ -193,5 +193,5 @@ advisory — it never blocks a merge.
 - **risk-signals.json** — Declarative path globs → risk weights, the single source of the heuristics
 - **collect-changeset.js** — Builds `changeset.json` / `.md` / `.diff` and the mechanical baseline
 - **render-comment.js** — Validates the verdict, sanitises it, renders the PR comment
-- **tests/** — Regression tests for the sanitiser and rename handling (`node --test .github/skills/pr-risk-review/tests/`)
+- **tests/** — Regression tests for the sanitiser and rename handling (`node --test .github/skills/pr-risk-review/tests/pr-risk-review.test.js`)
 - **README.md** — Short overview of the skill

@@ -122,4 +122,4 @@ jobs:
       # into a PR comment; these are the regression tests for their sanitizer
       # and rename handling (#2307).
       - name: Test the pr-risk-review scripts
-        run: node --test .github/skills/pr-risk-review/tests/
+        run: node --test .github/skills/pr-risk-review/tests/pr-risk-review.test.js

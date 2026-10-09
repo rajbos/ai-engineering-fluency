@@ -73,10 +73,10 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
   matched at their real paths, and both ends of a rename are classified with the worse
   end winning; a rename counts as generated (and so drops out of the size assessment)
   only when both ends are generated (`classify`, lines 257-321). File names are written
-  into `changeset.md` as code spans (`codeSpan`, lines 401-425) that show backslashes,
-  control, bidi and invisible characters as visible `\u{...}` escapes, then escape
-  pipes, so no backslash in a name can consume a pipe escape, and pick a backtick fence
-  longer than any run in the name.
+  into `changeset.md` as code spans (`codeSpan`, lines 395-425) that show pipes,
+  backslashes, control, bidi and invisible characters as visible `\u{...}` escapes in a
+  single pass, so no backslash in a name can cancel a pipe escape, and pick a backtick
+  fence longer than any run in the name.
 - The workflow checks out the PR's base commit and runs the scripts from there. The
   PR head is read only through git objects and a worktree checked out with
   `core.symlinks=false` (symlinks become plain files) and hooks disabled.
