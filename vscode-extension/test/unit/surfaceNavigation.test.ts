@@ -147,6 +147,15 @@ test('surface reveal queue: bind ignores the panel being replaced and an already
 	assert.deepEqual(queue.opened('chart', existing), { tab: 't' }, 'still treated as a reused panel');
 });
 
+test('surface reveal queue: an opener that settles after the TTL does not deliver to a reused panel', () => {
+	const { queue, advance } = makeQueue();
+	const panel = { name: 'existing' };
+	queue.request('chart', { tab: 't' }, panel);
+	advance(60_001);
+	assert.equal(queue.opened('chart', panel), null);
+	assert.equal(queue.peek('chart'), undefined);
+});
+
 // ── Webview side: carrying out a reveal ──────────────────────────────────
 
 /** Installs a jsdom document as the globals the webview helper reads, and records scrolls. */

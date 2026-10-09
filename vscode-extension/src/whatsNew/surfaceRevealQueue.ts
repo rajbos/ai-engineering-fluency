@@ -86,6 +86,10 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 	opened(view: TKey, panel: TPanel | undefined): TNav | null {
 		const entry = this.pending.get(view);
 		if (!entry) { return null; } // already delivered through ready() and handled
+		if (this.isExpired(entry)) {
+			this.pending.delete(view);
+			return null;
+		}
 		if (!panel || (entry.panel !== undefined && panel !== entry.panel)) {
 			// No panel, or not the one the request was bound to (the user closed it
 			// and opened another by hand): drop the request rather than redirect.
@@ -101,7 +105,7 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 	ready(view: TKey, panel: TPanel): TNav | null {
 		const entry = this.pending.get(view);
 		if (!entry) { return null; }
-		if (this.now() - entry.requestedAt > this.ttlMs) {
+		if (this.isExpired(entry)) {
 			this.pending.delete(view);
 			return null;
 		}
@@ -129,6 +133,10 @@ export class SurfaceRevealQueue<TKey extends string, TNav, TPanel> {
 		if (entry && (requestId === undefined || requestId === entry.id)) {
 			this.pending.delete(view);
 		}
+	}
+
+	private isExpired(entry: Pending<TNav, TPanel>): boolean {
+		return this.now() - entry.requestedAt > this.ttlMs;
 	}
 
 	/** The navigation still held for `view`, if any. For tests and diagnostics. */

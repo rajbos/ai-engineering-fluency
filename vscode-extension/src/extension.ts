@@ -1914,20 +1914,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this.handleExtensionPointAction(message.buttonId);
 		}
 		const handlers: Record<string, () => unknown> = {
-			showDetails:            () => this.showDetails(),
-			showChart:              () => this.showChart(),
-			showUsageAnalysis:      () => this.showUsageAnalysis(),
+			// Plain opens go through openView so they also cancel any deep link still
+			// pending for that view (see openViewSurface).
+			showDetails:            () => this.openView('details'),
+			showChart:              () => this.openView('chart'),
+			showUsageAnalysis:      () => this.openView('usage'),
 			// Distinct from showUsageAnalysis: that handler deliberately ignores payload
 			// properties, so a tab can only be requested through its own command.
 			showUsageAnalysisRepoPrs: () => this.showUsageAnalysisOnReposTab(),
-			showDiagnostics:        () => this.showDiagnosticReport(),
-			showMaturity:           () => this.showMaturity(),
+			showDiagnostics:        () => this.openView('diagnostics'),
+			showMaturity:           () => this.openView('maturity'),
 			showReadiness:          () => this.showReadiness(),
-			showDashboard:          () => this.showDashboard(),
-			showEnvironmental:      () => this.showEnvironmental(),
-			showEfficiency:         () => this.showEfficiency(),
-			showFluencyLevelViewer: () => this.showFluencyLevelViewer(),
-			showWhatsNew:           () => this.showWhatsNew(),
+			showDashboard:          () => this.openView('dashboard'),
+			showEnvironmental:      () => this.openView('environmental'),
+			showEfficiency:         () => this.openView('efficiency'),
+			showFluencyLevelViewer: () => this.openView('fluency-level-viewer'),
+			showWhatsNew:           () => this.openView('whatsnew'),
 			// Panels report their own tab switches so the what's-new announcer can tell
 			// which subviews the user has already found. Fire-and-forget by design: the
 			// webview must never wait on bookkeeping to render a tab.
@@ -2840,6 +2842,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		this.log(`🧭 View index: opening ${entry.path.join(' › ')}`);
 		await this.openViewSurface(entry.view, entry.nav);
+	}
+
+	/**
+	 * Opens a view as the user asked for it — a header button or a command, no
+	 * tab or section. Unlike calling the view's opener directly, this also
+	 * cancels any deep link still pending for that view, so it can no longer
+	 * switch tabs or scroll after the user went to the view itself.
+	 */
+	public async openView(view: FeatureViewId): Promise<void> {
+		await this.openViewSurface(view, {});
 	}
 
 	/** The open panel for a view, if any. */
@@ -15642,7 +15654,7 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
     "aiEngineeringFluency.showMaturity",
     async () => {
       tokenTracker.log("Show maturity command called");
-      await tokenTracker.showMaturity();
+      await tokenTracker.openView('maturity');
     },
   );
   const showReadinessCommand = vscode.commands.registerCommand(
@@ -15655,28 +15667,28 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
     "aiEngineeringFluency.showDashboard",
     async () => {
       tokenTracker.log("Show dashboard command called");
-      await tokenTracker.showDashboard();
+      await tokenTracker.openView('dashboard');
     },
   );
   const showEnvironmentalCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showEnvironmental",
     async () => {
       tokenTracker.log("Show environmental impact command called");
-      await tokenTracker.showEnvironmental();
+      await tokenTracker.openView('environmental');
     },
   );
   const showEfficiencyCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showEfficiency",
     async () => {
       tokenTracker.log("Show efficiency trends command called");
-      await tokenTracker.showEfficiency();
+      await tokenTracker.openView('efficiency');
     },
   );
   const showWhatsNewCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showWhatsNew",
     async () => {
       tokenTracker.log("Show what's new command called");
-      await tokenTracker.showWhatsNew();
+      await tokenTracker.openView('whatsnew');
     },
   );
   const openMcpJsonCommand = vscode.commands.registerCommand(
@@ -15726,7 +15738,7 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     "aiEngineeringFluency.showDetails",
     async () => {
       tokenTracker.log("Show details command called");
-      await tokenTracker.showDetails();
+      await tokenTracker.openView('details');
     },
   );
 
@@ -15734,7 +15746,7 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     "aiEngineeringFluency.showChart",
     async () => {
       tokenTracker.log("Show chart command called");
-      await tokenTracker.showChart();
+      await tokenTracker.openView('chart');
     },
   );
 
@@ -15742,7 +15754,7 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     "aiEngineeringFluency.showUsageAnalysis",
     async () => {
       tokenTracker.log("Show usage analysis command called");
-      await tokenTracker.showUsageAnalysis();
+      await tokenTracker.openView('usage');
     },
   );
 
@@ -15808,7 +15820,7 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
     "aiEngineeringFluency.showFluencyLevelViewer",
     async () => {
       tokenTracker.log("Show fluency level viewer command called");
-      await tokenTracker.showFluencyLevelViewer();
+      await tokenTracker.openView('fluency-level-viewer');
     },
   );
 
@@ -15825,7 +15837,7 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
     "aiEngineeringFluency.generateDiagnosticReport",
     async () => {
       tokenTracker.log("Generate diagnostic report command called");
-      await tokenTracker.showDiagnosticReport();
+      await tokenTracker.openView('diagnostics');
     },
   );
 
