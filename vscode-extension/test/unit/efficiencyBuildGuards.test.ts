@@ -1205,7 +1205,7 @@ test('wiring: insights are re-evaluated when the PR snapshot or a readiness resc
 		publish.indexOf('this._lastRepoPrStats = stamped;') < publish.indexOf('this.republishInsights();'),
 		'publishing a PR snapshot must re-evaluate insights after storing it',
 	);
-	const rescan = methodBody('private loadReadinessForUsage(');
+	const rescan = methodBody('private scanReadinessAndPost(');
 	assert.ok(
 		rescan.indexOf('this.rememberReadinessScan(report);') < rescan.indexOf('this.republishInsights();'),
 		'a readiness rescan must re-evaluate insights after storing it',
@@ -1259,6 +1259,6 @@ function readinessForInsightsBody(): string {
 	assert.notEqual(body, -1);
 	const end = EXTENSION_SRC.indexOf('\n\t}\n', body);
 	const text = EXTENSION_SRC.slice(start, end);
-	assert.ok(text.includes('this.runDarkFactoryScan()'), 'the slice must cover the method body');
+	assert.ok(text.includes('this.runDarkFactoryScan('), 'the slice must cover the method body');
 	return text;
 }

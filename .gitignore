@@ -96,9 +96,11 @@ visual-output/
 # comment). Regenerated on every run by collect-changeset.js — never committed.
 pr-risk/
 
-# Generated cloud-agent session cache from copilot-setup-steps; contains only
-# ephemeral fetched timestamps/counts and is recreated on demand.
-usage-data/agent-sessions.json-*
+# Data hydrated into the workspace by copilot-setup-steps (session-logs/ from
+# Azure Blob, usage-data/ incl. agent-sessions.json and its cache files). Generated
+# output, recreated on demand — never committed.
+session-logs/
+usage-data/
 
 # Throwaway fixture directories created by the vscode-extension unit suite.
 # The tests create these under os.tmpdir(), or under .test-fixtures/ where the
@@ -108,6 +110,8 @@ usage-data/agent-sessions.json-*
 # never be swept into a commit by `git add -A`.
 vscode-extension/.test-fixtures/
 vscode-extension/claude-test-*/
+vscode-extension/sync-test-*/
+vscode-extension/cowork-test-*/
 vscode-extension/cliapp-split-*/
 vscode-extension/contract-fixture-*/
 vscode-extension/ctt-cache-*/

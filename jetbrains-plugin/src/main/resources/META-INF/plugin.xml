@@ -28,6 +28,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.5.3</h3>
+        <ul>
+            <li>Fixed a startup error on IntelliJ Platform 2026.2 and newer caused by the JCEF classloader split</li>
+        </ul>
         <h3>0.5.2</h3>
         <ul>
             <li>Updated shared webview bundles: grouped Usage Analysis tabs, official editor logos in the Chart view</li>
@@ -60,10 +64,12 @@
     <!--
       `com.intellij.modules.platform` is the lowest-common-denominator module —
       every JetBrains IDE provides it, so a plugin that only depends on it
-      installs everywhere. We additionally need JCEF, which is bundled with the
-      platform on 2024.3+ for all IDEs that ship the JBR with JCEF.
+      installs everywhere. JCEF moved behind its own classloader in 2026.2, so
+      declare it as an optional dependency for visibility on new IDEs while
+      remaining loadable on older IDEs where that plugin ID does not exist.
     -->
     <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="ai-engineering-fluency-jcef.xml">com.intellij.modules.jcef</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow

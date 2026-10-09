@@ -5,6 +5,17 @@
  */
 
 /**
+ * Check if a tool name indicates it's an MCP (Model Context Protocol) tool.
+ * MCP tools are identified by names starting with "mcp." or "mcp_";
+ * Claude Code uses the double-underscore format "mcp__server__tool".
+ * Lives here (not in workspaceHelpers) so webview bundles can use it without
+ * pulling in the `vscode` module.
+ */
+export function isMcpTool(toolName: string): boolean {
+	return toolName.startsWith('mcp.') || toolName.startsWith('mcp_') || toolName.startsWith('mcp__');
+}
+
+/**
  * Matches Claude MCP tools registered under a tenant GUID, e.g.
  *   mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__sharepoint_search
  * The GUID is a tenant-specific server identifier (e.g. Microsoft 365 Connector).

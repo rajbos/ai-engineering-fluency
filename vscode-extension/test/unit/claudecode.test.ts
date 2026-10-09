@@ -795,6 +795,23 @@ test('getClaudeCodeModelUsage: crashed session contributes partial tokens per mo
 
 const adapterCtx = { modelPricing: {}, toolNameMap: {} };
 
+test('ClaudeCodeAdapter.analyzeUsage: counts permissionMode per human user prompt as autonomyUsage', async () => {
+const user = (mode: string | undefined, id: string) => ({
+type: 'user', uuid: id, message: { role: 'user', content: 'hi' }, timestamp: '2026-10-04T09:00:00.000Z',
+...(mode ? { permissionMode: mode } : {}),
+});
+const toolResult = { type: 'user', uuid: 'tr', permissionMode: 'auto', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, timestamp: '2026-10-04T09:00:00.000Z' };
+const synthetic = { type: 'user', uuid: 'sy', permissionMode: 'auto', message: { role: 'user', content: '<system-reminder>generated</system-reminder>' }, timestamp: '2026-10-04T09:00:00.000Z' };
+const events = [user('default', 'a'), user('auto', 'b'), toolResult, synthetic, user('auto', 'c'), user('acceptEdits', 'd'), user(undefined, 'e')];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.deepEqual(result.autonomyUsage, { autonomous: 2, supervised: 2, plan: 0, other: 0 });
+} finally {
+cleanup(filePath);
+}
+});
+
 test('ClaudeCodeAdapter.analyzeUsage: increments __auto_compact__ for trigger=auto', async () => {
 const events = [
 {
@@ -1509,6 +1526,76 @@ test('getClaudeCodeSessionMeta: a custom-title outranks an ai-title', async () =
 	const filePath = createTempSession(events);
 	try {
 		assert.equal((await claudeCode.getClaudeCodeSessionMeta(filePath))!.title, 'Title the user chose');
+	} finally {
+		cleanup(filePath);
+	}
+});
+// ----- ClaudeCodeAdapter.analyzeUsage: tool_use/tool_result pairing -> failures, latency, output tokens -----
+
+test('ClaudeCodeAdapter.analyzeUsage: pairs tool_result with tool_use to record failures, observed latency and output tokens', async () => {
+	const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+	const assistant = (ts: string, blocks: any[], extra: Record<string, unknown> = {}) => ({
+		type: 'assistant', timestamp: ts, ...extra,
+		message: { role: 'assistant', model: 'claude-sonnet-4-6', content: blocks },
+	});
+	const result = (ts: string, blocks: any[], extra: Record<string, unknown> = {}) => ({
+		type: 'user', timestamp: ts, parentUuid: 'x', ...extra,
+		message: { role: 'user', content: blocks },
+	});
+	const events = [
+		{ type: 'user', timestamp: t(0), message: { role: 'user', content: 'do things' } },
+		// Bash: 3000 ms, is_error
+		assistant(t(100), [{ type: 'tool_use', id: 'toolu_bash', name: 'Bash', input: { command: 'x' } }]),
+		result(t(3100), [{ type: 'tool_result', tool_use_id: 'toolu_bash', is_error: true, content: 'boom' }]),
+		// Read: 40 ms, success, result text sized into outputTokensByTool
+		assistant(t(4000), [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/a' } }]),
+		result(t(4040), [{ type: 'tool_result', tool_use_id: 'toolu_read', content: [{ type: 'text', text: 'x'.repeat(400) }] }]),
+		// Streaming re-log of the same tool_use id: the earlier timestamp must win.
+		assistant(t(4500), [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/a' } }]),
+		// MCP: 1500 ms, failure, attributed to the server derived from the name prefix.
+		assistant(t(5000), [{ type: 'tool_use', id: 'toolu_mcp', name: 'mcp__github__create_issue', input: {} }]),
+		result(t(6500), [{ type: 'tool_result', tool_use_id: 'toolu_mcp', is_error: true, content: 'nope' }]),
+		// Sidechain (subagent) pair: matched even though sidechain user events are not real turns.
+		assistant(t(7000), [{ type: 'tool_use', id: 'toolu_side', name: 'Grep', input: {} }], { isSidechain: true }),
+		result(t(7200), [{ type: 'tool_result', tool_use_id: 'toolu_side', content: 'hit' }], { isSidechain: true }),
+		// Result with no timestamp: failure counted, no latency sample.
+		assistant(t(8000), [{ type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: {} }]),
+		{ type: 'user', parentUuid: 'x', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_edit', is_error: true, content: '' }] } },
+		// Orphaned tool_use (session aborted): nothing recorded.
+		assistant(t(9000), [{ type: 'tool_use', id: 'toolu_orphan', name: 'WebFetch', input: {} }]),
+		// Result for an unknown id: ignored.
+		result(t(9500), [{ type: 'tool_result', tool_use_id: 'toolu_unknown', content: 'stray' }]),
+	];
+	const filePath = createTempSession(events);
+	try {
+		const analysis = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+
+		assert.deepEqual(analysis.toolCalls.completedByTool, { Bash: 1, Read: 1, Grep: 1, Edit: 1 }, 'one completion per matched result; re-logged and orphaned tool_use blocks do not count');
+		assert.deepEqual(analysis.toolCalls.failuresByTool, { Bash: 1, Edit: 1 });
+		assert.deepEqual(analysis.mcpTools.completedByServer, { github: 1 });
+		assert.deepEqual(analysis.mcpTools.failuresByServer, { github: 1 });
+
+		const lat = analysis.toolCalls.latencyByTool!;
+		assert.equal(lat.Bash.count, 1);
+		assert.equal(lat.Bash.sumMs, 3000);
+		assert.equal(lat.Read.count, 1);
+		assert.equal(lat.Read.sumMs, 40);
+		assert.equal(lat.Grep.sumMs, 200);
+		assert.equal(lat.mcp__github__create_issue, undefined, 'MCP latency lives under mcpTools only');
+		assert.equal(lat.Edit, undefined, 'no latency sample without a result timestamp');
+		assert.equal(lat.WebFetch, undefined, 'orphaned tool_use must not produce a sample');
+		assert.equal(analysis.mcpTools.latencyByServer!.github.sumMs, 1500);
+
+		const out = analysis.toolCalls.outputTokensByTool!;
+		assert.ok(out.Read > 0, 'Read result text should be sized');
+		assert.ok(out.Bash > 0, 'error text still counts as tool output');
+		assert.equal(out.mcp__github__create_issue, undefined, 'MCP results are not sized into outputTokensByTool');
+		assert.equal(out.Edit, undefined, 'empty result text adds nothing');
+
+		// Existing counters are unchanged by the pairing (the re-logged tool_use still counts as before).
+		assert.equal(analysis.toolCalls.byTool.Read, 2);
+		assert.equal(analysis.toolCalls.byTool.Bash, 1);
+		assert.equal(analysis.mcpTools.byServer.github, 1);
 	} finally {
 		cleanup(filePath);
 	}

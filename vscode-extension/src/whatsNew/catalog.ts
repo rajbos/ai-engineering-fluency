@@ -113,6 +113,20 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
+		version: '0.19.1',
+		date: null,
+		headlineKey: 'whatsNew.release.0.19.1.headline',
+		features: [
+			{
+				id: 'usage.tool-execution-stats',
+				titleKey: 'whatsNew.feature.usage.tool-execution-stats.title',
+				descriptionKey: 'whatsNew.feature.usage.tool-execution-stats.description',
+				kind: 'section',
+				surface: { view: 'usage', tab: 'tools', anchor: 'section-tool-reliability' },
+			},
+		],
+	},
+	{
 		version: '0.19.0',
 		date: '2026-10-02',
 		headlineKey: 'whatsNew.release.0.19.0.headline',

@@ -25,6 +25,7 @@ import {
 } from '../../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../../src/taskClassification';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import { normalizeMcpToolName } from '../../../src/workspaceHelpers';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
@@ -1405,6 +1406,63 @@ test('analyzeSessionUsage: Copilot CLI autonomous "skill" tool call populates sk
     assert.equal(result.toolCalls.byTool['skill'], 1);
 });
 
+test('analyzeSessionUsage: Copilot CLI MCP tool.execution_start (data.mcpServerName) lands in mcpTools, not toolCalls', async () => {
+    // Copilot CLI never writes data.mcpServer; its MCP tool.execution_start events carry
+    // data.mcpServerName / data.mcpToolName, and toolName is `<server>-<tool>`, which
+    // isMcpTool() does not match. The server tag must route the call to mcpTools only.
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { content: 'read the readme' } },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId: 'c1',
+                toolName: 'github-mcp-server-get_file_contents',
+                mcpServerName: 'github-mcp-server',
+                mcpToolName: 'get_file_contents',
+                arguments: { owner: 'o', repo: 'r', path: 'README.md' },
+            },
+        },
+        {
+            type: 'tool.execution_complete',
+            data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } },
+        },
+        { type: 'tool.execution_start', data: { toolCallId: 'c2', toolName: 'view', arguments: { path: 'a.ts' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c2', success: true, result: { content: 'y'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.total, 1);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.mcpTools.byTool[normalizeMcpToolName('github-mcp-server-get_file_contents')], 1);
+    assert.equal(result.mcpTools.byTool['mcp_io_github_git_get_file_contents'], 1);
+    // Not double-counted as a regular tool call.
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.total, 1);
+    assert.equal(result.toolCalls.byTool['view'], 1);
+    // Output-token bookkeeping skips MCP results, like it does for prefix-matched MCP names.
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+    assert.ok((result.toolCalls.outputTokensByTool?.['view'] ?? 0) > 0);
+});
+
+test('analyzeSessionUsage: blank data.mcpServer does not mask a valid data.mcpServerName', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        {
+            type: 'tool.execution_start',
+            data: { toolCallId: 'c1', toolName: 'github-mcp-server-get_file_contents', mcpServer: '  ', mcpServerName: 'github-mcp-server', arguments: {} },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.toolCalls.total, 0);
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+});
+
 test('analyzeSessionUsage: Copilot CLI user-typed slash invocation (plain text, no wrapper) populates skillCalls', async () => {
     // Unlike Claude Code's <command-message>/<command-name> tags, Copilot CLI's explicit
     // slash invocation is just the literal user-typed text, e.g. "/graphify".
@@ -1473,6 +1531,100 @@ test('analyzeSessionUsage: CLI JSONL session produces model efficiency counters 
     assert.equal(c.selfCorrections, 0);
     assert.equal(c.oneShotEditTurns, 1);
     assert.equal(c.editToolCalls, 3);
+});
+
+test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→complete latency, including MCP per-server mirrors', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        { type: 'user.message', data: { text: 'do things' }, timestamp: t(1) },
+        // view: 40 ms, success
+        { type: 'tool.execution_start', data: { toolCallId: 'v1', toolName: 'view', arguments: { path: '/a' } }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'v1', success: true, result: { content: 'ok' } }, timestamp: t(140) },
+        // powershell: 3000 ms, explicit failure
+        { type: 'tool.execution_start', data: { toolCallId: 'p1', toolName: 'powershell', arguments: { command: 'x' } }, timestamp: t(200) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'p1', success: false, error: { message: 'boom', code: 1 } }, timestamp: t(3200) },
+        // powershell: 0 ms, success → counted in bucket 0, not dropped
+        { type: 'tool.execution_start', data: { toolCallId: 'p2', toolName: 'powershell', arguments: { command: 'y' } }, timestamp: t(4000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'p2', success: true }, timestamp: t(4000) },
+        // MCP call: 1500 ms, failure, server name on the start event (Copilot CLI shape)
+        { type: 'tool.execution_start', data: { toolCallId: 'm1', toolName: 'github-mcp-server-get_file_contents', mcpServerName: 'github-mcp-server', mcpToolName: 'get_file_contents', arguments: {} }, timestamp: t(5000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'm1', success: false, error: { message: 'nope', code: 2 } }, timestamp: t(6500) },
+        // missing success flag (older schema) → neither completed nor failed; result text must not be sized either
+        { type: 'tool.execution_start', data: { toolCallId: 'g1', toolName: 'grep', arguments: {} }, timestamp: t(7000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'g1', result: { content: 'match '.repeat(50) } }, timestamp: t(7010) },
+        // complete without a timestamp → failure counted, no latency sample
+        { type: 'tool.execution_start', data: { toolCallId: 'e1', toolName: 'edit', arguments: { path: '/b', old_str: 'a', new_str: 'b' } }, timestamp: t(8000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'e1', success: false } },
+        // start with no complete (aborted) → nothing recorded
+        { type: 'tool.execution_start', data: { toolCallId: 'orphan', toolName: 'web_fetch', arguments: {} }, timestamp: t(9000) },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
+
+    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, powershell: 2, edit: 1 }, 'orphaned start and the verdict-less grep are not completed; MCP call is counted per server');
+    assert.deepEqual(result.toolCalls.failuresByTool, { powershell: 1, edit: 1 });
+    assert.deepEqual(result.mcpTools.completedByServer, { 'github-mcp-server': 1 });
+    assert.deepEqual(result.mcpTools.failuresByServer, { 'github-mcp-server': 1 });
+
+    const lat = result.toolCalls.latencyByTool!;
+    assert.equal(lat.view.count, 1);
+    assert.equal(lat.view.sumMs, 40);
+    assert.equal(lat.view.buckets[5], 1);
+    assert.equal(lat.powershell.count, 2);
+    assert.equal(lat.powershell.sumMs, 3000);
+    assert.equal(lat.powershell.buckets[0], 1);
+    assert.equal(lat.powershell.buckets[11], 1);
+    assert.equal(lat.grep.count, 1, 'verdict-less completion still contributes latency');
+    assert.equal(lat.grep.sumMs, 10);
+    assert.equal(result.toolCalls.outputTokensByTool?.grep, undefined, 'verdict-less result text is not sized: it has no completed call to divide by');
+    assert.ok((result.toolCalls.outputTokensByTool?.view ?? 0) > 0, 'explicit-success result text is sized');
+    assert.equal(lat.edit, undefined, 'no latency sample without a complete timestamp');
+    assert.equal(lat.web_fetch, undefined, 'orphaned start must not produce a sample');
+    assert.equal(lat['github-mcp-server-get_file_contents'], undefined, 'MCP latency lives under mcpTools only');
+    assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].sumMs, 1500);
+    assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].count, 1);
+
+    // Existing counters are untouched by the new bookkeeping.
+    assert.equal(result.toolCalls.byTool.powershell, 2);
+    assert.equal(result.toolCalls.byTool.web_fetch, 1);
+});
+
+test('mergeUsageAnalysis: failure counts and latency histograms are summed across sessions and absent fields are skipped', () => {
+    const period = emptyPeriod();
+    const a = emptyAnalysis();
+    a.toolCalls.completedByTool = { view: 2 };
+    a.mcpTools.completedByServer = { gh: 1 };
+    a.toolCalls.failuresByTool = { view: 1 };
+    a.toolCalls.latencyByTool = { view: { count: 2, sumMs: 60, buckets: [0, 0, 0, 0, 1, 1] } };
+    a.mcpTools.failuresByServer = { gh: 1 };
+    a.mcpTools.latencyByServer = { gh: { count: 1, sumMs: 1500, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
+    const b = emptyAnalysis();
+    b.toolCalls.completedByTool = { view: 1, edit: 1 };
+    b.toolCalls.failuresByTool = { view: 2, edit: 1 };
+    b.toolCalls.latencyByTool = { view: { count: 1, sumMs: 5000, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
+    const c = emptyAnalysis(); // no new fields at all (old cache entry)
+
+    mergeUsageAnalysis(period, a);
+    mergeUsageAnalysis(period, b);
+    mergeUsageAnalysis(period, c);
+
+    assert.deepEqual(period.toolCalls.completedByTool, { view: 3, edit: 1 });
+    assert.deepEqual(period.mcpTools.completedByServer, { gh: 1 });
+    assert.deepEqual(period.toolCalls.failuresByTool, { view: 3, edit: 1 });
+    assert.equal(period.toolCalls.latencyByTool!.view.count, 3);
+    assert.equal(period.toolCalls.latencyByTool!.view.sumMs, 5060);
+    assert.equal(period.toolCalls.latencyByTool!.view.buckets[4], 1);
+    assert.equal(period.toolCalls.latencyByTool!.view.buckets[12], 1);
+    assert.deepEqual(period.mcpTools.failuresByServer, { gh: 1 });
+    assert.equal(period.mcpTools.latencyByServer!.gh.sumMs, 1500);
+
+    const untouched = emptyPeriod();
+    mergeUsageAnalysis(untouched, c);
+    assert.equal(untouched.toolCalls.completedByTool, undefined);
+    assert.equal(untouched.toolCalls.failuresByTool, undefined);
+    assert.equal(untouched.toolCalls.latencyByTool, undefined);
+    assert.equal(untouched.mcpTools.failuresByServer, undefined);
 });
 
 test('analyzeSessionUsage: JSON session produces model efficiency counters from textEditGroup responses', async () => {
@@ -3612,4 +3764,46 @@ test('analyzeSessionUsage: plan mode biases primary category to Planning', async
     const deps = makeMockDeps();
     const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.taskClassification.primaryCategory, 'Planning');
+});
+
+test('analyzeSessionUsage: tool result text is sized from detailedContent (Copilot CLI) and result[].value (JetBrains) shapes', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const big = 'x'.repeat(4000);
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        // Copilot CLI: detailedContent is the full output, content a trimmed preview -> the full output wins.
+        { type: 'tool.execution_start', data: { toolCallId: 'a', toolName: 'view', arguments: {} }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'a', success: true, result: { content: 'short', detailedContent: big } }, timestamp: t(150) },
+        // JetBrains: typed blocks under result.result with `value`.
+        { type: 'tool.execution_start', data: { toolCallId: 'b', toolName: 'read_file', arguments: {} }, timestamp: t(200) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'b', success: true, result: { result: [{ type: 'text', value: big }, { type: 'text', value: big }] } }, timestamp: t(260) },
+        // No text in any supported field -> nothing sized, call still completed.
+        { type: 'tool.execution_start', data: { toolCallId: 'c', toolName: 'glob', arguments: {} }, timestamp: t(300) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c', success: true, result: {} }, timestamp: t(310) },
+    ];
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', events.map(e => JSON.stringify(e)).join('\n'));
+    const out = result.toolCalls.outputTokensByTool!;
+    assert.ok(out.view > 500, `detailedContent should be sized, got ${out.view}`);
+    assert.ok(out.read_file > out.view, 'two JetBrains blocks should size larger than one detailedContent');
+    assert.equal(out.glob, undefined);
+    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, read_file: 1, glob: 1 });
+});
+
+test('analyzeSessionUsage: an untagged MCP start (name-recognised, no mcpServerName) keeps its outcome under mcpTools', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        // JetBrains / older Copilot CLI shape: the tool name carries the MCP prefix, the start event carries no server tag.
+        { type: 'tool.execution_start', data: { toolCallId: 'm1', toolName: 'mcp_io_github_git_get_file_contents', arguments: {} }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'm1', success: false, error: { message: 'nope', code: 1 } }, timestamp: t(1600) },
+    ];
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', events.map(e => JSON.stringify(e)).join('\n'));
+    const server = Object.keys(result.mcpTools.byServer)[0];
+    assert.ok(server, 'the start was counted under mcpTools');
+    assert.deepEqual(result.mcpTools.completedByServer, { [server]: 1 });
+    assert.deepEqual(result.mcpTools.failuresByServer, { [server]: 1 });
+    assert.equal(result.mcpTools.latencyByServer?.[server].sumMs, 1500);
+    assert.equal(result.toolCalls.completedByTool, undefined, 'nothing leaks into the per-tool maps');
+    assert.equal(result.toolCalls.failuresByTool, undefined);
+    assert.equal(result.toolCalls.latencyByTool, undefined);
 });

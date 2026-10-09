@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
+import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths, resolveExactWorkspacePath } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
@@ -108,7 +108,7 @@ export async function discoverSessionFiles(): Promise<string[]> {
  * Builds a WorkspaceCustomizationMatrix from session file paths.
  *
  * - For VS Code sessions: derives workspace folder from workspaceStorage/<hash>/workspace.json,
- *   then checks for .github/copilot-instructions.md, agents.md, or CLAUDE.md.
+ *   then checks for AGENTS.md, CLAUDE.md, or .github/copilot-instructions.md.
  * - For Claude Code sessions (~/.claude/projects/<hash>/): reads the JSONL to extract the
  *   `cwd` workspace path, then checks for CLAUDE.md there.
  */
@@ -161,12 +161,15 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 	for (const wsPath of workspacePaths) {
 		const hasIssues = await withErrorRecovery(
 			async () => {
-				const [hasInstructions, hasAgentsMd, hasClaudeMd] = await Promise.all([
-					fs.promises.access(path.join(wsPath, '.github', 'copilot-instructions.md')).then(() => true).catch(() => false),
-					fs.promises.access(path.join(wsPath, 'agents.md')).then(() => true).catch(() => false),
-					fs.promises.access(path.join(wsPath, 'CLAUDE.md')).then(() => true).catch(() => false),
-				]);
-				return !hasInstructions && !hasAgentsMd && !hasClaudeMd;
+				// Same case-insensitive resolution as the shared customization scanner, so the CLI
+				// accepts every spelling the extension does (including on case-sensitive filesystems).
+				const instructionPaths = [
+					'.github/copilot-instructions.md',
+					'AGENTS.md',
+					'CLAUDE.md',
+					'.claude/CLAUDE.md',
+				];
+				return !instructionPaths.some(p => resolveExactWorkspacePath(wsPath, p, true) !== undefined);
 			},
 			true,
 			`buildCustomizationMatrix workspace check(${wsPath})`

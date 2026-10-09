@@ -39,6 +39,9 @@ import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDete
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { formatToolEditors, sanitizeToolCallsByEditor } from './toolEditors';
+import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
+import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSanitizer';
 import { renderContextRefTable } from './contextRefTableHtml';
 import { shouldListAccountBudgets } from '../../githubAccountBudgets';
 import { applyBillingFields, sanitizeAccountBudgets, sanitizeCopilotApiBalance, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
@@ -224,6 +227,8 @@ type UsageAnalysisStats = {
 	readinessAvailable?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
+	/** Per-tool, per-editor call counts (last 30 days); used to tag unknown-tool issue reports with the editor. */
+	toolCallsByEditor?: { [tool: string]: { [editor: string]: number } };
 	todaySessions?: TodaySessionSummary[];
 	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
@@ -516,7 +521,11 @@ type WorktreeCleanupDiagnostics = {
 	behind?: number;
 	modifiedFiles?: number;
 	untrackedFiles?: number;
+	sizeBytes?: number;
 };
+/** Live state of a "Delete anyway…" retry on a cleanup-log row, keyed by worktree path. */
+type WorktreeRetryState = { status: "running" | "deleted" | "error"; reason?: string };
+const worktreeRetryState = new Map<string, WorktreeRetryState>();
 type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string; diagnostics?: WorktreeCleanupDiagnostics };
 let worktreeCleanupLog: WorktreeCleanupLogEntry[] = [];
 
@@ -811,10 +820,13 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
-function createMcpToolIssueUrl(unknownTools: string[]): string {
+function createMcpToolIssueUrl(unknownTools: string[], toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
 	const repoUrl = 'https://github.com/rajbos/ai-engineering-fluency';
 	const title = encodeURIComponent('Add missing friendly names for tools');
-	const toolList = unknownTools.map(tool => `- \`${tool}\``).join('\n');
+	const toolList = unknownTools.map(tool => {
+		const editors = formatToolEditors(tool, toolCallsByEditor);
+		return editors ? `- \`${tool}\` (seen in: ${editors})` : `- \`${tool}\``;
+	}).join('\n');
 	const body = encodeURIComponent(
 		`## Unknown Tools Found\n\n` +
 		`The following tools were detected but don't have friendly display names:\n\n` +
@@ -1702,11 +1714,13 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		toolCalls: {
 			total: coerceNumber(toolCalls.total),
 			byTool: toolCalls.byTool ?? {},
+			...sanitizeToolOutcomeMaps(toolCalls),
 		},
 		mcpTools: {
 			total: coerceNumber(mcpTools.total),
 			byServer: mcpTools.byServer ?? {},
 			byTool: mcpTools.byTool ?? {},
+			...sanitizeMcpOutcomeMaps(mcpTools),
 		},
 		modelSwitching: {
 			modelsPerSession: [],
@@ -1984,6 +1998,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			suppressedUnknownTools: Array.isArray(raw.suppressedUnknownTools)
 				? raw.suppressedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
 				: undefined,
+			toolCallsByEditor: sanitizeToolCallsByEditor(raw.toolCallsByEditor),
 		};
 
 		// Sanitize customizationMatrix (avoid pass-through of untrusted nested fields)
@@ -2086,6 +2101,7 @@ function startWorktreeScan(): void {
 	worktreeScanError = null;
 	worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
 	worktreeCleanupLog = [];
+	worktreeRetryState.clear();
 	updateWorktreeControls();
 	updateWorktreeResults();
 	vscode.postMessage({ command: "scanWorktrees", rootPaths: worktreeRoots });
@@ -2363,6 +2379,7 @@ function handleCleanupStarted(message: any): void {
 	worktreeCleanupInProgress = true;
 	worktreeCleanupStatus = { processed: 0, total: numField(message.total) };
 	worktreeCleanupLog = [];
+	worktreeRetryState.clear();
 	updateWorktreeResults();
 }
 
@@ -2370,13 +2387,18 @@ function handleCleanupWorktreeResult(message: any): void {
 	worktreeCleanupStatus = { processed: numField(message.processed), total: numField(message.total) };
 	const rawStatus = message.status;
 	const status: WorktreeCleanupOutcome = rawStatus === "deleted" || rawStatus === "skipped" ? rawStatus : "error";
+	const entryPath = String(message.path ?? "");
+	const diagnostics = sanitizeWorktreeCleanupDiagnostics(message.diagnostics);
+	// The size comes from the scan's already-enriched row, not a second recursive disk walk per failed worktree.
+	const scanned = worktreeResults.find((w) => w.path === entryPath);
+	if (diagnostics && diagnostics.sizeBytes === undefined && scanned && !isWorktreePending(scanned)) { diagnostics.sizeBytes = knownBytes(scanned); }
 	worktreeCleanupLog.push({
-		path: String(message.path ?? ""),
+		path: entryPath,
 		branch: String(message.branch ?? "?"),
 		repoLabel: String(message.repoLabel ?? ""),
 		status,
 		reason: typeof message.reason === "string" ? message.reason : undefined,
-		diagnostics: sanitizeWorktreeCleanupDiagnostics(message.diagnostics),
+		diagnostics,
 	});
 	updateWorktreeResults();
 }
@@ -2397,7 +2419,32 @@ function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagno
 		behind: num(d.behind),
 		modifiedFiles: num(d.modifiedFiles),
 		untrackedFiles: num(d.untrackedFiles),
+		sizeBytes: num(d.sizeBytes),
 	};
+}
+
+/** The extension passed its confirmation and began removing a worktree from the cleanup report. */
+function handleWorktreeDeleteStarted(message: any): void {
+	const p = String(message.path ?? "");
+	if (!p) { return; }
+	worktreeRetryState.set(p, { status: "running" });
+	updateWorktreeResults();
+}
+
+/** Final outcome of a "Delete anyway…" retry; "cancelled" (modal dismissed) just clears the state. */
+function handleWorktreeDeleteResult(message: any): void {
+	const p = String(message.path ?? "");
+	if (!p) { return; }
+	// A final result only means something for a retry still in flight; scan/cleanup clear the map, so a late result must not repopulate it.
+	if ((message.status === "deleted" || message.status === "error") && worktreeRetryState.get(p)?.status !== "running") { return; }
+	if (message.status === "deleted") {
+		worktreeRetryState.set(p, { status: "deleted" });
+	} else if (message.status === "error") {
+		worktreeRetryState.set(p, { status: "error", reason: typeof message.reason === "string" ? message.reason : localize("usage.worktreeCleanup.unknownError") });
+	} else {
+		worktreeRetryState.delete(p);
+	}
+	updateWorktreeResults();
 }
 
 function handleCleanupComplete(): void {
@@ -2476,6 +2523,8 @@ const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeEnrichProgress: handleWorktreeEnrichProgress,
 	worktreeEnriched: handleWorktreeEnriched,
 	worktreeDeleted: handleWorktreeDeleted,
+	worktreeDeleteStarted: handleWorktreeDeleteStarted,
+	worktreeDeleteResult: handleWorktreeDeleteResult,
 	worktreeScanComplete: () => handleWorktreeScanComplete(),
 	worktreeScanCancelled: () => handleWorktreeScanCancelled(),
 	worktreeBackgroundResults: handleWorktreeBackgroundResults,
@@ -4424,6 +4473,9 @@ function worktreeChip(icon: string, text: string, title: string, danger = false)
 /** "Last updated" / "Last commit" chips — how stale (or how live) this worktree is. */
 function buildWorktreeAgeChips(d: WorktreeCleanupDiagnostics): string[] {
 	const chips: string[] = [];
+	if (d.sizeBytes !== undefined) {
+		chips.push(worktreeChip("💾", localizeFormat("usage.worktreeCleanup.sizeChip", formatFileSize(d.sizeBytes)), localizeFormat("usage.worktreeCleanup.sizeChipTitle", d.sizeBytes.toLocaleString())));
+	}
 	const lastModified = formatWorktreeTimestamp(d.lastModified);
 	if (lastModified) {
 		chips.push(worktreeChip("🕒", `Last updated: ${lastModified}`, "Newest file modification at the worktree root"));
@@ -4493,12 +4545,29 @@ function buildWorktreeCleanupActions(e: WorktreeCleanupLogEntry): string {
     </div>`;
 }
 
+/** Replaces a row's actions while "Delete anyway…" runs, and shows its final state afterwards. */
+function buildWorktreeRetryArea(e: WorktreeCleanupLogEntry, retry: WorktreeRetryState | undefined): string {
+	if (!retry) { return buildWorktreeCleanupActions(e); }
+	if (retry.status === "running") {
+		const size = e.diagnostics?.sizeBytes !== undefined ? ` (${formatFileSize(e.diagnostics.sizeBytes)})` : "";
+		return `<div class="worktree-retry-status" role="status">
+      <div>${escapeHtml(localizeFormat("usage.worktreeCleanup.deleting", size))}</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill indeterminate" style="width: 100%;"></div></div>
+    </div>`;
+	}
+	if (retry.status === "deleted") {
+		return `<div class="worktree-retry-status success" role="status">${escapeHtml(localize("usage.worktreeCleanup.deleted"))}</div>`;
+	}
+	return `<div class="worktree-retry-status failed" role="status">${escapeHtml(localizeFormat("usage.worktreeCleanup.deleteFailed", retry.reason || localize("usage.worktreeCleanup.unknownError")))}</div>${buildWorktreeCleanupActions(e)}`;
+}
+
 /** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */
 function renderWorktreeCleanupLog(): string {
 	const notable = worktreeCleanupLog.filter((e) => e.status !== "deleted");
 	if (notable.length === 0) { return ""; }
 	const rows = notable.map((e) => {
-		const icon = e.status === "skipped" ? "⏭️" : "❌";
+		const retry = worktreeRetryState.get(e.path);
+		const icon = retry?.status === "deleted" ? "✅" : e.status === "skipped" ? "⏭️" : "❌";
 		return `<div class="worktree-cleanup-log-row">
       <span>${icon}</span>
       <div class="worktree-cleanup-log-details">
@@ -4507,9 +4576,9 @@ function renderWorktreeCleanupLog(): string {
           <span class="worktree-cleanup-log-repo">${escapeHtml(e.repoLabel)}</span>
         </div>
         <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
-        <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
+        ${retry?.status === "deleted" ? "" : `<div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>`}
         ${buildWorktreeCleanupDetailChips(e.diagnostics)}
-        ${buildWorktreeCleanupActions(e)}
+        ${buildWorktreeRetryArea(e, retry)}
       </div>
     </div>`;
 	}).join("");
@@ -4527,9 +4596,11 @@ function renderWorktreeCleanupStatus(): string {
     </div>${renderWorktreeCleanupLog()}`;
 	}
 	if (worktreeCleanupLog.length === 0) { return ""; }
-	const deleted = worktreeCleanupLog.filter((e) => e.status === "deleted").length;
-	const skipped = worktreeCleanupLog.filter((e) => e.status === "skipped").length;
-	const errors = worktreeCleanupLog.filter((e) => e.status === "error").length;
+	// A row the user later removed with "Delete anyway…" counts as deleted, not as its original outcome.
+	const retried = (e: WorktreeCleanupLogEntry) => worktreeRetryState.get(e.path)?.status === "deleted";
+	const deleted = worktreeCleanupLog.filter((e) => e.status === "deleted" || retried(e)).length;
+	const skipped = worktreeCleanupLog.filter((e) => e.status === "skipped" && !retried(e)).length;
+	const errors = worktreeCleanupLog.filter((e) => e.status === "error" && !retried(e)).length;
 	return `<div class="info-box" style="margin-top: 12px;">
     <div class="info-box-title">🧹 Cleanup finished</div>
     <div>✅ ${deleted} deleted · ⏭️ ${skipped} skipped (uncommitted/unpushed) · ${errors > 0 ? `❌ ${errors} error${errors === 1 ? "" : "s"}` : "0 errors"}</div>
@@ -5117,7 +5188,7 @@ function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number,
 function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 	const unknownTools = getUnknownMcpTools(stats);
 	if (unknownTools.length === 0) { return ''; }
-	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const issueUrl = createMcpToolIssueUrl(unknownTools, stats.toolCallsByEditor);
 	const toolListHtml = unknownTools.map(tool => {
 		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
 		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
@@ -5126,7 +5197,9 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
 		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
 		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
-		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
+		const editors = formatToolEditors(tool, stats.toolCallsByEditor);
+		if (editors) { countParts.push(editors); }
+		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${escapeHtml(countParts.join(' | '))})</span>` : '';
 		const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
 		return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
 	}).join(' ');
@@ -5597,6 +5670,7 @@ function buildToolsTabPanelHtml(
 				</div>
 			</div>
 
+			${safeSectionHtml(localize('usage.tab.tools'), () => buildToolExecutionSectionsHtml({ toolCalls: stats.last30Days.toolCalls, mcpTools: stats.last30Days.mcpTools, resolveToolName: lookupToolName, hiddenTools: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined }))}
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
 			${buildMemoryFilesSectionHtml(currentMemoryFilesAnalysis ?? stats.memoryFilesAnalysis)}

@@ -3,9 +3,9 @@ import { localize } from '../shared/localization';
 import { buildDarkFactoryChatPrompt, buildDarkFactorySectionHtml } from '../maturity/darkFactorySection';
 import type { DarkFactoryReport } from '../../../../src/types';
 
-type ReadinessMessage = { command: string; requestId?: unknown; report?: unknown };
+type ReadinessMessage = { command: string; requestId?: unknown; report?: unknown; refreshing?: unknown };
 type OutgoingMessage =
-	| { command: 'loadReadiness'; requestId: number }
+	| { command: 'loadReadiness'; requestId: number; force?: boolean }
 	| { command: 'draftCopilotChatWithPrompt'; prompt: string };
 
 export class DarkFactoryTab {
@@ -13,6 +13,8 @@ export class DarkFactoryTab {
 	private status: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
 	private requestId = 0;
 	private available = false;
+	/** A cached report is on screen while a fresh scan runs in the background. */
+	private refreshing = false;
 
 	constructor(
 		private readonly postMessage: (message: OutgoingMessage) => void,
@@ -40,7 +42,7 @@ export class DarkFactoryTab {
 	}
 
 	attach(): void {
-		document.getElementById('btn-refresh-readiness')?.addEventListener('click', () => this.requestScan());
+		document.getElementById('btn-refresh-readiness')?.addEventListener('click', () => this.requestScan(true));
 		// Delegated: the report re-renders on every scan, the container does not.
 		const content = document.getElementById('readiness-content');
 		if (content && !content.dataset.dfBound) {
@@ -73,7 +75,7 @@ export class DarkFactoryTab {
 		const content = document.getElementById('readiness-content');
 		if (!content) { return; }
 		const html = this.status === 'loaded' && this.report
-			? buildDarkFactorySectionHtml(this.report)
+			? (this.refreshing ? `<div class="df-empty" role="status">${localize('readiness.refreshing')}</div>` : '') + buildDarkFactorySectionHtml(this.report)
 			: this.status === 'error'
 				? `<div class="df-error" role="alert">${localize('readiness.scanFailed')}</div>`
 				: `<div class="df-empty" role="status">${localize('readiness.loading')}</div>`;
@@ -84,15 +86,21 @@ export class DarkFactoryTab {
 		if (this.available && this.status === 'idle') { this.requestScan(); }
 	}
 
-	requestScan(): void {
-		if (!this.available || this.status === 'loading') { return; }
-		this.status = 'loading';
+	/** `force` is the Refresh button: re-scan even when the cached report is recent. */
+	requestScan(force = false): void {
+		if (!this.available || this.status === 'loading' || this.refreshing) { return; }
+		const hasReport = this.status === 'loaded' && !!this.report;
+		// Keep showing what we have while a forced refresh runs.
+		if (hasReport) { this.refreshing = true; } else { this.status = 'loading'; }
 		this.render();
-		this.postMessage({ command: 'loadReadiness', requestId: ++this.requestId });
+		this.postMessage({ command: 'loadReadiness', requestId: ++this.requestId, ...(force ? { force: true } : {}) });
 	}
 
 	invalidate(): void {
 		this.status = 'idle';
+		this.refreshing = false;
+		// The host replays its cached report on the next open, so nothing is lost by dropping this one.
+		this.report = undefined;
 		this.requestId++;
 	}
 
@@ -100,15 +108,17 @@ export class DarkFactoryTab {
 		if (message.command !== 'readinessLoaded' && message.command !== 'readinessScanFailed') { return false; }
 		if (message.requestId !== this.requestId) { return true; }
 		if (message.command === 'readinessScanFailed') {
-			this.report = undefined;
-			this.status = 'error';
+			// A failed background refresh must not discard a report we can still show.
+			this.refreshing = false;
+			if (!this.report) { this.status = 'error'; }
 		} else if (!message.report || typeof message.report !== 'object' || !Array.isArray((message.report as DarkFactoryReport).repos)) {
 			this.trace('readinessLoaded.invalidReport', { hasReport: !!message.report });
-			this.report = undefined;
-			this.status = 'error';
+			this.refreshing = false;
+			if (!this.report) { this.status = 'error'; }
 		} else {
 			this.report = message.report as DarkFactoryReport;
 			this.status = 'loaded';
+			this.refreshing = message.refreshing === true;
 		}
 		this.render();
 		return true;

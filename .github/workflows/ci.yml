@@ -83,12 +83,13 @@ jobs:
               - 'cli/src/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/scripts/check-test-coverage.sh'
+              - '.github/workflows/scripts/check-test-coverage.test.sh'
 
   # Deterministic guard against "new source logic without test changes" — the
   # class of finding the Test Expert agent would otherwise have to
   # catch with an LLM. Fails the PR when production source under
   # vscode-extension/src/, cli/src/ or src/ changes without any test file
-  # changing too. Escape hatch: put [skip-test-check] in the PR body.
+  # changing too (deletion-only changes and pure renames are exempt). Escape hatch: put [skip-test-check] in the PR body.
   test-coverage-check:
     name: Test coverage companion check
     runs-on: ubuntu-latest
@@ -108,6 +109,10 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
+
+    - name: Run check-test-coverage.sh scenario tests
+      shell: bash
+      run: bash .github/workflows/scripts/check-test-coverage.test.sh
 
     - name: Check source changes come with test changes
       env:

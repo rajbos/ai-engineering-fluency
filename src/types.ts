@@ -436,6 +436,8 @@ export interface ThinkingEffortUsage {
 export interface SessionUsageAnalysis {
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
+  /** Per-interaction autonomy level (autopilot/auto vs supervised). Absent when no surface reported one. */
+  autonomyUsage?: AutonomyUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
   /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
@@ -496,10 +498,48 @@ export interface SessionUsageAnalysis {
   firstUserPrompt?: string;
 }
 
+/**
+ * Additive, log-spaced latency histogram (see src/latencyHistogram.ts).
+ * `buckets[i]` counts durations in `[2^i, 2^(i+1))` ms; the last bucket is overflow.
+ * Stored as counts + sum (never averages) so it merges correctly across sessions,
+ * cache entries and backend rollups.
+ */
+export interface LatencyHistogram {
+  count: number;
+  sumMs: number;
+  buckets: number[];
+}
+
 export interface ToolCallUsage {
   total: number;
   byTool: { [toolName: string]: number };
   outputTokensByTool?: { [toolName: string]: number };
+  /**
+   * Calls whose session log recorded an explicit verdict (success or failure) on a
+   * completion/result event matched to its start. This is the denominator for
+   * `failuresByTool` and `outputTokensByTool`, which are only ever recorded for such
+   * calls; unlike `byTool` it excludes orphaned starts, streaming re-logs, editors whose
+   * format carries no completion events, and verdict-less completions (older Copilot CLI
+   * schemas). `latencyByTool` is a *different* population — any matched completion with
+   * usable timestamps, verdict or not — so its `count` may differ from this in either
+   * direction; never divide one by the other. Absent when no format contributed
+   * verdicts. MCP calls are counted under {@link McpToolUsage.completedByServer} instead.
+   */
+  completedByTool?: { [toolName: string]: number };
+  /**
+   * Calls whose session log explicitly flagged them as failed (Copilot CLI/JetBrains
+   * `tool.execution_complete.success === false`, Claude Code `tool_result.is_error`).
+   * A subset of `completedByTool`; absent when no failure was recorded.
+   */
+  failuresByTool?: { [toolName: string]: number };
+  /**
+   * Observed execution duration per tool, from the start→complete timestamp delta.
+   * This includes permission-prompt and queueing time, not just tool runtime. Sampled
+   * from every matched completion with usable timestamps, including verdict-less ones,
+   * so `count` is its own population (see {@link completedByTool}). Absent when the
+   * format carries no per-call timestamps.
+   */
+  latencyByTool?: { [toolName: string]: LatencyHistogram };
 }
 
 export interface ModeUsage {
@@ -512,6 +552,18 @@ export interface ModeUsage {
   cliApp?: number; // Subset of CLI interactions: Copilot CLI sessions started via the Copilot desktop app (client_name: github/autopilot), broken out from `cli`
   claudeDesktop?: number; // Claude Code sessions launched from the standalone Claude Desktop app (entrypoint: 'claude-desktop'), broken out of `cli` so terminal usage isn't inflated by desktop-app usage
   claudeVsCode?: number; // Claude Code sessions running inside an IDE, e.g. the VS Code extension (entrypoint: 'claude-vscode' or any non-CLI/non-desktop value), broken out of `cli` for the same reason
+}
+
+/**
+ * How much autonomy the user granted per interaction, independent of the chat mode (ask/edit/agent).
+ * Sources: Copilot CLI `agentMode` on user.message, VS Code Copilot Chat `inputState.permissionLevel`,
+ * Claude Code `permissionMode` on human user entries.
+ */
+export interface AutonomyUsage {
+  autonomous: number; // Copilot "autopilot" / Claude Code "auto"
+  supervised: number; // Copilot "interactive" / "default", Claude Code "default" / "acceptEdits"
+  plan: number; // Plan mode
+  other: number; // Recognised-but-unclassified values (e.g. Claude "bypassPermissions")
 }
 
 export interface ContextReferenceUsage {
@@ -542,6 +594,12 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+  /** MCP calls with a recorded outcome per server; see {@link ToolCallUsage.completedByTool}. */
+  completedByServer?: { [serverName: string]: number };
+  /** Failed MCP calls per server; same source and caveats as {@link ToolCallUsage.failuresByTool}. */
+  failuresByServer?: { [serverName: string]: number };
+  /** Observed MCP call duration per server; same source and caveats as {@link ToolCallUsage.latencyByTool}. */
+  latencyByServer?: { [serverName: string]: LatencyHistogram };
 }
 
 /**
@@ -980,6 +1038,12 @@ last30Days: UsageAnalysisPeriod;
 month: UsageAnalysisPeriod;
 /** Previous calendar month (full month). */
 lastMonth: UsageAnalysisPeriod;
+/**
+ * Per-tool, per-editor call counts for the last 30 days (tool name -> editor display name -> calls).
+ * Covers general tools, MCP tools and MCP server names; used to tell maintainers which editor an
+ * unknown tool was seen in when reporting it.
+ */
+toolCallsByEditor?: { [toolName: string]: { [editorSource: string]: number } };
 locale?: string;
 lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;
@@ -1210,6 +1274,8 @@ export interface UsageAnalysisPeriod {
   sessions: number;
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
+  /** Aggregated per-interaction autonomy level across the period's sessions. */
+  autonomyUsage?: AutonomyUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
   /** Aggregated agent-skill invocation counts across the period's sessions. See {@link SkillCallUsage}. */

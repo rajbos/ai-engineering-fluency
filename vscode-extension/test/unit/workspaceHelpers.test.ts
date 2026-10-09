@@ -867,6 +867,25 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 });
 
+test('scanWorkspaceCustomizationFiles: AGENTS.md and root/nested CLAUDE.md count as copilot-compatible instructions', () => {
+const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-test-'));
+try {
+fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# Agents');
+fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '@AGENTS.md');
+const claudeDir = path.join(tmpDir, '.CLAUDE');
+fs.mkdirSync(claudeDir);
+fs.writeFileSync(path.join(claudeDir, 'claude.md'), '@AGENTS.md');
+const result = scanWorkspaceCustomizationFiles(tmpDir);
+for (const name of ['AGENTS.md', 'CLAUDE.md', '.CLAUDE/claude.md']) {
+const file = result.find(f => f.relativePath.toLowerCase() === name.toLowerCase());
+assert.ok(file, `should find ${name}`);
+assert.equal(file?.category, 'copilot');
+}
+} finally {
+fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+});
+
 test('scanWorkspaceCustomizationFiles: detects .claude/settings.json as non-copilot (not CLAUDE.md)', () => {
 const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-test-'));
 try {

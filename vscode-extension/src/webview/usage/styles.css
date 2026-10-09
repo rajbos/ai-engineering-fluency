@@ -1391,6 +1391,21 @@ background: var(--bg-tertiary);
 	color: var(--vscode-errorForeground, #f14c4c);
 }
 
+.worktree-retry-status {
+	margin-top: 8px;
+	font-size: 12px;
+}
+
+.worktree-retry-status.success {
+	color: var(--success-fg);
+	font-weight: 600;
+}
+
+.worktree-retry-status.failed {
+	color: var(--error-fg);
+	margin-bottom: 4px;
+}
+
 .worktree-cleanup-log-actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -1504,9 +1519,11 @@ background: var(--bg-tertiary);
 
 .df-repo-summary::before {
 	content: '▸';
-	color: var(--text-muted);
-	font-size: 12px;
-	width: 10px;
+	color: var(--text-primary);
+	font-size: 22px;
+	line-height: 1;
+	width: 20px;
+	text-align: center;
 	transition: transform 0.15s ease;
 }
 
@@ -1541,21 +1558,29 @@ background: var(--bg-tertiary);
 
 .df-dots {
 	display: inline-flex;
-	gap: 4px;
+	gap: 6px;
 }
 
+/* The verdict colour lives on the ring and a tinted fill; the numeral stays in the
+   primary text colour so it keeps its contrast on dark themes (red/amber text on
+   a dark background was unreadable). */
 .df-dot {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
+	width: 28px;
+	height: 28px;
 	border-radius: 50%;
-	font-size: 10px;
+	font-size: 14px;
 	font-weight: 700;
-	border: 1px solid var(--border-color);
+	border: 2px solid var(--border-color);
 	background: var(--bg-secondary);
+	color: var(--text-primary);
 }
+
+.df-dot.df-verdict-attained { background: color-mix(in srgb, var(--success-fg) 28%, transparent); color: var(--text-primary); }
+.df-dot.df-verdict-blocked { background: color-mix(in srgb, var(--error-fg) 28%, transparent); color: var(--text-primary); }
+.df-dot.df-verdict-unverified { background: color-mix(in srgb, var(--warning-fg) 28%, transparent); color: var(--text-primary); }
 
 .df-counts {
 	display: inline-flex;
@@ -1891,4 +1916,126 @@ background: var(--bg-tertiary);
 .agentic-definition summary {
 	cursor: pointer;
 	color: var(--link-color);
+
+/* ── Tool execution sections (reliability / latency / MCP health / cost-vs-speed) ── */
+.tool-exec-chart-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	background: var(--list-hover-bg);
+	border-radius: 6px;
+	padding: 8px 6px;
+}
+
+.tool-exec-chart {
+	display: block;
+	width: 100%;
+	min-width: 640px;
+	height: auto;
+}
+
+.tool-exec-chart text {
+	fill: var(--text-secondary);
+	font-family: inherit;
+	font-size: 11px;
+}
+
+.tool-exec-chart .tool-exec-label,
+.tool-exec-chart .tool-exec-bubble-label {
+	fill: var(--text-primary);
+}
+
+.tool-exec-chart .tool-exec-bubble-label {
+	font-size: 10px;
+}
+
+.tool-exec-chart .tool-exec-axis-title {
+	font-size: 11px;
+}
+
+.tool-exec-chart .tool-exec-chart-hint {
+	fill: var(--text-muted);
+	font-size: 10px;
+}
+
+.tool-exec-grid line {
+	stroke: var(--border-subtle);
+	stroke-width: 1;
+	stroke-dasharray: 3 3;
+}
+
+.tool-exec-bar-success,
+.tool-exec-bar-p50 { fill: var(--vscode-charts-purple, #a78bfa); }
+.tool-exec-bar-failure { fill: var(--vscode-charts-red, #fb7185); }
+.tool-exec-bar-p95 { fill: var(--vscode-charts-purple, #a78bfa); opacity: 0.3; }
+.tool-exec-marker-p95 { stroke: var(--text-primary); stroke-width: 2; }
+.tool-exec-bar-mcp { fill: var(--vscode-charts-yellow, #fbbf24); }
+
+.tool-exec-kind-builtin { fill: var(--vscode-charts-blue, #22d3ee); }
+.tool-exec-kind-mcp { fill: var(--vscode-charts-purple, #a78bfa); }
+.tool-exec-kind-subagent { fill: var(--vscode-charts-red, #f472b6); }
+.tool-exec-kind-skill { fill: var(--vscode-charts-green, #a3e635); }
+
+.tool-exec-bubble {
+	opacity: 0.78;
+	stroke: var(--bg-primary);
+	stroke-width: 1;
+}
+
+.tool-exec-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+	margin: 6px 2px 8px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.tool-exec-legend span {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.tool-exec-empty {
+	color: var(--text-muted);
+	font-size: 12px;
+	padding: 6px 2px;
+}
+
+.tool-exec-table {
+	margin: 6px 2px 2px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.tool-exec-table summary {
+	cursor: pointer;
+	user-select: none;
+}
+
+.tool-exec-table table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: 6px;
+}
+
+.tool-exec-table th,
+.tool-exec-table td {
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border-subtle);
+	text-align: left;
+}
+
+.tool-exec-table th {
+	color: var(--text-secondary);
+	font-weight: 600;
+}
+
+.tool-exec-table td {
+	color: var(--text-primary);
+}
+
+.tool-exec-table .tool-exec-num {
+	text-align: right;
+	white-space: nowrap;
 }

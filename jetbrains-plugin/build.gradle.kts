@@ -48,6 +48,8 @@ kotlin {
 
 dependencies {
     intellijPlatform {
+        val targetPlatformVersion = providers.gradleProperty("platformVersion").get()
+
         // IntelliJ IDEA Community is the smallest base that bundles JCEF.
         // The resulting plugin also installs into Rider, PyCharm, WebStorm,
         // GoLand, RubyMine, CLion, and the rest of the family because we only
@@ -56,6 +58,12 @@ dependencies {
             providers.gradleProperty("platformType").get(),
             providers.gradleProperty("platformVersion").get(),
         )
+
+        // Starting with IntelliJ Platform 2026.2, JCEF is exposed through its
+        // own bundled plugin and must be present on the compile classpath.
+        if (targetPlatformVersion.startsWith("2026.")) {
+            bundledPlugin("com.intellij.modules.jcef")
+        }
 
         // Test fixtures (IntelliJ Platform test framework + JUnit 5).
         testFramework(TestFrameworkType.Platform)

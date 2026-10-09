@@ -95,6 +95,9 @@ Tracks usage of MCP servers and tools:
   - Response items with `kind: "mcpServersStarting"` and `didStartServerIds`
 - JSONL files:
   - Events with `type: "mcp.tool.call"` or containing `mcpServer` in data
+  - Copilot CLI `tool.execution_start` events tagged with `data.mcpServerName` (their `toolName` is
+    `<server>-<tool>`, e.g. `github-mcp-server-get_file_contents`, which the `mcp_`/`mcp__` prefix
+    check does not match); these count as MCP usage only, never as regular tool calls
 
 ### 5. Tool Curation
 

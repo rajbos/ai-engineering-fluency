@@ -43,20 +43,38 @@ test('AI Readiness is a host-gated Usage Analysis tab with a lazy, refreshable s
 		tab.attach();
 		assert.match(dom.window.document.getElementById('readiness-content')!.textContent!, /No git repositories were found/);
 		dom.window.document.getElementById('btn-refresh-readiness')!.click();
-		assert.equal(messages.at(-1)?.requestId, 2);
+		assert.deepEqual(messages.at(-1), { command: 'loadReadiness', requestId: 2, force: true });
+		// A forced refresh keeps the current report on screen and says it is refreshing.
 		tab.handleMessage({ command: 'readinessLoaded', requestId: 1, report: emptyReport });
-		assert.match(dom.window.document.getElementById('readiness-content')!.textContent!, /Scanning repository controls/);
+		const shown = () => dom.window.document.getElementById('readiness-content')!.textContent!;
+		assert.match(shown(), /Showing the last scan while a fresh one runs/);
+		assert.match(shown(), /No git repositories were found/);
+		// A failed background refresh must not throw away the report we can still show.
 		tab.handleMessage({ command: 'readinessScanFailed', requestId: 2 });
-		assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /Could not scan repository readiness/);
+		assert.equal(dom.window.document.querySelector('[role="alert"]'), null);
+		assert.match(shown(), /No git repositories were found/);
+		assert.doesNotMatch(shown(), /Showing the last scan/);
 
+		// A cached report arrives first (refreshing), then the fresh scan replaces it.
 		dom.window.document.getElementById('btn-refresh-readiness')!.click();
 		assert.equal(messages.at(-1)?.requestId, 3);
-		tab.handleMessage({ command: 'readinessLoaded', requestId: 3, report: {} });
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 3, report: emptyReport, refreshing: true });
+		assert.match(shown(), /Showing the last scan/);
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 3, report: emptyReport, refreshing: false });
+		assert.doesNotMatch(shown(), /Showing the last scan/);
+
+		dom.window.document.getElementById('btn-refresh-readiness')!.click();
+		assert.equal(messages.at(-1)?.requestId, 4);
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 4, report: {} });
 		assert.deepEqual(traces, ['readinessLoaded.invalidReport']);
-		assert.ok(dom.window.document.querySelector('[role="alert"]'));
+		assert.match(shown(), /No git repositories were found/);
+
+		// With nothing to show, a failure is surfaced.
 		tab.invalidate();
 		tab.startIfNeeded();
-		assert.equal(messages.at(-1)?.requestId, 5);
+		assert.equal(messages.at(-1)?.requestId, 6);
+		tab.handleMessage({ command: 'readinessScanFailed', requestId: 6 });
+		assert.ok(dom.window.document.querySelector('[role="alert"]'));
 		assert.equal(tab.handleMessage({ command: 'unrelated' }), false);
 	} finally {
 		(globalThis as typeof globalThis & { document: Document }).document = previousDocument;

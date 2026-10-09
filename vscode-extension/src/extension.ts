@@ -28,6 +28,7 @@ import * as loadingHtml from './loadingHtml';
 import type {
   TokenUsageStats,
   ModelUsage,
+  ModelEfficiencyUsage,
   ModelId,
   ModelPricing,
   EditorUsage,
@@ -333,7 +334,7 @@ import {
  */
 const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
-import { scanDarkFactoryReadiness } from './darkFactoryService';
+import { DARK_FACTORY_CACHE_KEY, isReportStale, parseCacheEntry, readinessScopeKey, scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -481,6 +482,7 @@ import {
 	type WhatsNewState,
 } from './whatsNew/announcer';
 import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from './whatsNew/visits';
+import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -954,14 +956,14 @@ export interface CopilotBudgetGauge {
 	barCell: string;
 	/** Indented sub-row labels, from buildCopilotBudgetSubRowLabels(). */
 	subRowLabels: string[];
-	/** Where the budget figure came from, named in the table's footnote. */
+	/** Where the budget figure came from (not currently rendered in the tooltip). */
 	source: string;
 }
 
 /**
  * Formats the "💰 Costs by Provider" table for the status bar hover tooltip: the Copilot Budget
  * gauge and its sub-rows on top (when a budget is set), then every provider's share of total
- * monthly spend, then the footnote naming the budget's source.
+ * monthly spend.
  *
  * The section title doubles as the table's header row. A title line above an empty `|  |  |  |`
  * header left a blank band between the two, wasting vertical space in a popup narrow enough that
@@ -991,9 +993,6 @@ export function formatProviderCostTable(
 	for (const provider of providers) {
 		const cost = monthCosts[provider] ?? 0;
 		markdown += `| ${pad(provider)} | ${pad(`$${cost.toFixed(2)}`)} | ${shareBarCell(totalCost > 0 ? cost / totalCost : 0)} |\n`;
-	}
-	if (gauge) {
-		markdown += `\n*${l10n.t('tooltip.budgetFromSource', gauge.source)}*\n`;
 	}
 	return markdown;
 }
@@ -1125,6 +1124,14 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
+	// v78: per-tool outcome maps (toolCalls.completedByTool/failuresByTool/latencyByTool,
+	// mcpTools.completedByServer/failuresByServer/latencyByServer) are now recorded from Copilot
+	// CLI/JetBrains tool.execution_start/complete pairs and Claude Code tool_use/tool_result pairs;
+	// an mtime/size hit skips re-analysis, so existing entries would never gain the fields.
+	// v77: Copilot CLI MCP calls (tool.execution_start tagged with data.mcpServerName) now land in
+	// usageAnalysis.mcpTools instead of toolCalls (and no longer get output-token estimates);
+	// getSessionFileDataCached() serves the persisted usageAnalysis on an mtime/size hit, so without
+	// this bump unchanged CLI sessions would keep the old counts until their file changed.
 	// v75: legacy details-only placeholders (tokens 0, empty usage analysis, real mtime/size) were
 	// written unmarked by updateCacheWithSessionDetails() and cannot be told apart from full entries,
 	// so the whole generation is discarded; new placeholders carry `detailsOnly`.
@@ -1134,7 +1141,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v74: Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
 	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
 	// showing an estimate in Today/month/30-day totals until their file changed.
-	private static readonly CACHE_VERSION = 75;
+	// v76: Add per-session autonomyUsage (autopilot/auto vs supervised) to usageAnalysis: cache hits
+	// skip re-analysis, so existing entries would lack the metric until their file changed.
+	private static readonly CACHE_VERSION = 78;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -1588,6 +1597,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
 	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
+	// Per-tool, per-editor call counts for the last-30-days window, so the "Report Unknown Tools"
+	// issue can say which editor each unknown tool was seen in. Reset at the top of each refresh.
+	private _toolCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	// Distinct workspace folder paths each skill was invoked from (last 30 days), used to
 	// backfill descriptions for skills whose repo isn't the one currently open (see
 	// findSkillDescriptionInWorkspaces).
@@ -5891,8 +5903,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
 	 *  budget, health-colored), then a spend breakdown where every provider's bar is its share
-	 *  of total monthly spend (so those bars sum to 100%), and one combined footnote explaining
-	 *  the bar scales and where the budget value comes from. */
+	 *  of total monthly spend (so those bars sum to 100%). */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
 		if (Object.keys(monthCosts).length === 0) { return; }
@@ -6663,7 +6674,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Falls back to the session's overall category (rather than silently dropping to
 			// "Conversation") for a day rollup that predates per-day task classification.
 			const primaryTaskCategory = dayRollup.primaryTaskCategory ?? sessionData.taskCategory;
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory);
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory, sessionData.usageAnalysis?.modelEfficiency);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey) {
@@ -6684,7 +6695,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const dateKey = toLocalDayKey(lastActivity);
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
-		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory);
+		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory, sessionData.usageAnalysis?.modelEfficiency);
 		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData, editorType);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
@@ -6728,7 +6739,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		repository: string,
 		modelUsage: any,
 		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory
+		primaryTaskCategory?: TaskCategory,
+		/** The session's per-model turn counters; lets routed (hydrafusion/auto) sessions be re-keyed for the efficiency aggregate. */
+		modelEfficiency?: ModelEfficiencyUsage
 	): void {
 		entry.tokens += tokens;
 		entry.sessions += 1;
@@ -6744,7 +6757,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.modelUsage[model]!.sessions += 1;
 		}
-		_accumulateDayAndEditorModelTokens(entry, editorType, modelUsage, this.modelPricing);
+		_accumulateDayAndEditorModelTokens(entry, editorType, modelUsage, this.modelPricing, modelEfficiency);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
@@ -6855,6 +6868,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._customizationFilesCache.clear();
 		this._pendingCustomizationScans.clear();
 		this._skillCallsByEditorAccum = new Map();
+		this._toolCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
@@ -6909,6 +6923,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days,
 			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
 			claudeDesktopCoverage: await this.computeClaudeDesktopCoverage(),
+			toolCallsByEditor: this._buildToolCallsByEditor(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -8085,6 +8100,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/** Plain-object snapshot of `_toolCallsByEditorAccum` for the stats payload. */
+	private _buildToolCallsByEditor(): Record<string, Record<string, number>> {
+		return toolCallsByEditorToRecord(this._toolCallsByEditorAccum);
+	}
+
+	/**
+	 * Accumulate this session's tool calls (general tools, MCP tools and MCP servers) into
+	 * `_toolCallsByEditorAccum` (toolName -> editorSource -> count).
+	 */
+	private _accumulateToolCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis): void {
+		const sources = [analysis.toolCalls.byTool, analysis.mcpTools.byTool, analysis.mcpTools.byServer];
+		if (sources.every(s => Object.keys(s).length === 0)) { return; }
+		const editorSource = this.detectEditorSource(sessionFile);
+		// 'Unknown' means no editor could be identified; leave it out so reports fall back to the no-editor format.
+		if (editorSource === 'Unknown') { return; }
+		for (const source of sources) {
+			for (const [name, count] of Object.entries(source)) {
+				let byEditor = this._toolCallsByEditorAccum.get(name);
+				if (!byEditor) { byEditor = new Map(); this._toolCallsByEditorAccum.set(name, byEditor); }
+				byEditor.set(editorSource, (byEditor.get(editorSource) || 0) + count);
+			}
+		}
+	}
+
 	/**
 	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
 	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
@@ -8141,6 +8180,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts,
 				sessionData.workspaceFolderPath);
 			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
+			this._accumulateToolCallsByEditor(sessionFile, analysis);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
@@ -10155,7 +10195,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
-			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId)),
+			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId, message.force)),
 			checkCcrActivity: (message) => {
 				const owner = typeof message.owner === 'string' ? message.owner : '';
 				const repo = typeof message.repo === 'string' ? message.repo : '';
@@ -10271,6 +10311,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			backendConfigured: this.isBackendConfigured(),
 			readinessAvailable: true,
 			currentWorkspacePaths: workspacePaths,
+			toolCallsByEditor: analysisStats.toolCallsByEditor ?? {},
 			todaySessions: analysisStats.todaySessions || [],
 			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
 			insights: this.buildCurrentInsights(analysisStats),
@@ -11041,10 +11082,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
 	 * already fetched, so opening AI Readiness issues no extra GitHub calls.
 	 */
-	private runDarkFactoryScan(): DarkFactoryReport {
-		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+	private runDarkFactoryScan(workspacePaths: readonly string[]): DarkFactoryReport {
 		return scanDarkFactoryReadiness({
-			workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
 		});
@@ -11071,7 +11111,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 				&& cached.prStatsKey === readinessPrStatsKey(this._lastRepoPrStats)) {
 				return { report: cached.report };
 			}
-			const report = this.runDarkFactoryScan();
+			const report = this.runDarkFactoryScan(this.darkFactoryCandidatePaths());
 			this.rememberReadinessScan(report);
 			return { report };
 		} catch (err) {
@@ -11096,18 +11136,47 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		await this.showUsageAnalysisOnTab('readiness');
 	}
 
-	private loadReadinessForUsage(requestId: unknown): void {
+	/**
+	 * Serve the readiness report, cache-first.
+	 *
+	 * A cached report is posted immediately so the tab is usable at once; a fresh scan
+	 * then runs in the background only when that cache is over a day old, or when the
+	 * user asked for one (`force`). With no cache the scan runs straight away.
+	 */
+	/** Open folders first, then every workspace path the usage matrix knows about. */
+	private darkFactoryCandidatePaths(): string[] {
+		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+		return [...openFolders, ...this._buildWorkspacePaths()];
+	}
+
+	private loadReadinessForUsage(requestId: unknown, force: unknown): void {
 		const panel = this.analysisPanel;
 		if (!panel) { return; }
 		if (typeof requestId !== 'number' || !Number.isSafeInteger(requestId) || requestId < 1) {
 			this.warn('AI Readiness: received an invalid scan request id');
 			return;
 		}
+		const workspacePaths = this.darkFactoryCandidatePaths();
+		const scopeKey = readinessScopeKey(workspacePaths);
+		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey, this.githubSession !== undefined);
+		const needsScan = force === true || !cached || isReportStale(cached);
+		if (cached && force !== true) {
+			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });
+		}
+		if (!needsScan) { return; }
+		// Deferred so the cached report above paints before the synchronous scan blocks the host.
+		setTimeout(() => this.scanReadinessAndPost(panel, requestId, workspacePaths, scopeKey), 0);
+	}
+
+	private scanReadinessAndPost(panel: vscode.WebviewPanel, requestId: number, workspacePaths: readonly string[], scopeKey: string): void {
 		try {
-			const report = this.runDarkFactoryScan();
+			const report = this.runDarkFactoryScan(workspacePaths);
+			Promise.resolve(this.context.globalState.update(DARK_FACTORY_CACHE_KEY, { scopeKey, report }))
+				.catch(err => this.warn(`Dark Factory readiness cache could not be saved: ${err}`));
+			// Also kept in memory, tagged with its PR snapshot, for the insight pass (readinessForInsights).
 			this.rememberReadinessScan(report);
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, refreshing: false });
 			}
 			// A rescan can change the review-control insights; readinessForInsights() picks it up.
 			this.republishInsights();
@@ -13270,14 +13339,21 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       const pathModule = require("path");
       const normalized = pathModule.normalize(pathToReveal);
       try {
-        const stat = await fsModule.promises.stat(normalized);
-        if (stat.isDirectory()) {
-          await vscode.env.openExternal(vscode.Uri.file(normalized));
-        } else {
-          await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+        await fsModule.promises.stat(normalized);
+      } catch (err) {
+        // Only a genuinely missing path is "gone"; permission/IO errors fall through to the reveal attempt.
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT" || code === "ENOTDIR") {
+          vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
+          return;
         }
-      } catch {
+      }
+      // revealFileInOS works for folders and files alike; openExternal on a folder URI is
+      // silently ignored on some hosts, which made "Reveal folder" look dead.
+      try {
         await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+      } catch {
+        await vscode.env.openExternal(vscode.Uri.file(normalized));
       }
     } catch {
       vscode.window.showErrorMessage("Could not reveal: " + pathToReveal);
@@ -14181,27 +14257,39 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const { worktreePath, branch, repoLabel, pushed } = this._parseDeleteWorktreeMessage(message);
     if (!worktreePath) { return; }
 
-    if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { return; }
+    // Progress/outcome messages let the cleanup report show a bar and the final state for the row.
+    const post = (msg: Record<string, unknown>) => {
+      if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) { this.analysisPanel.webview.postMessage(msg); }
+    };
+    const finish = (status: "deleted" | "error" | "cancelled", reason?: string) =>
+      post({ command: "worktreeDeleteResult", path: worktreePath, status, reason });
+
+    if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { finish("cancelled"); return; }
+
+    post({ command: "worktreeDeleteStarted", path: worktreePath });
 
     const mainRepoRoot = await this.resolveMainRepoRoot(worktreePath);
     if (!mainRepoRoot || path.resolve(mainRepoRoot).toLowerCase() === path.resolve(worktreePath).toLowerCase()) {
-      vscode.window.showErrorMessage(`Could not safely locate the main repository for "${worktreePath}". Remove it manually with "git worktree remove".`);
+      const reason = `Could not safely locate the main repository for "${worktreePath}". Remove it manually with "git worktree remove".`;
+      vscode.window.showErrorMessage(reason);
+      finish("error", reason);
       return;
     }
 
     const result = await this._removeWorktreeWithFallback(mainRepoRoot, worktreePath);
-    if (!result) { return; }
+    if (!result) { finish("cancelled"); return; }
 
     if (!result.ok) {
-      vscode.window.showErrorMessage(`Could not delete worktree: ${result.stderr || "unknown error"}`);
+      const reason = result.stderr || l10n.t('usage.worktreeCleanup.unknownError');
+      vscode.window.showErrorMessage(`Could not delete worktree: ${reason}`);
+      finish("error", reason);
       return;
     }
 
     this.log(`🗑️ Deleted worktree: ${worktreePath}`);
     vscode.window.showInformationMessage(`Deleted worktree "${branch}" (${repoLabel}).`);
-    if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
-      this.analysisPanel.webview.postMessage({ command: "worktreeDeleted", path: worktreePath });
-    }
+    post({ command: "worktreeDeleted", path: worktreePath });
+    finish("deleted");
   }
 
   /**
@@ -15277,6 +15365,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   }
 
   /** Build the JSON-serialized initial payload injected into the usage analysis webview. */
+  /** Per-repository agent activity for the Usage Analysis panel's first render. Local only, never uploaded. */
+  private agenticInitialData(stats: UsageAnalysisStats): { repoActivity: UsageAnalysisStats['repoActivity'] | null } {
+    return { repoActivity: stats.repoActivity ?? null };
+  }
+
   private _buildUsageAnalysisInitialData(stats: UsageAnalysisStats | null, detectedLocale: string): string {
     if (!stats) { return 'null'; }
     const suppressedUnknownTools = vscode.workspace
@@ -15298,13 +15391,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       readinessAvailable: true,
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
+      toolCallsByEditor: stats.toolCallsByEditor ?? {},
       todaySessions: stats.todaySessions || [],
       claudeDesktopCoverage: stats.claudeDesktopCoverage ?? null,
       use24HourTime: this.getUse24HourTimeSetting(),
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
-      repoActivity: stats.repoActivity ?? null,
+      ...this.agenticInitialData(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
       serverMemoriesAnalysis: this.buildServerMemoriesView(),

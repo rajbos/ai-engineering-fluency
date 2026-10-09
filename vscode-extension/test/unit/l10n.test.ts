@@ -43,6 +43,21 @@ test('l10n: resolves zh-cn strings when the display language is zh-cn', () => {
 	mock.setLanguage('en');
 });
 
+test('l10n: missing-instructions insight is tool-neutral in English and zh-cn', () => {
+	const enOne = "1 active workspace (repo) uses other AI tools but has no shared agent instructions file (`AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`). `AGENTS.md` is the open standard read by most coding agents, including Copilot; adding one gives them project-specific context, reducing back-and-forth and improving response quality.";
+	const enOther = "2 active workspaces (a, b) use other AI tools but have no shared agent instructions file (`AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`). `AGENTS.md` is the open standard read by most coding agents, including Copilot; adding one gives them project-specific context, reducing back-and-forth and improving response quality.";
+	const zhOne = '有 1 个活跃工作区（repo）使用了其他 AI 工具，但没有共享的智能体说明文件（`AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`）。`AGENTS.md` 是大多数编码智能体（包括 Copilot）都支持的开放标准，添加后可提供项目专属上下文，减少反复沟通并提升回答质量。';
+	const zhOther = '有 2 个活跃工作区（a, b）使用了其他 AI 工具，但没有共享的智能体说明文件（`AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`）。`AGENTS.md` 是大多数编码智能体（包括 Copilot）都支持的开放标准，添加后可提供项目专属上下文，减少反复沟通并提升回答质量。';
+	assert.equal(t('insight.missingInstructions.title'), '🗒️ Add an AGENTS.md to your repos');
+	assert.equal(t('insight.missingInstructions.body.one', 1, 'repo', ''), enOne);
+	assert.equal(t('insight.missingInstructions.body.other', 2, 'a, b', ''), enOther);
+	mock.setLanguage('zh-cn');
+	assert.equal(t('insight.missingInstructions.title'), '🗒️ 为你的仓库添加 AGENTS.md');
+	assert.equal(t('insight.missingInstructions.body.one', 1, 'repo', ''), zhOne);
+	assert.equal(t('insight.missingInstructions.body.other', 2, 'a, b', ''), zhOther);
+	mock.setLanguage('en');
+});
+
 test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 	assert.equal(t('usage.pagedTable.previous'), 'Previous');
 	assert.equal(t('usage.pagedTable.next'), 'Next');
@@ -136,6 +151,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('command.showReadiness.title'), 'Show AI Readiness');
 	assert.equal(t('nav.btnReadiness'), 'AI Readiness');
 	assert.equal(t('readiness.loading'), 'Scanning repository controls…');
+	assert.equal(t('readiness.refreshing'), 'Showing the last scan while a fresh one runs…');
 	assert.equal(t('readiness.scanFailed'), 'Could not scan repository readiness. Check the AI Engineering Fluency output for details, then try Refresh.');
 	assert.equal(t('whatsNew.release.0.18.1.headline'), 'A maintenance release: friendly tool names, localization groundwork, and a Mistral Vibe cost-attribution fix. No new screens.');
 	assert.equal(t('whatsNew.release.0.18.2.headline'), 'See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.');
@@ -150,6 +166,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('command.showReadiness.title'), '显示 AI 就绪度');
 		assert.equal(t('nav.btnReadiness'), 'AI 就绪度');
 		assert.equal(t('readiness.loading'), '正在扫描仓库控制措施…');
+		assert.equal(t('readiness.refreshing'), '正在显示上次扫描结果，同时重新扫描…');
 		assert.equal(t('readiness.scanFailed'), '无法扫描仓库就绪度。请查看 AI 工程熟练度输出中的详细信息，然后重试刷新。');
 		assert.equal(t('whatsNew.release.0.18.1.headline'), '一个维护版本：友好的工具名称、本地化基础工作，以及一个 Mistral Vibe 成本归因修复。没有新增界面。');
 		assert.equal(t('whatsNew.release.0.18.2.headline'), '在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。');
@@ -174,8 +191,8 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.overview.atStage', 2, 0), '2 at Stage 0');
 	assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 with anti-patterns');
 	assert.equal(t('readiness.overview.hint'), 'Click a repository to see what blocks its next stage.');
-	assert.equal(t('readiness.disclaimer.headline'), 'It never tells you that you are ready to go dark.');
-	assert.equal(t('readiness.disclaimer.body'), 'It reports which governance and evidence controls each repository actually has — Stage 5 (a bounded dark factory) is never awarded.');
+	assert.equal(t('readiness.disclaimer.headline'), 'A checklist, not a green light.');
+	assert.equal(t('readiness.disclaimer.body'), 'For each repository this shows which safeguards are already in place (reviews, CI checks, agent instructions) and what is still missing for the next stage. It never says a repo is ready to run without people watching, so Stage 5 is never given out.');
 	assert.equal(t('readiness.about.title'), '📋 What this measures');
 	assert.equal(t('readiness.about.weakEvidence'), 'A green build from an unbounded agent is weak evidence.');
 	assert.equal(t('readiness.about.stage5'), 'Stage 5 is never awarded: its defining evidence is not machine-detectable.');
@@ -192,7 +209,7 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 		assert.equal(t('readiness.overview.atStage', 2, 0), '2 个处于第 0 阶段');
 		assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 个存在反模式');
 		assert.equal(t('readiness.overview.hint'), '点击仓库，查看阻碍其进入下一阶段的因素。');
-		assert.equal(t('readiness.disclaimer.headline'), '它从不告诉你已经可以“无人值守”运行。');
+		assert.equal(t('readiness.disclaimer.headline'), '这是一份检查清单，而不是绿灯。');
 		assert.equal(t('readiness.about.title'), '📋 衡量内容');
 		assert.equal(t('readiness.about.stage5'), '第 5 阶段永远不会被授予：其决定性证据无法由机器检测。');
 		assert.equal(t('readiness.action.draft'), '🤖 起草 Copilot Chat 提示词');
@@ -1696,5 +1713,76 @@ test('l10n: efficiency placeholder templates keep their {0} slot for localizeFor
 	// The trends intro fills three slots — resolution, range and bucket count.
 	for (const slot of ['{0}', '{1}', '{2}']) {
 		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
+	}
+});
+
+test('l10n: Tools & Integrations tool-execution section strings resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.reliability.title'), 'Tool execution reliability');
+	assert.equal(t('usage.toolExec.latency.title'), 'Tool latency profile');
+	assert.equal(t('usage.toolExec.mcp.title'), 'MCP server health');
+	assert.equal(t('usage.toolExec.costSpeed.title'), 'Cost vs speed map');
+	assert.equal(t('usage.toolExec.costSpeed.hint'), 'top-right = heavy & slow');
+	assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% fail');
+	assert.equal(t('usage.toolExec.legend.failure'), 'Failure');
+	assert.equal(t('usage.toolExec.empty.mcp'), 'No MCP server calls with a recorded outcome in this period.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.reliability.title'), '工具执行可靠性');
+		assert.equal(t('usage.toolExec.latency.title'), '工具延迟分布');
+		assert.equal(t('usage.toolExec.mcp.title'), 'MCP 服务器健康度');
+		assert.equal(t('usage.toolExec.costSpeed.title'), '成本与速度图');
+		assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% 失败');
+		assert.equal(t('usage.toolExec.legend.failure'), '失败');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New entry resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View: 30 succeeded, 10 failed');
+	assert.equal(t('usage.toolExec.tip.latency', 'Bash', '3.3s', '55s', '451'), 'Bash: p50 3.3s, p95 55s, 451 calls');
+	assert.equal(t('usage.toolExec.table.show'), 'Show as table');
+	assert.equal(t('usage.toolExec.col.completed'), 'Completed calls');
+	assert.equal(t('usage.toolExec.empty.latency'), 'No tool latency data yet. It is recorded from Copilot CLI, JetBrains, Claude Code and Claude Desktop sessions.');
+	assert.equal(t('whatsNew.release.0.19.1.headline'), 'The Tools & Integrations tab now shows how reliable and how slow each tool is, which MCP servers fail, and a cost-vs-speed map of your built-in, subagent and skill tools.');
+	assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), 'Tool reliability, latency and MCP health');
+	assert.ok(t('whatsNew.feature.usage.tool-execution-stats.description').includes('cost-vs-speed map'));
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View：成功 30 次，失败 10 次');
+		assert.equal(t('usage.toolExec.table.show'), '以表格显示');
+		assert.equal(t('usage.toolExec.col.completed'), '已完成调用');
+		assert.equal(t('usage.toolExec.empty.latency'), '暂无工具延迟数据。该数据来自 Copilot CLI、JetBrains、Claude Code 和 Claude Desktop 会话。');
+		assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), '工具可靠性、延迟与 MCP 健康度');
+		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+const WORKTREE_CLEANUP_KEYS: Record<string, { en: string; zh: string }> = {
+	'usage.worktreeCleanup.sizeChip': { en: 'Size: {0}', zh: '大小：{0}' },
+	'usage.worktreeCleanup.sizeChipTitle': { en: '{0} bytes on disk', zh: '磁盘占用 {0} 字节' },
+	'usage.worktreeCleanup.deleting': { en: '⏳ Deleting worktree{0}…', zh: '⏳ 正在删除工作树{0}…' },
+	'usage.worktreeCleanup.deleted': { en: '✅ Deleted', zh: '✅ 已删除' },
+	'usage.worktreeCleanup.deleteFailed': { en: '❌ Delete failed: {0}', zh: '❌ 删除失败：{0}' },
+	'usage.worktreeCleanup.unknownError': { en: 'unknown error', zh: '未知错误' },
+	'usage.worktreeCleanup.revealMissing': { en: '"{0}" no longer exists on disk.', zh: '“{0}”在磁盘上已不存在。' },
+};
+
+test('worktree cleanup delete-feedback keys resolve to their English text', () => {
+	for (const [key, { en }] of Object.entries(WORKTREE_CLEANUP_KEYS)) {
+		assert.equal(t(key), en, `en value for ${key}`);
+	}
+});
+
+test('worktree cleanup delete-feedback keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, { zh }] of Object.entries(WORKTREE_CLEANUP_KEYS)) {
+			assert.equal(t(key), zh, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
 	}
 });

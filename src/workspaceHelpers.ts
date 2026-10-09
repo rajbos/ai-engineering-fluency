@@ -612,14 +612,8 @@ export function parseGitRemoteUrl(gitConfigContent: string): string | undefined 
 	return undefined;
 }
 
-/**
- * Check if a tool name indicates it's an MCP (Model Context Protocol) tool.
- * MCP tools are identified by names starting with "mcp." or "mcp_"
- * Claude Code uses double-underscore format: "mcp__server__tool"
- */
-export function isMcpTool(toolName: string): boolean {
-	return toolName.startsWith('mcp.') || toolName.startsWith('mcp_') || toolName.startsWith('mcp__');
-}
+// isMcpTool moved to utils/toolUtils.ts (webview-safe); re-exported so existing importers keep working.
+export { isMcpTool } from './utils/toolUtils';
 
 /**
  * Normalize an MCP tool name so that equivalent tools from different servers

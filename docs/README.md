@@ -109,3 +109,4 @@ Implementation notes and decisions captured during development sessions.
 | [adr/LOCALIZATION-ARCHITECTURE.md](adr/LOCALIZATION-ARCHITECTURE.md) | Repo-wide localization standard: the four runtime tiers and one source of truth |
 | [adr/INSIGHTS-CATALOG-LOCALIZATION.md](adr/INSIGHTS-CATALOG-LOCALIZATION.md) | How the Insights catalog is localized without giving up insightsEngine.ts's purity |
 | [adr/AGENTIC-ENGINEERING-SYSTEM-PLAN.md](adr/AGENTIC-ENGINEERING-SYSTEM-PLAN.md) | Plan: per-repo rework, speed-vs-error, PR revert rate, anti-pattern insights and participation modes (its adoption × foundations matrix was dropped; the plan records why) |
+| [adr/TOOL-EXECUTION-STATS.md](adr/TOOL-EXECUTION-STATS.md) | Per-tool failure counts and latency histograms (reliability, latency, MCP health, cost-vs-speed panels): data sources, additive design, phased plan |
