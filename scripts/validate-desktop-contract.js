@@ -35,13 +35,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const { collectPostedCommands, collectHandledCommandsFromAst } = require('./validate-webview-contract.js');
+const { collectPostedCommands, ts } = require('./validate-webview-contract.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DESKTOP_DIR = path.join(REPO_ROOT, 'desktop');
 const EXT_WEBVIEW_DIR = path.join(REPO_ROOT, 'vscode-extension', 'src', 'webview');
 const DESKTOP_MAIN = path.join(DESKTOP_DIR, 'src', 'main.ts');
 const UNSUPPORTED_FILE = path.join(DESKTOP_DIR, 'src', 'unsupportedWebviewCommands.json');
+const IPC_HANDLER_FUNCTION = 'registerIpcHandlers';
 
 const STATUSES = ['hidden', 'gap', 'no-op'];
 
@@ -129,10 +130,60 @@ function selectorToken(selector) {
   return match ? match[1] : undefined;
 }
 
+/**
+ * Commands the desktop answers: the `case` labels of `switch (….command)` and
+ * `….command === '…'` comparisons inside `registerIpcHandlers` only. The
+ * extension's collector scans a whole file and also counts the keys of any
+ * `Record<string, …>` object; over main.ts that would let an unrelated map
+ * (STATIC_MIME_TYPES, say) mark a posted command as handled.
+ */
+function collectIpcHandledCommands(file = DESKTOP_MAIN) {
+  const sourceFile = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  let handlerFn;
+  const findHandler = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === IPC_HANDLER_FUNCTION) {
+      handlerFn = node;
+      return;
+    }
+    ts.forEachChild(node, findHandler);
+  };
+  findHandler(sourceFile);
+  if (!handlerFn) {
+    throw new ConfigError(`Could not find function ${IPC_HANDLER_FUNCTION} in ${path.relative(REPO_ROOT, file)} — has it moved or been renamed?`);
+  }
+
+  const handled = new Set();
+  const isCommandAccess = (expr) => /\.command$/.test(expr.getText(sourceFile));
+  const visit = (node) => {
+    if (ts.isSwitchStatement(node) && isCommandAccess(node.expression)) {
+      for (const clause of node.caseBlock.clauses) {
+        if (ts.isCaseClause(clause) && ts.isStringLiteralLike(clause.expression)) {
+          handled.add(clause.expression.text);
+        }
+      }
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken) &&
+      isCommandAccess(node.left) &&
+      ts.isStringLiteralLike(node.right)
+    ) {
+      handled.add(node.right.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(handlerFn);
+  if (handled.size === 0) {
+    throw new ConfigError(`${IPC_HANDLER_FUNCTION} handles no commands — has its dispatch changed shape?`);
+  }
+  return handled;
+}
+
 function analyse() {
   const views = readDesktopViews();
   const unsupported = readUnsupported();
-  const handled = collectHandledCommandsFromAst([DESKTOP_MAIN]);
+  const handled = collectIpcHandledCommands();
 
   /** command -> { views: Set, locations: [] } */
   const posted = new Map();
@@ -275,4 +326,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { readDesktopViews, collectViewFiles, analyse };
+module.exports = { readDesktopViews, collectViewFiles, collectIpcHandledCommands, analyse };

@@ -194,7 +194,11 @@ function analyse() {
   const vsList = parseVsCsprojViews();
   const jbList = parseJetBrainsViews();
   const desktopLists = parseDesktopViews();
-  const desktopList = new Set([...desktopLists.bundled].filter((v) => desktopLists.menu.has(v)));
+  // A desktop view half-wired into only one of its two lists is mechanical
+  // drift (unreachable/unbundled below), not a NEW view awaiting a decision.
+  // So NEW and ORPHAN look at either list, and only TRACKED needs both.
+  const desktopAny = new Set([...desktopLists.bundled, ...desktopLists.menu]);
+  const desktopBoth = new Set([...desktopLists.bundled].filter((v) => desktopLists.menu.has(v)));
 
   const sortV = (set) => [...set].sort();
 
@@ -210,7 +214,8 @@ function analyse() {
   const vs = classify(vsList);
   const jb = classify(jbList);
   const desktop = {
-    ...classify(desktopList),
+    ...classify(desktopAny),
+    tracked: sortV(new Set([...desktopBoth].filter((v) => canonical.has(v)))),
     // Half-wired views: copied but not in the menus, or in the menus but not copied.
     unreachable: sortV(new Set([...desktopLists.bundled].filter((v) => !desktopLists.menu.has(v)))),
     unbundled: sortV(new Set([...desktopLists.menu].filter((v) => !desktopLists.bundled.has(v)))),

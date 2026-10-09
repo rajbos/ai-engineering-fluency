@@ -46,7 +46,7 @@ None. The script does not use `child_process`.
   argument or parsed value changes them.
 - `dist/webview` entries are used as names only; the bundles are never opened.
 - A missing or unreadable source file ends the run with exit code 2 and a message
-  (lines 72-78, 297-301).
+  (lines 72-78, 302-306).
 
 ## Known gaps
 

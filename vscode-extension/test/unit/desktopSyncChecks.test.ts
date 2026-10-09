@@ -28,6 +28,7 @@ type Finding = { kind: string; command: string; detail: string };
 const desktopContract = requireFromHere(path.join(REPO_ROOT, 'scripts', 'validate-desktop-contract.js')) as {
 	readDesktopViews: () => string[];
 	collectViewFiles: (entry: string) => string[];
+	collectIpcHandledCommands: (file: string) => Set<string>;
 	analyse: () => { views: string[]; findings: Finding[] };
 };
 const webviewShell = requireFromHere(path.join(REPO_ROOT, 'scripts', 'validate-webview-shell.js')) as {
@@ -67,6 +68,28 @@ test('desktop contract: a view only owns the files it imports', () => {
 		.map(f => path.relative(dir, f).split(path.sep).join('/'))
 		.sort();
 	assert.deepEqual(files, ['shared/nested.ts', 'shared/used.ts', 'view/main.ts']);
+});
+
+test('desktop contract: only registerIpcHandlers counts as handling a command', () => {
+	// Keys of an unrelated Record<string, …> map or a comparison elsewhere in
+	// main.ts must not pass for an IPC handler.
+	const dir = makeTmpFixtureDir('desktop-ipc-');
+	const file = path.join(dir, 'main.ts');
+	fs.writeFileSync(file, `
+		declare const ipcMain: any; declare const other: { command: string };
+		const STATIC_MIME_TYPES: Record<string, string> = { refreshAll: 'text/javascript' };
+		if (other.command === 'elsewhere') { /* not the IPC dispatch */ }
+		function registerIpcHandlers(): void {
+			ipcMain.on('webview-message', (_e: unknown, message: { command: string }) => {
+				switch (message.command) {
+					case 'refresh': break;
+					case 'showDetails': break;
+				}
+				if (message.command === 'copyText') { /* handled */ }
+			});
+		}
+	`);
+	assert.deepEqual([...desktopContract.collectIpcHandledCommands(file)].sort(), ['copyText', 'refresh', 'showDetails']);
 });
 
 test('webview shell: every --vscode-* token the webviews use is defined for the desktop app and harness', () => {
