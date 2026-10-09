@@ -18,12 +18,14 @@ import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
-import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, WorkspaceCustomizationRow, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
-import { withErrorRecovery } from '../../src/utils/errors';
+import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
+import { groupWorkspaces, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes } from '../../src/workspaceGrouping';
+import { createNodeWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 
@@ -104,84 +106,98 @@ export async function discoverSessionFiles(): Promise<string[]> {
 	return discovery.getCopilotSessionFiles();
 }
 
+/** Instruction files that satisfy the CLI's "has customization" check (case-insensitive). */
+const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md'];
+
+/** Workspace folder a session belongs to, or undefined when it cannot be resolved. */
+async function resolveSessionWorkspacePath(sessionFile: string, claudeBasePath: string): Promise<string | undefined> {
+	// Claude Code session: ~/.claude/projects/<hash>/<uuid>.jsonl
+	if (sessionFile.startsWith(claudeBasePath + path.sep) || sessionFile.startsWith(claudeBasePath + '/')) {
+		const content = await withErrorRecovery(
+			() => fs.promises.readFile(sessionFile, 'utf-8'),
+			null,
+			`buildCustomizationMatrix readFile(${sessionFile})`
+		);
+		if (content === null) { return undefined; }
+		for (const line of content.split('\n').slice(0, 30)) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
+				if (event.cwd && typeof event.cwd === 'string') { return event.cwd; }
+			} catch { /* skip malformed lines */ }
+		}
+		return undefined;
+	}
+
+	// VS Code session: .../workspaceStorage/<hash>/chatSessions/<file>
+	const chatSessionsDir = path.dirname(sessionFile);
+	if (path.basename(chatSessionsDir) !== 'chatSessions') { return undefined; }
+	const workspaceJson = await readJsonFile<{ folder?: string }>(path.join(path.dirname(chatSessionsDir), 'workspace.json'));
+	const folderUri = workspaceJson?.folder;
+	if (!folderUri || !folderUri.startsWith('file://')) { return undefined; }
+	return resolveFileUri(folderUri) || undefined;
+}
+
 /**
  * Builds a WorkspaceCustomizationMatrix from session file paths.
  *
- * - For VS Code sessions: derives workspace folder from workspaceStorage/<hash>/workspace.json,
- *   then checks for AGENTS.md, CLAUDE.md, or .github/copilot-instructions.md.
+ * - For VS Code sessions: derives workspace folder from workspaceStorage/<hash>/workspace.json.
  * - For Claude Code sessions (~/.claude/projects/<hash>/): reads the JSONL to extract the
- *   `cwd` workspace path, then checks for CLAUDE.md there.
+ *   `cwd` workspace path.
+ *
+ * Folders are then grouped with the shared `groupWorkspaces()` (src/workspaceGrouping.ts) — the
+ * same rules the VS Code extension uses — so worktrees and clones of one repository count once.
+ * A group has an issue when none of its folders has AGENTS.md, CLAUDE.md, or
+ * .github/copilot-instructions.md.
  */
-export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<WorkspaceCustomizationMatrix | undefined> {
-	const workspacePaths = new Set<string>();
+export async function buildCustomizationMatrix(
+	sessionFiles: string[],
+	probes: WorkspaceGroupingProbes = createNodeWorkspaceGroupingProbes(),
+): Promise<WorkspaceCustomizationMatrix | undefined> {
+	const sessionCounts = new Map<string, number>();
 	const claudeBasePath = path.join(os.homedir(), '.claude', 'projects');
-
 	for (const sessionFile of sessionFiles) {
-		// Claude Code session: ~/.claude/projects/<hash>/<uuid>.jsonl
-		if (sessionFile.startsWith(claudeBasePath + path.sep) || sessionFile.startsWith(claudeBasePath + '/')) {
-			const content = await withErrorRecovery(
-				() => fs.promises.readFile(sessionFile, 'utf-8'),
-				null,
-				`buildCustomizationMatrix readFile(${sessionFile})`
-			);
-			if (content !== null) {
-				const lines = content.split('\n').slice(0, 30);
-				for (const line of lines) {
-					if (!line.trim()) { continue; }
-					try {
-						const event = JSON.parse(line);
-						if (event.cwd && typeof event.cwd === 'string') {
-							workspacePaths.add(event.cwd);
-							break;
-						}
-					} catch { /* skip malformed lines */ }
-				}
-			}
-			continue;
-		}
-
-		// VS Code session: .../workspaceStorage/<hash>/chatSessions/<file>
-		const chatSessionsDir = path.dirname(sessionFile);
-		if (path.basename(chatSessionsDir) !== 'chatSessions') { continue; }
-		const hashDir = path.dirname(chatSessionsDir);
-		const workspaceJsonPath = path.join(hashDir, 'workspace.json');
-
-		const workspaceJson = await readJsonFile<{ folder?: string }>(workspaceJsonPath);
-		if (!workspaceJson) { continue; }
-		const folderUri: string | undefined = workspaceJson.folder;
-		if (!folderUri || !folderUri.startsWith('file://')) { continue; }
-
-		const folderPath = resolveFileUri(folderUri);
-		if (folderPath) { workspacePaths.add(folderPath); }
+		const workspacePath = await resolveSessionWorkspacePath(sessionFile, claudeBasePath);
+		if (!workspacePath) { continue; }
+		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
+		const norm = path.normalize(workspacePath);
+		sessionCounts.set(norm, (sessionCounts.get(norm) ?? 0) + 1);
 	}
+	if (sessionCounts.size === 0) { return undefined; }
 
-	if (workspacePaths.size === 0) { return undefined; }
+	const groups = groupWorkspaces(
+		[...sessionCounts].map(([p, sessionCount]) => ({ path: p, sessionCount, interactionCount: 0 })),
+		probes,
+	);
+	const hasInstructions = (wsPath: string): boolean => withErrorRecoverySync(
+		// Same case-insensitive resolution as the shared customization scanner, so the CLI
+		// accepts every spelling the extension does (including on case-sensitive filesystems).
+		() => INSTRUCTION_PATHS.some(p => resolveExactWorkspacePath(wsPath, p, true) !== undefined),
+		false,
+		`buildCustomizationMatrix workspace check(${wsPath})`
+	);
 
 	let workspacesWithIssues = 0;
-	for (const wsPath of workspacePaths) {
-		const hasIssues = await withErrorRecovery(
-			async () => {
-				// Same case-insensitive resolution as the shared customization scanner, so the CLI
-				// accepts every spelling the extension does (including on case-sensitive filesystems).
-				const instructionPaths = [
-					'.github/copilot-instructions.md',
-					'AGENTS.md',
-					'CLAUDE.md',
-					'.claude/CLAUDE.md',
-				];
-				return !instructionPaths.some(p => resolveExactWorkspacePath(wsPath, p, true) !== undefined);
-			},
-			true,
-			`buildCustomizationMatrix workspace check(${wsPath})`
-		);
-		if (hasIssues) { workspacesWithIssues++; }
-	}
+	const workspaces: WorkspaceCustomizationRow[] = groups.map(group => {
+		const folders = [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
+		if (!folders.some(hasInstructions)) { workspacesWithIssues++; }
+		return {
+			workspacePath: group.canonicalPath,
+			workspaceName: group.displayName,
+			sessionCount: group.sessionCount,
+			interactionCount: group.interactionCount,
+			typeStatuses: {},
+			...(group.memberPaths.length > 1 ? { memberPaths: group.memberPaths } : {}),
+		};
+	});
+	const ungrouped = detectArtefactWorkspaceNames(groups).map(a => a.displayName);
 
 	return {
 		customizationTypes: [],
-		workspaces: [],
-		totalWorkspaces: workspacePaths.size,
+		workspaces,
+		totalWorkspaces: workspaces.length,
 		workspacesWithIssues,
+		...(ungrouped.length > 0 ? { ungroupedWorkspaceNames: ungrouped } : {}),
 	};
 }
 

@@ -280,6 +280,8 @@
   "memoryFiles.table.size",
   "memoryFiles.table.stale",
   "memoryFiles.table.lastUpdated",
+  "customizationMatrix.mergedFolders",
+  "customizationMatrix.ungroupedNames",
   "memoryFiles.unknownWorkspace",
   "memoryFiles.globalWorkspaceLabel",
   "memoryFiles.renderError",

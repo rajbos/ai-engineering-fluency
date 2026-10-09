@@ -2329,6 +2329,85 @@
       }
     },
     "recommendations": []
+  },
+  "customizationMatrix": {
+    "customizationTypes": [
+      {
+        "id": "instructions",
+        "icon": "📋",
+        "label": "Instructions"
+      },
+      {
+        "id": "coding-agent",
+        "icon": "⚙️",
+        "label": "Coding Agent Setup"
+      },
+      {
+        "id": "mcp-config",
+        "icon": "🔌",
+        "label": "MCP Server Config"
+      },
+      {
+        "id": "skill",
+        "icon": "🧠",
+        "label": "Skill Files"
+      },
+      {
+        "id": "agent",
+        "icon": "🤖",
+        "label": "Custom agents"
+      }
+    ],
+    "workspaces": [
+      {
+        "workspacePath": "/home/dev/code/acme-app",
+        "workspaceName": "acme-app",
+        "sessionCount": 18,
+        "interactionCount": 240,
+        "typeStatuses": {
+          "instructions": "✅",
+          "coding-agent": "✅",
+          "mcp-config": "⚠️",
+          "skill": "✅",
+          "agent": "❌"
+        },
+        "memberPaths": [
+          "/home/dev/.claude/worktrees/acme-app/goofy-wozniak-42f712",
+          "/home/dev/code/acme-app",
+          "/home/dev/code/acme-app-refactor-wt"
+        ]
+      },
+      {
+        "workspacePath": "/home/dev/code/widget",
+        "workspaceName": "widget",
+        "sessionCount": 7,
+        "interactionCount": 65,
+        "typeStatuses": {
+          "instructions": "✅",
+          "coding-agent": "❌",
+          "mcp-config": "❌",
+          "skill": "❌",
+          "agent": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/scratch/groups-dashboard-layout-85ed99",
+        "workspaceName": "groups-dashboard-layout-85ed99",
+        "sessionCount": 2,
+        "interactionCount": 11,
+        "typeStatuses": {
+          "instructions": "❌",
+          "coding-agent": "❌",
+          "mcp-config": "❌",
+          "skill": "❌",
+          "agent": "❌"
+        }
+      }
+    ],
+    "totalWorkspaces": 3,
+    "workspacesWithIssues": 1,
+    "ungroupedWorkspaceNames": [
+      "groups-dashboard-layout-85ed99"
+    ]
   }
-
 }

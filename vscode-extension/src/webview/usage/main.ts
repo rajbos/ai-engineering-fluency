@@ -305,6 +305,7 @@ interface WorkspaceCustomizationRow {
 	sessionCount: number;
 	interactionCount: number;
 	typeStatuses: { [typeId: string]: CustomizationTypeStatus };
+	memberPaths?: string[];
 }
 
 interface WorkspaceCustomizationMatrix {
@@ -312,6 +313,25 @@ interface WorkspaceCustomizationMatrix {
 	workspaces: WorkspaceCustomizationRow[];
 	totalWorkspaces: number;
 	workspacesWithIssues: number;
+	ungroupedWorkspaceNames?: string[];
+}
+
+/** Expandable list of the folders (worktrees, clones) grouped into one workspace row. */
+function renderMergedWorkspaceMembers(memberPaths: string[] | undefined): string {
+	if (!memberPaths || memberPaths.length < 2) { return ''; }
+	const items = memberPaths.map(p => `<li>${escapeHtml(p)}</li>`).join('');
+	return `
+		<details class="workspace-group-members" style="font-family: sans-serif; font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+			<summary title="${escapeHtml(memberPaths.join('\n'))}" style="cursor: pointer;">${escapeHtml(localizeFormat('customizationMatrix.mergedFolders', memberPaths.length))}</summary>
+			<ul style="margin: 4px 0 0 16px; padding: 0; font-family: 'Courier New', monospace;">${items}</ul>
+		</details>`;
+}
+
+/** Summary note for workspace names that still look like worktree / clone artefacts after grouping. */
+function renderUngroupedWorkspaceNote(names: string[] | undefined): string {
+	if (!names || names.length === 0) { return ''; }
+	const examples = names.slice(0, 3).join(', ');
+	return `<span class="ungrouped-workspace-note" style="display:inline-flex;align-items:center;gap:4px;" title="${escapeHtml(names.join('\n'))}">${statusBadgeHtml('⚠️')} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedNames', names.length, examples))}</span>`;
 }
 
 interface MissedPotentialWorkspace {
@@ -3099,7 +3119,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 		return `
 			<tr>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
+					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}${renderMergedWorkspaceMembers(ws.memberPaths)}
 				</td>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
 					${ws.sessionCount}
@@ -3117,6 +3137,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 				${matrix.workspacesWithIssues > 0
 					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
 					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
+				${renderUngroupedWorkspaceNote(matrix.ungroupedWorkspaceNames)}
 			</div>
 			<div class="customization-matrix-container">
 				<table class="customization-matrix">

@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Bug Fixes
+- The Customization category of `fluency` (and of `all --json`) now counts worktrees, scratch clones and case/WSL spellings of one repository as one workspace, with the same shared rules as the VS Code extension, instead of counting every folder separately, so its workspace counts match the extension's. The matrix behind it now carries the grouped workspace rows (display name, session count, merged `memberPaths`) instead of an empty list (#2290)
+
 ## [0.6.2] - 2026-10-02
 
 ### Bug Fixes

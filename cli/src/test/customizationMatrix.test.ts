@@ -61,3 +61,76 @@ for (const file of [
 		assert.equal(await issuesFor([file]), 0);
 	});
 }
+
+// ── Workspace grouping (shared src/workspaceGrouping.ts) ─────────────────────
+
+import { groupWorkspaces } from '../../../src/workspaceGrouping';
+import { createNodeWorkspaceGroupingProbes } from '../../../src/workspaceGroupingProbes';
+
+/** One VS Code-style session file per folder, so each folder counts one session. */
+function makeSessions(root: string, folders: string[]): string[] {
+	return folders.map((folder, i) => {
+		const hashDir = path.join(root, 'workspaceStorage', `hash${i}`);
+		const chatDir = path.join(hashDir, 'chatSessions');
+		fs.mkdirSync(chatDir, { recursive: true });
+		fs.writeFileSync(path.join(hashDir, 'workspace.json'), JSON.stringify({ folder: 'file:///' + folder.replace(/\\/g, '/') }));
+		const sessionFile = path.join(chatDir, 's.json');
+		fs.writeFileSync(sessionFile, '{}');
+		return sessionFile;
+	});
+}
+
+test('buildCustomizationMatrix: worktrees and clones of one repository count as one grouped workspace', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const main = path.join(root, 'code', 'acme-app');
+		const sibling = path.join(root, 'code', 'acme-app-refactor-wt');
+		const clone = path.join(root, 'tmp', 'acme-app-85ed99');
+		const other = path.join(root, 'code', 'other-repo');
+		for (const dir of [main, sibling, clone, other]) { fs.mkdirSync(dir, { recursive: true }); }
+		// Only the sibling worktree has an instructions file; the group as a whole is covered.
+		fs.writeFileSync(path.join(sibling, 'AGENTS.md'), '# instructions');
+
+		const matrix = await buildCustomizationMatrix(makeSessions(root, [main, sibling, clone, other]));
+		assert.ok(matrix);
+		assert.equal(matrix.totalWorkspaces, 2);
+		assert.equal(matrix.workspacesWithIssues, 1, 'only other-repo lacks instructions');
+		const acme = matrix.workspaces.find(w => w.workspaceName === 'acme-app');
+		assert.ok(acme);
+		assert.equal(acme.workspacePath, main);
+		assert.equal(acme.sessionCount, 3);
+		assert.deepEqual(acme.memberPaths, [main, sibling, clone].sort());
+		const otherRow = matrix.workspaces.find(w => w.workspaceName === 'other-repo');
+		assert.equal(otherRow?.memberPaths, undefined, 'single-folder rows carry no member list');
+		assert.equal(matrix.ungroupedWorkspaceNames, undefined);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('buildCustomizationMatrix: grouped totals match the shared grouping the extension uses (parity)', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const folders = [
+			path.join(root, 'code', 'widget'),
+			path.join(root, 'clones', 'widget'),
+			path.join(root, 'home', '.claude', 'worktrees', 'widget', 'goofy-wozniak-42f712'),
+			path.join(root, 'scratch', 'groups-dashboard-layout-85ed99'),
+		];
+		for (const dir of folders) { fs.mkdirSync(dir, { recursive: true }); }
+		const matrix = await buildCustomizationMatrix(makeSessions(root, folders));
+		// The extension feeds the same folder → count list through the same function.
+		const expected = groupWorkspaces(folders.map(p => ({ path: p, sessionCount: 1, interactionCount: 0 })), createNodeWorkspaceGroupingProbes());
+		assert.ok(matrix);
+		assert.equal(matrix.totalWorkspaces, expected.length);
+		assert.deepEqual(
+			matrix.workspaces.map(w => [w.workspaceName, w.sessionCount]),
+			expected.map(g => [g.displayName, g.sessionCount]),
+		);
+		assert.equal(matrix.totalWorkspaces, 2);
+		// The branch-named scratch clone has nothing to join, so the detector reports it.
+		assert.deepEqual(matrix.ungroupedWorkspaceNames, ['groups-dashboard-layout-85ed99']);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
