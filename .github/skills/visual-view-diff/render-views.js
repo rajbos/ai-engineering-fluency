@@ -47,8 +47,9 @@ const {
 	REPO_ROOT,
 	buildPageHtml,
 	loadFixture,
+	resolveInside,
 } = require('./lib/harness');
-const { loadChromium } = require('./lib/browser');
+const { blockNetwork, loadChromium } = require('./lib/browser');
 const { parseArgs, readConfig, selectViews } = require('./lib/config');
 const { applySteps, isShowing } = require('./lib/steps');
 const { parseConcurrency, runPool } = require('./lib/pool');
@@ -96,7 +97,12 @@ function renderTargets(view) {
 
 async function renderView({ browser, view, state, theme, outDir, tmpDir, defaults, distDir, repoRoot }) {
 	const id = state ? `${view.id}--${state.id}` : view.id;
-	const bundlePath = path.join(distDir, `${view.bundle}.js`);
+	let bundlePath;
+	try {
+		bundlePath = resolveInside(distDir, `${view.bundle}.js`, 'bundle');
+	} catch (error) {
+		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: String(error && error.message || error) };
+	}
 	if (!fs.existsSync(bundlePath)) {
 		return {
 			view: view.id,
@@ -154,6 +160,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 	page.on('pageerror', (err) => { consoleErrors.push(String(err && err.stack || err)); });
 
 	try {
+		await blockNetwork(page);
 		// `setFixedTime` pins Date/Date.now but leaves timers running, so the
 		// settle waits and Chart.js's own scheduling behave as before.
 		await page.clock.setFixedTime(new Date(FROZEN_NOW));

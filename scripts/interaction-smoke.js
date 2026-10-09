@@ -62,7 +62,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const DIST_DIR = path.join(REPO_ROOT, 'vscode-extension', 'dist', 'webview');
 
 const { buildPageHtml, loadFixture } = require(path.join(SKILL_DIR, 'lib', 'harness.js'));
-const { loadChromium } = require(path.join(SKILL_DIR, 'lib', 'browser.js'));
+const { blockNetwork, loadChromium } = require(path.join(SKILL_DIR, 'lib', 'browser.js'));
 const { parseArgs, readConfig, selectViews } = require(path.join(SKILL_DIR, 'lib', 'config.js'));
 // The step vocabulary (`click`, `select`, `post`) is shared with the visual
 // diff's `states`, so a scenario and a screenshot state read alike. The
@@ -266,6 +266,7 @@ async function openPage(browser, pageFile, view, defaults) {
   // A control that opens a real URL or a dialog must not hang or navigate the
   // harness away from the page under test.
   page.on('dialog', (dialog) => void dialog.dismiss().catch(() => {}));
+  await blockNetwork(page);
   await page.addInitScript(INSTALL_VISIBILITY_HELPER);
   await page.goto(require('url').pathToFileURL(pageFile).href, { waitUntil: 'load' });
   await page.waitForTimeout(view.settleMs || defaults.settleMs || 1200);

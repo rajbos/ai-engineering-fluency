@@ -40,6 +40,37 @@ const JSON_CONFIG_GLOBALS = {
 };
 
 /**
+ * Joins `relativePath` onto `root` and refuses a result outside `root`.
+ *
+ * Registry and fixture fields name files the harness reads into the page, and
+ * the page ends up in a screenshot. An absolute path or `../` segments would let
+ * an entry pull any readable file on disk into that screenshot, so the resolved
+ * path must stay under the root it was given.
+ *
+ * @param {string} root
+ * @param {string} relativePath
+ * @param {string} label  what the path is, for the error message
+ */
+function resolveInside(root, relativePath, label) {
+	if (typeof relativePath !== 'string' || relativePath === '' || path.isAbsolute(relativePath)) {
+		throw new Error(`${label} must be a relative path, got ${JSON.stringify(relativePath)}`);
+	}
+	const base = path.resolve(root);
+	const resolved = path.resolve(base, relativePath);
+	const outside = (from, to) => {
+		const rel = path.relative(from, to);
+		return rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+	};
+	// The lexical check catches `../` and absolute paths; the real-path check
+	// catches a committed symlink that points out of the root.
+	if (outside(base, resolved)
+		|| (fs.existsSync(resolved) && outside(fs.realpathSync(base), fs.realpathSync(resolved)))) {
+		throw new Error(`${label} ${JSON.stringify(relativePath)} resolves outside ${base}`);
+	}
+	return resolved;
+}
+
+/**
  * Loads a fixture file, resolving `$fromRepoJson` references.
  *
  * Some views are driven by data files that already live in the repo (e.g. the
@@ -61,7 +92,7 @@ function loadFixture(fixturePath, repoRoot) {
 		}
 		if (node && typeof node === 'object') {
 			if (typeof node.$fromRepoJson === 'string') {
-				return JSON.parse(fs.readFileSync(path.join(repoRoot, node.$fromRepoJson), 'utf8'));
+				return JSON.parse(fs.readFileSync(resolveInside(repoRoot, node.$fromRepoJson, '$fromRepoJson'), 'utf8'));
 			}
 			return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, resolve(v)]));
 		}
@@ -179,5 +210,6 @@ module.exports = {
 	buildPageHtml,
 	loadFixture,
 	pathToFileUrl,
+	resolveInside,
 	toScriptJson,
 };
