@@ -14,6 +14,10 @@ import {
 	VIEW_DOCUMENTED_LIMIT,
 	selectPromotionTarget,
 	createPromotionTargetProbe,
+	createRepoRegularFileCheck,
+	resolvePromotionTarget,
+	describePromotionTarget,
+	describeNoPromotionCandidates,
 	buildPromotionPrompt,
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
@@ -1422,4 +1426,101 @@ test('renderPromotionMarkdown names the promotion target, or says it was not che
 	assert.match(renderPromotionMarkdown(local), /Suggested target: AGENTS\.md \(create it\)\./);
 	const elsewhere = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] }, alwaysExists);
 	assert.match(renderPromotionMarkdown(elsewhere), /Suggested target: AGENTS\.md or \.github\/copilot-instructions\.md \(not checked against a local checkout\)\./);
+});
+
+// ---------------------------------------------------------------------------
+// Review round 2 (#2373): probe errors, blocked targets, directory citations,
+// and the zero-candidate explanation
+// ---------------------------------------------------------------------------
+
+test('createPromotionTargetProbe treats an inspection error as unsafe, never as free to create', () => {
+	const deps = fakeProbeDeps({ files: ['docs/x.md'] });
+	const probe = createPromotionTargetProbe('/repo', {
+		...deps,
+		lexists: (target: string) => {
+			if (target === '/repo/AGENTS.md') { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }
+			return deps.lexists(target);
+		},
+	});
+	assert.equal(probe('AGENTS.md'), 'unsafe');
+	assert.equal(probe('missing.md'), 'absent');
+});
+
+test('resolvePromotionTarget names the candidate it rejected', () => {
+	assert.deepEqual(resolvePromotionTarget(targets({ 'AGENTS.md': 'unsafe' })), { blockedPath: 'AGENTS.md' });
+	assert.deepEqual(resolvePromotionTarget(targets({ '.github/copilot-instructions.md': 'unsafe' })), { blockedPath: '.github/copilot-instructions.md' });
+	assert.deepEqual(resolvePromotionTarget(targets({})), { target: { path: 'AGENTS.md', exists: false } });
+});
+
+test('a blocked target is reported as "none", never as a path to write to', () => {
+	const analysis = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] },
+		{ fileExists: () => true, promotionTargetStatus: targets({ 'AGENTS.md': 'unsafe' }) });
+	assert.equal(analysis.promotionTarget, undefined);
+	assert.equal(analysis.promotionTargetBlockedPath, 'AGENTS.md');
+	const described = describePromotionTarget(analysis);
+	assert.match(described, /^none — AGENTS\.md is not a regular file inside this checkout/);
+	assert.ok(!described.includes('copilot-instructions'), 'must not fall back to suggesting the other candidate');
+	const markdown = renderPromotionMarkdown(analysis);
+	assert.match(markdown, /Suggested target: none — AGENTS\.md is not a regular file/);
+	assert.ok(!/or \.github\/copilot-instructions\.md/.test(markdown));
+	// And the webview gets no prompt aimed at it.
+	assert.equal(toServerMemoriesAnalysisView(analysis)?.topPromotionGroups[0].prompt, undefined);
+});
+
+test('a memory that cites only a directory is not promotable', () => {
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', subject: 'folder', fact: 'Lives in src.', citations: ['src/webview:1'] }),
+			memory({ id: '2', subject: 'file', fact: 'Lives in a file.', citations: ['src/a.ts:1'] }),
+		],
+	}, { fileExists: () => true, isRegularFile: p => p === 'src/a.ts' });
+	assert.deepEqual(analysis.promotionGroups.map(g => g.displaySubject), ['file']);
+	// The directory exists, so it is not reported as stale either.
+	assert.equal(analysis.staleCitations.length, 0);
+});
+
+test('createRepoRegularFileCheck accepts files inside the checkout only', () => {
+	const fs = require('fs') as typeof import('fs');
+	const os = require('os') as typeof import('os');
+	const path = require('path') as typeof import('path');
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srvmem-regular-'));
+	try {
+		fs.mkdirSync(path.join(root, 'src'));
+		fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'x');
+		const isRegularFile = createRepoRegularFileCheck(root);
+		assert.equal(isRegularFile('src/a.ts'), true);
+		assert.equal(isRegularFile('src'), false, 'a directory is not a regular file');
+		assert.equal(isRegularFile('src/missing.ts'), false);
+		assert.equal(isRegularFile('../outside.ts'), false);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('describeNoPromotionCandidates does not call a stale-only store "all documented"', () => {
+	const staleOnly = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [memory({ id: '1', citations: ['src/deleted.ts:1'] }), memory({ id: '2', subject: 'b', citations: ['src/gone.ts:2'] })],
+	}, { fileExists: () => false });
+	assert.equal(staleOnly.promotionGroups.length, 0);
+	const reason = describeNoPromotionCandidates(staleOnly);
+	assert.ok(!reason.includes('every stored memory already cites'), reason);
+	assert.match(reason, /2 cite only files that no longer exist/);
+	assert.match(renderPromotionMarkdown(staleOnly), /2 cite only files that no longer exist/);
+
+	const mixed = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', citations: ['AGENTS.md:1'] }),
+			memory({ id: '2', subject: 'told', citations: ['User input: tabs'] }),
+		],
+	}, alwaysExists);
+	assert.match(describeNoPromotionCandidates(mixed), /1 already cite an instruction file, 1 have no verifiable file citation/);
+
+	const documented = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1', citations: ['AGENTS.md:1'] })] }, alwaysExists);
+	assert.equal(describeNoPromotionCandidates(documented), 'No promotion candidates: every stored memory already cites an instruction file.');
 });

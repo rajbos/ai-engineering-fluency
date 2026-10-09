@@ -88,3 +88,18 @@ test('buildPromoteOutput reports a failed read on stderr with exit code 1', () =
 	assert.deepEqual(buildPromoteOutput(failed), { stdout: '', stderr: 'Could not read o/n: HTTP 401\n', exitCode: 1 });
 	assert.equal(buildPromoteOutput(undefined).exitCode, 0);
 });
+
+test('buildPromoteOutput never suggests a target the local probe rejected', () => {
+	const output = buildPromoteOutput(promoteAnalysis(
+		{ fileExists: () => true, promotionTargetStatus: p => (p === 'AGENTS.md' ? 'unsafe' : 'exists') },
+		'/home/dev/repo',
+	));
+	assert.match(output.stdout, /Suggested target: none — AGENTS\.md is not a regular file inside this checkout/);
+	assert.ok(!output.stdout.includes('copilot-instructions'), 'must not fall back to the other candidate');
+});
+
+test('buildPromoteOutput explains a stale-only store instead of calling it documented', () => {
+	const output = buildPromoteOutput(promoteAnalysis({ fileExists: () => false, promotionTargetStatus: () => 'absent' }, '/home/dev/repo'));
+	assert.match(output.stdout, /1 cite only files that no longer exist/);
+	assert.ok(!output.stdout.includes('every stored memory already cites'));
+});

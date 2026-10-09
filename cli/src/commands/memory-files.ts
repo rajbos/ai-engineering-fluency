@@ -21,6 +21,9 @@ import {
 	isValidRepoSlug,
 	createRepoFileExists,
 	createPromotionTargetProbe,
+	createRepoRegularFileCheck,
+	describePromotionTarget,
+	describeNoPromotionCandidates,
 	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 	DEFAULT_MEMORY_LIMIT,
@@ -202,6 +205,7 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		fileExists: analyzingThisCheckout ? createRepoFileExists(root) : () => true,
 		// Same reasoning: whether AGENTS.md exists here says nothing about another repository,
 		// so no target is reported rather than a guessed one.
+		isRegularFile: analyzingThisCheckout ? createRepoRegularFileCheck(root) : undefined,
 		promotionTargetStatus: analyzingThisCheckout ? createPromotionTargetProbe(root) : undefined,
 	});
 	// Named in every output mode so it is clear which checkout the citations and the promotion
@@ -209,10 +213,20 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 	return analyzingThisCheckout ? { ...analysis, repoRoot: root } : analysis;
 }
 
-/** The promotion target as the text report names it; unknown when not checked out here. */
-function describeReportTarget(target: ServerMemoriesAnalysis['promotionTarget']): string {
-	if (!target) { return 'AGENTS.md or .github/copilot-instructions.md'; }
-	return target.exists ? target.path : `${target.path}, which does not exist yet`;
+/** The promotion section of the text report, or the shared reason there is nothing to promote. */
+function printPromotionCandidates(analysis: ServerMemoriesAnalysis): void {
+	if (analysis.promotionGroups.length === 0) {
+		process.stdout.write(`${describeNoPromotionCandidates(analysis)}\n`);
+		return;
+	}
+	// Shared with --promote, so neither ever suggests a path the target probe rejected.
+	process.stdout.write(`Top promotion candidates (suggested target: ${sanitizeForDisplay(describePromotionTarget(analysis))}):\n`);
+	for (const group of analysis.promotionGroups.slice(0, 10)) {
+		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
+		process.stdout.write(`  • ${sanitizeForDisplay(group.displaySubject)}${repeats}\n`);
+		process.stdout.write(`      ${sanitizeForDisplay(group.representativeFact)}\n`);
+	}
+	process.stdout.write('\n  Run with --promote for a Markdown block you can paste in.\n');
 }
 
 function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined): void {
@@ -261,13 +275,7 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 		return;
 	}
 
-	process.stdout.write(`Top promotion candidates (consider adding these to ${describeReportTarget(analysis.promotionTarget)}):\n`);
-	for (const group of analysis.promotionGroups.slice(0, 10)) {
-		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
-		process.stdout.write(`  • ${sanitizeForDisplay(group.displaySubject)}${repeats}\n`);
-		process.stdout.write(`      ${sanitizeForDisplay(group.representativeFact)}\n`);
-	}
-	process.stdout.write('\n  Run with --promote for a Markdown block you can paste in.\n');
+	printPromotionCandidates(analysis);
 
 	if (analysis.fullyStaleCount > 0) {
 		process.stdout.write('\nMemories whose every cited file is gone:\n');

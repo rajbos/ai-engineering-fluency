@@ -1791,6 +1791,11 @@ export interface ServerMemoriesAnalysis {
    * the rule would pick is occupied by something unsafe to edit (e.g. an escaping symlink).
    */
   promotionTarget?: ServerMemoryPromotionTarget;
+  /**
+   * The candidate the target rule would have picked but rejected as unsafe (e.g. an escaping
+   * symlink at `AGENTS.md`). Set only when {@link promotionTarget} is absent for that reason.
+   */
+  promotionTargetBlockedPath?: string;
   /** Total memories sitting inside a promotion group. */
   promotionCandidateCount: number;
   /** Promotion groups with more than one member, i.e. facts re-learned at least twice. */

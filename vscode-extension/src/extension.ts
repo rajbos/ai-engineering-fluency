@@ -144,6 +144,7 @@ import {
   toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
   createRepoFileExists as _createRepoFileExists,
   createPromotionTargetProbe as _createPromotionTargetProbe,
+  createRepoRegularFileCheck as _createRepoRegularFileCheck,
 } from '../../src/copilotServerMemories';
 import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
@@ -7186,6 +7187,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// to stay under the real root.
 				const analysis = _analyzeServerMemories(result, {
 					fileExists: _createRepoFileExists(context.repoRoot),
+					isRegularFile: _createRepoRegularFileCheck(context.repoRoot),
 					promotionTargetStatus: _createPromotionTargetProbe(context.repoRoot),
 				});
 				// The workspace can change, or the user can switch the feature off, while this
