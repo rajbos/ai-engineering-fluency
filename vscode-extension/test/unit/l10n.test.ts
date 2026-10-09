@@ -91,15 +91,31 @@ test('l10n: customization files table controls resolve in English and zh-cn', ()
 		['usage.customization.column.interactions', 'Interactions', '交互'],
 		['usage.customization.aria.table', 'Copilot customization files by workspace', '按工作区列出的 Copilot 自定义文件'],
 		['usage.customization.filter.noCustomizationOnly', 'Only workspaces without customization files', '仅显示没有自定义文件的工作区'],
+		['usage.customization.status.fresh', "Present and fresh", "存在且最新"],
+		['usage.customization.status.stale', "Present but stale", "存在但已过时"],
+		['usage.customization.status.missing', "Missing", "缺失"],
+		['usage.customization.status.unknown', "Status unknown", "状态未知"],
+		['usage.customization.badge.noCustomization', "No customization files", "没有自定义文件"],
+		['usage.customization.legend.fresh', "= Present & Fresh", "= 存在且最新"],
+		['usage.customization.legend.stale', "= Present but Stale", "= 存在但已过时"],
+		['usage.customization.legend.missing', "= Missing", "= 缺失"],
+		['usage.customization.title', "Copilot Customization Files", "Copilot 自定义文件"],
+		['usage.customization.emptySubtitle', "Showing workspace customization status for active workspaces", "显示活跃工作区的自定义状态"],
+		['usage.customization.empty', "No workspaces with customization files detected in the last 30 days.", "过去 30 天内未检测到包含自定义文件的工作区。"],
+		['usage.customization.summary.allGood', "All workspaces have up-to-date customizations.", "所有工作区的自定义文件均为最新。"],
 	];
 	for (const [key, english] of translations) {
 		assert.equal(t(key), english);
 	}
+	assert.equal(t('usage.customization.summary', 26), 'Showing 26 workspace(s) with Copilot activity in the last 30 days.');
+	assert.equal(t('usage.customization.summary.issues', 6), '6 workspace(s) have no customization files.');
 	mock.setLanguage('zh-cn');
 	try {
 		for (const [key, , chinese] of translations) {
 			assert.equal(t(key), chinese);
 		}
+		assert.equal(t('usage.customization.summary', 26), '显示过去 30 天内有 Copilot 活动的 26 个工作区。');
+		assert.equal(t('usage.customization.summary.issues', 6), '6 个工作区没有自定义文件。');
 	} finally {
 		mock.setLanguage('en');
 	}

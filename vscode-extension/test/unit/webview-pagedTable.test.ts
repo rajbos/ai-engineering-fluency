@@ -200,3 +200,33 @@ test('pagedTable: preserves control focus and announces sorted and paged updates
 	assert.equal(replacement.querySelector('[data-paged-direction="previous"]')?.hasAttribute('disabled'), true);
 	dom.window.close();
 });
+
+test('pagedTable: icon-only headers expose headerTitle as the accessible name, tooltip and announcement', () => {
+	initializeWebviewLocalization({});
+	const tableId = 'test-icon-header';
+	const iconColumns: PagedTableColumn<Row>[] = [
+		...columns,
+		{ id: 'agents', label: '🤖', headerTitle: 'Agents', align: 'center', sortValue: row => row.count, render: row => String(row.count) },
+		{ id: 'plain', label: '📄', headerTitle: 'Instructions', sortable: false, sortValue: () => null, render: () => '' },
+	];
+	const render = (): string => renderPagedTable({
+		tableId,
+		ariaLabel: 'icons',
+		rows: rows(3),
+		columns: iconColumns,
+		initialSortColumn: 'name',
+		initialSortDirection: 'asc',
+		emptyMessage: 'Empty',
+	});
+	let html = render();
+	assert.match(html, /data-paged-sort="agents" title="Sort by Agents" aria-label="Agents"/);
+	assert.match(html, /<th scope="col" title="Instructions"/);
+	assert.match(html, /text-align:center;">3<\/td>/);
+	setPagedTableSort(tableId, 'agents');
+	html = render();
+	const dom = new JSDOM(`<div id="host">${html}</div>`);
+	const root = dom.window.document.getElementById(`paged-table-root-${tableId}`);
+	assert.ok(root);
+	assert.equal(getPagedTableAnnouncement(root, true), 'Agents: Sorted ascending');
+	dom.window.close();
+});

@@ -1,7 +1,7 @@
 import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../../src/types';
 import { setHtml } from '../shared/domUtils';
 import { escapeHtml } from '../shared/formatUtils';
-import { localize } from '../shared/localization';
+import { localize, localizeFormat } from '../shared/localization';
 import {
 	getPagedTableAnnouncement,
 	getPagedTableFocusTarget,
@@ -38,10 +38,10 @@ export function customizationStatusRank(status: string | undefined): number | nu
 }
 
 function statusLabel(status: string): string {
-	if (status === '✅') { return 'Present and fresh'; }
-	if (status === '⚠️') { return 'Present but stale'; }
-	if (status === '❌') { return 'Missing'; }
-	return 'Status unknown';
+	if (status === '✅') { return localize('usage.customization.status.fresh'); }
+	if (status === '⚠️') { return localize('usage.customization.status.stale'); }
+	if (status === '❌') { return localize('usage.customization.status.missing'); }
+	return localize('usage.customization.status.unknown');
 }
 
 export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): PagedTableColumn<WorkspaceCustomizationRow>[] {
@@ -63,7 +63,7 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 			sortValue: row => row.workspaceName,
 			render: row => {
 				const badge = hasNoCustomization(row)
-					? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>`
+					? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', localize('usage.customization.badge.noCustomization'))}</span>`
 					: '';
 				const title = row.workspacePath || row.workspaceName;
 				return { html: `<span class="customization-workspace-name" title="${escapeHtml(title)}">${escapeHtml(row.workspaceName)}</span>${badge}` };
@@ -112,11 +112,11 @@ function buildLegendHtml(matrix: WorkspaceCustomizationMatrix): string {
 					`).join('')}
 				</div>
 				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.legend.fresh'))}</span>
 					<span style="color: var(--text-muted);">•</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.status.stale'))} ${escapeHtml(localize('usage.customization.legend.stale'))}</span>
 					<span style="color: var(--text-muted);">•</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌', localize('usage.customization.status.missing'))} ${escapeHtml(localize('usage.customization.legend.missing'))}</span>
 				</div>
 			</div>`;
 }
@@ -126,9 +126,9 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 	if (!currentMatrix) {
 		return `
 			<div class="section">
-				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
-				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
-				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
+				<div class="section-title"><span>🛠️</span><span>${escapeHtml(localize('usage.customization.title'))}</span></div>
+				<div class="section-subtitle">${escapeHtml(localize('usage.customization.emptySubtitle'))}</div>
+				<div style="color: var(--text-muted); padding:12px;">${escapeHtml(localize('usage.customization.empty'))}</div>
 			</div>`;
 	}
 	const state = getPagedTableState(CUSTOMIZATION_TABLE_ID, 'interactions', 'desc', { [CUSTOMIZATION_FILTER_NONE_ONLY]: false });
@@ -142,13 +142,13 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 	return `
 		<div id="${SECTION_ID}" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-				🛠️ Copilot Customization Files
+				🛠️ ${escapeHtml(localize('usage.customization.title'))}
 			</div>
 			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-				Showing ${currentMatrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
+				${escapeHtml(localizeFormat('usage.customization.summary', currentMatrix.totalWorkspaces))}
 				${currentMatrix.workspacesWithIssues > 0
-					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${currentMatrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
+					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${escapeHtml(localizeFormat('usage.customization.summary.issues', currentMatrix.workspacesWithIssues))}</span>`
+					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} ${escapeHtml(localize('usage.customization.summary.allGood'))}</span>`}
 			</div>
 			${filterToggle}
 			<span id="customization-table-status" class="paged-table-status" role="status" aria-live="polite" aria-atomic="true"></span>

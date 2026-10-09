@@ -145,7 +145,7 @@ export function getPagedTableAnnouncement(root: HTMLElement, sorted: boolean): s
 		const header = root.querySelector<HTMLTableCellElement>('th[aria-sort="ascending"], th[aria-sort="descending"]');
 		const button = header?.querySelector<HTMLButtonElement>('.paged-table-sort');
 		if (button) {
-			const label = (button.textContent ?? '').replace(/\s*[↑↓]\s*$/, '').trim();
+			const label = button.getAttribute('aria-label')?.trim() || (button.textContent ?? '').replace(/\s*[↑↓]\s*$/, '').trim();
 			return localizeFormat('usage.pagedTable.announcement.sort', label, button.title);
 		}
 	}
