@@ -30,7 +30,7 @@ import { getModelUsageFromSession } from '../../../src/usageAnalysis';
 import tokenEstimatorsData from '../../../src/tokenEstimators.json';
 import modelPricingData from '../../../src/modelPricing.json';
 
-import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, processSessionFile } from '../helpers';
+import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, processSessionFile, processSessionFileForViews } from '../helpers';
 import { aggregateIntoPeriod, buildChartPayload, buildEfficiencyPayload, createEmptyChartPayload, createEmptyPeriodStats } from '../analysis';
 import { disableCache } from '../cliCache';
 
@@ -376,9 +376,17 @@ test('CLI daily stats carry task category and lines of code into the chart paylo
 	assert.equal(testing.data.reduce((a, b) => a + b, 0), 1000);
 });
 
-test('CLI session parse attributes a task category that reaches the daily stats', async t => {
-	const data = await processSessionFile(mockAutoSession(t, 'jsonl'));
-	assert.ok(data?.taskCategory, 'processSessionFile must attribute a task category');
+test('CLI view parse attributes a task category; the base parse stays lean', async t => {
+	// The usage-analysis pass behind these attributes is only for the Chart and Efficiency
+	// payloads, so token-only commands must not pay for it on every cold session.
+	const lean = await processSessionFile(mockAutoSession(t, 'jsonl'));
+	assert.ok(lean);
+	assert.equal(lean.taskCategory, undefined, 'processSessionFile must not run the usage analysis');
+	assert.equal(lean.viewAttributesResolved, undefined);
+	t.mock.restoreAll();
+	const data = await processSessionFileForViews(mockAutoSession(t, 'jsonl'));
+	assert.ok(data?.taskCategory, 'processSessionFileForViews must attribute a task category');
+	assert.equal(data.viewAttributesResolved, true);
 	t.mock.restoreAll();
 	const days = await calculateDailyStats([mockAutoSession(t, 'jsonl')]);
 	assert.equal(days.length, 2);

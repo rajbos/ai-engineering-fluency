@@ -241,8 +241,9 @@ body {
 /* Controls the desktop app cannot act on yet. They are rendered by the shared
    webview bundles, so the only host-side way to avoid a dead control is to hide
    it. Remove a selector here when its message gets a handler in registerIpcHandlers. */
-/* Efficiency: the Value tab's "load repository PRs" link (needs GitHub sign-in). */
-#btn-open-repo-prs,
+/* Efficiency: the Value tab's "Connect GitHub and open Repository PRs" hint and its
+   button — the whole hint, since this host has no GitHub sign-in or PR loader. */
+.value-hint,
 /* Diagnostics: formatted-file viewer, editor-path reporting, GitHub sign-in,
    backend/team-server setup, VS Code settings, folder analysis, cache reset,
    social sharing. */

@@ -61,6 +61,8 @@ export interface SessionData {
 	 * counters, active duration, apply usage, skill calls). Kept slim because it is cached.
 	 */
 	usageAnalysis?: EfficiencySessionAnalysis;
+	/** Set once the view attributes above were derived (see processSessionFileForViews in helpers.ts). */
+	viewAttributesResolved?: true;
 }
 
 // ── Billing group helpers ────────────────────────────────────────────────────────────────────

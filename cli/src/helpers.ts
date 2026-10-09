@@ -314,15 +314,14 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
 
 /**
  * The per-session fields the Chart and Efficiency views split by (task category, lines of code,
- * efficiency signals), derived through the same shared helpers the extension's session analyzer uses. Best-effort: a
- * failed analysis leaves them out rather than dropping the session.
+ * efficiency signals), derived through the same shared helpers the extension's session analyzer uses.
+ * Best-effort: a failed analysis leaves them out rather than dropping the session.
  */
-async function sessionDailyAttributes(filePath: string, content?: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'>> {
+async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'>> {
 	try {
 		const analysis = await analyzeSessionUsage(
 			{ warn, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
 			filePath,
-			content,
 		);
 		return {
 			...resolveSessionTaskAttribution(analysis),
@@ -337,6 +336,28 @@ async function sessionDailyAttributes(filePath: string, content?: string): Promi
 	} catch {
 		return {};
 	}
+}
+
+/**
+ * {@link processSessionFile} plus the view attributes (task category, lines of code, efficiency
+ * signals) the Chart and Efficiency payloads need.
+ *
+ * The attributes cost a full usage-analysis pass, so they are added lazily here rather than in
+ * processSessionFile(): token-only commands (`usage`, `environmental`, the prompt segment) keep
+ * the lean parse. The enriched entry is written back to the session cache, so each session is
+ * analyzed at most once per file version.
+ */
+export async function processSessionFileForViews(filePath: string, verbose = false): Promise<SessionData | null> {
+	const data = await processSessionFile(filePath, verbose);
+	if (!data || data.viewAttributesResolved) { return data; }
+	const enriched: SessionData = { ...data, ...(await sessionViewAttributes(filePath)), viewAttributesResolved: true };
+	try {
+		const stats = await statSessionFile(filePath);
+		setCached(filePath, stats.mtimeMs, stats.size, enriched);
+	} catch {
+		// Not cacheable (file vanished): still return the enriched data for this run.
+	}
+	return enriched;
 }
 
 /**
@@ -361,7 +382,6 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 				eco.getModelUsage(filePath),
 			]);
 			const mtimeDateKey = toLocalDayKey(stats.mtime);
-			const dailyAttributes = await sessionDailyAttributes(filePath);
 			const ecoResult: SessionData = {
 				file: filePath,
 				tokens: tokenResult.actualTokens > 0 ? tokenResult.actualTokens : tokenResult.tokens,
@@ -372,7 +392,6 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 				lastModified: stats.mtime,
 				editorSource: getEditorSourceFromPath(filePath),
 				dailyFractions: (await eco.getDailyFractions?.(filePath)) ?? { [mtimeDateKey]: 1.0 },
-				...dailyAttributes,
 			};
 			setCached(filePath, stats.mtimeMs, stats.size, ecoResult);
 			return ecoResult;
@@ -493,7 +512,6 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 			lastModified: stats.mtime,
 			editorSource: getEditorSourceFromPath(filePath),
 			dailyFractions,
-			...(await sessionDailyAttributes(filePath, content)),
 		};
 		setCached(filePath, stats.mtimeMs, stats.size, sessionData);
 		return sessionData;
@@ -816,7 +834,7 @@ export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, '
  */
 export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<DailyTokenStats[]> {
 	const dailyStatsMap = new Map<string, DailyTokenStats>();
-	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFile(file, verbose));
+	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose));
 	for (const data of sessionResults) {
 		if (!data || data.tokens === 0 || data.interactions === 0) { continue; }
 		addSessionToDailyStats(dailyStatsMap, {
@@ -846,13 +864,13 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 /**
  * Per-session inputs for the Efficiency view's behaviour trends over the trailing
  * `weeksBack` weeks — the Node-side counterpart of the extension's
- * collectEfficiencySessionInputs(). Reads the cached session parse, so after a stats
- * walk it does not re-parse files.
+ * collectEfficiencySessionInputs(). Reads the cached, enriched session parse, so after the
+ * daily-stats walk it does not re-analyze files.
  */
 export async function calculateEfficiencySessionInputs(sessionFiles: string[], weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<EfficiencySessionInput[]> {
 	const now = new Date();
 	const cutoffKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7));
-	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFile(file));
+	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file));
 	const inputs: EfficiencySessionInput[] = [];
 	for (const data of sessionResults) {
 		if (!data || data.interactions === 0) { continue; }
