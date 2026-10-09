@@ -152,6 +152,9 @@ function safeText(text) {
 }
 
 function formatPercent(value) {
+  // normalizeComparison always yields a number; this keeps a caller that
+  // skips it from failing the whole comment on a missing value.
+  if (!Number.isFinite(value)) return '—';
   if (value === 0) return '0%';
   if (value < 0.01) return '<0.01%';
   return `${value.toFixed(2)}%`;
@@ -285,6 +288,7 @@ const image = (f) => `![${f.alt}](${f.file})`;
  */
 function renderImages(lines, shown, plan, titles) {
   const files = (c) => plan.inline.get(`${key(c)}.${c.theme}`);
+  if (shown.length === 0) return;
   const cells = shown.map((c) => {
     const lead = files(c).find((f) => f.kind === 'Diff') || files(c)[0];
     const note = c.status === 'changed' ? `${formatPercent(c.changedPercent)} changed` : c.status;

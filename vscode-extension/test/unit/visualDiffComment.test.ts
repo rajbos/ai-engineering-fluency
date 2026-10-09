@@ -200,7 +200,9 @@ test('renderBody shows only the diff inline and folds before/after into a closed
 		const fold = body.indexOf('<details><summary>Before and after');
 		assert.ok(fold > 0, 'before/after sit in a collapsed section');
 		assert.ok(!body.includes('<details open>'), 'nothing large is expanded by default');
-		const diffAt = body.indexOf(`](${path.posix.join(root, 'diff', 'usage--tools.dark.diff.png')})`);
+		const diff = plan.attachments.find((a) => a.kind === 'Diff');
+		assert.ok(diff, 'the plan attaches a diff');
+		const diffAt = body.indexOf(`](${diff.file})`);
 		assert.ok(diffAt > 0 && diffAt < fold, 'the diff is the inline image');
 		assert.ok(body.indexOf('![Before:') > fold && body.indexOf('![After:') > fold, 'before and after only appear inside the fold');
 		for (const a of plan.attachments) {
@@ -209,6 +211,24 @@ test('renderBody shows only the diff inline and folds before/after into a closed
 	} finally {
 		cleanup();
 	}
+});
+
+test('renderBody survives a changed row with no pixel figures', () => {
+	const row: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'changed' };
+	const files = ['Before', 'After', 'Diff'].map((kind) => ({ kind, file: `visual-output/x/${kind}.png`, alt: kind }));
+	const plan: Plan = { attachments: files, inline: new Map([['usage.dark', files]]) };
+	const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+	const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+	assert.ok(body.includes('— changed'), 'a missing percentage renders as a dash, not a crash');
+});
+
+test('renderBody emits no image grid when no row has inline images', () => {
+	const row: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'changed', changedPercent: 1, changedPixels: 10 };
+	const stray = [{ kind: 'Diff', file: 'visual-output/diff/other.png', alt: 'Diff' }];
+	const plan: Plan = { attachments: stray, inline: new Map([['other.dark', stray]]) };
+	const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+	const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+	assert.ok(!body.includes('![') && !/^\|\s*\|$/m.test(body), 'no empty or zero-column table');
 });
 
 test('renderBody reports an all-clear without a table when nothing changed', () => {
