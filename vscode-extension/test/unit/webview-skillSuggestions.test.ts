@@ -3,10 +3,11 @@ import * as assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
-import { setPagedTablePage } from '../../src/webview/usage/pagedTable';
 import {
 	SKILL_SUGGESTIONS_LIST_ID,
 	SKILL_SUGGESTIONS_PAGE_SIZE,
+	setSkillSessionsPage,
+	setSkillSuggestionsPage,
 	buildSkillSuggestionsSectionHtml,
 	getSkillSuggestionsPage,
 	isRepositoryOpen,
@@ -50,7 +51,7 @@ function render(report: RepeatedTaskReport | null): Document {
 }
 
 function resetPages(): void {
-	setPagedTablePage(SKILL_SUGGESTIONS_LIST_ID, 1);
+	setSkillSuggestionsPage(1);
 }
 
 test('skillSuggestions: no report or no clusters renders nothing', () => {
@@ -79,7 +80,7 @@ for (const [count, expectedCards, pagerShown] of [[1, 1, false], [5, 5, false], 
 test('skillSuggestions: page slicing keeps global cluster indexes and the last page is partial', () => {
 	resetPages();
 	const clusters = makeReport(12).clusters;
-	setPagedTablePage(SKILL_SUGGESTIONS_LIST_ID, 3);
+	setSkillSuggestionsPage(3);
 	const page = getSkillSuggestionsPage(clusters);
 	assert.equal(SKILL_SUGGESTIONS_PAGE_SIZE, 5);
 	assert.deepEqual([page.page, page.pageCount, page.firstRow, page.lastRow], [3, 3, 11, 12]);
@@ -91,7 +92,7 @@ test('skillSuggestions: page slicing keeps global cluster indexes and the last p
 
 test('skillSuggestions: a stale page is clamped when the list shrinks after a refresh', () => {
 	resetPages();
-	setPagedTablePage(SKILL_SUGGESTIONS_LIST_ID, 3);
+	setSkillSuggestionsPage(3);
 	const page = getSkillSuggestionsPage(makeReport(6).clusters);
 	assert.equal(page.page, 2);
 	assert.deepEqual(page.rows.map(c => c.representativePrompt), ['task number 5']);
@@ -111,7 +112,9 @@ test('skillSuggestions: sessions table has one open button per session with the 
 	assert.equal(buttons[0].getAttribute('data-file'), 'C:\\logs\\"evil"<b>.jsonl');
 	assert.equal(buttons[1].getAttribute('data-file'), 'C:\\logs\\cluster-0-session-1.jsonl');
 	const headers = Array.from(doc.querySelectorAll('.paged-table th')).map(th => th.textContent!.trim());
-	assert.deepEqual(headers, ['Session', 'Date', 'Repository', 'Actions']);
+	assert.deepEqual(headers, ['Session', 'Date ↓', 'Repository', 'Actions']);
+	const dateHeader = Array.from(doc.querySelectorAll('.paged-table th')).find(th => th.textContent!.includes('Date'))!;
+	assert.equal(dateHeader.getAttribute('aria-sort'), 'descending', 'the applied sort is exposed on the header');
 	assert.match(doc.querySelector('.paged-table tbody tr')!.textContent!, /<img src=x onerror=alert\(1\)>/);
 });
 
@@ -214,4 +217,64 @@ test('skillSuggestions: a cluster with no repository is labelled user-level with
 	const text = doc.querySelector('.skill-suggestion-card')!.textContent!;
 	assert.match(text, /user-level skill \(not tied to exactly one repository\)/);
 	assert.doesNotMatch(text, /several repositories/);
+});
+
+test('skillSuggestions: page setters work before anything has rendered (no hidden state dependency)', () => {
+	// A fresh list id would have no state yet; the module setters create it.
+	setSkillSuggestionsPage(2);
+	assert.equal(getSkillSuggestionsPage(makeReport(12).clusters).page, 2);
+	setSkillSuggestionsPage(1);
+	setSkillSessionsPage(41, 2);
+	const doc = render({ minClusterSize: 2, sessionsScanned: 12, clusters: Array.from({ length: 42 }, (_, i) => makeCluster(i, i === 41 ? 12 : 2)) });
+	assert.equal(doc.querySelector('.skill-suggestion-card'), doc.querySelector('.skill-suggestion-card[data-cluster-index="0"]'));
+	setSkillSuggestionsPage(9);
+	const lastPage = render({ minClusterSize: 2, sessionsScanned: 12, clusters: Array.from({ length: 42 }, (_, i) => makeCluster(i, i === 41 ? 12 : 2)) });
+	const buttons = lastPage.querySelectorAll('.skill-suggestion-card[data-cluster-index="41"] .skill-suggestion-open-session');
+	assert.equal(buttons.length, 2, 'sessions table of cluster 41 opened on its page 2 (sessions 11–12)');
+	resetPages();
+});
+
+test('wireSkillSuggestions: sorting a sessions table by date toggles order and is announced', () => {
+	resetPages();
+	const report = makeReport(1);
+	const dom = new JSDOM(`<div id="root">${buildSkillSuggestionsSectionHtml(report)}</div>`);
+	const globals = globalThis as unknown as Record<string, unknown>;
+	const previous = { document: globals.document, Element: globals.Element, HTMLElement: globals.HTMLElement };
+	Object.assign(globals, { document: dom.window.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement });
+	try {
+		wireSkillSuggestions({ getReport: () => report, getWorkspacePaths: () => [], postMessage: () => undefined });
+		const doc = dom.window.document;
+		const files = () => Array.from(doc.querySelectorAll('.skill-suggestion-open-session') as NodeListOf<Element>).map(b => b.getAttribute('data-file')!.split(/[\\/]/).pop());
+		assert.deepEqual(files(), ['cluster-0-session-0.jsonl', 'cluster-0-session-1.jsonl']);
+		(doc.querySelector('[data-paged-sort="date"]') as HTMLElement).click();
+		assert.deepEqual(files(), ['cluster-0-session-1.jsonl', 'cluster-0-session-0.jsonl'], 'oldest first after toggling');
+		assert.match(doc.querySelector('.skill-suggestions-status')!.textContent!, /Sorted ascending/);
+		(doc.querySelector('[data-paged-sort="date"]') as HTMLElement).click(); // restore the default for other tests
+		assert.deepEqual(files(), ['cluster-0-session-0.jsonl', 'cluster-0-session-1.jsonl']);
+	} finally {
+		Object.assign(globals, previous);
+	}
+});
+
+test('wireSkillSuggestions: Copy prompt without a clipboard API does not throw', () => {
+	resetPages();
+	const report = makeReport(1);
+	const dom = new JSDOM(`<div id="root">${buildSkillSuggestionsSectionHtml(report)}</div>`);
+	const globals = globalThis as unknown as Record<string, unknown>;
+	const previous = { document: globals.document, Element: globals.Element, HTMLElement: globals.HTMLElement, navigator: globals.navigator };
+	Object.assign(globals, { document: dom.window.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement });
+	Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true, writable: true });
+	try {
+		const errors: unknown[] = [];
+		dom.window.addEventListener('error', (e: { error?: unknown }) => errors.push(e.error));
+		wireSkillSuggestions({ getReport: () => report, getWorkspacePaths: () => [], postMessage: () => undefined });
+		const button = dom.window.document.querySelector('button.skill-suggestion-copy') as HTMLElement;
+		const label = button.textContent;
+		button.click();
+		assert.deepEqual(errors, []);
+		assert.equal(button.textContent, label, 'label unchanged when nothing was copied');
+	} finally {
+		Object.defineProperty(globalThis, 'navigator', { value: previous.navigator, configurable: true, writable: true });
+		Object.assign(globals, { document: previous.document, Element: previous.Element, HTMLElement: previous.HTMLElement });
+	}
 });
