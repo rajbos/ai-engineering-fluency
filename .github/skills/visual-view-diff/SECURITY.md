@@ -72,7 +72,7 @@ render processes run concurrently; each is awaited before the worktree is remove
 - View and state ids must match a strict allowlist, so ids cannot carry path separators
   into screenshot or temp file names (`lib/config.js` `ID_PATTERN`). The fixture file name
   is reduced with `path.basename` (render-views.js line 114).
-- Embedded JSON has every `<` escaped as `<`, so a payload cannot close the
+- Embedded JSON has every `<` escaped as `\u003c`, so a payload cannot close the
   script tag (`lib/harness.js` lines 74-75 and 83, used by the inline scripts at
   lines 162-164).
 - The page gets a stub `acquireVsCodeApi` that only records messages in memory; nothing is
