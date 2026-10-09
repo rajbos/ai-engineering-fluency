@@ -35,13 +35,21 @@ export interface SkillSuggestionsPayload {
 export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undefined, includePrompts: boolean): SkillSuggestionsPayload {
 	if (!report) { return { promptsIncluded: includePrompts, repeatedTasks: null }; }
 	if (includePrompts) { return { promptsIncluded: true, repeatedTasks: report }; }
+	// Allowlist: only fields known not to carry prompt text are copied, so a
+	// prompt-derived field added to the report later stays out by default.
 	return {
 		promptsIncluded: false,
 		repeatedTasks: {
-			...report,
-			clusters: report.clusters.map(({ representativePrompt: _prompt, sharedKeywords: _keywords, sessions, ...rest }) => ({
-				...rest,
-				sessions: sessions.map(({ title: _title, ...session }) => session),
+			minClusterSize: report.minClusterSize,
+			sessionsScanned: report.sessionsScanned,
+			clusters: report.clusters.map(cluster => ({
+				sessionCount: cluster.sessionCount,
+				repositories: cluster.repositories,
+				sessions: cluster.sessions.map(session => ({
+					file: session.file,
+					lastInteraction: session.lastInteraction,
+					repository: session.repository,
+				})),
 			})),
 		},
 	};

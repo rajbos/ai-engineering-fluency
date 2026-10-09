@@ -604,15 +604,20 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			const stats = await statSessionFile(file);
 			const modified = stats.mtime;
 
-			if (modified < cutoffStart) {
+			const inPeriodWindow = modified >= cutoffStart;
+			// A DB-backed session's file mtime can lag its real activity (writes still in
+			// the SQLite WAL), so the repeated-task report asks the adapter before skipping.
+			if (!inPeriodWindow && !(options.includeRepeatedTasks
+				&& isActiveSince(modified, await getSessionLastActivity(file), cutoffStart))) {
 				continue;
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
-			if (options.includeRepeatedTasks && analysis.firstUserPrompt) {
-				const source = await toRepeatedTaskSource(file, analysis.firstUserPrompt, stats.mtimeMs);
-				if (repeatedTaskActivityMs(source) >= cutoffStart.getTime()) { repeatedTaskSources.push(source); }
+			if (options.includeRepeatedTasks) {
+				await addRepeatedTaskSource(repeatedTaskSources, file, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
 			}
+			// Period stats keep using the file mtime, as before.
+			if (!inPeriodWindow) { continue; }
 			let sessionSummary: TodaySessionSummary | undefined;
 			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
 			if (data && data.interactions > 0) {
@@ -696,6 +701,23 @@ async function toRepeatedTaskSource(file: string, firstUserPrompt: string, mtime
 		mtime: mtimeMs,
 		repository: meta?.repository ?? null,
 	};
+}
+
+/** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
+async function addRepeatedTaskSource(
+	sources: RepeatedTaskSessionSource[], file: string, firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
+): Promise<void> {
+	if (!firstUserPrompt) { return; }
+	const source = await toRepeatedTaskSource(file, firstUserPrompt, mtimeMs);
+	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
+}
+
+/**
+ * Whether a session was active on or after `cutoff`: by its file mtime, or by the
+ * adapter's per-session last activity when the file mtime is stale.
+ */
+export function isActiveSince(fileMtime: Date, sessionLastActivity: Date | null, cutoff: Date): boolean {
+	return fileMtime >= cutoff || (sessionLastActivity !== null && sessionLastActivity >= cutoff);
 }
 
 /**

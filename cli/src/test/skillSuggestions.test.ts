@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { calculateUsageAnalysisStats, repeatedTaskActivityMs } from '../helpers';
+import { calculateUsageAnalysisStats, isActiveSince, repeatedTaskActivityMs } from '../helpers';
 import { disableCache } from '../cliCache';
 import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skill-suggestions';
 import type { RepeatedTaskReport } from '../../../src/types';
@@ -80,6 +80,15 @@ test("repeatedTaskActivityMs uses each session's own last interaction, not the s
 	assert.equal(repeatedTaskActivityMs({ lastInteraction: 'not a date', mtime }), mtime);
 });
 
+test('isActiveSince falls back to the session’s last activity when the file mtime is stale', () => {
+	const cutoff = new Date('2026-09-01T00:00:00Z');
+	const staleDbMtime = new Date('2026-08-01T00:00:00Z'); // newer writes still in the WAL
+	assert.equal(isActiveSince(staleDbMtime, new Date('2026-10-08T00:00:00Z'), cutoff), true);
+	assert.equal(isActiveSince(staleDbMtime, new Date('2026-08-15T00:00:00Z'), cutoff), false);
+	assert.equal(isActiveSince(staleDbMtime, null, cutoff), false);
+	assert.equal(isActiveSince(new Date('2026-09-02T00:00:00Z'), null, cutoff), true);
+});
+
 const REPORT: RepeatedTaskReport = {
 	minClusterSize: 2,
 	sessionsScanned: 5,
@@ -110,6 +119,13 @@ test('skill-suggestions JSON leaves prompts, keywords and titles out by default'
 	assert.deepEqual(Object.keys(cluster.sessions[0]).sort(), ['file', 'lastInteraction', 'repository']);
 	assert.equal(cluster.sessionCount, 2);
 	assert.equal(payload.repeatedTasks!.sessionsScanned, 5);
+	// Allowlisted: an unknown (possibly prompt-derived) field added later is not copied.
+	const withExtra = {
+		...REPORT,
+		clusters: REPORT.clusters.map(c => ({ ...c, futurePromptField: 'secret prompt words',
+			sessions: c.sessions.map(s => ({ ...s, futureTitleField: 'secret title words' })) })),
+	} as RepeatedTaskReport;
+	assert.ok(!JSON.stringify(createSkillSuggestionsPayload(withExtra, false)).includes('secret'));
 	// The input report is not mutated.
 	assert.equal(REPORT.clusters[0].representativePrompt, 'run the tests and fix the failures');
 	assert.equal(REPORT.clusters[0].sessions[0].title, 'Fix failing tests');
