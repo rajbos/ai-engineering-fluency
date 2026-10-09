@@ -4,7 +4,7 @@
  * asked, and `skill-suggestions --json` leaves prompt text out unless opted in.
  * Session files are synthetic, written to a temporary directory.
  */
-import test from 'node:test';
+import test, { before } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -15,7 +15,8 @@ import { disableCache } from '../cliCache';
 import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skill-suggestions';
 import type { RepeatedTaskReport } from '../../../src/types';
 
-disableCache();
+// node --test runs each test file in its own process, so this only affects this file.
+before(() => disableCache());
 
 /** A minimal VS Code Chat delta-format session whose only request is `prompt`. */
 function deltaSession(id: string, prompt: string): string {

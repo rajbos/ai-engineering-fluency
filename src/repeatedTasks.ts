@@ -184,13 +184,18 @@ export function detectRepeatedTasks(inputs: RepeatedTaskInput[]): RepeatedTaskCl
 // Report building (shared by the VS Code extension and the CLI)
 // ---------------------------------------------------------------------------
 
+/** `scheme://host/...` remote URLs (not `file:`), and scp-like `user@host:path`. */
+const REMOTE_URL_PATTERN = /^(?!file:)[a-z][a-z0-9+.-]*:\/\/[^/\s]+\/|^[^\s/@:]+@[^\s/:]+:/i;
+
 /**
  * Short `owner/repo` display name for a repository remote URL
- * (`https://github.com/o/r.git`, `git@github.com:o/r`). Anything that does
- * not look like a remote URL is returned unchanged.
+ * (`https://github.com/o/r.git`, `ssh://git@host/o/r`, `git@github.com:o/r`).
+ * Anything that is not a remote URL — a bare name, `owner/repo`, a filesystem
+ * path — is returned unchanged.
  */
 export function repoDisplayName(repository: string): string {
-	const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+	if (!REMOTE_URL_PATTERN.test(repository)) { return repository; }
+	const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/);
 	return m ? m[1] : repository;
 }
 
@@ -208,9 +213,13 @@ export interface RepeatedTaskSessionSource {
 	repository?: string | null;
 }
 
-/** Map a parsed session to clustering input, or null when it has no usable prompt. */
+/**
+ * Map a parsed session to clustering input, or null when it has no usable
+ * prompt: missing, or one `normalizePromptTokens()` excludes (slash command,
+ * too short, stopwords only) and clustering would drop anyway.
+ */
 export function toRepeatedTaskInput(source: RepeatedTaskSessionSource): RepeatedTaskInput | null {
-	if (!source.firstUserPrompt) { return null; }
+	if (!source.firstUserPrompt || !normalizePromptTokens(source.firstUserPrompt)) { return null; }
 	return {
 		prompt: source.firstUserPrompt,
 		session: {

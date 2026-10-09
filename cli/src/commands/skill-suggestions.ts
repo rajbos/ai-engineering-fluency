@@ -15,26 +15,34 @@
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
-import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../src/types';
+import type { RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../src/types';
 
-/** A cluster in the JSON payload; prompt-derived text (prompt, keywords, titles) is absent unless opted in. */
-export type SkillSuggestionCluster = Omit<RepeatedTaskCluster, 'representativePrompt' | 'sharedKeywords' | 'sessions'> & {
-	representativePrompt?: string;
-	sharedKeywords?: string[];
-	sessions: RepeatedTaskSessionRef[];
-};
+/** A session in the redacted payload: no title. */
+export type RedactedSessionRef = Pick<RepeatedTaskSessionRef, 'file' | 'lastInteraction' | 'repository'>;
 
-export interface SkillSuggestionsPayload {
-	/** Whether `representativePrompt`, `sharedKeywords` and session titles are included. */
-	promptsIncluded: boolean;
-	/** Null when no cluster reached the minimum size (or no sessions were found). */
-	repeatedTasks: (Omit<RepeatedTaskReport, 'clusters'> & { clusters: SkillSuggestionCluster[] }) | null;
+/** A cluster in the redacted payload: no prompt, keywords or session titles. */
+export interface RedactedCluster {
+	sessionCount: number;
+	repositories: string[];
+	sessions: RedactedSessionRef[];
 }
+
+/** The repeated-task report as emitted without `--include-prompts`. */
+export interface RedactedRepeatedTaskReport {
+	minClusterSize: number;
+	sessionsScanned: number;
+	clusters: RedactedCluster[];
+}
+
+/** `skill-suggestions --json` output; the flag decides which report shape is present. */
+export type SkillSuggestionsPayload =
+	| { promptsIncluded: true; repeatedTasks: RepeatedTaskReport | null }
+	| { promptsIncluded: false; repeatedTasks: RedactedRepeatedTaskReport | null };
 
 /** JSON payload for `skill-suggestions --json`, with prompts, keywords and titles removed unless `includePrompts`. */
 export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undefined, includePrompts: boolean): SkillSuggestionsPayload {
-	if (!report) { return { promptsIncluded: includePrompts, repeatedTasks: null }; }
-	if (includePrompts) { return { promptsIncluded: true, repeatedTasks: report }; }
+	if (includePrompts) { return { promptsIncluded: true, repeatedTasks: report ?? null }; }
+	if (!report) { return { promptsIncluded: false, repeatedTasks: null }; }
 	// Allowlist: only fields known not to carry prompt text are copied, so a
 	// prompt-derived field added to the report later stays out by default.
 	return {
@@ -42,10 +50,10 @@ export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undef
 		repeatedTasks: {
 			minClusterSize: report.minClusterSize,
 			sessionsScanned: report.sessionsScanned,
-			clusters: report.clusters.map(cluster => ({
+			clusters: report.clusters.map((cluster): RedactedCluster => ({
 				sessionCount: cluster.sessionCount,
 				repositories: cluster.repositories,
-				sessions: cluster.sessions.map(session => ({
+				sessions: cluster.sessions.map((session): RedactedSessionRef => ({
 					file: session.file,
 					lastInteraction: session.lastInteraction,
 					repository: session.repository,

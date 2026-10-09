@@ -212,13 +212,30 @@ test('repoDisplayName: shortens remote URLs to owner/repo and keeps bare names',
     assert.equal(repoDisplayName('https://github.com/o/r'), 'o/r');
     assert.equal(repoDisplayName('git@github.com:o/r'), 'o/r');
     assert.equal(repoDisplayName('git@github.com:o/r.git'), 'o/r');
+    assert.equal(repoDisplayName('ssh://git@github.com/o/r.git'), 'o/r');
+    assert.equal(repoDisplayName('https://gitlab.example.com/group/sub/r/'), 'sub/r');
     assert.equal(repoDisplayName('my-repo'), 'my-repo');
+    assert.equal(repoDisplayName('o/r'), 'o/r');
+});
+
+test('repoDisplayName: leaves filesystem paths and other non-remote values unchanged', () => {
+    assert.equal(repoDisplayName('/Users/alice/project'), '/Users/alice/project');
+    assert.equal(repoDisplayName('C:\\code\\project'), 'C:\\code\\project');
+    assert.equal(repoDisplayName('C:/code/project'), 'C:/code/project');
+    assert.equal(repoDisplayName('file:///Users/alice/project'), 'file:///Users/alice/project');
+    assert.equal(repoDisplayName('owner/repo/extra'), 'owner/repo/extra');
 });
 
 test('toRepeatedTaskInput: skips sessions without a first prompt', () => {
     assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0 }), null);
     assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0, firstUserPrompt: '' }), null);
     assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0, firstUserPrompt: null }), null);
+});
+
+test('toRepeatedTaskInput: skips prompts clustering would drop (whitespace, stopwords, slash commands)', () => {
+    assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0, firstUserPrompt: '                    ' }), null);
+    assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0, firstUserPrompt: 'please could you then do it now' }), null);
+    assert.equal(toRepeatedTaskInput({ file: 'a', mtime: 0, firstUserPrompt: '/fix the failing tests please' }), null);
 });
 
 test('toRepeatedTaskInput: falls back to mtime for lastInteraction and maps the repository', () => {
@@ -256,6 +273,8 @@ test('buildRepeatedTaskReport: reports minClusterSize and counts only sessions w
         { file: 's2', mtime: 0, lastInteraction: '2026-08-02T10:00:00Z', firstUserPrompt: 'please run the tests and fix any failures', repository: 'https://github.com/o/r.git' },
         { file: 's3', mtime: 0, firstUserPrompt: undefined },
         { file: 's4', mtime: 0, firstUserPrompt: '' },
+        { file: 's5', mtime: 0, firstUserPrompt: 'please could you then do it now' },
+        { file: 's6', mtime: 0, firstUserPrompt: '/fix the failing tests please' },
     ]);
     assert.ok(report);
     assert.equal(report.minClusterSize, MIN_CLUSTER_SIZE);
