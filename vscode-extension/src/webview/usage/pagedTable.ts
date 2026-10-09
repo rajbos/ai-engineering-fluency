@@ -207,7 +207,7 @@ function headerTitleAttr(headerTitle: string | undefined, attribute: 'title' | '
 function renderHeaderCell<Row>(column: PagedTableColumn<Row>, state: PagedTableState, tableId: string): string {
 	const style = `padding:5px 8px; text-align:${column.align ?? 'left'}; color:var(--text-primary); font-weight:600; font-size:12px;`;
 	if (column.sortable === false) {
-		return `<th scope="col"${column.align === 'right' ? ' class="num"' : ''}${headerTitleAttr(column.headerTitle, 'title')} style="${style}">${escapeHtml(column.label)}</th>`;
+		return `<th scope="col"${column.align === 'right' ? ' class="num"' : ''}${headerTitleAttr(column.headerTitle, 'title')}${headerTitleAttr(column.headerTitle, 'aria-label')} style="${style}">${escapeHtml(column.label)}</th>`;
 	}
 	const active = state.sortColumn === column.id;
 	const direction = active ? state.sortDirection : 'none';

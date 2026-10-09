@@ -220,7 +220,7 @@ test('pagedTable: icon-only headers expose headerTitle as the accessible name, t
 	});
 	let html = render();
 	assert.match(html, /data-paged-sort="agents" title="Sort by Agents" aria-label="Agents"/);
-	assert.match(html, /<th scope="col" title="Instructions"/);
+	assert.match(html, /<th scope="col" title="Instructions" aria-label="Instructions"/);
 	assert.match(html, /text-align:center;">3<\/td>/);
 	setPagedTableSort(tableId, 'agents');
 	html = render();
