@@ -355,7 +355,7 @@ import {
   normalizeToRepoRoot as _normalizeToRepoRoot,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
-import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, type WorkspaceGroup } from '../../src/workspaceGrouping';
+import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { createNodeWorkspaceGroupingProbes as _createNodeWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
@@ -8299,13 +8299,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.resolvePendingCustomizationScans();
 		this.deduplicateWorkspacePaths(sessionCounts, interactionCounts);
 		await this.resolvePendingCustomizationScans();
+		this.mergeGroupCustomizationScans();
 	}
 
 	/**
 	 * Folds worktrees, clones, case variants and remote spellings of one repository into a single
 	 * workspace (rules and tests live in src/workspaceGrouping.ts). The count maps are rewritten
-	 * to be keyed by each group's canonical path; a canonical path that had no customization scan
-	 * of its own borrows a member's, and a new canonical path is queued for scanning.
+	 * to be keyed by each group's canonical path, and a canonical path nobody has scanned yet (a
+	 * main checkout reached through a worktree) is queued for its own customization scan.
 	 */
 	private deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
 		const paths = new Set([...sessionCounts.keys(), ...interactionCounts.keys()]);
@@ -8320,18 +8321,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 		interactionCounts.clear();
 		this._workspaceGroups = new Map();
 		for (const group of groups) {
-			const canonical = group.canonicalPath;
-			sessionCounts.set(canonical, group.sessionCount);
-			interactionCounts.set(canonical, group.interactionCount);
-			this._workspaceGroups.set(canonical, group);
-			if (!(this._customizationFilesCache.get(canonical)?.length)) {
-				const donor = group.memberPaths.find(m => (this._customizationFilesCache.get(m)?.length ?? 0) > 0);
-				if (donor) { this._customizationFilesCache.set(canonical, this._customizationFilesCache.get(donor)!); }
-			}
-			for (const member of group.memberPaths) {
-				if (member !== canonical) { this._customizationFilesCache.delete(member); }
-			}
-			this.ensureWorkspaceCustomizationCached(canonical);
+			sessionCounts.set(group.canonicalPath, group.sessionCount);
+			interactionCounts.set(group.canonicalPath, group.interactionCount);
+			this._workspaceGroups.set(group.canonicalPath, group);
+			this.ensureWorkspaceCustomizationCached(group.canonicalPath);
+		}
+	}
+
+	/**
+	 * After the scans resolve: a group's customization files are the union of its canonical
+	 * folder's and every member's (mergeGroupCustomizationFiles), so a file present in any
+	 * folder of the repository counts. Member entries are then dropped from the cache.
+	 */
+	private mergeGroupCustomizationScans(): void {
+		for (const group of this._workspaceGroups.values()) {
+			const folders = [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
+			if (folders.length < 2) { continue; }
+			const merged = _mergeGroupCustomizationFiles(folders.map(f => this._customizationFilesCache.get(f)));
+			for (const member of folders.slice(1)) { this._customizationFilesCache.delete(member); }
+			this._customizationFilesCache.set(group.canonicalPath, merged);
 		}
 	}
 

@@ -11,6 +11,7 @@ import {
 	matchWorktreeConvention,
 	repositoryIdentity,
 	workspaceBasename,
+	mergeGroupCustomizationFiles,
 	type WorkspaceUsageEntry,
 	type WorkspaceGroupingProbes,
 	type WorkspaceGitInfo,
@@ -146,6 +147,15 @@ const CORPUS: CorpusRow[] = [
 		expected: [{ name: 'acme-app', canonical: 'C:\\code\\acme-app', members: ['/home/dev/acme-app', 'C:\\code\\acme-app'] }],
 	},
 	{
+		name: 'WSL path inside a Claude desktop worktree layout joins the local checkout',
+		platform: 'win32',
+		entries: [
+			entry('C:\\code\\acme-app', 2, 2),
+			entry('/home/dev/.claude/worktrees/acme-app/goofy-wozniak-42f712', 3, 3),
+		],
+		expected: [{ name: 'acme-app', canonical: 'C:\\code\\acme-app', members: ['/home/dev/.claude/worktrees/acme-app/goofy-wozniak-42f712', 'C:\\code\\acme-app'] }],
+	},
+	{
 		name: 'branch-named worktree joined by its session git remote (Copilot Chat / CLI repository field)',
 		platform: 'win32',
 		entries: [
@@ -194,14 +204,13 @@ test('corpus invariant: after grouping no display name looks like a worktree or 
 	}
 });
 
-test('corpus invariant: every row is order-independent', () => {
+test('corpus invariant: every row gives the same groups in every input order', () => {
 	for (const row of CORPUS) {
 		const p = probes(row.platform, row.existing, row.git);
-		assert.deepEqual(
-			summarize(groupWorkspaces([...row.entries].reverse(), p)),
-			summarize(groupWorkspaces(row.entries, p)),
-			row.name,
-		);
+		const expected = summarize(groupWorkspaces(row.entries, p));
+		for (const order of permutations(row.entries)) {
+			assert.deepEqual(summarize(groupWorkspaces(order, p)), expected, row.name);
+		}
 	}
 });
 
@@ -225,16 +234,79 @@ test('a -wt / hash name pattern never merges across different remotes', () => {
 	assert.equal(groups.length, 3);
 });
 
-test('remote identity beats basename: same-named folder with a different remote joins nothing', () => {
-	const groups = groupWorkspaces([
+/** Every ordering of `items`. */
+function permutations<T>(items: T[]): T[][] {
+	if (items.length <= 1) { return [items]; }
+	return items.flatMap((item, i) => permutations([...items.slice(0, i), ...items.slice(i + 1)]).map(rest => [item, ...rest]));
+}
+
+test('remote identity beats basename: a remote-less folder between two repositories of the same name stays apart, in every order', () => {
+	const entries = [
 		entry('C:\\one\\tools', 1, 1, 'https://github.com/acme/tools'),
 		entry('C:\\two\\tools', 1, 1),
 		entry('C:\\three\\tools', 1, 1, 'https://github.com/other/tools'),
-	], probes('win32'));
-	// The remote-less folder joins the first compatible same-named group; the conflicting one stays apart.
-	assert.equal(groups.length, 2);
-	const acme = groups.find(g => g.repositoryId === 'acme/tools')!;
-	assert.deepEqual(acme.memberPaths, ['C:\\one\\tools', 'C:\\two\\tools']);
+	];
+	for (const order of permutations(entries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [['C:\\one\\tools'], ['C:\\three\\tools'], ['C:\\two\\tools']]);
+	}
+});
+
+test('ambiguous name: several remote-less same-named folders still fold together, apart from both repositories', () => {
+	const entries = [
+		entry('C:\\one\\tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('C:\\two\\tools', 1, 1),
+		entry('D:\\two\\tools', 1, 1),
+		entry('C:\\three\\tools', 1, 1, 'https://github.com/other/tools'),
+	];
+	for (const order of permutations(entries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [['C:\\one\\tools'], ['C:\\three\\tools'], ['C:\\two\\tools', 'D:\\two\\tools']]);
+	}
+});
+
+test('ambiguous stem: a sibling -wt folder with two same-named repositories to choose from joins neither, in every order', () => {
+	const entries = [
+		entry('C:\\a\\tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('C:\\b\\tools', 1, 1, 'https://github.com/other/tools'),
+		entry('C:\\a\\tools-wt', 1, 1),
+	];
+	for (const order of permutations(entries)) {
+		assert.equal(groupWorkspaces(order, probes('win32')).length, 3);
+	}
+});
+
+test('ambiguous remote path: a WSL folder named like two different local repositories joins neither, in every order', () => {
+	const entries = [
+		entry('C:\\a\\tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('C:\\b\\tools', 1, 1, 'https://github.com/other/tools'),
+		entry('/home/dev/tools', 1, 1),
+	];
+	for (const order of permutations(entries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		assert.ok(groups.some(g => g.memberPaths.length === 1 && g.memberPaths[0] === '/home/dev/tools'));
+		assert.equal(groups.length, 3);
+	}
+});
+
+test('a remote path joins the single local repository it names even when that repository has a remote', () => {
+	const groups = groupWorkspaces([entry('C:\\a\\tools', 1, 1, 'https://github.com/acme/tools'), entry('/home/dev/tools')], probes('win32'));
+	assert.equal(groups.length, 1);
+	assert.equal(groups[0].displayName, 'tools');
+});
+
+test('WSL paths in a Claude worktree layout still group by the layout (no disk access needed)', () => {
+	let probed = 0;
+	const p: WorkspaceGroupingProbes = { platform: 'win32', pathExists: () => { probed++; return false; } };
+	const groups = groupWorkspaces([
+		entry('/home/dev/.claude/worktrees/acme-app/goofy-wozniak-42f712', 1, 2),
+		entry('/home/dev/.claude/worktrees/acme-app/brave-curie-0a1b2c', 1, 3),
+	], p);
+	assert.equal(groups.length, 1);
+	assert.equal(groups[0].displayName, 'acme-app');
+	assert.deepEqual(detectArtefactWorkspaceNames(groups), []);
+	// Only local paths are probed (the anchor here is remote too).
+	assert.equal(probed, 0);
 });
 
 test('remote identity merges folders whose names share nothing', () => {
@@ -401,6 +473,33 @@ test('workspaceBasename ignores trailing separators and handles both separator s
 	assert.equal(workspaceBasename('C:\\code\\repo\\'), 'repo');
 	assert.equal(workspaceBasename('/home/dev/repo/'), 'repo');
 	assert.equal(workspaceBasename('repo'), 'repo');
+});
+
+// ── Customization files of a group ───────────────────────────────────────────
+
+function file(type: string, relativePath: string, lastModified: string | null, isStale = false) {
+	return { type, relativePath, lastModified, isStale, path: `/x/${relativePath}` };
+}
+
+test('mergeGroupCustomizationFiles keeps every type found in any member folder', () => {
+	const main = [file('instructions', '.github/copilot-instructions.md', '2026-10-01T00:00:00Z')];
+	const worktree = [file('skill', '.github/skills/a/SKILL.md', '2026-10-02T00:00:00Z'), file('agent', '.github/agents/x.agent.md', '2026-10-03T00:00:00Z')];
+	const merged = mergeGroupCustomizationFiles([main, undefined, worktree]);
+	assert.deepEqual(merged.map(f => f.type).sort(), ['agent', 'instructions', 'skill']);
+});
+
+test('mergeGroupCustomizationFiles keeps one copy of the same file: fresh over stale, then newest', () => {
+	const stale = file('instructions', '.github\\copilot-instructions.md', '2026-10-09T00:00:00Z', true);
+	const older = file('instructions', '.github/copilot-instructions.md', '2026-09-01T00:00:00Z');
+	const newer = file('instructions', '.GITHUB/copilot-instructions.md', '2026-10-01T00:00:00Z');
+	assert.deepEqual(mergeGroupCustomizationFiles([[stale], [older], [newer]]), [newer]);
+	assert.deepEqual(mergeGroupCustomizationFiles([[newer], [stale], [older]]), [newer]);
+	assert.deepEqual(mergeGroupCustomizationFiles([[stale]]), [stale], 'a stale copy is kept when it is the only one');
+});
+
+test('mergeGroupCustomizationFiles: same path under two types is two entries; nothing in, nothing out', () => {
+	assert.equal(mergeGroupCustomizationFiles([[file('a', 'f.md', null)], [file('b', 'f.md', null)]]).length, 2);
+	assert.deepEqual(mergeGroupCustomizationFiles([undefined, []]), []);
 });
 
 // ── Node probes (real temp folders, never user data) ──────────────────────────

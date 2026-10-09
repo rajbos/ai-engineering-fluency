@@ -28,7 +28,8 @@ the CLI's Customization evidence counts repositories, not folders.
    - `<home>/.claude/worktrees/<repo>/<name>` (Claude desktop app),
      `<repo>/.claude/worktrees/<name>` (Claude Code CLI) and
      `<root>/copilot-worktrees/<repo>/<name>` (Copilot app; anchored on `<root>/repos/<repo>`
-     when that checkout exists). These work for folders that are already deleted.
+     when that checkout exists). These need no disk access, so they work for folders that are
+     already deleted and for WSL / remote paths.
    - Case-only differences on Windows and macOS.
    - A WSL / SSH path seen on Windows that has the same folder name as a local checkout.
 4. **Sibling artefact folders** — `<repo>-wt`, `<repo>-<word>-wt` and `<repo>-<hex>` join the
@@ -37,13 +38,18 @@ the CLI's Customization evidence counts repositories, not folders.
 
 No rule merges two groups whose remotes say they are different repositories. A name pattern on
 its own never invents a group: `groups-dashboard-layout-85ed99` with nothing named
-`groups-dashboard-layout` and no remote stays its own row.
+`groups-dashboard-layout` and no remote stays its own row. When a name-based rule (3–5) finds
+candidates belonging to two different repositories, a folder without a remote is ambiguous and
+joins neither (several such same-named folders still fold together). The result depends only on
+the set of folders, never on their order.
 
-The canonical folder of a group (where customization files are scanned, and the row's path) is,
-in order: an existing main checkout found by rule 2 or 3; a local folder whose name is not an
-artefact; any local folder; a remote one. Ties go to most interactions, then most sessions,
-then the smallest path, so the result does not depend on input order. Counts are the sum of the
-members. `<unresolved:…>` workspaces pass through untouched.
+The canonical folder of a group (the row's path) is, in order: an existing main checkout found by
+rule 2 or 3; a local folder whose name is not an artefact; any local folder; a remote one. Ties go
+to most interactions, then most sessions, then the smallest path. Counts are the sum of the
+members. The group's customization files are the union of every member's scan and the canonical
+folder's own (`mergeGroupCustomizationFiles()`), so instructions in the main checkout and a skill
+only in a worktree both count; a file found in several folders is kept once, the fresh copy over
+a stale one. `<unresolved:…>` workspaces pass through untouched.
 
 ## Seeing what was merged
 

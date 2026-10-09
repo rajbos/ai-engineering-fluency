@@ -338,7 +338,9 @@ function inputNode(entry: WorkspaceUsageEntry, probes: WorkspaceGroupingProbes, 
 			isInput: true,
 			remote,
 			mainWorktreePath: git?.mainWorktreePath,
-			convention: remote ? undefined : matchWorktreeConvention(entry.path, pathExists),
+			// Layout rules need no disk access, so they also apply to WSL / remote paths; only the
+			// existence checks are skipped there, since the local probes cannot see that filesystem.
+			convention: matchWorktreeConvention(entry.path, remote ? undefined : pathExists),
 		},
 		repoId: repositoryIdentity(entry.repository) ?? repositoryIdentity(git?.remote),
 	};
@@ -357,7 +359,8 @@ function addAnchors(list: NodeList, platform: string): Map<number, number> {
 		const anchorPath = n.mainWorktreePath ?? n.convention?.anchorPath;
 		if (!anchorPath || samePathKey(anchorPath, platform) === samePathKey(n.path, platform)) { continue; }
 		const isCheckoutAnchor = n.mainWorktreePath !== undefined || n.convention?.anchorIsCheckout === true;
-		anchorOf.set(i, list.add({ path: anchorPath, sessionCount: 0, interactionCount: 0, isInput: false, isCheckoutAnchor, remote: false }, list.repoIds[i]));
+		const anchor: Node = { path: anchorPath, sessionCount: 0, interactionCount: 0, isInput: false, isCheckoutAnchor, remote: isRemotePath(anchorPath, platform) };
+		anchorOf.set(i, list.add(anchor, list.repoIds[i]));
 	}
 	return anchorOf;
 }
@@ -367,29 +370,46 @@ function nodeName(n: Node): string {
 	return (n.convention?.repoName ?? workspaceBasename(n.path)).toLowerCase();
 }
 
+/**
+ * Join `i` to every candidate's group, unless that would put two different repositories in
+ * play: then a folder without a remote cannot be attributed to either, and stays apart.
+ * Returns whether `i` joined.
+ */
+function joinUnlessAmbiguous(groups: Groups, i: number, candidates: number[]): boolean {
+	const others = candidates.filter(c => groups.find(c) !== groups.find(i));
+	if (others.length === 0) { return false; }
+	const ids = new Set<string>();
+	for (const idx of [i, ...others]) { for (const id of groups.repositoryIds(idx)) { ids.add(id); } }
+	if (ids.size > 1) { return false; }
+	for (const c of others) { groups.union(c, i); }
+	return true;
+}
+
 /** Rules 3 (remote paths), 4 (sibling artefact folders) and 5 (same basename), in that order. */
 function unionByName(nodes: Node[], groups: Groups): void {
-	const localByName = new Map<string, number>();
-	const byName = new Map<string, number[]>();
+	const localByName = new Map<string, number[]>();
 	nodes.forEach((n, i) => {
 		if (n.remote) { return; }
 		const name = nodeName(n);
-		if (!localByName.has(name)) { localByName.set(name, i); }
-		byName.set(name, [...(byName.get(name) ?? []), i]);
+		localByName.set(name, [...(localByName.get(name) ?? []), i]);
 	});
 
 	nodes.forEach((n, i) => {
-		const local = n.remote ? localByName.get(nodeName(n)) : undefined;
-		if (local !== undefined) { groups.union(local, i); }
+		if (n.remote) { joinUnlessAmbiguous(groups, i, localByName.get(nodeName(n)) ?? []); }
 	});
 	nodes.forEach((n, i) => {
 		if (n.remote || n.convention) { return; }
-		const targets = artefactStems(workspaceBasename(n.path)).map(stem => localByName.get(stem.toLowerCase()));
-		targets.some(target => target !== undefined && target !== i && groups.union(target, i));
+		// The most specific stem that names another workspace decides; an ambiguous one is not retried with a shorter stem.
+		const candidates = artefactStems(workspaceBasename(n.path))
+			.map(stem => (localByName.get(stem.toLowerCase()) ?? []).filter(c => c !== i))
+			.find(list => list.length > 0);
+		if (candidates) { joinUnlessAmbiguous(groups, i, candidates); }
 	});
-	for (const same of byName.values()) {
-		// Each folder joins the first earlier same-named group the remotes do not rule out.
-		same.forEach((idx, k) => { same.slice(0, k).some(earlier => groups.union(earlier, idx)); });
+	for (const same of localByName.values()) {
+		if (joinUnlessAmbiguous(groups, same[0], same.slice(1))) { continue; }
+		// Different repositories share this name: still fold the folders that have no remote together.
+		const unidentified = same.filter(idx => groups.repositoryIds(idx).size === 0);
+		unidentified.slice(1).forEach(idx => groups.union(unidentified[0], idx));
 	}
 }
 
@@ -403,7 +423,10 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 	const pathExists = probes.pathExists ?? (() => false);
 	const list = new NodeList();
 	const passthrough: WorkspaceGroup[] = [];
-	for (const entry of entries) {
+	// Every pass walks nodes in index order, so index them by path: the result then depends
+	// only on the set of entries, never on the order they arrived in.
+	const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+	for (const entry of sorted) {
 		if (isUnresolved(entry.path)) {
 			passthrough.push({
 				canonicalPath: entry.path, displayName: entry.path, memberPaths: [entry.path],
@@ -492,6 +515,38 @@ function pickCanonical(indexes: number[], nodes: Node[], pathExists: (p: string)
 		|| nodes[b].sessionCount - nodes[a].sessionCount
 		|| (nodes[a].path < nodes[b].path ? -1 : nodes[a].path > nodes[b].path ? 1 : 0)
 	)[0];
+}
+
+// ── Customization files of a group ───────────────────────────────────────────
+
+/** The fields of a customization file entry the merge looks at. */
+export interface GroupCustomizationFile {
+	type: string;
+	relativePath: string;
+	lastModified: string | null;
+	isStale: boolean;
+}
+
+/**
+ * Merge the customization scans of every folder in a group into the group's file list, so a
+ * file present in any member counts for the repository (instructions in the main checkout and
+ * a skill only in a worktree are both found). The same repo-relative file seen in several
+ * folders is kept once: the fresh copy over a stale one, then the most recently modified.
+ */
+export function mergeGroupCustomizationFiles<T extends GroupCustomizationFile>(scans: Array<T[] | undefined>): T[] {
+	const byKey = new Map<string, T>();
+	const better = (a: T, b: T): boolean => {
+		if (a.isStale !== b.isStale) { return !a.isStale; }
+		return (a.lastModified ?? '') > (b.lastModified ?? '');
+	};
+	for (const files of scans) {
+		for (const file of files ?? []) {
+			const key = `${file.type}\u0000${file.relativePath.replace(/\\/g, '/').toLowerCase()}`;
+			const current = byKey.get(key);
+			if (!current || better(file, current)) { byKey.set(key, file); }
+		}
+	}
+	return [...byKey.values()];
 }
 
 // ── Detection ────────────────────────────────────────────────────────────────
