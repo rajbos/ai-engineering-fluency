@@ -1237,6 +1237,12 @@ test('l10n: Copilot Repository Memories scope, action and documented-list string
 		assert.equal(t('serverMemories.openFile'), '打开文件');
 		assert.equal(t('serverMemories.table.action'), '操作');
 		assert.equal(t('serverMemories.table.citedFile'), '引用的文件');
+		assert.equal(t('serverMemories.scopeNoPath', 'o/n'), 'GitHub 为 o/n 存储的记忆。由所有参与本仓库的人共享，并非特定于此 VS Code 工作区。');
+		assert.equal(t('serverMemories.localVsServer'), '与 Copilot 记忆文件（本地笔记，按机器和工作区）不同，这些记忆按仓库存储在 GitHub 上。');
+		assert.equal(t('serverMemories.targetExisting', 'AGENTS.md'), '建议文件：AGENTS.md。');
+		assert.equal(t('serverMemories.targetNew', 'AGENTS.md'), '建议文件：AGENTS.md（尚不存在；将请 Copilot 创建）。');
+		assert.equal(t('serverMemories.askCopilotTooltip', 'AGENTS.md'), '起草一条 Copilot Chat 提示，先对照来源验证此事实，再将其添加到 AGENTS.md。在您按 Enter 之前不会发送任何内容。');
+		assert.equal(t('serverMemories.documentedHint'), '这些记忆引用了指令或文档文件（AGENTS.md、.github/instructions、skills、agents 或 docs/），因此存储的副本是多余的。可在 GitHub 仓库的 设置 → Copilot → 记忆 页面中删除。');
 		// The zh-CN template puts the total first, so this catches a swapped placeholder.
 		assert.equal(t('serverMemories.showingOf', '10', '99'), '显示 99 条中的 10 条');
 	} finally {

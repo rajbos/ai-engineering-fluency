@@ -13,6 +13,7 @@ import {
 	VIEW_PROMOTION_GROUP_LIMIT,
 	VIEW_DOCUMENTED_LIMIT,
 	selectPromotionTarget,
+	createPromotionTargetProbe,
 	buildPromotionPrompt,
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
@@ -620,8 +621,7 @@ test('analyzeServerMemories never probes a citation path that escapes the checko
 		],
 	}, { fileExists: (p) => { probed.push(p); return false; } });
 
-	// The only other probes are the two fixed promotion-target candidates, which are ours, not server-supplied.
-	assert.deepEqual(probed, ['src/real.ts', 'AGENTS.md', '.github/copilot-instructions.md'], `unsafe paths were probed: ${probed.join(', ')}`);
+	assert.deepEqual(probed, ['src/real.ts'], `unsafe paths were probed: ${probed.join(', ')}`);
 	// The hostile memory has nothing checkable, so it is neither stale nor fully stale —
 	// an unverifiable citation must not be reported as a missing file.
 	assert.deepEqual(analysis.staleCitations.map(c => c.id), ['ok']);
@@ -1205,17 +1205,87 @@ test('decideServerMemoriesRefresh starts the first fetch when nothing is cached'
 // Promotion target, prompt builder and documented-memory projection (#2286)
 // ---------------------------------------------------------------------------
 
+type TargetState = 'exists' | 'absent' | 'unsafe';
+const targets = (states: Record<string, TargetState>) => (p: string): TargetState => states[p] ?? 'absent';
+
 test('selectPromotionTarget prefers AGENTS.md, then copilot-instructions.md, else creates AGENTS.md', () => {
-	const existing = (paths: string[]) => (p: string) => paths.includes(p);
-	assert.deepEqual(selectPromotionTarget(existing(['AGENTS.md', '.github/copilot-instructions.md'])), { path: 'AGENTS.md', exists: true });
-	assert.deepEqual(selectPromotionTarget(existing(['.github/copilot-instructions.md'])), { path: '.github/copilot-instructions.md', exists: true });
-	assert.deepEqual(selectPromotionTarget(existing([])), { path: 'AGENTS.md', exists: false });
+	assert.deepEqual(selectPromotionTarget(targets({ 'AGENTS.md': 'exists', '.github/copilot-instructions.md': 'exists' })), { path: 'AGENTS.md', exists: true });
+	assert.deepEqual(selectPromotionTarget(targets({ '.github/copilot-instructions.md': 'exists' })), { path: '.github/copilot-instructions.md', exists: true });
+	assert.deepEqual(selectPromotionTarget(targets({})), { path: 'AGENTS.md', exists: false });
 });
 
-test('analyzeServerMemories records the promotion target from the working tree', () => {
-	const analysis = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] },
-		{ fileExists: p => p === '.github/copilot-instructions.md' || p === 'src/thing.ts' });
-	assert.deepEqual(analysis.promotionTarget, { path: '.github/copilot-instructions.md', exists: true });
+test('selectPromotionTarget offers no target when the file it would pick is unsafe', () => {
+	// An escaping symlink at AGENTS.md is occupied, not missing: describing it as "create it"
+	// or handing it to an agent to edit would write outside the checkout.
+	assert.equal(selectPromotionTarget(targets({ 'AGENTS.md': 'unsafe', '.github/copilot-instructions.md': 'exists' })), undefined);
+	assert.equal(selectPromotionTarget(targets({ '.github/copilot-instructions.md': 'unsafe' })), undefined);
+});
+
+test('analyzeServerMemories takes the target from its own probe, never from the staleness callback', () => {
+	const memories = [memory({ id: '1' })];
+	// `fileExists: () => true` is what the CLI passes for `--repo` elsewhere; it must not turn
+	// into "AGENTS.md exists" for a repository that is not checked out here.
+	const elsewhere = analyzeServerMemories({ repo: 'o/n', enabled: true, memories }, alwaysExists);
+	assert.equal(elsewhere.promotionTarget, undefined);
+	const local = analyzeServerMemories({ repo: 'o/n', enabled: true, memories },
+		{ fileExists: () => true, promotionTargetStatus: targets({ '.github/copilot-instructions.md': 'exists' }) });
+	assert.deepEqual(local.promotionTarget, { path: '.github/copilot-instructions.md', exists: true });
+});
+
+/** A fake checkout: `files`/`dirs` live under /repo, `links` map a path to its real target. */
+function fakeProbeDeps(tree: { files?: string[]; dirs?: string[]; links?: Record<string, string | null> }) {
+	const files = new Set((tree.files ?? []).map(f => `/repo/${f}`));
+	const dirs = new Set((tree.dirs ?? []).map(d => `/repo/${d}`));
+	const links = Object.fromEntries(Object.entries(tree.links ?? {}).map(([k, v]) => [`/repo/${k}`, v]));
+	const norm = (parts: string[]) => parts.join('/').replace(/\/+/g, '/');
+	return {
+		resolve: (...parts: string[]) => (parts.length === 1 ? parts[0] : norm(parts)),
+		relative: (from: string, to: string) => (to.startsWith(`${from}/`) ? to.slice(from.length + 1) : to === from ? '' : `../${to}`),
+		isAbsolute: (target: string) => target.startsWith('/'),
+		realpathSync: (target: string) => {
+			if (target in links) {
+				const real = links[target];
+				if (real === null) { throw new Error('ENOENT'); }
+				return real;
+			}
+			if (target === '/repo' || files.has(target) || dirs.has(target)) { return target; }
+			throw new Error('ENOENT');
+		},
+		lexists: (target: string) => files.has(target) || dirs.has(target) || target in links,
+		isFile: (target: string) => files.has(target) || (target in links && files.has(links[target] ?? '')),
+	};
+}
+
+test('createPromotionTargetProbe distinguishes safe files, absence and unsafe paths', () => {
+	const probe = createPromotionTargetProbe('/repo', fakeProbeDeps({
+		files: ['AGENTS.md', 'docs/real.md'],
+		dirs: ['.github/copilot-instructions.md'],
+		links: { 'escape.md': '/etc/passwd', 'dangling.md': null, 'inside.md': '/repo/docs/real.md' },
+	}));
+	assert.equal(probe('AGENTS.md'), 'exists');
+	assert.equal(probe('missing.md'), 'absent');
+	assert.equal(probe('inside.md'), 'exists', 'a symlink to a file inside the checkout is fine');
+	assert.equal(probe('escape.md'), 'unsafe', 'an escaping symlink is occupied, not missing');
+	assert.equal(probe('dangling.md'), 'unsafe', 'a dangling link must not be offered for creation');
+	assert.equal(probe('.github/copilot-instructions.md'), 'unsafe', 'a directory is not an editable file');
+	assert.equal(probe('../AGENTS.md'), 'unsafe');
+});
+
+test('createPromotionTargetProbe on a real checkout', () => {
+	const fs = require('fs') as typeof import('fs');
+	const os = require('os') as typeof import('os');
+	const path = require('path') as typeof import('path');
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srvmem-target-'));
+	try {
+		const probe = createPromotionTargetProbe(root);
+		assert.equal(probe('AGENTS.md'), 'absent');
+		fs.writeFileSync(path.join(root, 'AGENTS.md'), '# x\n');
+		assert.equal(probe('AGENTS.md'), 'exists');
+		fs.mkdirSync(path.join(root, '.github', 'copilot-instructions.md'), { recursive: true });
+		assert.equal(probe('.github/copilot-instructions.md'), 'unsafe');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test('buildPromotionPrompt states the fact, subject, citations and target and asks to verify first', () => {
@@ -1308,30 +1378,48 @@ test('toServerMemoriesAnalysisView gives a prompt only to promotion groups', () 
 			memory({ id: '1', subject: 'promotable', fact: 'From code.', citations: ['src/a.ts:1'] }),
 			memory({ id: '2', subject: 'told', fact: 'From a person.', citations: ['User input: prefer tabs'] }),
 			memory({ id: '3', subject: 'documented', fact: 'Written down.', citations: ['AGENTS.md:1'] }),
+			memory({ id: '4', subject: 'gone', fact: 'Every source deleted.', citations: ['src/deleted.ts:1', 'src/also-deleted.ts:2'] }),
 		],
-	}, { fileExists: p => p.startsWith('src/') });
+	}, { fileExists: p => p.startsWith('src/') && !p.includes('deleted'), promotionTargetStatus: () => 'absent' });
 	const view = toServerMemoriesAnalysisView(analysis);
 	assert.ok(view);
 	assert.deepEqual(view.topPromotionGroups.map(g => g.displaySubject), ['promotable'],
-		'user-input-only and documented memories get no button');
+		'user-input-only, documented and fully stale memories get no button');
 	assert.match(view.topPromotionGroups[0].prompt ?? '', /verify the fact/);
 	// No AGENTS.md in this tree, so the prompt asks for it to be created.
 	assert.deepEqual(view.promotionTarget, { path: 'AGENTS.md', exists: false });
 	assert.match(view.topPromotionGroups[0].prompt ?? '', /create it/);
 });
 
-test('toServerMemoriesAnalysisView still projects an analysis cached before the new fields', () => {
+test('toServerMemoriesAnalysisView offers no prompt without a known target, including for older cached analyses', () => {
 	const legacy: Partial<ReturnType<typeof analyzeServerMemories>> = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] }, alwaysExists);
 	delete legacy.documentedMemories;
 	delete legacy.promotionTarget;
 	const view = toServerMemoriesAnalysisView(legacy as ReturnType<typeof analyzeServerMemories>);
 	assert.ok(view);
 	assert.deepEqual(view.documentedMemories, []);
-	assert.deepEqual(view.promotionTarget, { path: 'AGENTS.md', exists: false });
+	assert.equal(view.promotionTarget, undefined);
+	assert.equal(view.topPromotionGroups.length, 1, 'the row itself still renders');
+	assert.equal(view.topPromotionGroups[0].prompt, undefined, 'but without a prompt aimed at a guessed file');
 });
 
-test('renderPromotionMarkdown names the promotion target', () => {
-	const analysis = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] },
-		{ fileExists: p => p === 'src/thing.ts' });
-	assert.match(renderPromotionMarkdown(analysis), /Suggested target: AGENTS\.md \(create it\)\./);
+test('a group with one live member still qualifies even when another member is fully stale', () => {
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', subject: 'mixed', fact: 'Old wording.', citations: ['src/deleted.ts:1'] }),
+			memory({ id: '2', subject: 'mixed', fact: 'Current wording.', citations: ['src/live.ts:1'] }),
+		],
+	}, { fileExists: p => p === 'src/live.ts' });
+	assert.deepEqual(analysis.promotionGroups.map(g => g.displaySubject), ['mixed']);
+	assert.equal(analysis.fullyStaleCount, 1);
+});
+
+test('renderPromotionMarkdown names the promotion target, or says it was not checked', () => {
+	const local = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] },
+		{ fileExists: p => p === 'src/thing.ts', promotionTargetStatus: () => 'absent' });
+	assert.match(renderPromotionMarkdown(local), /Suggested target: AGENTS\.md \(create it\)\./);
+	const elsewhere = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] }, alwaysExists);
+	assert.match(renderPromotionMarkdown(elsewhere), /Suggested target: AGENTS\.md or \.github\/copilot-instructions\.md \(not checked against a local checkout\)\./);
 });

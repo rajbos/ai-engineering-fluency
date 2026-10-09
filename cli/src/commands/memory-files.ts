@@ -20,6 +20,7 @@ import {
 	renderPromotionMarkdown,
 	isValidRepoSlug,
 	createRepoFileExists,
+	createPromotionTargetProbe,
 	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 	DEFAULT_MEMORY_LIMIT,
@@ -85,20 +86,10 @@ export const memoryFilesCommand = new Command('memory-files')
 		}
 
 		if (options.promote) {
-			if (!serverAnalysis) {
-				process.stdout.write('Not a GitHub repository checkout — pass --repo owner/name.\n');
-			} else if (serverAnalysis.error) {
-				// A failed read must not fall through to renderPromotionMarkdown(): with no
-				// memories it prints "every stored memory already cites an instruction file",
-				// so a 401, a missing `gh` or a dropped connection would read as "you have
-				// nothing left to document" — the most misleading answer this command can give.
-				process.stderr.write(`Could not read ${sanitizeForDisplay(serverAnalysis.repo)}: ${sanitizeForDisplay(serverAnalysis.error)}\n`);
-				process.exitCode = 1;
-			} else {
-				// stderr, so stdout stays a block that can be redirected straight into a file.
-				if (serverAnalysis.repoRoot) { process.stderr.write(`Analyzed ${sanitizeForDisplay(serverAnalysis.repo)} at ${sanitizeForDisplay(serverAnalysis.repoRoot)}\n`); }
-				process.stdout.write(renderPromotionMarkdown(serverAnalysis));
-			}
+			const output = buildPromoteOutput(serverAnalysis);
+			if (output.stdout) { process.stdout.write(output.stdout); }
+			if (output.stderr) { process.stderr.write(output.stderr); }
+			if (output.exitCode !== 0) { process.exitCode = output.exitCode; }
 			return;
 		}
 
@@ -107,6 +98,29 @@ export const memoryFilesCommand = new Command('memory-files')
 			printServerMemoriesReport(serverAnalysis);
 		}
 	});
+
+/**
+ * What `--promote` prints, split by stream. Exported so the output contract — stdout is only
+ * the paste-ready block, everything about *how* it was produced goes to stderr — is tested
+ * without a network read.
+ */
+export function buildPromoteOutput(serverAnalysis: ServerMemoriesAnalysis | undefined): { stdout: string; stderr: string; exitCode: number } {
+	if (!serverAnalysis) {
+		return { stdout: 'Not a GitHub repository checkout — pass --repo owner/name.\n', stderr: '', exitCode: 0 };
+	}
+	if (serverAnalysis.error) {
+		// A failed read must not fall through to renderPromotionMarkdown(): with no
+		// memories it prints "every stored memory already cites an instruction file",
+		// so a 401, a missing `gh` or a dropped connection would read as "you have
+		// nothing left to document" — the most misleading answer this command can give.
+		return { stdout: '', stderr: `Could not read ${sanitizeForDisplay(serverAnalysis.repo)}: ${sanitizeForDisplay(serverAnalysis.error)}\n`, exitCode: 1 };
+	}
+	// stderr, so stdout stays a block that can be redirected straight into a file.
+	const stderr = serverAnalysis.repoRoot
+		? `Analyzed ${sanitizeForDisplay(serverAnalysis.repo)} at ${sanitizeForDisplay(serverAnalysis.repoRoot)}\n`
+		: '';
+	return { stdout: renderPromotionMarkdown(serverAnalysis), stderr, exitCode: 0 };
+}
 
 /**
  * Run a command and return its trimmed stdout, or `undefined` if it is missing or fails.
@@ -157,7 +171,7 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// the message echoes it — `--json` serializes both.
 		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.', truncated: false,
 			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, documentedMemories: [],
-			promotionTarget: { path: 'AGENTS.md', exists: false }, promotionCandidateCount: 0,
+			promotionCandidateCount: 0,
 			repeatedGroupCount: 0, promotionGroups: [], unverifiableCount: 0, staleCitations: [], fullyStaleCount: 0,
 			byAgent: {}, byModel: {} };
 	}
@@ -186,10 +200,19 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// createRepoFileExists() rather than a bare existsSync(): that follows symlinks, so a
 		// repository symlink out of the checkout would let a citation probe an arbitrary path.
 		fileExists: analyzingThisCheckout ? createRepoFileExists(root) : () => true,
+		// Same reasoning: whether AGENTS.md exists here says nothing about another repository,
+		// so no target is reported rather than a guessed one.
+		promotionTargetStatus: analyzingThisCheckout ? createPromotionTargetProbe(root) : undefined,
 	});
 	// Named in every output mode so it is clear which checkout the citations and the promotion
 	// target were resolved against. Omitted for `--repo` elsewhere: that tree says nothing.
 	return analyzingThisCheckout ? { ...analysis, repoRoot: root } : analysis;
+}
+
+/** The promotion target as the text report names it; unknown when not checked out here. */
+function describeReportTarget(target: ServerMemoriesAnalysis['promotionTarget']): string {
+	if (!target) { return 'AGENTS.md or .github/copilot-instructions.md'; }
+	return target.exists ? target.path : `${target.path}, which does not exist yet`;
 }
 
 function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined): void {
@@ -238,8 +261,7 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 		return;
 	}
 
-	const target = analysis.promotionTarget;
-	process.stdout.write(`Top promotion candidates (consider adding these to ${target.path}${target.exists ? '' : ', which does not exist yet'}):\n`);
+	process.stdout.write(`Top promotion candidates (consider adding these to ${describeReportTarget(analysis.promotionTarget)}):\n`);
 	for (const group of analysis.promotionGroups.slice(0, 10)) {
 		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
 		process.stdout.write(`  • ${sanitizeForDisplay(group.displaySubject)}${repeats}\n`);

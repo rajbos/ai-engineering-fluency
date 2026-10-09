@@ -558,6 +558,15 @@ export interface ServerMemoryAnalysisDeps {
 	 * so an implementation may resolve it against its checkout root directly.
 	 */
 	fileExists: (repoRelativePath: string) => boolean;
+	/**
+	 * Status of a candidate promotion target in the checkout — see
+	 * {@link createPromotionTargetProbe}. Deliberately separate from {@link fileExists}: that
+	 * is a staleness callback a host with no checkout answers `true` for everything, and it
+	 * reports an escaping symlink as missing, so it cannot tell "safe to edit" from "absent"
+	 * from "do not touch". Omitted when the analyzed repository is not checked out here, in
+	 * which case no promotion target is offered.
+	 */
+	promotionTargetStatus?: PromotionTargetProbe;
 }
 
 /**
@@ -655,15 +664,19 @@ function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps):
  * Rank the subjects worth writing into an instruction file.
  *
  * A subject qualifies only when nothing in it already cites an instruction file (it would
- * be redundant) and something in it cites verifiable code (otherwise the "the agent keeps
- * re-deriving this" pitch is simply untrue). Ranked by how often the same thing has been
+ * be redundant) and some member cites verifiable code that still exists (otherwise the
+ * "the agent keeps re-deriving this" pitch is simply untrue). Ranked by how often the same thing has been
  * re-learned, which is also the only ranking available — the API returns no timestamps.
  */
 function buildPromotionGroups(scan: MemoryScan): ServerMemoryPromotionGroup[] {
 	const groups: ServerMemoryPromotionGroup[] = [];
+	const fullyStaleIds = new Set(scan.staleCitations.filter(c => c.fullyStale).map(c => c.id));
 	for (const [subjectKey, group] of scan.bySubject) {
 		if (group.some(memory => scan.documentedIds.has(memory.id))) { continue; }
-		if (!group.some(memory => scan.codeDerivedIds.has(memory.id))) { continue; }
+		// At least one member must still be backed by the tree. A memory whose every cited file
+		// is gone is code-derived in form only — nothing left supports it, so it must not be
+		// offered for promotion into the one file every agent reads.
+		if (!group.some(memory => scan.codeDerivedIds.has(memory.id) && !fullyStaleIds.has(memory.id))) { continue; }
 		groups.push({
 			subject: subjectKey,
 			displaySubject: group[0].subject,
@@ -697,7 +710,7 @@ export function analyzeServerMemories(
 		distinctSubjects: scan.bySubject.size,
 		documentedCount: scan.documentedIds.size,
 		documentedMemories: scan.documented,
-		promotionTarget: selectPromotionTarget(deps.fileExists),
+		promotionTarget: deps.promotionTargetStatus ? selectPromotionTarget(deps.promotionTargetStatus) : undefined,
 		promotionCandidateCount: promotionGroups.reduce((sum, g) => sum + g.repeatCount, 0),
 		repeatedGroupCount: promotionGroups.filter(g => g.repeatCount > 1).length,
 		promotionGroups,
@@ -773,8 +786,9 @@ export function toServerMemoriesAnalysisView(
 	context: ServerMemoriesViewContext = {},
 ): ServerMemoriesAnalysisView | null {
 	if (!analysis) { return null; }
-	// An analysis cached before these fields existed still projects.
-	const target: ServerMemoryPromotionTarget = analysis.promotionTarget ?? { path: 'AGENTS.md', exists: false };
+	// No target means none could be safely determined (or an analysis cached before the
+	// field existed): the rows then carry no prompt rather than one aimed at a guessed file.
+	const target = analysis.promotionTarget;
 	return {
 		repo: analysis.repo,
 		enabled: analysis.enabled,
@@ -792,9 +806,10 @@ export function toServerMemoriesAnalysisView(
 			representativeFact: group.representativeFact,
 			citationCount: group.citations.length,
 			// Every promotion group is eligible by construction: buildPromotionGroups() already
-			// drops documented subjects and those with no verifiable code citation (which covers
-			// `User input:`-only memories), so the mapping to a target file is deterministic.
-			prompt: buildPromotionPrompt(analysis.repo, group, target),
+			// drops documented subjects, those with no verifiable code citation (which covers
+			// `User input:`-only memories) and fully stale ones, so the only remaining gate is a
+			// target file that is safe to edit or create.
+			...(target ? { prompt: buildPromotionPrompt(analysis.repo, group, target) } : {}),
 		})),
 		repoRoot: context.repoRoot,
 		workspaceFolderCount: context.workspaceFolderCount,
@@ -822,15 +837,76 @@ const AGENTS_MD = 'AGENTS.md';
 const COPILOT_INSTRUCTIONS_MD = '.github/copilot-instructions.md';
 
 /**
+ * What a promotion target path is in the checkout:
+ *   - `exists`: a regular file whose real path stays inside the checkout — safe to edit;
+ *   - `absent`: nothing at that path at all — safe to create;
+ *   - `unsafe`: something is there but must not be offered for writing — a symlink that
+ *     escapes the checkout or dangles, a directory, or a path that could not be inspected.
+ */
+export type PromotionTargetStatus = 'exists' | 'absent' | 'unsafe';
+export type PromotionTargetProbe = (repoRelativePath: string) => PromotionTargetStatus;
+
+/**
  * Pick the checked-in file a promotion should go into. v1 rule, intentionally simple:
  * an existing root `AGENTS.md`, else an existing `.github/copilot-instructions.md`, else a
  * new root `AGENTS.md`. Scoped `.github/instructions/*.instructions.md` files are not
  * matched — that needs `applyTo` glob parsing, which no shared code does yet.
+ *
+ * Returns `undefined` when the candidate the rule would pick is `unsafe`: an occupied path
+ * must never be described as missing, nor handed to an agent as something to edit.
  */
-export function selectPromotionTarget(fileExists: (repoRelativePath: string) => boolean): ServerMemoryPromotionTarget {
-	if (fileExists(AGENTS_MD)) { return { path: AGENTS_MD, exists: true }; }
-	if (fileExists(COPILOT_INSTRUCTIONS_MD)) { return { path: COPILOT_INSTRUCTIONS_MD, exists: true }; }
+export function selectPromotionTarget(status: PromotionTargetProbe): ServerMemoryPromotionTarget | undefined {
+	for (const candidate of [AGENTS_MD, COPILOT_INSTRUCTIONS_MD] as const) {
+		const state = status(candidate);
+		if (state === 'exists') { return { path: candidate, exists: true }; }
+		if (state === 'unsafe') { return undefined; }
+	}
 	return { path: AGENTS_MD, exists: false };
+}
+
+/** The `fs`/`path` surface {@link createPromotionTargetProbe} needs, injected so it can be tested. */
+export interface PromotionTargetProbeDeps extends RepoFileExistsDeps {
+	/** Is anything at the path, without following a final symlink (so a dangling link counts)? */
+	lexists: (target: string) => boolean;
+	/** `stat` that follows symlinks; true for a regular file. */
+	isFile: (target: string) => boolean;
+}
+
+/**
+ * Build the {@link PromotionTargetProbe} for a checkout. Same containment rule as
+ * {@link createRepoFileExists} — the real path must stay under the real root — but three-way,
+ * because "missing" and "there but not ours to touch" lead to opposite actions here.
+ */
+export function createPromotionTargetProbe(repoRoot: string, deps?: PromotionTargetProbeDeps): PromotionTargetProbe {
+	const io: PromotionTargetProbeDeps = deps ?? defaultPromotionTargetProbeDeps();
+	let realRoot: string;
+	try { realRoot = io.realpathSync(io.resolve(repoRoot)); } catch { realRoot = io.resolve(repoRoot); }
+
+	return (relativePath: string): PromotionTargetStatus => {
+		if (!isSafeRepoRelativePath(relativePath)) { return 'unsafe'; }
+		const target = io.resolve(realRoot, relativePath);
+		// Nothing at the path, not even a dangling link: free to create.
+		if (!io.lexists(target)) { return 'absent'; }
+		try {
+			const rel = io.relative(realRoot, io.realpathSync(target));
+			const inside = rel !== '' && !rel.startsWith('..') && !io.isAbsolute(rel);
+			return inside && io.isFile(target) ? 'exists' : 'unsafe';
+		} catch {
+			// Present but unresolvable — a dangling symlink, or a permission error.
+			return 'unsafe';
+		}
+	};
+}
+
+function defaultPromotionTargetProbeDeps(): PromotionTargetProbeDeps {
+	const fs = require('fs') as typeof import('fs');
+	return {
+		...defaultRepoFileExistsDeps(),
+		lexists: (target) => {
+			try { fs.lstatSync(target); return true; } catch { return false; }
+		},
+		isFile: (target) => fs.statSync(target).isFile(),
+	};
 }
 
 /** How many citations a promotion prompt lists; the same cap the Markdown block uses. */
@@ -914,7 +990,9 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
 
 /** `AGENTS.md`, or `AGENTS.md (create it)` when it does not exist yet. */
 function describePromotionTarget(target: ServerMemoryPromotionTarget | undefined): string {
-	if (!target) { return AGENTS_MD; }
+	// Not checked: `--repo` names a repository that is not this checkout, or the file the
+	// rule would pick is an unsafe path. Say so rather than guess.
+	if (!target) { return `${AGENTS_MD} or ${COPILOT_INSTRUCTIONS_MD} (not checked against a local checkout)`; }
 	return target.exists ? target.path : `${target.path} (create it)`;
 }
 

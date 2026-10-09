@@ -1785,8 +1785,12 @@ export interface ServerMemoriesAnalysis {
   documentedCount: number;
   /** The memories behind {@link documentedCount}, in store order. */
   documentedMemories: ServerMemoryDocumentedEntry[];
-  /** Where promotions should be written; see {@link ServerMemoryPromotionTarget}. */
-  promotionTarget: ServerMemoryPromotionTarget;
+  /**
+   * Where promotions should be written; see {@link ServerMemoryPromotionTarget}. Absent when
+   * it could not be safely determined: the repository is not checked out here, or the file
+   * the rule would pick is occupied by something unsafe to edit (e.g. an escaping symlink).
+   */
+  promotionTarget?: ServerMemoryPromotionTarget;
   /** Total memories sitting inside a promotion group. */
   promotionCandidateCount: number;
   /** Promotion groups with more than one member, i.e. facts re-learned at least twice. */

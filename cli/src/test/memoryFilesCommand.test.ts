@@ -6,7 +6,8 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveMemoryFilesThresholds } from '../commands/memory-files';
+import { resolveMemoryFilesThresholds, buildPromoteOutput } from '../commands/memory-files';
+import { analyzeServerMemories } from '../../../src/copilotServerMemories';
 import { DEFAULT_STALE_DAYS, DEFAULT_LARGE_FILE_BYTES } from '../../../src/copilotMemoryFiles';
 
 test('resolveMemoryFilesThresholds falls back to defaults when options are missing', () => {
@@ -46,4 +47,44 @@ test('resolveMemoryFilesThresholds falls back to defaults for a value with trail
 	const result = resolveMemoryFilesThresholds({ staleDays: '30days', largeKb: '5kb' });
 	assert.equal(result.staleDays, DEFAULT_STALE_DAYS);
 	assert.equal(result.largeFileBytes, DEFAULT_LARGE_FILE_BYTES);
+});
+
+// ---------------------------------------------------------------------------
+// --promote output contract: stdout is only the paste-ready block (#2286)
+// ---------------------------------------------------------------------------
+
+function promoteAnalysis(deps: Parameters<typeof analyzeServerMemories>[1], repoRoot?: string) {
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [{ id: '1', subject: 'caching', fact: 'Cache via snapshots.', citations: ['src/cache.ts:1'] }],
+	}, deps);
+	return repoRoot ? { ...analysis, repoRoot } : analysis;
+}
+
+test('buildPromoteOutput sends the analyzed checkout to stderr and keeps stdout paste-ready', () => {
+	const output = buildPromoteOutput(promoteAnalysis(
+		{ fileExists: () => true, promotionTargetStatus: p => (p === '.github/copilot-instructions.md' ? 'exists' : 'absent') },
+		'/home/dev/repo',
+	));
+	assert.equal(output.exitCode, 0);
+	assert.equal(output.stderr, 'Analyzed o/n at /home/dev/repo\n');
+	assert.ok(!output.stdout.includes('/home/dev/repo'), 'the checkout path must not leak into the pasted block');
+	assert.match(output.stdout, /Suggested target: \.github\/copilot-instructions\.md\./);
+	assert.match(output.stdout, /- \*\*caching\*\* — Cache via snapshots\./);
+});
+
+test('buildPromoteOutput for --repo elsewhere names no checkout and no guessed target', () => {
+	// The CLI passes `fileExists: () => true` and no target probe when --repo is not this checkout.
+	const output = buildPromoteOutput(promoteAnalysis({ fileExists: () => true }));
+	assert.equal(output.exitCode, 0);
+	assert.equal(output.stderr, '');
+	assert.match(output.stdout, /not checked against a local checkout/);
+	assert.ok(!/Suggested target: AGENTS\.md\./.test(output.stdout), 'must not claim AGENTS.md exists in another repository');
+});
+
+test('buildPromoteOutput reports a failed read on stderr with exit code 1', () => {
+	const failed = { ...promoteAnalysis({ fileExists: () => true }), error: 'HTTP 401' };
+	assert.deepEqual(buildPromoteOutput(failed), { stdout: '', stderr: 'Could not read o/n: HTTP 401\n', exitCode: 1 });
+	assert.equal(buildPromoteOutput(undefined).exitCode, 0);
 });

@@ -143,6 +143,7 @@ import {
   parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
   toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
   createRepoFileExists as _createRepoFileExists,
+  createPromotionTargetProbe as _createPromotionTargetProbe,
 } from '../../src/copilotServerMemories';
 import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
@@ -7185,6 +7186,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// to stay under the real root.
 				const analysis = _analyzeServerMemories(result, {
 					fileExists: _createRepoFileExists(context.repoRoot),
+					promotionTargetStatus: _createPromotionTargetProbe(context.repoRoot),
 				});
 				// The workspace can change, or the user can switch the feature off, while this
 				// request is in flight. Publishing unconditionally would then put one repository's

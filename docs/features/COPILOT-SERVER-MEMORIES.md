@@ -143,9 +143,16 @@ flattened to one line, so memory text cannot add steps of its own to the prompt.
 The target file is chosen deterministically by `selectPromotionTarget()`: an
 existing root `AGENTS.md`, else an existing `.github/copilot-instructions.md`, else
 a new root `AGENTS.md`. Scoped `.github/instructions/*.instructions.md` files are
-not matched yet — that needs `applyTo` glob parsing. Only promotion groups get the
-button; `User input:`-only memories, already-documented memories and memories with
-no surviving source never qualify.
+not matched yet — that needs `applyTo` glob parsing. Each candidate is checked by
+its own probe, `createPromotionTargetProbe()`, not by the citation-staleness
+callback: it reports `exists` (a regular file whose real path stays inside the
+checkout), `absent` or `unsafe` (an escaping or dangling symlink, a directory, an
+unreadable path). When the file the rule would pick is `unsafe`, or the analyzed
+repository is not checked out here (CLI `--repo` elsewhere), no target is offered
+and the rows get no button. Only promotion groups get the button;
+`User input:`-only memories, already-documented memories and groups whose every
+member is fully stale (no cited file survives) never qualify — the last are now
+excluded from `promotionGroups` entirely, so `--promote` skips them too.
 
 ## The Tools-tab section
 
@@ -190,7 +197,7 @@ fields the typed shape does not know about. Use it when the API changes.
 
 | Piece | Location |
 |---|---|
-| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `selectPromotionTarget()`, `buildPromotionPrompt()`, `parseRepoFromRemoteUrl()`, `isValidRepoSlug()`, `isSafeRepoRelativePath()` |
+| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `selectPromotionTarget()`, `createPromotionTargetProbe()`, `buildPromotionPrompt()`, `parseRepoFromRemoteUrl()`, `isValidRepoSlug()`, `isSafeRepoRelativePath()` |
 | Types | `src/types.ts` — `ServerMemory`, `ServerMemoryPromotionGroup`, `ServerMemoryStaleCitation`, `ServerMemoryDocumentedEntry`, `ServerMemoryPromotionTarget`, `ServerMemoriesAnalysis`, `ServerMemoriesAnalysisView` |
 | Unit tests | `vscode-extension/test/unit/copilotServerMemories.test.ts` (offline — `fetch` and `fileExists` are both injected), `vscode-extension/test/unit/webview-serverMemoriesSection.test.ts` (section HTML and click mapping) |
 | CLI | `cli/src/commands/memory-files.ts` — `--server`, `--repo`, `--limit`, `--promote` |
