@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { calculateUsageAnalysisStats, isActiveSince, repeatedTaskActivityMs } from '../helpers';
+import { calculateUsageAnalysisStats, createSessionActivityLookup, isActiveSince, repeatedTaskActivityMs, type SessionActivitySources, type SessionMeta } from '../helpers';
 import { disableCache } from '../cliCache';
 import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skill-suggestions';
 import type { RepeatedTaskReport } from '../../../src/types';
@@ -87,6 +87,42 @@ test('isActiveSince falls back to the session’s last activity when the file mt
 	assert.equal(isActiveSince(staleDbMtime, new Date('2026-08-15T00:00:00Z'), cutoff), false);
 	assert.equal(isActiveSince(staleDbMtime, null, cutoff), false);
 	assert.equal(isActiveSince(new Date('2026-09-02T00:00:00Z'), null, cutoff), true);
+});
+
+/** Fake adapter lookups that count how often each is called. */
+function fakeSources(opts: { lastActivity: Date | null; meta: SessionMeta | null; virtual: boolean }) {
+	const calls = { lastActivity: 0, meta: 0 };
+	const sources: SessionActivitySources = {
+		getLastActivity: async () => { calls.lastActivity++; return opts.lastActivity; },
+		getMeta: async () => { calls.meta++; return opts.meta; },
+		getBackingPath: file => (opts.virtual ? 'state.vscdb' : file),
+	};
+	return { sources, calls };
+}
+
+const META: SessionMeta = { title: 'T', firstInteraction: null, lastInteraction: '2026-10-08T00:00:00Z' };
+
+test('session activity: DB-backed session without getLastActivity falls back to metadata, read once', async () => {
+	const { sources, calls } = fakeSources({ lastActivity: null, meta: META, virtual: true });
+	const lookup = createSessionActivityLookup('state.vscdb#abc', sources);
+	assert.equal((await lookup.lastActivity())?.toISOString(), '2026-10-08T00:00:00.000Z');
+	assert.equal(await lookup.meta(), META);
+	await lookup.lastActivity();
+	assert.deepEqual(calls, { lastActivity: 1, meta: 1 });
+});
+
+test('session activity: the cheap lookup wins and metadata is not read for it', async () => {
+	const { sources, calls } = fakeSources({ lastActivity: new Date('2026-10-01T00:00:00Z'), meta: META, virtual: true });
+	const lookup = createSessionActivityLookup('opencode.db#abc', sources);
+	assert.equal((await lookup.lastActivity())?.toISOString(), '2026-10-01T00:00:00.000Z');
+	assert.deepEqual(calls, { lastActivity: 1, meta: 0 });
+});
+
+test('session activity: regular files rely on their mtime, without a metadata read', async () => {
+	const { sources, calls } = fakeSources({ lastActivity: null, meta: META, virtual: false });
+	const lookup = createSessionActivityLookup('/sessions/a.jsonl', sources);
+	assert.equal(await lookup.lastActivity(), null);
+	assert.deepEqual(calls, { lastActivity: 1, meta: 0 });
 });
 
 const REPORT: RepeatedTaskReport = {

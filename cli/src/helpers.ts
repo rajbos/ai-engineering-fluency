@@ -607,17 +607,16 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			const inPeriodWindow = modified >= cutoffStart;
 			// A DB-backed session's file mtime can lag its real activity (writes still in
 			// the SQLite WAL), so the repeated-task report asks the adapter before skipping.
-			// Fetched at most once per session: undefined means not looked up yet.
-			let lastActivity: Date | null | undefined;
+			// The lookup reads the adapter at most once per session and is reused below.
+			const activity = createSessionActivityLookup(file);
 			if (!inPeriodWindow) {
 				if (!options.includeRepeatedTasks) { continue; }
-				lastActivity = await getSessionLastActivity(file);
-				if (!isActiveSince(modified, lastActivity, cutoffStart)) { continue; }
+				if (!isActiveSince(modified, await activity.lastActivity(), cutoffStart)) { continue; }
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
 			if (options.includeRepeatedTasks) {
-				await addRepeatedTaskSource(repeatedTaskSources, { file, firstUserPrompt: analysis.firstUserPrompt, mtimeMs: stats.mtimeMs, lastActivity }, cutoffStart);
+				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
 			}
 			// Period stats keep using the file mtime, as before.
 			if (!inPeriodWindow) { continue; }
@@ -688,22 +687,60 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	};
 }
 
+/** Adapter lookups a SessionActivityLookup uses; injectable for tests. */
+export interface SessionActivitySources {
+	getLastActivity(file: string): Promise<Date | null>;
+	getMeta(file: string): Promise<SessionMeta | null>;
+	getBackingPath(file: string): string;
+}
+
+const defaultActivitySources: SessionActivitySources = {
+	getLastActivity: getSessionLastActivity,
+	getMeta: getSessionMeta,
+	getBackingPath: getSessionBackingPath,
+};
+
+/** Memoized per-session adapter reads: each underlying lookup runs at most once. */
+export interface SessionActivityLookup {
+	readonly file: string;
+	meta(): Promise<SessionMeta | null>;
+	/**
+	 * The session's own last activity: the adapter's cheap `getLastActivity()`, or —
+	 * for DB-backed (virtual) sessions whose adapter lacks it — the metadata's
+	 * `lastInteraction`. Null when unknown; the file mtime is then the signal.
+	 */
+	lastActivity(): Promise<Date | null>;
+}
+
+export function createSessionActivityLookup(file: string, sources: SessionActivitySources = defaultActivitySources): SessionActivityLookup {
+	let meta: Promise<SessionMeta | null> | undefined;
+	let lastActivity: Promise<Date | null> | undefined;
+	const lookup: SessionActivityLookup = {
+		file,
+		meta: () => (meta ??= sources.getMeta(file)),
+		lastActivity: () => (lastActivity ??= (async () => {
+			const cheap = await sources.getLastActivity(file);
+			if (cheap) { return cheap; }
+			// Regular files: the file mtime is the session's own; no metadata read needed.
+			if (sources.getBackingPath(file) === file) { return null; }
+			const fromMeta = (await lookup.meta())?.lastInteraction;
+			const parsed = fromMeta ? new Date(fromMeta) : null;
+			return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+		})()),
+	};
+	return lookup;
+}
+
 /**
  * Session context for the repeated-task report, from the owning adapter when it has one.
  * DB-backed sessions share their database's mtime, so the adapter's per-session
  * last interaction (or last activity) is what places a session in the window.
- * `knownLastActivity` is the adapter's last activity when the caller already
- * fetched it (null = none); undefined means it is looked up here if needed.
  */
-async function toRepeatedTaskSource(
-	file: string, firstUserPrompt: string, mtimeMs: number, knownLastActivity: Date | null | undefined,
-): Promise<RepeatedTaskSessionSource> {
-	const meta = await getSessionMeta(file);
-	const lastActivity = meta?.lastInteraction ? undefined
-		: knownLastActivity !== undefined ? knownLastActivity : await getSessionLastActivity(file);
-	const lastInteraction = meta?.lastInteraction ?? lastActivity?.toISOString() ?? null;
+async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+	const meta = await activity.meta();
+	const lastInteraction = meta?.lastInteraction ?? (await activity.lastActivity())?.toISOString() ?? null;
 	return {
-		file,
+		file: activity.file,
 		firstUserPrompt,
 		title: meta?.title ?? null,
 		lastInteraction,
@@ -714,12 +751,11 @@ async function toRepeatedTaskSource(
 
 /** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
 async function addRepeatedTaskSource(
-	sources: RepeatedTaskSessionSource[],
-	session: { file: string; firstUserPrompt: string | undefined; mtimeMs: number; lastActivity: Date | null | undefined },
-	cutoff: Date,
+	sources: RepeatedTaskSessionSource[], activity: SessionActivityLookup,
+	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
 ): Promise<void> {
-	if (!session.firstUserPrompt) { return; }
-	const source = await toRepeatedTaskSource(session.file, session.firstUserPrompt, session.mtimeMs, session.lastActivity);
+	if (!firstUserPrompt) { return; }
+	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs);
 	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
 }
 
