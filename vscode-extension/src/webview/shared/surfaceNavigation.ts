@@ -143,6 +143,16 @@ function revealHiddenAncestors(target: HTMLElement): void {
 	}
 }
 
+/**
+ * How far a deep link may take the user's eye: instant when they asked the OS for
+ * reduced motion (as the dashboard and diagnostics animations already respect), else smooth.
+ */
+export function preferredScrollBehavior(): ScrollBehavior {
+	const reduce = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+		&& window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	return reduce ? 'auto' : 'smooth';
+}
+
 /** How to find the element a request scrolls to, or null when it names none. */
 function targetFinder(request: SurfaceRevealRequest): (() => HTMLElement | null) | null {
 	const { anchor, selector } = request;
@@ -190,7 +200,7 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 	const target = found.isConnected ? found : await waitForElement(find, remaining(), superseded);
 	if (!target || superseded()) { return false; }
 	revealHiddenAncestors(target);
-	target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	target.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
 	flashSection(target);
 	return true;
 }

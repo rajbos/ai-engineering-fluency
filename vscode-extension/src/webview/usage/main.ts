@@ -409,6 +409,13 @@ let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 /**
+ * When a deep link that is still waiting for its section stops being honoured. Matches the
+ * host's SURFACE_REVEAL_TTL_MS for every other panel, so a conditional section that turns up
+ * much later does not scroll the user.
+ */
+const PENDING_ANCHOR_TTL_MS = 60_000;
+let pendingTabAnchorExpiresAt = 0;
+/**
  * How long an insight anchor keeps re-asserting itself once its card has been shown. Activating
  * the Insights tab immediately marks its new insights as "seen", which makes the host push a
  * fresh `updateInsights`; a background stats refresh runs the full `renderLayout`. Either rebuilds
@@ -796,6 +803,7 @@ function getEffortDisplayName(level: string): string {
 }
 
 import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName, isKnownToolDisplayName } from '../../../../src/utils/toolUtils';
+import { preferredScrollBehavior } from '../shared/surfaceNavigation';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -6112,7 +6120,7 @@ function handleHighlightUnknownTools(): void {
 	activateUsageTab('tools');
 	const el = document.getElementById('unknown-mcp-tools-section');
 	if (el) {
-		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
 		flashAnchorHighlight(el);
 	}
 }
@@ -6292,6 +6300,7 @@ function handleSwitchTab(message: any): void {
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
 	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	pendingTabAnchorExpiresAt = Date.now() + PENDING_ANCHOR_TTL_MS;
 	// activateUsageTab sets activeTab even when it finds no panel, so a switch that arrives
 	// during the loading state is still honored by the render that follows.
 	activateUsageTab(tab);
@@ -6312,13 +6321,19 @@ function handleSwitchTab(message: any): void {
 
 function scrollToPendingTabAnchor(): void {
 	if (!pendingTabAnchor) { return; }
+	if (Date.now() > pendingTabAnchorExpiresAt) {
+		// The section never rendered in time. Landing on it minutes later, on some
+		// unrelated stats refresh, would yank the user away from whatever they are reading.
+		pendingTabAnchor = null;
+		return;
+	}
 	const anchor = document.getElementById(pendingTabAnchor);
 	if (anchor) {
 		pendingTabAnchor = null;
 		lastAnchorScrollTarget = anchor;
 		const timer = setTimeout(() => {
 			if (pendingInsightScrollTimer === timer) { pendingInsightScrollTimer = null; }
-			anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			anchor.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
 			flashAnchorHighlight(anchor);
 		}, 50);
 		// Only an insight scroll is tracked, and so only it is cancellable: navigating away inside

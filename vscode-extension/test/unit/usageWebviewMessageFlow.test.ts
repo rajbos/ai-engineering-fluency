@@ -1673,6 +1673,28 @@ test('cancelPendingNavigation drops a deep link still waiting for its section', 
 	assert.deepEqual(harness.scrolledTo, []);
 });
 
+test('a section deep link that never landed expires after 60 seconds', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-shows-up-much-later' });
+	harness.scrolledTo.length = 0;
+	// The bundle runs inside jsdom's window, so its clock is that window's Date.
+	const webviewDate = (harness.window as unknown as { Date: DateConstructor }).Date;
+	const realNow = webviewDate.now;
+	webviewDate.now = () => realNow() + 61_000;
+	try {
+		const late = harness.window.document.createElement('div');
+		late.id = 'section-shows-up-much-later';
+		harness.window.document.body.append(late);
+		harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+		await harness.settleScroll();
+	} finally {
+		webviewDate.now = realNow;
+	}
+
+	assert.deepEqual(harness.scrolledTo, [], 'an expired deep link must not scroll a much later render');
+});
+
 test('switchTab still honours a static section anchor', async () => {
 	// switchTab clicks the tab button itself, which runs the clear-on-navigation handler, so the
 	// anchors are assigned after that click. This pins that ordering: assigning before the click

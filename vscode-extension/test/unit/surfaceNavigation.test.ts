@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { SurfaceRevealQueue } from '../../src/whatsNew/surfaceRevealQueue';
-import { cancelReveal, flashSection, installSurfaceNavigation, revealSurface } from '../../src/webview/shared/surfaceNavigation';
+import { cancelReveal, flashSection, installSurfaceNavigation, preferredScrollBehavior, revealSurface } from '../../src/webview/shared/surfaceNavigation';
 
 // ── Host side: the request handshake ─────────────────────────────────────
 
@@ -320,4 +320,16 @@ test('revealSurface: a cancelled or superseded reveal stops polling at once inst
 	void revealSurface({ command: 'revealSurface' }, 10_000);
 	assert.equal(await superseded, false);
 	assert.ok(Date.now() - started < 1_000, 'both waits ended within a poll interval of being abandoned');
+});
+
+test('preferredScrollBehavior: instant under prefers-reduced-motion, smooth otherwise', () => {
+	const { window } = installDom('');
+	const setReduced = (reduce: boolean) => {
+		(window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia =
+			(query: string) => ({ matches: reduce && query.includes('prefers-reduced-motion: reduce') });
+	};
+	setReduced(true);
+	assert.equal(preferredScrollBehavior(), 'auto');
+	setReduced(false);
+	assert.equal(preferredScrollBehavior(), 'smooth');
 });
