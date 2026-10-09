@@ -228,8 +228,9 @@ function createTableClient(storageAccount, tableName, sharedKey) {
 // repository's input validator (.github/workflows/validate-input.sh) treats as
 // hidden content: control characters (\p{Cc}), all format characters (\p{Cf}:
 // bidi controls, zero-width characters, soft hyphen, word joiner, BOM, Unicode
-// tag characters), variation selectors, other invisible fillers, and HTML
-// comments. Then collapse whitespace and cap the length. Visible text is kept,
+// tag characters), variation selectors and other invisible fillers. HTML
+// comments are defused by removing all angle brackets, so their content stays
+// visible. Then collapse whitespace and cap the length. Visible text is kept,
 // so consumers must still treat these values as data, never as instructions.
 function sanitizeEntityString(value) {
 	if (value === undefined || value === null || value === '') {
@@ -240,8 +241,11 @@ function sanitizeEntityString(value) {
 		.replace(/\p{Cf}/gu, '')
 		.replace(/[\u{E0000}-\u{E007F}\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu, '')
 		.replace(/[\u034F\u115F\u1160\u180E\u3164\uFFA0]/gu, '')
-		.replace(/<!--[\s\S]*?(-->|$)/g, '')
-		.replace(/<!--|-->/g, '')
+		// Drop every angle bracket rather than pattern-matching HTML: with no
+		// '<' or '>' left, no comment or tag can hide text from a Markdown
+		// render, and a single-character pass cannot be bypassed by nesting
+		// (e.g. "<!<!---->--") the way a multi-character strip can.
+		.replace(/[<>]/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 	const chars = Array.from(result);

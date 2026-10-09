@@ -19,19 +19,19 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 - Default: `DefaultAzureCredential` (Entra ID: whatever the `@azure/identity` chain finds,
   such as environment variables, `az login` or a managed identity).
 - Optional: an account key read from the `AZURE_STORAGE_KEY` environment variable
-  (`main`, line 457) and passed to `AzureNamedKeyCredential`. The old `--sharedKey`
+  (`main`, line 461) and passed to `AzureNamedKeyCredential`. The old `--sharedKey`
   argument is rejected, in both `--sharedKey <key>` and `--sharedKey=<key>` form, with an error that does not echo the value (line 74). The CI step
   in `.github/workflows/copilot-setup-steps.yml` maps `secrets.COPILOT_STORAGE_KEY` to that
   environment variable and no longer puts it on the command line.
 - The script itself never prints the key; stderr only says which auth mode is used (the
-  error handler does print `error.message` and the stack, lines 526-530).
+  error handler does print `error.message` and the stack, lines 530-534).
 
 ## Untrusted inputs parsed
 
 - Table entities returned by the storage account. Rows are written by every team member's
   client, so string fields (`model`, `workspaceName`, `machineName`, `userId`, ...) are
   attacker-influenceable text by anyone allowed to upload. They pass through
-  `normalizeEntity` / `sanitizeEntityString` (lines 234-277) before output.
+  `normalizeEntity` / `sanitizeEntityString` (lines 235-281) before output.
 - Command-line arguments (`--storageAccount`, `--tableName`, `--datasetId`, `--model`,
   `--workspaceId`, `--userId`, `--output`), which end up in the endpoint host, an OData
   filter and the output file path.
@@ -39,7 +39,7 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 ## What it writes and where
 
 - With `--output <path>`: that file only (parent directories created, new files created
-  with mode `0600`; `writeOutputFile`, lines 390-395). Nothing per-row goes to stdout.
+  with mode `0600`; `writeOutputFile`, lines 394-399). Nothing per-row goes to stdout.
 - Without `--output`: the result goes to stdout, for interactive use.
 - In both cases the result is also kept in `module.exports.tresult`.
 - The payload contains `userId`, `machineName`, `workspaceName` and `workspaceId` per row.
@@ -67,12 +67,14 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 - Entity strings have every hidden-content class that `.github/workflows/validate-input.sh`
   flags removed: control characters (`\p{Cc}`), all format characters (`\p{Cf}`: bidi
   controls, zero-width characters, soft hyphen, word joiner, BOM), the whole Unicode tag
-  block, variation selectors and HTML comments, plus a few invisible fillers (U+034F,
-  U+115F, U+1160, U+180E, U+3164, U+FFA0). Whitespace is then collapsed and the length
+  block and variation selectors, plus a few invisible fillers (U+034F, U+115F, U+1160,
+  U+180E, U+3164, U+FFA0). HTML comments are defused by removing every `<` and `>`
+  (a single-character pass that nested markers cannot bypass), so their content stays
+  visible instead of hidden. Whitespace is then collapsed and the length
   capped at 256 characters (`sanitizeEntityString`). The source uses escapes only, so
   the ranges stay reviewable. `SKILL.md` tells agents to treat row values as data.
 - CSV cells that are strings starting with `=`, `+`, `-`, `@`, tab or CR are prefixed with
-  `'`; cells with commas, quotes or line breaks are quoted (`formatCsvCell`, lines 343-355).
+  `'`; cells with commas, quotes or line breaks are quoted (`formatCsvCell`, lines 347-359).
 - OData filter values are rejected if they contain `and`/`or`/`not` or newlines and have
   single quotes doubled; partition keys go through `sanitizeTableKey`.
 - Dates must match `YYYY-MM-DD`; `--format` is restricted to `json`/`csv`.
