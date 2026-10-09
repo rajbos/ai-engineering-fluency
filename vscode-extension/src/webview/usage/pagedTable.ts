@@ -216,7 +216,7 @@ function renderHeaderCell<Row>(column: PagedTableColumn<Row>, state: PagedTableS
 		? localize(direction === 'asc' ? 'usage.pagedTable.sortedAscending' : 'usage.pagedTable.sortedDescending')
 		: localizeFormat('usage.pagedTable.sortBy', column.headerTitle ?? column.label);
 	return `<th scope="col" class="sortable${column.align === 'right' ? ' num' : ''}" aria-sort="${direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}" style="${style}">
-		<button type="button" class="paged-table-sort" data-paged-table="${escapeHtml(tableId)}" data-paged-sort="${escapeHtml(column.id)}" title="${escapeHtml(title)}"${headerTitleAttr(column.headerTitle, 'aria-label')} style="background:none;border:0;padding:0;color:inherit;font:inherit;text-align:inherit;cursor:pointer;">${escapeHtml(column.label)}${indicator}</button>
+		<button type="button" class="paged-table-sort" data-paged-table="${escapeHtml(tableId)}" data-paged-sort="${escapeHtml(column.id)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(column.headerTitle ?? column.label)}" style="background:none;border:0;padding:0;color:inherit;font:inherit;text-align:inherit;cursor:pointer;">${escapeHtml(column.label)}${indicator}</button>
 	</th>`;
 }
 

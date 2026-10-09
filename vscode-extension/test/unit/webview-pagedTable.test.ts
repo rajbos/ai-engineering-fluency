@@ -218,15 +218,29 @@ test('pagedTable: icon-only headers expose headerTitle as the accessible name, t
 		initialSortDirection: 'asc',
 		emptyMessage: 'Empty',
 	});
-	let html = render();
-	assert.match(html, /data-paged-sort="agents" title="Sort by Agents" aria-label="Agents"/);
-	assert.match(html, /<th scope="col" title="Instructions" aria-label="Instructions"/);
-	assert.match(html, /text-align:center;">3<\/td>/);
+	const parse = (): { dom: JSDOM; root: HTMLElement } => {
+		const dom = new JSDOM(`<div id="host">${render()}</div>`);
+		const root = dom.window.document.getElementById(`paged-table-root-${tableId}`);
+		assert.ok(root);
+		return { dom, root };
+	};
+	let { dom, root } = parse();
+	const agentsButton = root.querySelector('[data-paged-sort="agents"]');
+	assert.equal(agentsButton?.getAttribute('aria-label'), 'Agents');
+	assert.equal(agentsButton?.getAttribute('title'), 'Sort by Agents');
+	// Text headers get a stable accessible name too, without the ↑/↓ indicator.
+	const nameButton = root.querySelector('[data-paged-sort="name"]');
+	assert.equal(nameButton?.textContent?.trim(), 'Name ↑');
+	assert.equal(nameButton?.getAttribute('aria-label'), 'Name');
+	const plainHeader = Array.from(root.querySelectorAll('th')).find(th => th.textContent?.trim() === '📄');
+	assert.equal(plainHeader?.getAttribute('aria-label'), 'Instructions');
+	assert.equal(plainHeader?.getAttribute('title'), 'Instructions');
+	const agentsCell = root.querySelector('tbody tr')?.children[2] as HTMLElement | undefined;
+	assert.equal(agentsCell?.textContent, '1'); // sorted by name: 'Row 01' comes first
+	assert.equal(agentsCell?.style.textAlign, 'center');
+	dom.window.close();
 	setPagedTableSort(tableId, 'agents');
-	html = render();
-	const dom = new JSDOM(`<div id="host">${html}</div>`);
-	const root = dom.window.document.getElementById(`paged-table-root-${tableId}`);
-	assert.ok(root);
+	({ dom, root } = parse());
 	assert.equal(getPagedTableAnnouncement(root, true), 'Agents: Sorted ascending');
 	dom.window.close();
 });

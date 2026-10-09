@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../src/types';
@@ -23,7 +23,8 @@ import {
 	renderCustomizationTable,
 } from '../../src/webview/usage/customizationMatrixSection';
 
-initializeWebviewLocalization({});
+beforeEach(() => initializeWebviewLocalization({}));
+afterEach(() => initializeWebviewLocalization({}));
 
 const TYPES = [
 	{ id: 'instructions', icon: '📄', label: 'Instructions' },
@@ -214,4 +215,20 @@ test('customizationMatrix: an active filter stays clearable when a refresh leave
 test("customizationMatrix: populated and empty sections keep the What's New nav anchor", () => {
 	assert.match(buildCustomizationSectionHtml(matrix([row('a', 1)])), /id="section-customization-files"/);
 	assert.match(buildCustomizationSectionHtml(null), /id="section-customization-files"/);
+});
+
+test('customizationMatrix: a row with no status data is unknown, not missing', () => {
+	assert.equal(hasNoCustomization(row('x', 1, {})), false);
+	assert.equal(hasNoCustomization({ ...row('x', 1), typeStatuses: undefined as unknown as WorkspaceCustomizationRow['typeStatuses'] }), false);
+	const html = buildCustomizationSectionHtml(matrix([row('a', 1, {})]));
+	assert.doesNotMatch(html, /aria-label="No customization files"/);
+	assert.match(html, /title="Status unknown" aria-label="Status unknown">\?<\/span>/);
+});
+
+test('statusBadge: unknown renders a neutral ? badge, not the missing ✕', () => {
+	const unknown = statusBadgeHtml('❓');
+	assert.match(unknown, />\?<\/span>$/);
+	assert.match(unknown, /aria-label="Status unknown"/);
+	assert.doesNotMatch(unknown, /239,68,68/);
+	assert.match(statusBadgeHtml('❌'), />✕<\/span>$/);
 });

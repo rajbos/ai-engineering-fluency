@@ -25,9 +25,13 @@ const SECTION_ID = 'section-customization-files';
 /** The matrix last rendered, so sort/page/filter clicks can re-render without a new payload. */
 let currentMatrix: WorkspaceCustomizationMatrix | null = null;
 
-/** Same test that decides the ⚠️ badge: every customization type is missing. */
+/**
+ * Same test that decides the ⚠️ badge: every customization type is missing. A row with no
+ * status data at all is unknown, not missing, so it is neither badged nor matched by the filter.
+ */
 export function hasNoCustomization(row: WorkspaceCustomizationRow): boolean {
-	return Object.values(row.typeStatuses ?? {}).every(status => status === '❌');
+	const statuses = Object.values(row.typeStatuses ?? {});
+	return statuses.length > 0 && statuses.every(status => status === '❌');
 }
 
 /** Sort rank for a status cell: ✅ > ⚠️ > ❌; unknown sorts last in both directions. */
