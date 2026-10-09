@@ -123,6 +123,12 @@
           "expect": "#tab-panel-health"
         },
         {
+          "id": "health-customization-page2",
+          "title": "Workspace › Workspace Health, Customization Files table on page 2",
+          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }, { "click": "#paged-table-root-customization [data-paged-direction=\"next\"]" }],
+          "expect": "#paged-table-root-customization"
+        },
+        {
           "id": "repos",
           "title": "GitHub › Repository PRs tab",
           "$comment": [

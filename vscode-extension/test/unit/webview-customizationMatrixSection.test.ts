@@ -1,0 +1,178 @@
+import test from 'node:test';
+import * as assert from 'node:assert/strict';
+
+import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../src/types';
+import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
+import {
+	getPagedTablePage,
+	getPagedTableState,
+	setPagedTableFilter,
+	setPagedTablePage,
+	setPagedTableSort,
+	type PagedTableState,
+} from '../../src/webview/usage/pagedTable';
+import {
+	CUSTOMIZATION_FILTER_NONE_ONLY,
+	CUSTOMIZATION_PAGE_SIZE,
+	CUSTOMIZATION_TABLE_ID,
+	buildCustomizationColumns,
+	buildCustomizationSectionHtml,
+	customizationStatusRank,
+	hasNoCustomization,
+	renderCustomizationTable,
+} from '../../src/webview/usage/customizationMatrixSection';
+
+initializeWebviewLocalization({});
+
+const TYPES = [
+	{ id: 'instructions', icon: '📄', label: 'Instructions' },
+	{ id: 'agents', icon: '🤖', label: 'Agents' },
+];
+
+function row(name: string, interactions: number, statuses: Record<string, '✅' | '⚠️' | '❌'> = { instructions: '✅', agents: '✅' }, extra: Partial<WorkspaceCustomizationRow> = {}): WorkspaceCustomizationRow {
+	return { workspacePath: `/repos/${name}`, workspaceName: name, sessionCount: interactions % 7, interactionCount: interactions, typeStatuses: statuses, ...extra };
+}
+
+function matrix(rows: WorkspaceCustomizationRow[]): WorkspaceCustomizationMatrix {
+	return {
+		customizationTypes: TYPES,
+		workspaces: rows,
+		totalWorkspaces: rows.length,
+		workspacesWithIssues: rows.filter(hasNoCustomization).length,
+	};
+}
+
+function rows(count: number): WorkspaceCustomizationRow[] {
+	return Array.from({ length: count }, (_, i) => row(`ws-${String(i).padStart(3, '0')}`, count - i));
+}
+
+function state(overrides: Partial<PagedTableState> = {}): PagedTableState {
+	return { sortColumn: 'interactions', sortDirection: 'desc', page: 1, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false }, ...overrides };
+}
+
+function filterRows(r: WorkspaceCustomizationRow, filters: Readonly<Record<string, boolean>>): boolean {
+	return !filters[CUSTOMIZATION_FILTER_NONE_ONLY] || hasNoCustomization(r);
+}
+
+function page(data: WorkspaceCustomizationRow[], s: PagedTableState) {
+	return getPagedTablePage(data, buildCustomizationColumns(matrix(data)), s, filterRows, CUSTOMIZATION_PAGE_SIZE);
+}
+
+test('customizationMatrix: page slicing at 0/1/20/21/140 rows', () => {
+	const cases: Array<[number, number, number, number]> = [
+		// rows, pageCount, rows on page 1, rows on last page
+		[0, 1, 0, 0],
+		[1, 1, 1, 1],
+		[20, 1, 20, 20],
+		[21, 2, 20, 1],
+		[140, 7, 20, 20],
+	];
+	for (const [count, pageCount, firstLen, lastLen] of cases) {
+		const data = rows(count);
+		const first = page(data, state());
+		assert.equal(first.pageCount, pageCount, `pageCount for ${count}`);
+		assert.equal(first.rows.length, firstLen, `first page length for ${count}`);
+		assert.equal(page(data, state({ page: pageCount })).rows.length, lastLen, `last page length for ${count}`);
+	}
+	const p2 = page(rows(21), state({ page: 2 }));
+	assert.deepEqual([p2.firstRow, p2.lastRow, p2.filteredCount], [21, 21, 21]);
+});
+
+test('customizationMatrix: page clamps when the list shrinks', () => {
+	const result = page(rows(25), state({ page: 7 }));
+	assert.equal(result.page, 2);
+	assert.equal(result.rows.length, 5);
+});
+
+test('customizationMatrix: default order is interactions descending', () => {
+	const data = [row('a', 5), row('b', 50), row('c', 10)];
+	assert.deepEqual(page(data, state()).rows.map(r => r.workspaceName), ['b', 'c', 'a']);
+});
+
+test('customizationMatrix: sorts by each column both directions', () => {
+	const data = [
+		row('beta', 3, { instructions: '❌', agents: '✅' }, { sessionCount: 9 }),
+		row('Alpha', 7, { instructions: '✅', agents: '❌' }, { sessionCount: 1 }),
+		row('gamma', 5, { instructions: '⚠️', agents: '⚠️' }, { sessionCount: 4 }),
+	];
+	const names = (s: PagedTableState) => page(data, s).rows.map(r => r.workspaceName);
+	assert.deepEqual(names(state({ sortColumn: 'workspace', sortDirection: 'asc' })), ['Alpha', 'beta', 'gamma']);
+	assert.deepEqual(names(state({ sortColumn: 'workspace', sortDirection: 'desc' })), ['gamma', 'beta', 'Alpha']);
+	assert.deepEqual(names(state({ sortColumn: 'sessions', sortDirection: 'asc' })), ['Alpha', 'gamma', 'beta']);
+	assert.deepEqual(names(state({ sortColumn: 'interactions', sortDirection: 'asc' })), ['beta', 'gamma', 'Alpha']);
+	// Status columns: ✅ > ⚠️ > ❌, so ascending lists the missing ones first.
+	assert.deepEqual(names(state({ sortColumn: 'type:instructions', sortDirection: 'asc' })), ['beta', 'gamma', 'Alpha']);
+	assert.deepEqual(names(state({ sortColumn: 'type:instructions', sortDirection: 'desc' })), ['Alpha', 'gamma', 'beta']);
+	assert.deepEqual(names(state({ sortColumn: 'type:agents', sortDirection: 'asc' })), ['Alpha', 'gamma', 'beta']);
+});
+
+test('customizationMatrix: ties keep host order in both directions', () => {
+	const data = [row('first', 1), row('second', 1), row('third', 1)];
+	assert.deepEqual(page(data, state({ sortColumn: 'type:instructions', sortDirection: 'asc' })).rows.map(r => r.workspaceName), ['first', 'second', 'third']);
+	assert.deepEqual(page(data, state({ sortColumn: 'type:instructions', sortDirection: 'desc' })).rows.map(r => r.workspaceName), ['first', 'second', 'third']);
+});
+
+test('customizationMatrix: status rank and no-customization test', () => {
+	assert.equal(customizationStatusRank('✅'), 2);
+	assert.equal(customizationStatusRank('⚠️'), 1);
+	assert.equal(customizationStatusRank('❌'), 0);
+	assert.equal(customizationStatusRank(undefined), null);
+	assert.equal(hasNoCustomization(row('x', 1, { instructions: '❌', agents: '❌' })), true);
+	assert.equal(hasNoCustomization(row('x', 1, { instructions: '❌', agents: '⚠️' })), false);
+});
+
+test('customizationMatrix: filter keeps paging consistent', () => {
+	const data = rows(45).map((r, i) => i % 3 === 0 ? { ...r, typeStatuses: { instructions: '❌' as const, agents: '❌' as const } } : r);
+	const filtered = page(data, state({ page: 3, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: true } }));
+	assert.equal(filtered.filteredCount, 15);
+	assert.equal(filtered.pageCount, 1);
+	assert.equal(filtered.page, 1);
+	assert.ok(filtered.rows.every(hasNoCustomization));
+});
+
+test('customizationMatrix: rendered table resets page on sort/filter and updates counts', () => {
+	const data = rows(45).map((r, i) => i % 3 === 0 ? { ...r, typeStatuses: { instructions: '❌' as const, agents: '❌' as const } } : r);
+	const m = matrix(data);
+	buildCustomizationSectionHtml(m);
+	setPagedTablePage(CUSTOMIZATION_TABLE_ID, 3);
+	assert.match(renderCustomizationTable(m), /Page 3 of 3 · Showing 41–45 of 45/);
+	setPagedTableSort(CUSTOMIZATION_TABLE_ID, 'workspace');
+	assert.equal(getPagedTableState(CUSTOMIZATION_TABLE_ID, 'interactions', 'desc').page, 1);
+	setPagedTablePage(CUSTOMIZATION_TABLE_ID, 2);
+	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
+	const html = renderCustomizationTable(m);
+	assert.match(html, /Showing 1–15 of 15/);
+	assert.doesNotMatch(html, /data-paged-direction/);
+	assert.match(buildCustomizationSectionHtml(m), /data-paged-table-filter="noCustomizationOnly" checked/);
+	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+});
+
+test('customizationMatrix: pager hidden at 20 rows, shown at 21', () => {
+	assert.doesNotMatch(renderCustomizationTable(matrix(rows(20))), /data-paged-direction/);
+	assert.match(renderCustomizationTable(matrix(rows(21))), /data-paged-direction="next"/);
+});
+
+test('customizationMatrix: escapes name and path, path is the tooltip', () => {
+	const evil = row('<img src=x onerror=alert(1)>', 3, undefined, { workspacePath: 'C:\\repos\\"quoted"<b>' });
+	const twin = row('<img src=x onerror=alert(1)>', 2, undefined, { workspacePath: '/other/place' });
+	const html = buildCustomizationSectionHtml(matrix([evil, twin]));
+	assert.doesNotMatch(html, /<img src=x/);
+	assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+	assert.match(html, /title="C:\\repos\\&quot;quoted&quot;&lt;b&gt;"/);
+	assert.match(html, /title="\/other\/place"/);
+});
+
+test('customizationMatrix: renders interactions column, icon headers with type labels and the filter toggle', () => {
+	const html = buildCustomizationSectionHtml(matrix([row('a', 1234), row('b', 3, { instructions: '❌', agents: '❌' })]));
+	assert.match(html, />Interactions/);
+	assert.match(html, />1234</);
+	assert.match(html, /aria-label="Instructions"/);
+	assert.match(html, /title="Sort by Agents"/);
+	assert.match(html, /Only workspaces without customization files/);
+	assert.match(html, /1 workspace\(s\) have no customization files/);
+});
+
+test('customizationMatrix: empty matrix renders the empty state', () => {
+	assert.match(buildCustomizationSectionHtml(null), /No workspaces with customization files/);
+	assert.match(buildCustomizationSectionHtml(matrix([])), /No workspaces with customization files/);
+});

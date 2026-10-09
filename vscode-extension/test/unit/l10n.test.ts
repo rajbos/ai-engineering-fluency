@@ -84,6 +84,27 @@ test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 	}
 });
 
+test('l10n: customization files table controls resolve in English and zh-cn', () => {
+	const translations: Array<[string, string, string]> = [
+		['usage.customization.column.workspace', '📂 Workspace', '📂 工作区'],
+		['usage.customization.column.sessions', 'Sessions', '会话'],
+		['usage.customization.column.interactions', 'Interactions', '交互'],
+		['usage.customization.aria.table', 'Copilot customization files by workspace', '按工作区列出的 Copilot 自定义文件'],
+		['usage.customization.filter.noCustomizationOnly', 'Only workspaces without customization files', '仅显示没有自定义文件的工作区'],
+	];
+	for (const [key, english] of translations) {
+		assert.equal(t(key), english);
+	}
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, , chinese] of translations) {
+			assert.equal(t(key), chinese);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: tool curation UI strings resolve in English and zh-cn', () => {
 	const translations: Array<[string, string, string]> = [
 		['usage.toolCuration.column.server', 'Server', '服务器'],
