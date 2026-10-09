@@ -21,7 +21,7 @@ const {
 const SKILL_DIR = path.resolve(__dirname, '..');
 const COLLECT = path.join(SKILL_DIR, 'collect-changeset.js');
 const CONFIG = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, 'risk-signals.json'), 'utf8'));
-const ZWSP = '​';
+const ZWSP = '\u200B';
 
 // ── render-comment.js sanitize() ────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ test('sanitize: zero-width space cannot splice a raw HTML tag back together', ()
 });
 
 test('sanitize: other invisible characters are removed before the HTML steps', () => {
-  for (const ch of ['‌', '‍', '⁠', '﻿', '­', '‮', '\u{E0041}', '\u0007']) {
+  for (const ch of ['\u200C', '\u200D', '\u2060', '\uFEFF', '\u00AD', '\u202E', '\u{E0041}', '\u0007']) {
     const out = sanitize(`<${ch}!-- pr-risk-review --> <${ch}script>`, 2400);
     assert.ok(!out.includes('<'), `U+${ch.codePointAt(0).toString(16)}: ${out}`);
   }
@@ -144,6 +144,15 @@ test('classify: a file moved out of a sensitive directory into docs keeps the hi
   assert.equal(moved.lowRisk, false);
 });
 
+test('classify: a hand-written file renamed into a generated path still counts as reviewable', () => {
+  const moved = fileFixture('vscode-extension/dist/extension.js', 'vscode-extension/src/extension.ts');
+  classify([moved], CONFIG);
+  assert.equal(moved.generated, false);
+  const both = fileFixture('a/dist/x.js', 'b/dist/x.js');
+  classify([both], CONFIG);
+  assert.equal(both.generated, true);
+});
+
 // ── collect-changeset.js end to end against a scratch repository ────────────
 
 function gitIn(cwd, args) {
@@ -192,11 +201,22 @@ test('collect-changeset: --base/--head values starting with "-" are rejected', (
 // ── collect-changeset.js codeSpan() ─────────────────────────────────────────
 
 test('codeSpan: backticks, pipes, newlines and bidi in file names cannot break the table', () => {
-  const span = codeSpan('a`b|c\nd‮e.txt');
+  const span = codeSpan('a`b|c\nd\u202Ee.txt');
   assert.ok(!span.includes('\n'));
-  assert.ok(!span.includes('‮'));
+  assert.ok(!span.includes('\u202E'));
   assert.ok(span.includes('\\u{202E}'));
   assert.ok(span.includes('\\|'));
   assert.ok(!/(^|[^\\])\|/.test(span), span);
   assert.ok(span.startsWith('``') && span.endsWith('``'), span);
+});
+
+test('codeSpan: a backslash before a pipe cannot consume the pipe escape', () => {
+  for (const name of ['a\\|b', 'a\\\\|b', 'trailing\\', '\\|']) {
+    const span = codeSpan(name);
+    // Every `|` must be preceded by an odd number of backslashes, i.e. escaped.
+    for (const match of span.matchAll(/(\\*)\|/g)) {
+      assert.equal(match[1].length % 2, 1, `${JSON.stringify(name)} -> ${span}`);
+    }
+    assert.ok(span.includes('\\u{5C}'), span);
+  }
 });

@@ -264,11 +264,14 @@ function classify(files, config) {
   const generated = compilePatterns(config.generatedPaths.paths);
 
   for (const file of files) {
-    file.generated = matchesAny(generated, file.path);
     // A rename or copy is judged at both ends, each end on its own, and the
     // worse end wins: moving `.github/workflows/x.yml` to `docs/x.yml` removes
     // a workflow, and the low-risk `docs` match on the new path must not hide it.
-    const ends = (file.oldPath ? [file.path, file.oldPath] : [file.path]).map((p) => {
+    // The same goes for the generated flag, which drops a file's churn from the
+    // size assessment: renaming hand-written code into `dist/` must not.
+    const endPaths = file.oldPath ? [file.path, file.oldPath] : [file.path];
+    file.generated = endPaths.every((p) => matchesAny(generated, p));
+    const ends = endPaths.map((p) => {
       const matched = categories.filter((category) => matchesAny(category.compiled, p));
       // Kept as its own flag rather than inferred from weight === 1: build
       // tooling and uncategorised files are also weight 1, and they are
@@ -404,6 +407,12 @@ const HIDDEN_IN_NAMES =
  */
 function codeSpan(value) {
   const text = String(value)
+    // Backslashes first, shown as a visible `\u{5C}` like the characters below.
+    // Left alone, a name ending `\` before a `|` would consume the escape we
+    // add to that pipe (`a\|b` -> `a\\|b`) and split the table row anyway — the
+    // parity case cell() in render-comment.js handles by doubling. Doubling
+    // would show inside a code span, so the escape form is used instead.
+    .replace(/\\/g, '\\u{5C}')
     .replace(HIDDEN_IN_NAMES, (ch) => `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`)
     // GFM splits table rows on `|` even inside a code span unless escaped.
     .replace(/\|/g, '\\|');

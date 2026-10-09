@@ -218,10 +218,11 @@ jobs:
         with:
           node-version: ${{ steps.node-version.outputs.version }}
 
-      # The model below may write files anywhere in the workspace, so the code
-      # and data that run AFTER it — the renderer and the changeset facts it
-      # reads — are staged outside the workspace first, where it cannot reach
-      # them. Copied from the base checkout, never from the PR head.
+      # The model below may only write pr-risk/verdict.json. The code and data
+      # that run AFTER it — the renderer and the changeset facts it reads —
+      # are still staged outside the workspace first, so that guarantee does
+      # not rest on one CLI flag alone. Copied from the base checkout, never
+      # from the PR head.
       - name: Stage the trusted review scripts
         run: |
           set -euo pipefail
@@ -271,8 +272,12 @@ jobs:
       # must degrade to the mechanical baseline, not fail a contributor's PR.
       #
       # The CLI runs deliberately narrowly for a job that reads an untrusted
-      # diff. Tools are an ALLOWLIST, not a denylist: file writes (for the
-      # verdict) and a handful of read-only shell commands. Nothing that can
+      # diff. Tools are an ALLOWLIST, not a denylist: a write to exactly one
+      # file, pr-risk/verdict.json, and a handful of read-only shell commands
+      # (shell redirections need --allow-all-tools, so `cat > f` is refused).
+      # The model therefore cannot rewrite the pr-risk/head evidence, .git, or
+      # the changeset files it is judging. --disallow-temp-dir keeps it out of
+      # the system temp directory as well. Nothing that can
       # run code or reach the network — no `node`, `python`, `npx`, `sh`,
       # `git` (whose `--output=` can write anywhere), `sed` (`e`) or `find`
       # (`-exec`). The old denylist stays as a second layer. No GitHub MCP
@@ -342,7 +347,7 @@ jobs:
             --silent \
             --no-color \
             --no-ask-user \
-            --allow-tool 'write' \
+            --allow-tool "write(${GITHUB_WORKSPACE}/pr-risk/verdict.json)" \
             --allow-tool 'shell(cat:*)' \
             --allow-tool 'shell(head:*)' \
             --allow-tool 'shell(tail:*)' \
@@ -350,6 +355,7 @@ jobs:
             --allow-tool 'shell(ls:*)' \
             --allow-tool 'shell(grep:*)' \
             --add-dir "${GITHUB_WORKSPACE}" \
+            --disallow-temp-dir \
             --disable-builtin-mcps \
             --secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN \
             --deny-tool 'shell(gh:*)' \
