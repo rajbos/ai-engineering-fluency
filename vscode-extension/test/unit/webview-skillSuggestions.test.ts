@@ -189,16 +189,29 @@ test('wireSkillSuggestions: delegated clicks post messages, page the list, and s
 		assert.equal(posted.length, 2);
 		const notice = doc.querySelector('.skill-suggestion-notice[data-cluster-index="0"]')!;
 		assert.match(notice.textContent!, /Open "app" in VS Code first/);
+		assert.equal(notice.getAttribute('role'), 'status', 'blocked-create instructions must be announced');
+		assert.equal(notice.getAttribute('aria-live'), 'polite');
 		assert.match(notice.querySelector('pre')!.textContent!, /\.github\/skills\//);
 
 		// Next page re-renders the section; the same listener keeps handling clicks.
 		click(doc.querySelector(`[data-paged-table="${SKILL_SUGGESTIONS_LIST_ID}"][data-paged-direction="next"]`));
 		const indexes = Array.from(doc.querySelectorAll('.skill-suggestion-card') as NodeListOf<Element>).map(c => c.getAttribute('data-cluster-index'));
 		assert.deepEqual(indexes, ['5', '6']);
+		const status = doc.querySelector('.skill-suggestions-status')!;
+		assert.equal(status.getAttribute('role'), 'status');
+		assert.match(status.textContent!, /Page 2 of 2/, 'page change is announced');
 		click(doc.querySelector('button.skill-suggestion-open-session'));
 		assert.deepEqual(posted[2], { command: 'openSessionFile', file: 'C:\\logs\\cluster-5-session-0.jsonl' });
 	} finally {
 		Object.assign(globals, previous);
 		resetPages();
 	}
+});
+
+test('skillSuggestions: a cluster with no repository is labelled user-level without claiming several repositories', () => {
+	resetPages();
+	const doc = render({ minClusterSize: 2, sessionsScanned: 2, clusters: [makeCluster(0, 2, [])] });
+	const text = doc.querySelector('.skill-suggestion-card')!.textContent!;
+	assert.match(text, /user-level skill \(not tied to exactly one repository\)/);
+	assert.doesNotMatch(text, /several repositories/);
 });

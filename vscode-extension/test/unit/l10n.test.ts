@@ -96,7 +96,7 @@ test('l10n: skill suggestion UI strings resolve in English and zh-cn', () => {
 		["usage.skillSuggestions.copyPromptTooltip", "Copy the skill prompt to paste into Copilot Chat in another workspace", "复制技能提示，以便粘贴到其他工作区的 Copilot Chat 中"],
 		["usage.skillSuggestions.copied", "✅ Copied!", "✅ 已复制！"],
 		["usage.skillSuggestions.target.workspace", "Target: workspace skill in {0}", "目标：{0} 中的工作区技能"],
-		["usage.skillSuggestions.target.user", "Target: user-level skill (spans several repositories)", "目标：用户级技能（跨多个仓库）"],
+		["usage.skillSuggestions.target.user", "Target: user-level skill (not tied to exactly one repository)", "目标：用户级技能（不只属于一个仓库）"],
 		["usage.skillSuggestions.openRepoFirst", "⚠️ Open \"{0}\" in VS Code first, then paste this prompt into Copilot Chat:", "⚠️ 请先在 VS Code 中打开“{0}”，然后将此提示粘贴到 Copilot Chat："],
 		["usage.skillSuggestions.column.session", "Session", "会话"],
 		["usage.skillSuggestions.column.date", "Date", "日期"],

@@ -151,7 +151,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 			</div>
 			${keywords}
 			<div style="margin-top:6px; font-size:11px; color:var(--text-secondary);">${escapeHtml(buildTargetHint(cluster))}</div>
-			<div class="skill-suggestion-notice" data-cluster-index="${clusterIndex}"></div>
+			<div class="skill-suggestion-notice" data-cluster-index="${clusterIndex}" role="status" aria-live="polite" aria-atomic="true"></div>
 			<details style="margin-top:8px;">
 				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">${escapeHtml(localizeFormat('usage.skillSuggestions.sessions', cluster.sessions.length))}</summary>
 				<div style="margin-top:4px;">${renderSkillSessionsTable(cluster, clusterIndex)}</div>
@@ -176,7 +176,11 @@ export function buildSkillSuggestionsBodyHtml(report: RepeatedTaskReport): strin
 /** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
 export function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
 	if (!report || report.clusters.length === 0) { return ''; }
-	return `<div class="section" id="${SKILL_SUGGESTIONS_SECTION_ID}">${buildSkillSuggestionsBodyHtml(report)}</div>`;
+	// The status region sits outside the body so it survives page re-renders and can announce them.
+	return `<div class="section" id="${SKILL_SUGGESTIONS_SECTION_ID}">
+		<span class="paged-table-status skill-suggestions-status" role="status" aria-live="polite" aria-atomic="true"></span>
+		<div class="skill-suggestions-body">${buildSkillSuggestionsBodyHtml(report)}</div>
+	</div>`;
 }
 
 // ── Interaction ────────────────────────────────────────────────────────────
@@ -224,10 +228,24 @@ function clusterAt(wiring: SkillSuggestionsWiring, button: Element): RepeatedTas
 	return Number.isSafeInteger(index) && index >= 0 ? wiring.getReport()?.clusters[index] : undefined;
 }
 
-function copyWithFeedback(button: HTMLButtonElement, text: string): void {
+/** Announce a change that does not move focus (copy feedback, page changes) to screen readers. */
+function announce(section: HTMLElement, text: string): void {
+	const status = section.querySelector<HTMLElement>('.skill-suggestions-status');
+	if (status) { status.textContent = text; }
+}
+
+/** The "Page X of Y · Showing …" text of one list's or table's pager. */
+function pagerStatusText(root: HTMLElement, tableId: string): string {
+	const button = Array.from(root.querySelectorAll<HTMLElement>('[data-paged-direction]'))
+		.find(b => b.getAttribute('data-paged-table') === tableId);
+	return button?.closest('.paged-table-pager')?.querySelector('span')?.textContent?.trim() ?? '';
+}
+
+function copyWithFeedback(section: HTMLElement, button: HTMLButtonElement, text: string): void {
 	navigator.clipboard.writeText(text).then(() => {
 		const original = button.textContent;
 		button.textContent = localize('usage.skillSuggestions.copied');
+		announce(section, localize('usage.skillSuggestions.copied'));
 		setTimeout(() => { button.textContent = original; }, 2000);
 	}).catch(() => { /* clipboard unavailable: leave the label unchanged */ });
 }
@@ -248,8 +266,13 @@ function showOpenRepoNotice(section: HTMLElement, button: Element, action: Extra
 function rerenderSection(section: HTMLElement, wiring: SkillSuggestionsWiring, focus?: { tableId: string; direction: string }): void {
 	const report = wiring.getReport();
 	if (!report) { return; }
-	setHtml(section, buildSkillSuggestionsBodyHtml(report));
-	if (focus) { focusPagerButton(section, focus.tableId, focus.direction); }
+	const body = section.querySelector<HTMLElement>('.skill-suggestions-body');
+	if (!body) { return; }
+	setHtml(body, buildSkillSuggestionsBodyHtml(report));
+	if (focus) {
+		focusPagerButton(body, focus.tableId, focus.direction);
+		announce(section, pagerStatusText(body, focus.tableId));
+	}
 }
 
 function rerenderSessionsTable(section: HTMLElement, wiring: SkillSuggestionsWiring, tableId: string, direction: string): void {
@@ -263,6 +286,7 @@ function rerenderSessionsTable(section: HTMLElement, wiring: SkillSuggestionsWir
 	if (replacement instanceof HTMLElement) {
 		root.replaceWith(replacement);
 		focusPagerButton(replacement, tableId, direction);
+		announce(section, pagerStatusText(replacement, tableId));
 	}
 }
 
@@ -313,7 +337,7 @@ function handleSectionClick(section: HTMLElement, wiring: SkillSuggestionsWiring
 	const copyButton = target.closest<HTMLButtonElement>('button.skill-suggestion-copy');
 	if (copyButton) {
 		const cluster = clusterAt(wiring, copyButton);
-		if (cluster) { copyWithFeedback(copyButton, buildSkillCreationPrompt(cluster)); }
+		if (cluster) { copyWithFeedback(section, copyButton, buildSkillCreationPrompt(cluster)); }
 	}
 }
 

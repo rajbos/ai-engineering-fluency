@@ -140,7 +140,7 @@
   "usage.skillSuggestions.copyPromptTooltip": "Copy the skill prompt to paste into Copilot Chat in another workspace",
   "usage.skillSuggestions.copied": "✅ Copied!",
   "usage.skillSuggestions.target.workspace": "Target: workspace skill in {0}",
-  "usage.skillSuggestions.target.user": "Target: user-level skill (spans several repositories)",
+  "usage.skillSuggestions.target.user": "Target: user-level skill (not tied to exactly one repository)",
   "usage.skillSuggestions.openRepoFirst": "⚠️ Open \"{0}\" in VS Code first, then paste this prompt into Copilot Chat:",
   "usage.skillSuggestions.column.session": "Session",
   "usage.skillSuggestions.column.date": "Date",
