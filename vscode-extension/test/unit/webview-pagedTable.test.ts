@@ -200,3 +200,47 @@ test('pagedTable: preserves control focus and announces sorted and paged updates
 	assert.equal(replacement.querySelector('[data-paged-direction="previous"]')?.hasAttribute('disabled'), true);
 	dom.window.close();
 });
+
+test('pagedTable: icon-only headers expose headerTitle as the accessible name, tooltip and announcement', () => {
+	initializeWebviewLocalization({});
+	const tableId = 'test-icon-header';
+	const iconColumns: PagedTableColumn<Row>[] = [
+		...columns,
+		{ id: 'agents', label: '🤖', headerTitle: 'Agents', align: 'center', sortValue: row => row.count, render: row => String(row.count) },
+		{ id: 'plain', label: '📄', headerTitle: 'Instructions', sortable: false, sortValue: () => null, render: () => '' },
+	];
+	const render = (): string => renderPagedTable({
+		tableId,
+		ariaLabel: 'icons',
+		rows: rows(3),
+		columns: iconColumns,
+		initialSortColumn: 'name',
+		initialSortDirection: 'asc',
+		emptyMessage: 'Empty',
+	});
+	const parse = (): { dom: JSDOM; root: HTMLElement } => {
+		const dom = new JSDOM(`<div id="host">${render()}</div>`);
+		const root = dom.window.document.getElementById(`paged-table-root-${tableId}`);
+		assert.ok(root);
+		return { dom, root };
+	};
+	let { dom, root } = parse();
+	const agentsButton = root.querySelector('[data-paged-sort="agents"]');
+	assert.equal(agentsButton?.getAttribute('aria-label'), 'Agents');
+	assert.equal(agentsButton?.getAttribute('title'), 'Sort by Agents');
+	// Text headers get a stable accessible name too, without the ↑/↓ indicator.
+	const nameButton = root.querySelector('[data-paged-sort="name"]');
+	assert.equal(nameButton?.textContent?.trim(), 'Name ↑');
+	assert.equal(nameButton?.getAttribute('aria-label'), 'Name');
+	const plainHeader = Array.from(root.querySelectorAll('th')).find(th => th.textContent?.trim() === '📄');
+	assert.equal(plainHeader?.getAttribute('aria-label'), 'Instructions');
+	assert.equal(plainHeader?.getAttribute('title'), 'Instructions');
+	const agentsCell = root.querySelector('tbody tr')?.children[2] as HTMLElement | undefined;
+	assert.equal(agentsCell?.textContent, '1'); // sorted by name: 'Row 01' comes first
+	assert.equal(agentsCell?.style.textAlign, 'center');
+	dom.window.close();
+	setPagedTableSort(tableId, 'agents');
+	({ dom, root } = parse());
+	assert.equal(getPagedTableAnnouncement(root, true), 'Agents: Sorted ascending');
+	dom.window.close();
+});

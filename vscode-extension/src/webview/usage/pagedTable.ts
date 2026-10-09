@@ -9,6 +9,8 @@ export type PagedTableSortValue = string | number | null | undefined;
 export interface PagedTableColumn<Row> {
 	id: string;
 	label: string;
+	/** Accessible name for the header when `label` is an icon; defaults to `label`. */
+	headerTitle?: string;
 	align?: 'left' | 'center' | 'right';
 	hidden?: boolean;
 	sortable?: boolean;
@@ -143,7 +145,7 @@ export function getPagedTableAnnouncement(root: HTMLElement, sorted: boolean): s
 		const header = root.querySelector<HTMLTableCellElement>('th[aria-sort="ascending"], th[aria-sort="descending"]');
 		const button = header?.querySelector<HTMLButtonElement>('.paged-table-sort');
 		if (button) {
-			const label = (button.textContent ?? '').replace(/\s*[↑↓]\s*$/, '').trim();
+			const label = button.getAttribute('aria-label')?.trim() || (button.textContent ?? '').replace(/\s*[↑↓]\s*$/, '').trim();
 			return localizeFormat('usage.pagedTable.announcement.sort', label, button.title);
 		}
 	}
@@ -198,6 +200,31 @@ function cellHtml(value: string | { html: string }): string {
 	return typeof value === 'string' ? escapeHtml(value) : value.html;
 }
 
+function headerTitleAttr(headerTitle: string | undefined, attribute: 'title' | 'aria-label'): string {
+	return headerTitle ? ` ${attribute}="${escapeHtml(headerTitle)}"` : '';
+}
+
+function renderHeaderCell<Row>(column: PagedTableColumn<Row>, state: PagedTableState, tableId: string): string {
+	const style = `padding:5px 8px; text-align:${column.align ?? 'left'}; color:var(--text-primary); font-weight:600; font-size:12px;`;
+	if (column.sortable === false) {
+		return `<th scope="col"${column.align === 'right' ? ' class="num"' : ''}${headerTitleAttr(column.headerTitle, 'title')}${headerTitleAttr(column.headerTitle, 'aria-label')} style="${style}">${escapeHtml(column.label)}</th>`;
+	}
+	const active = state.sortColumn === column.id;
+	const direction = active ? state.sortDirection : 'none';
+	const indicator = direction === 'asc' ? ' ↑' : direction === 'desc' ? ' ↓' : '';
+	const title = active
+		? localize(direction === 'asc' ? 'usage.pagedTable.sortedAscending' : 'usage.pagedTable.sortedDescending')
+		: localizeFormat('usage.pagedTable.sortBy', column.headerTitle ?? column.label);
+	return `<th scope="col" class="sortable${column.align === 'right' ? ' num' : ''}" aria-sort="${direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}" style="${style}">
+		<button type="button" class="paged-table-sort" data-paged-table="${escapeHtml(tableId)}" data-paged-sort="${escapeHtml(column.id)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(column.headerTitle ?? column.label)}" style="background:none;border:0;padding:0;color:inherit;font:inherit;text-align:inherit;cursor:pointer;">${escapeHtml(column.label)}${indicator}</button>
+	</th>`;
+}
+
+function renderBodyCell<Row>(column: PagedTableColumn<Row>, row: Row): string {
+	const alignStyle = column.align && column.align !== 'left' ? ` text-align:${column.align};` : '';
+	return `<td${column.align === 'right' ? ' class="num"' : ''} style="padding:5px 8px; color:var(--text-primary); font-size:12px;${alignStyle}">${cellHtml(column.render(row))}</td>`;
+}
+
 export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): string {
 	const state = getPagedTableState(
 		options.tableId,
@@ -210,25 +237,9 @@ export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): st
 		setPagedTablePage(options.tableId, page.page);
 	}
 	const visibleColumns = options.columns.filter(column => !column.hidden);
-	const headers = visibleColumns.map(column => {
-		if (column.sortable === false) {
-			return `<th scope="col"${column.align === 'right' ? ' class="num"' : ''} style="padding:5px 8px; text-align:${column.align ?? 'left'}; color:var(--text-primary); font-weight:600; font-size:12px;">${escapeHtml(column.label)}</th>`;
-		}
-		const active = state.sortColumn === column.id;
-		const direction = active ? state.sortDirection : 'none';
-		const indicator = direction === 'asc' ? ' ↑' : direction === 'desc' ? ' ↓' : '';
-		const title = active
-			? localize(direction === 'asc' ? 'usage.pagedTable.sortedAscending' : 'usage.pagedTable.sortedDescending')
-			: localizeFormat('usage.pagedTable.sortBy', column.label);
-		return `<th scope="col" class="sortable${column.align === 'right' ? ' num' : ''}" aria-sort="${direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}" style="padding:5px 8px; text-align:${column.align ?? 'left'}; color:var(--text-primary); font-weight:600; font-size:12px;">
-			<button type="button" class="paged-table-sort" data-paged-table="${escapeHtml(options.tableId)}" data-paged-sort="${escapeHtml(column.id)}" title="${escapeHtml(title)}" style="background:none;border:0;padding:0;color:inherit;font:inherit;text-align:inherit;cursor:pointer;">${escapeHtml(column.label)}${indicator}</button>
-		</th>`;
-	}).join('');
+	const headers = visibleColumns.map(column => renderHeaderCell(column, state, options.tableId)).join('');
 	const body = page.rows.length > 0
-		? page.rows.map(row => `<tr>${visibleColumns.map(column => {
-			const value = column.render(row);
-			return `<td${column.align === 'right' ? ' class="num"' : ''} style="padding:5px 8px; color:var(--text-primary); font-size:12px;${column.align === 'right' ? ' text-align:right;' : ''}">${cellHtml(value)}</td>`;
-		}).join('')}</tr>`).join('')
+		? page.rows.map(row => `<tr>${visibleColumns.map(column => renderBodyCell(column, row)).join('')}</tr>`).join('')
 		: `<tr><td class="paged-table-empty" colspan="${visibleColumns.length}" style="padding:8px;color:var(--text-secondary);font-size:12px;">${escapeHtml(options.emptyMessage)}</td></tr>`;
 	const summary = page.filteredCount <= (options.pageSize ?? DEFAULT_PAGED_TABLE_PAGE_SIZE)
 		? `<span class="paged-table-summary" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(localizeFormat('usage.pagedTable.showing', page.firstRow, page.lastRow, page.filteredCount))}</span>`
