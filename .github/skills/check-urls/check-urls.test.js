@@ -13,6 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
     HEAD_RETRY_STATUSES,
+    extractUrls,
     isPlainHttp,
     getInternalAddressReason,
     getInternalHostReason,
@@ -128,6 +129,39 @@ test('partitionInternalUrls skips internal hosts and keeps public and invalid UR
         'https://rebind.example/',
     ]);
     assert.match(skipped[2].reason, /^loopback \(rebind\.example resolves to 127\.0\.0\.1\)$/);
+});
+
+test('extractUrls keeps the closing bracket of IPv6 hosts', () => {
+    const text = [
+        "const a = 'http://[::1]/health';",
+        'see http://[fe80::1]:8080/x.',
+        '(http://[fd00::2])',
+        '`http://[::ffff:10.0.0.1]`',
+        'http://[::1]',
+    ].join('\n');
+    assert.deepEqual([...extractUrls(text)], [
+        'http://[::1]/health',
+        'http://[fe80::1]:8080/x',
+        'http://[fd00::2]',
+        'http://[::ffff:10.0.0.1]',
+        'http://[::1]',
+    ]);
+});
+
+test('extractUrls keeps its existing behaviour for ordinary URLs', () => {
+    const text = 'see https://example.com/a. (https://example.org/b) [link](https://x.test/c) https:// https://${host}/p';
+    assert.deepEqual([...extractUrls(text)], ['https://example.com/a', 'https://example.org/b', 'https://x.test/c']);
+});
+
+test('IPv6 URLs extracted from source are SKIPPED, not reported as invalid', async () => {
+    const neverCalled = async () => { throw new Error('IP literals must not be resolved'); };
+    const urls = [...extractUrls("fetch('http://[::1]/x'); fetch('http://[fe80::1]:8080/'); fetch('https://[2001:4860:4860::8888]/')")];
+    const { toCheck, skipped } = await partitionInternalUrls(urls, neverCalled);
+    assert.deepEqual(skipped.map((s) => [s.url, s.reason]), [
+        ['http://[::1]/x', 'loopback'],
+        ['http://[fe80::1]:8080/', 'link-local'],
+    ]);
+    assert.deepEqual(toCheck, ['https://[2001:4860:4860::8888]/']);
 });
 
 test('guardedLookup blocks internal answers at connect time', async () => {

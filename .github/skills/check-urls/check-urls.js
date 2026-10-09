@@ -85,13 +85,16 @@ function collectTsFiles(dir) {
 
 /** Extract all unique http(s) URLs from a string. */
 function extractUrls(text) {
-    // Match URLs, then strip trailing punctuation that isn't part of the URL
-    const raw = text.matchAll(/https?:\/\/[^\s"'`<>)\]},]+/g);
+    // Match URLs, then strip trailing punctuation that isn't part of the URL.
+    // A bracketed IPv6 host (http://[::1]/) is matched as a unit so its closing
+    // bracket survives both the character class and the trailing-punctuation strip.
+    const raw = text.matchAll(/(https?:\/\/(?:\[[0-9A-Fa-f:.]+\])?)([^\s"'`<>)\]},]*)/g);
     const urls = new Set();
-    for (const [match] of raw) {
+    for (const [, prefix, rest] of raw) {
         // Strip trailing punctuation characters that commonly appear after URLs
         // in prose or markdown (e.g. "see https://example.com." or "(https://example.com)")
-        const url = match.replace(/[.,;:!?)>\]'"`]+$/u, '');
+        const url = prefix + rest.replace(/[.,;:!?)>\]'"`]+$/u, '');
+        if (/^https?:\/\/$/i.test(url)) { continue; }
         // Skip template literal interpolations (e.g. https://${variable}/path)
         if (url.includes('${')) { continue; }
         urls.add(url);
