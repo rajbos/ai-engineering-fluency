@@ -133,10 +133,10 @@ jobs:
             const fs = require("fs");
             const { readDesktopViews } = require("../scripts/validate-desktop-contract.js");
             const expected = ["dist/main.js", "dist/preload.js", "dist/webview/codicons/codicon.css", "dist/webview/codicons/codicon.ttf",
-              ...readDesktopViews().map((v) => `dist/webview/${v}.js`)];
+              ...readDesktopViews().map((v) => "dist/webview/" + v + ".js")];
             const missing = expected.filter((f) => !fs.existsSync(f));
             if (missing.length) { console.error("Missing from the desktop build:", missing.join(", ")); process.exit(1); }
-            console.log(`Desktop build contains all ${expected.length} expected files.`);
+            console.log("Desktop build contains all " + expected.length + " expected files.");
           '
 
       # Informational: views the extension has that the desktop (or another
