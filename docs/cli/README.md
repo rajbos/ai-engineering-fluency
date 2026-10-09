@@ -321,7 +321,7 @@ ai-engineering-fluency skill-suggestions --json                   # JSON without
 ai-engineering-fluency skill-suggestions --json --include-prompts # JSON with prompt text and session titles
 ```
 
-Sessions from the current and the previous calendar month (at least the last 30 days) are scanned. A task is reported once at least two sessions start with a similar prompt.
+Sessions active in the current or the previous calendar month (at least the last 30 days) are scanned; for editors that keep many sessions in one database (such as OpenCode and Crush), each session's own last activity decides, not the database file's date. A task is reported once at least two sessions start with a similar prompt.
 
 ```
 Skill Suggestions — repeated tasks

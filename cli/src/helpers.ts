@@ -610,7 +610,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 
 			const analysis = await analyzeSessionUsage(deps, file);
 			if (options.includeRepeatedTasks && analysis.firstUserPrompt) {
-				repeatedTaskSources.push(await toRepeatedTaskSource(file, analysis.firstUserPrompt, stats.mtimeMs));
+				const source = await toRepeatedTaskSource(file, analysis.firstUserPrompt, stats.mtimeMs);
+				if (repeatedTaskActivityMs(source) >= cutoffStart.getTime()) { repeatedTaskSources.push(source); }
 			}
 			let sessionSummary: TodaySessionSummary | undefined;
 			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
@@ -679,17 +680,31 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	};
 }
 
-/** Session context for the repeated-task report, from the owning adapter when it has one. */
+/**
+ * Session context for the repeated-task report, from the owning adapter when it has one.
+ * DB-backed sessions share their database's mtime, so the adapter's per-session
+ * last interaction (or last activity) is what places a session in the window.
+ */
 async function toRepeatedTaskSource(file: string, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
 	const meta = await getSessionMeta(file);
+	const lastInteraction = meta?.lastInteraction ?? (await getSessionLastActivity(file))?.toISOString() ?? null;
 	return {
 		file,
 		firstUserPrompt,
 		title: meta?.title ?? null,
-		lastInteraction: meta?.lastInteraction ?? null,
+		lastInteraction,
 		mtime: mtimeMs,
 		repository: meta?.repository ?? null,
 	};
+}
+
+/**
+ * A repeated-task source's own activity time in epoch ms: its last interaction
+ * when known and parseable, otherwise the file mtime.
+ */
+export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, 'lastInteraction' | 'mtime'>): number {
+	const parsed = source.lastInteraction ? Date.parse(source.lastInteraction) : NaN;
+	return Number.isNaN(parsed) ? source.mtime : parsed;
 }
 
 /**

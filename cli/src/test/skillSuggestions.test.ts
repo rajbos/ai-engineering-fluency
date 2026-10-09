@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { calculateUsageAnalysisStats } from '../helpers';
+import { calculateUsageAnalysisStats, repeatedTaskActivityMs } from '../helpers';
 import { disableCache } from '../cliCache';
 import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skill-suggestions';
 import type { RepeatedTaskReport } from '../../../src/types';
@@ -70,6 +70,14 @@ test('calculateUsageAnalysisStats leaves repeatedTasks undefined when no prompt 
 	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true });
 	assert.equal(stats.repeatedTasks, undefined);
 	assert.equal(JSON.parse(JSON.stringify(stats)).repeatedTasks, undefined);
+});
+
+test("repeatedTaskActivityMs uses each session's own last interaction, not the shared file mtime", () => {
+	const mtime = Date.parse('2026-10-08T00:00:00Z');
+	// A DB-backed session: the database file changed today, the session itself is a year old.
+	assert.equal(repeatedTaskActivityMs({ lastInteraction: '2025-10-01T00:00:00Z', mtime }), Date.parse('2025-10-01T00:00:00Z'));
+	assert.equal(repeatedTaskActivityMs({ lastInteraction: null, mtime }), mtime);
+	assert.equal(repeatedTaskActivityMs({ lastInteraction: 'not a date', mtime }), mtime);
 });
 
 const REPORT: RepeatedTaskReport = {
