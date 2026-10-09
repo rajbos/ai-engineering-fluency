@@ -75,7 +75,7 @@ test('default output removes session-identifying fields and anonymizes paths', (
                     snippet: 'correction-snippet-sentinel',
                     file: 'correction-file-path-sentinel'
                 }],
-                contextReferences: { file: 5 }
+                contextReferences: { file: 5, byPath: { 'context-path-sentinel.ts': 2 } }
             }
         }
     };
@@ -87,7 +87,7 @@ test('default output removes session-identifying fields and anonymizes paths', (
     assert.deepEqual(Object.keys(output.entries), ['session-1']);
     assert.equal(output.entries['session-1'].tokens, 42);
     assert.equal(output.entries['session-1'].interactions, 3);
-    assert.equal(output.entries['session-1'].usageAnalysis.contextReferences.file, 5);
+    assert.deepEqual(output.entries['session-1'].usageAnalysis.contextReferences, { file: 5 });
     assert.deepEqual(output.entries['session-1'].usageAnalysis.correctionMoments, [{
         type: 'user-correction'
     }]);
@@ -101,6 +101,7 @@ test('default output removes session-identifying fields and anonymizes paths', (
         'nested-prompt-sentinel',
         'correction-snippet-sentinel',
         'correction-file-path-sentinel',
+        'context-path-sentinel',
         sessionPath
     ]) {
         assert.equal(result.stdout.includes(sentinel), false, `output leaked ${sentinel}`);
@@ -123,6 +124,30 @@ test('--include-sensitive opts in to full entries and their paths', (t) => {
     const output = JSON.parse(result.stdout);
     assert.equal(output.cacheFile, path.join(fixture.storage, 'session-cache.json'));
     assert.deepEqual(output.entries[sessionPath], entry);
+});
+
+test('--include-sensitive still strips credentials from repository URLs', (t) => {
+    const fixture = createFixture(t);
+    const sessionPath = path.join(fixture.home, 'workspace', 'session.jsonl');
+    fs.writeFileSync(path.join(fixture.storage, 'session-cache.json'), JSON.stringify({
+        [sessionPath]: { tokens: 1, repository: 'https://user:token-sentinel@github.com/owner/repo.git' }
+    }));
+
+    const result = fixture.run(['--include-sensitive', '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.includes('token-sentinel'), false);
+    assert.equal(JSON.parse(result.stdout).entries[sessionPath].repository, 'https://github.com/owner/repo.git');
+});
+
+test('finds the cache under the current extension id', (t) => {
+    const fixture = createFixture(t);
+    const currentStorage = path.join(path.dirname(fixture.storage), 'robbos.ai-engineering-fluency');
+    fs.mkdirSync(currentStorage, { recursive: true });
+    fs.writeFileSync(path.join(currentStorage, 'session-cache.json'), JSON.stringify({ a: { tokens: 3, mtime: 1 } }));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).entries['session-1'].tokens, 3);
 });
 
 test('ignores cache files planted in temporary and current-working directories', (t) => {

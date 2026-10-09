@@ -4,39 +4,50 @@ Lightweight model derived from reading `load-cache-data.js` and the cache entry 
 `SessionFileCache` in `src/types.ts`. Update it in the same PR as any change that adds or
 alters a trigger surface (see "Skill security classification" in the repository `AGENTS.md`).
 
-This skill is classified as modelled (not exempt) because its purpose is to print raw cache
-entries, which include session-derived free text and local paths, straight into a chat
-transcript (trigger 6).
+This skill is classified as modelled (not exempt) because its purpose is to print cache
+entries derived from the user's AI sessions into a chat transcript (trigger 6). The default
+output is limited to counts and metadata; session-derived free text and local paths are only
+printed behind the explicit `--include-sensitive` opt-in.
 
 ## What the scripts do and talk to
 
 - `load-cache-data.js` looks for the extension's session cache export on disk, parses it
-  and prints the most recent `--last N` entries (default 10) as one JSON document to
-  stdout. If no file is found it prints `{ cacheFound: false, searchedPaths }` and exits 1.
+  and prints the most recent `--last N` entries (default 10, at most 100) as one JSON
+  document to stdout. If no file is found it prints `{ cacheFound: false, error }` (no
+  searched paths) and exits 1. An invalid `--last` value exits 2.
 - No network access.
 
 ## Credentials used and where they come from
 
-None. It reads `APPDATA`, `TEMP`/`TMP` and `XDG_CONFIG_HOME` only to build candidate paths.
+None. It reads `APPDATA` and `XDG_CONFIG_HOME` only to build candidate paths.
 
 ## Untrusted inputs parsed
 
-- The first readable file among, in order: the extension's `globalStorage/<id>/session-cache.json`
-  under each VS Code variant's user directory, `copilot-token-tracker-cache.json` and
-  `session-cache.json` in the OS temp directory, and `cache-export.json` and
-  `session-cache.json` in the current working directory (lines 108-170, 280-300).
-- The temp directory and the working directory are locations other local users or
-  repositories can write to. The content is `JSON.parse`d and printed; nothing in it is
-  executed. Whatever text the file holds reaches the reader of stdout (for an agent, its
-  context).
+- The first regular file found at `<VS Code user data>/User/globalStorage/<extension id>/session-cache.json`,
+  for the variants Code, Code - Insiders, Code - Exploration, VSCodium and Cursor, and the
+  extension ids `robbos.ai-engineering-fluency` and `robbos.copilot-token-tracker`
+  (`getCacheFilePaths`, line 140). These are in the user's own profile directory.
+- The OS temp directory and the current working directory are no longer candidates, so a
+  file planted there is not read.
+- The content is `JSON.parse`d (line 261) and filtered before printing; nothing in it is
+  executed.
 
 ## What it writes and where
 
-Nothing on disk. Stdout is one JSON line with `cacheFile` (full path), `requestedCount`,
-`totalCacheEntries` and `entries`, where each entry is the whole cached object: token and
-interaction counts, per-model usage, usage analysis, and also `title` (the session title),
-`repository` (git remote URL) and `workspaceFolderPath` (a local path) when the cache has
-them.
+Nothing on disk. Stdout is one JSON line.
+
+- **Default:** `requestedCount`, `totalCacheEntries` and `entries`, keyed `session-1`,
+  `session-2`, ... instead of session file paths. Each entry keeps only allowlisted fields
+  (`SAFE_CACHE_ENTRY_FIELDS`, line 186): token and interaction counts, per-model usage,
+  timestamps, task categories, daily rollups and `usageAnalysis`. Inside `usageAnalysis`,
+  `firstUserPrompt`, `contextReferences.byPath` and each correction moment's `snippet` and
+  `file` are removed (`sanitizeCacheEntry`, line 196). `title`, `repository`,
+  `workspaceFolderPath`, any unrecognized top-level field and the cache file path are
+  omitted.
+- **`--include-sensitive`:** the cache file path (`cacheFile`), session file paths as entry
+  keys, and full entries including `title`, `workspaceFolderPath` and `repository`. URL
+  userinfo (`user:token@`) is stripped from `repository` even in this mode
+  (`stripUrlUserinfo`, line 236).
 
 ## External programs run
 
@@ -45,21 +56,21 @@ None.
 ## Mitigations in the code
 
 - Read-only and offline; no code path writes a file or opens a socket.
-- Output is limited to the `--last N` most recent entries (default 10, sorted by `mtime`).
-- A file that fails to parse is skipped (the loop `continue`s) and the search moves on.
+- Session-identifying fields are omitted by default via a top-level allowlist; opting in
+  requires `--include-sensitive`.
+- `--last` must be all digits and at least 1, otherwise the script exits 2; it is capped at
+  100 entries (`parseLastCount`, line 34).
+- Only the user's VS Code globalStorage directories are searched. `fs.lstatSync(...).isFile()`
+  (line 259) means a symlink at a candidate path is not followed.
+- A file that fails to parse is skipped and the search moves on.
 
 ## Known gaps
 
-Recorded, not fixed here.
-
-- **Session-derived text is printed raw.** Entries are emitted without filtering, so
-  session titles (`customTitle` from the session file, which is user-facing text and can echo a prompt), local workspace paths and
-  repository remote URLs go into the chat transcript, and from there into whatever the
-  transcript is shared with. The script does not strip URL userinfo or paths.
-  `--last 99999` prints the entire cache.
-- `--last` is not validated as a positive limit. It is read with `parseInt(value, 10) || 10`
-  (line 30), so any positive integer is accepted, a partially numeric value such as `5abc`
-  is read as `5`, and a negative value is passed to `slice(0, lastCount)` (line 294):
-  `--last -1` emits every entry except the oldest one.
-- The temp-directory and working-directory candidates mean a file planted there is
-  trusted as "the cache" (see "Untrusted inputs").
+- The filter inside `usageAnalysis` is a denylist of known text/path fields, not an
+  allowlist. A free-text or path field added to `SessionUsageAnalysis` later would be printed
+  by default until it is added here. Map keys such as MCP server, tool and skill names are
+  printed as-is.
+- With `--include-sensitive`, session titles (which can echo a prompt), first user prompts,
+  correction snippets and local paths are printed unfiltered by design.
+- `load-cache-data.test.js` is not run by any CI workflow; it runs only when invoked
+  manually with `node --test`.

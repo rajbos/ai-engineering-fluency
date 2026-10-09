@@ -28,17 +28,17 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 3. **Helps debugging** - Inspect what's being cached and when
 4. **Supports development** - Iterate with real data structures when building features
 
-By default, output omits session titles, prompt excerpts, correction snippets, workspace paths, repository URLs, cache file paths, and unknown entry fields. `--include-sensitive` opts into full entries and their local paths. `--last` is capped at 100 entries.
+By default, output omits session titles, prompt excerpts, correction snippets, workspace paths, referenced file paths, repository URLs, cache file paths, and unknown entry fields. `--include-sensitive` opts into full entries and their local paths; credentials in repository URLs are stripped even then. `--last` is capped at 100 entries.
 
 ## Cache File Locations
 
 The script checks for `session-cache.json` under each supported VS Code variant's globalStorage directory:
 
-- **Windows:** `%APPDATA%\<variant>\User\globalStorage\robbos.copilot-token-tracker\`
-- **macOS:** `~/Library/Application Support/<variant>/User/globalStorage/robbos.copilot-token-tracker/`
-- **Linux:** `${XDG_CONFIG_HOME:-~/.config}/<variant>/User/globalStorage/robbos.copilot-token-tracker/`
+- **Windows:** `%APPDATA%\<variant>\User\globalStorage\<extension id>\`
+- **macOS:** `~/Library/Application Support/<variant>/User/globalStorage/<extension id>/`
+- **Linux:** `${XDG_CONFIG_HOME:-~/.config}/<variant>/User/globalStorage/<extension id>/`
 
-Supported variants include Code, Insiders, Code - Exploration, VSCodium, and Cursor. Temporary and current-working directories are not trusted as cache sources.
+The extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename). Supported variants include Code, Insiders, Code - Exploration, VSCodium, and Cursor. Temporary and current-working directories are not trusted as cache sources.
 
 ## Important Note
 

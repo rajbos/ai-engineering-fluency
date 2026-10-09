@@ -144,8 +144,8 @@ function getCacheFilePaths() {
 
     // VS Code variants to check
     const vscodeVariants = ['Code', 'Code - Insiders', 'Code - Exploration', 'VSCodium', 'Cursor'];
-    // Support both the original author id and the machine-specific id (robbos)
-    const extensionId = 'robbos.copilot-token-tracker';
+    // Current extension id (publisher.name, lowercased) and the pre-rename id
+    const extensionIds = ['robbos.ai-engineering-fluency', 'robbos.copilot-token-tracker'];
     // Candidate cache file names to look for (include session-cache.json used on the user's machine)
     const candidateFiles = ['session-cache.json'];
 
@@ -153,23 +153,29 @@ function getCacheFilePaths() {
         // Windows: %APPDATA%\Code\User\globalStorage\<extensionId>\<cacheFile>
         const appDataPath = process.env.APPDATA || path.join(homedir, 'AppData', 'Roaming');
         for (const variant of vscodeVariants) {
-            for (const fileName of candidateFiles) {
-                paths.push(path.join(appDataPath, variant, 'User', 'globalStorage', extensionId, fileName));
+            for (const extensionId of extensionIds) {
+                for (const fileName of candidateFiles) {
+                    paths.push(path.join(appDataPath, variant, 'User', 'globalStorage', extensionId, fileName));
+                }
             }
         }
     } else if (platform === 'darwin') {
         // macOS: ~/Library/Application Support/<variant>/User/globalStorage/<extensionId>/<cacheFile>
         for (const variant of vscodeVariants) {
-            for (const fileName of candidateFiles) {
-                paths.push(path.join(homedir, 'Library', 'Application Support', variant, 'User', 'globalStorage', extensionId, fileName));
+            for (const extensionId of extensionIds) {
+                for (const fileName of candidateFiles) {
+                    paths.push(path.join(homedir, 'Library', 'Application Support', variant, 'User', 'globalStorage', extensionId, fileName));
+                }
             }
         }
     } else {
         // Linux: ~/.config/Code/User/globalStorage/extensionId/cache.json
         const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(homedir, '.config');
         for (const variant of vscodeVariants) {
-            for (const fileName of candidateFiles) {
-                paths.push(path.join(xdgConfigHome, variant, 'User', 'globalStorage', extensionId, fileName));
+            for (const extensionId of extensionIds) {
+                for (const fileName of candidateFiles) {
+                    paths.push(path.join(xdgConfigHome, variant, 'User', 'globalStorage', extensionId, fileName));
+                }
             }
         }
     }
@@ -199,6 +205,13 @@ function sanitizeCacheEntry(cacheEntry) {
     if (usageAnalysis && typeof usageAnalysis === 'object' && !Array.isArray(usageAnalysis)) {
         const safeUsageAnalysis = { ...usageAnalysis };
         delete safeUsageAnalysis.firstUserPrompt;
+        const contextReferences = safeUsageAnalysis.contextReferences;
+        if (contextReferences && typeof contextReferences === 'object' && !Array.isArray(contextReferences)) {
+            // byPath is keyed by the referenced files' local paths
+            const safeContextReferences = { ...contextReferences };
+            delete safeContextReferences.byPath;
+            safeUsageAnalysis.contextReferences = safeContextReferences;
+        }
         if (Array.isArray(safeUsageAnalysis.correctionMoments)) {
             safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments.map(moment => {
                 if (!moment || typeof moment !== 'object' || Array.isArray(moment)) {
@@ -214,6 +227,24 @@ function sanitizeCacheEntry(cacheEntry) {
     }
 
     return safeEntry;
+}
+
+/**
+ * Drop credentials (user:token@) from a remote URL. Applied even with
+ * --include-sensitive: opting in to repository URLs is not opting in to secrets.
+ */
+function stripUrlUserinfo(remote) {
+    if (typeof remote !== 'string') {
+        return remote;
+    }
+    return remote.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^\/@]*@/i, '$1');
+}
+
+function includeSensitiveEntry(cacheEntry) {
+    if (!cacheEntry || typeof cacheEntry !== 'object' || Array.isArray(cacheEntry) || !('repository' in cacheEntry)) {
+        return cacheEntry;
+    }
+    return { ...cacheEntry, repository: stripUrlUserinfo(cacheEntry.repository) };
 }
 
 /**
@@ -253,7 +284,7 @@ function readCacheFile() {
         const limited = entries.slice(0, lastCount);
         const limitedObj = Object.fromEntries(limited.map(([filePath, cacheEntry], index) => [
             includeSensitive ? filePath : `session-${index + 1}`,
-            includeSensitive ? cacheEntry : sanitizeCacheEntry(cacheEntry)
+            includeSensitive ? includeSensitiveEntry(cacheEntry) : sanitizeCacheEntry(cacheEntry)
         ]));
 
         const output = {

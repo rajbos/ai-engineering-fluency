@@ -113,7 +113,7 @@ node .github/skills/load-cache-data/load-cache-data.js --include-sensitive --jso
 node .github/skills/load-cache-data/load-cache-data.js --help
 ```
 
-`--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), and unrecognized fields are omitted.
+`--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), unrecognized fields are omitted, and `usageAnalysis.contextReferences.byPath` (keyed by referenced file paths) is dropped. Even with `--include-sensitive`, credentials in a repository URL (`https://user:token@host/...`) are stripped.
 
 **What it does:**
 - Searches for cache export files in known locations
@@ -125,7 +125,7 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 
 The script searches for cache export files in these locations:
 
-1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\robbos.copilot-token-tracker\session-cache.json`
+1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\<extension id>\session-cache.json`, where the extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename)
    - The Windows, macOS, and Linux locations are derived from the VS Code user-data directory.
    - Also checks other VS Code variants (Insiders, Cursor, VSCodium, etc.).
 
