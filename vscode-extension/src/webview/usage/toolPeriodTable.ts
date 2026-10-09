@@ -94,7 +94,7 @@ function countCell(value: number): string {
 function nameCell(row: ToolPeriodRow, duplicateNames: ReadonlySet<string>, autoIds?: ReadonlySet<string>): string {
 	const idEscaped = escapeHtml(row.id);
 	const autoBadge = autoIds?.has(row.id.toLowerCase())
-		? `<span class="auto-badge" title="${escapeHtml(localize('usage.toolPeriod.autoBadgeTitle'))}">auto</span>`
+		? `<span class="auto-badge" title="${escapeHtml(localize('usage.toolPeriod.autoBadgeTitle'))}">${escapeHtml(localize('usage.toolPeriod.autoBadge'))}</span>`
 		: '';
 	// Different raw ids can resolve to the same friendly name; keep them as separate
 	// rows and show the raw id so they stay distinguishable.

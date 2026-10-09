@@ -99,6 +99,7 @@ test('l10n: tool × period table strings resolve in English and zh-cn', () => {
 		['usage.toolPeriod.emptyTools', 'No tools used yet', '尚未使用任何工具'],
 		['usage.toolPeriod.emptyToolsHidden', 'No purposeful tools used yet (automatic tool calls are hidden)', '尚未使用任何有目的的工具（已隐藏自动工具调用）'],
 		['usage.toolPeriod.emptyMcp', 'No MCP tools used yet', '尚未使用任何 MCP 工具'],
+		['usage.toolPeriod.autoBadge', 'auto', '自动'],
 		['usage.toolPeriod.autoBadgeTitle', 'Automatic tool — Copilot uses this internally and it does not count toward fluency scoring', '自动工具 — Copilot 在内部使用，不计入熟练度评分'],
 	];
 	for (const [key, english] of translations) {
