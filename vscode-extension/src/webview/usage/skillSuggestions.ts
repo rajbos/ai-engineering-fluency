@@ -141,7 +141,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 		<div class="skill-suggestion-card" data-cluster-index="${clusterIndex}" style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
 			<div style="display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap;">
 				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${escapeHtml(localizeFormat('usage.skillSuggestions.repeated', cluster.sessionCount))}</span>
-				<div style="flex:1; min-width:200px; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representativePrompt)}&rdquo;</div>
+				<div style="flex:1; min-width:200px; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;"><q>${escapeHtml(cluster.representativePrompt)}</q></div>
 				<div style="display:flex; gap:6px; flex-shrink:0;">
 					<button type="button" class="skill-suggestion-create" data-cluster-index="${clusterIndex}" title="${escapeHtml(localize('usage.skillSuggestions.createSkillTooltip'))}"
 						style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid var(--vscode-focusBorder); background:var(--vscode-button-secondaryBackground); color:var(--text-primary); cursor:pointer;">${escapeHtml(localize('usage.skillSuggestions.createSkill'))}</button>
