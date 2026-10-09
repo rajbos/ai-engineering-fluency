@@ -219,6 +219,7 @@ can trust. The CI job checks out with `fetch-depth: 0` for the same reason.
 |---|---|
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
 | `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** |
+| `desktop-build` (`desktop-build.yml`) | desktop type-check, **desktop message contract**, **webview page shell**, production build, build-output check; host view sync (informational) |
 | `validate-skills` / `security-classification` | **every skill that ships scripts has a `SECURITY.md` or an exempt/pending entry** (`node scripts/validate-skill-security.js`, over all skills) |
 
 `ui-checks` renders every view in its initial state and in each tab/mode it
@@ -284,6 +285,50 @@ Two things to know about that comment:
 - **A dead control that is already the selected option** is reported as
   `noop-selected`, not as a finding. That is the trade for not carrying three
   standing false positives on the chart view's segmented controls.
+
+## Desktop app
+
+The desktop app (`desktop/`) renders the extension's webview bundles in Electron
+with its own host code in `desktop/src/main.ts`. Nothing about that wiring fails
+to compile when it drifts, so three checks compare the desktop app with the
+extension it borrows from. From `desktop/`:
+
+```bash
+npm run check            # check-types + check:contract + check:shell
+npm run check:views      # which extension views the desktop does not ship (report)
+```
+
+or from the repo root, `./build.ps1 -Project desktop -Target test`.
+
+- **`check:contract`** (`scripts/validate-desktop-contract.js`) — for every view
+  in `WEBVIEW_BUNDLES` (`desktop/esbuild.js`) it follows the view's imports from
+  `vscode-extension/src/webview/<view>/main.ts`, collects every `command` the view
+  can post, and requires each one to be handled in `registerIpcHandlers` or listed
+  in `desktop/src/unsupportedWebviewCommands.json` as `hidden` (with the CSS
+  selectors that hide its controls — `main.ts` builds its hidden-controls CSS from
+  this list), `gap` (still visible and dead; recorded, not decided) or `no-op`
+  (background notices such as telemetry or preferences). A new button in a shared
+  view therefore fails the desktop check until someone decides what the desktop
+  does with it. Stale entries fail too: a command that is now handled or no longer
+  posted, or a hidden selector whose id/class is gone from the views.
+- **`check:shell`** (`scripts/validate-webview-shell.js`) — every `--vscode-*`
+  token used under `vscode-extension/src/webview/` and `src/webview/` must be
+  defined in the visual-view-diff harness's `lib/theme-dark.css` and
+  `lib/theme-light.css`. The desktop app inlines those two files rather than
+  keeping its own copy, and the check fails if `main.ts` starts defining tokens
+  itself. It also checks the codicon stylesheet and font are copied and linked.
+- **`check:views`** — the `sync-host-views` skill, which reports extension views
+  the desktop (like Visual Studio and JetBrains) does not ship, and desktop views
+  that are bundled but not in `PANEL_MENU` or the other way round.
+
+The contract and shell checks also run as unit tests in the extension suite
+(`vscode-extension/test/unit/desktopSyncChecks.test.ts`), so an extension change
+that would break the desktop fails there too.
+
+Not covered yet: rendering each desktop view headlessly from the desktop's own
+payload builders (the check that would have caught the blank Chart and
+Diagnostics views). It needs the panel-building code moved out of the
+Electron-only `main.ts`, which waits on the shared payload builder work.
 
 ## VS Code extension release provenance
 

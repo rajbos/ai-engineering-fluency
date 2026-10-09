@@ -11,9 +11,10 @@
       sharing           – Self-hosted sharing server (TypeScript / Node.js)
       visualstudio-extension – Visual Studio extension (C# / .NET)
       jetbrains-plugin  – JetBrains IDE plugin (Kotlin / Gradle / IntelliJ Platform)
+      desktop           – Electron desktop app (reuses the extension's webview bundles)
 
 .PARAMETER Project
-    Which project(s) to build.  Accepts: all | vscode | cli | sharing | visualstudio | jetbrains
+    Which project(s) to build.  Accepts: all | vscode | cli | sharing | visualstudio | jetbrains | desktop
     Default: all
 
 .PARAMETER Target
@@ -38,7 +39,7 @@
 #>
 
 param(
-    [ValidateSet('all', 'vscode', 'cli', 'visualstudio', 'sharing', 'jetbrains')]
+    [ValidateSet('all', 'vscode', 'cli', 'visualstudio', 'sharing', 'jetbrains', 'desktop')]
     [string] $Project = 'all',
 
     [ValidateSet('build', 'package', 'test', 'clean')]
@@ -305,6 +306,32 @@ function Build-Sharing {
     finally { Pop-Location }
 }
 
+# ---------------------------------------------------------------------------
+# Desktop App
+# ---------------------------------------------------------------------------
+function Build-Desktop {
+    Write-Step "desktop: $Target"
+    if ($Target -ne 'clean') {
+        # The app copies the extension's webview bundles and imports the CLI's
+        # stats logic from source, so both siblings need their dependencies.
+        Ensure-NpmDeps "$PSScriptRoot/vscode-extension"
+        Ensure-NpmDeps "$PSScriptRoot/cli"
+    }
+    Push-Location "$PSScriptRoot/desktop"
+    try {
+        switch ($Target) {
+            'build'   { Ensure-NpmDeps .; npm run build }
+            'package' { Ensure-NpmDeps .; npm run dist }
+            # No unit tests yet: type-check plus the checks that keep the app in
+            # step with the extension's views (message contract, theme tokens).
+            'test'    { Ensure-NpmDeps .; npm run check }
+            'clean'   { Remove-Item -Recurse -Force dist, release -ErrorAction SilentlyContinue }
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Desktop target '$Target' failed" }
+        Write-Ok "desktop done."
+    }
+    finally { Pop-Location }
+}
 
 switch ($Project) {
     'all' {
@@ -313,12 +340,14 @@ switch ($Project) {
         Build-Sharing
         Build-VisualStudio
         Build-Jetbrains
+        Build-Desktop
     }
     'vscode'      { Build-VsCode }
     'cli'         { Build-Cli }
     'sharing'     { Build-Sharing }
     'visualstudio'{ Build-VisualStudio }
     'jetbrains'   { Build-Jetbrains }
+    'desktop'     { Build-Desktop }
 }
 
 Write-Host "`nBuild complete." -ForegroundColor Green

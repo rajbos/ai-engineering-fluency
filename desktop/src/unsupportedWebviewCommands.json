@@ -1,0 +1,146 @@
+{
+  "$comment": [
+    "Messages the shared webview bundles can post that desktop/src/main.ts does not handle.",
+    "Checked by scripts/validate-desktop-contract.js (npm run check:contract in desktop/).",
+    "status 'hidden': the controls that post it are hidden; hiddenBy is the CSS that hides them, injected by main.ts.",
+    "status 'gap':    the control is still visible and does nothing in the desktop app. A known gap, not a decision.",
+    "status 'no-op':  a background notice (telemetry, preference, failure report) with no visible control; ignoring it is harmless.",
+    "Remove an entry when its command gets a handler in registerIpcHandlers: the check fails on stale entries."
+  ],
+  "commands": {
+    "showEfficiency": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-efficiency"],
+      "reason": "The Efficiency payload is assembled inside the extension class, not in shared code (#2316)."
+    },
+    "openFormattedJsonlFile": {
+      "status": "hidden",
+      "hiddenBy": [".view-formatted-link"],
+      "reason": "Diagnostics: the formatted-file viewer is a VS Code editor tab."
+    },
+    "reportNewEditorPath": {
+      "status": "hidden",
+      "hiddenBy": [".report-editor-link"],
+      "reason": "Diagnostics: editor-path reporting is not wired up in the desktop app."
+    },
+    "authenticateGitHub": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-authenticate-github", "#btn-team-server-auth-warning"],
+      "reason": "Diagnostics: GitHub sign-in uses VS Code's authentication provider."
+    },
+    "signOutGitHub": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-sign-out-github"],
+      "reason": "Diagnostics: GitHub sign-in uses VS Code's authentication provider."
+    },
+    "configureBackend": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-configure-backend"],
+      "reason": "Diagnostics: backend setup is a VS Code configuration panel."
+    },
+    "configureTeamServer": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-configure-backend-team"],
+      "reason": "Diagnostics: team-server setup is a VS Code configuration panel."
+    },
+    "openSettings": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-open-settings"],
+      "reason": "Diagnostics: opens VS Code settings."
+    },
+    "openDisplaySettings": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-open-display-settings"],
+      "reason": "Diagnostics: opens VS Code settings."
+    },
+    "openToolFamiliesSettings": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-open-tool-families-settings"],
+      "reason": "Diagnostics: opens VS Code settings."
+    },
+    "pickFolder": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-browse-folder"],
+      "reason": "Diagnostics: folder analysis is not wired up in the desktop app."
+    },
+    "analyzeFolder": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-analyze-folder"],
+      "reason": "Diagnostics: folder analysis is not wired up in the desktop app."
+    },
+    "clearCache": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-clear-cache", "#btn-clear-cache-tab"],
+      "reason": "Diagnostics: the desktop cache is not reset from the page."
+    },
+    "resetInsightsState": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-reset-insights", "#btn-reset-insights-tab"],
+      "reason": "Diagnostics: insight state lives in VS Code global state."
+    },
+    "resetDiscoveredEditors": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-reset-discovered-editors"],
+      "reason": "Diagnostics: discovered-editor state lives in VS Code global state."
+    },
+    "resetDebugCounters": {
+      "status": "hidden",
+      "hiddenBy": ["#btn-reset-debug-counters"],
+      "reason": "Diagnostics: debug counters live in VS Code global state."
+    },
+    "shareCardToSocial": {
+      "status": "hidden",
+      "hiddenBy": [".share-btn"],
+      "reason": "Diagnostics: social sharing is not wired up in the desktop app."
+    },
+
+    "analyzeModelUsage": { "status": "gap", "reason": "Diagnostics: model-usage analysis action is visible and unhandled." },
+    "analyzeTtft": { "status": "gap", "reason": "Diagnostics: TTFT analysis action is visible and unhandled." },
+    "updateDisplaySetting": { "status": "gap", "reason": "Diagnostics: display-setting inputs are visible and unhandled." },
+    "setDebugCounter": { "status": "gap", "reason": "Diagnostics debug tab; only rendered in debug mode, which the desktop never enables." },
+    "setDebugFlag": { "status": "gap", "reason": "Diagnostics debug tab; only rendered in debug mode, which the desktop never enables." },
+
+    "dismissTips": { "status": "gap", "reason": "Fluency Score: dismissing tips is unhandled." },
+    "resetDismissedTips": { "status": "gap", "reason": "Fluency Score: resetting dismissed tips is unhandled." },
+    "saveChartImage": { "status": "gap", "reason": "Fluency Score: export as image is unhandled." },
+    "searchMcpExtensions": { "status": "gap", "reason": "Fluency Score: MCP marketplace search is a VS Code action." },
+    "shareToIssue": { "status": "gap", "reason": "Fluency Score: share to issue is unhandled." },
+    "shareToSocial": { "status": "gap", "reason": "Fluency Score: social sharing is unhandled." },
+
+    "analyseAllRepositories": { "status": "gap", "reason": "Usage Analysis: repository analysis is unhandled." },
+    "analyseRepository": { "status": "gap", "reason": "Usage Analysis: repository analysis is unhandled." },
+    "checkCcrActivity": { "status": "gap", "reason": "Usage Analysis: Copilot code review lookup needs GitHub auth." },
+    "loadRepoPrStats": { "status": "gap", "reason": "Usage Analysis: the repository PR tab never loads (needs GitHub auth)." },
+    "loadAgentSessions": { "status": "gap", "reason": "Usage Analysis: the cloud-agent tab never loads (needs GitHub auth)." },
+    "loadReadiness": { "status": "gap", "reason": "Usage Analysis: the readiness tab never loads." },
+    "loadRecentSessions": { "status": "gap", "reason": "Usage Analysis: changing the sessions look-back period never loads." },
+    "draftCopilotChatWithPrompt": { "status": "gap", "reason": "Usage Analysis: opens Copilot Chat, which only exists in VS Code." },
+    "openCopilotChatWithPrompt": { "status": "gap", "reason": "Usage Analysis: opens Copilot Chat, which only exists in VS Code." },
+    "manageExtension": { "status": "gap", "reason": "Usage Analysis: opens the VS Code extensions view." },
+    "openAgentPlugins": { "status": "gap", "reason": "Usage Analysis: opens a VS Code view." },
+    "openFileFromList": { "status": "gap", "reason": "Usage Analysis: opening customization files is unhandled." },
+    "suppressUnknownTool": { "status": "gap", "reason": "Usage Analysis: suppressing an unknown tool writes VS Code settings." },
+    "insightAction": { "status": "gap", "reason": "Usage Analysis: insight actions (seen, dismiss) are unhandled." },
+    "scanWorktrees": { "status": "gap", "reason": "Usage Analysis: worktree scan is unhandled." },
+    "cancelWorktreeScan": { "status": "gap", "reason": "Usage Analysis: worktree scan is unhandled." },
+    "pickWorktreeRoot": { "status": "gap", "reason": "Usage Analysis: worktree scan is unhandled." },
+    "cleanupPushedWorktrees": { "status": "gap", "reason": "Usage Analysis: worktree cleanup is unhandled." },
+    "cancelCleanupPushedWorktrees": { "status": "gap", "reason": "Usage Analysis: worktree cleanup is unhandled." },
+    "deleteWorktree": { "status": "gap", "reason": "Usage Analysis: worktree cleanup is unhandled." },
+    "openWorktreeInEditor": { "status": "gap", "reason": "Usage Analysis: opens a VS Code window." },
+
+    "extensionPointAction": { "status": "no-op", "reason": "The desktop registers no extension-point buttons (window.__EXTENSION_POINT_BUTTONS__ is empty), so none is ever rendered." },
+    "setEditorListCollapsed": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
+    "setPeriodPreference": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
+    "setTimeWindowPreference": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
+    "setViewPreference": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
+    "saveSessionColumnSettings": { "status": "no-op", "reason": "Preference the extension persists; the column choice is not kept across desktop restarts." },
+    "viewTabOpened": { "status": "no-op", "reason": "Feeds the extension's What's New announcer, which the desktop does not have." },
+    "usageWebviewReady": { "status": "no-op", "reason": "Handshake for GitHub activity data, which the desktop does not provide." },
+    "usageWebviewTrace": { "status": "no-op", "reason": "Debug trace for the extension's output channel." },
+    "traceUsageCuration": { "status": "no-op", "reason": "Debug trace for the extension's output channel." },
+    "copyFailed": { "status": "no-op", "reason": "Failure notice; the extension shows an error toast, the desktop has none." },
+    "exportImageFailed": { "status": "no-op", "reason": "Failure notice; the extension shows an error toast, the desktop has none." },
+    "shareToSocialFailed": { "status": "no-op", "reason": "Failure notice; the extension shows an error toast, the desktop has none." }
+  }
+}

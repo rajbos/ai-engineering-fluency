@@ -6,9 +6,10 @@ the repository `AGENTS.md`).
 
 ## What the scripts do and talk to
 
-- `sync-host-views.js` reads three files from the checkout it lives in
-  (`vscode-extension/esbuild.js`, the Visual Studio `AIEngineeringFluency.csproj` and
-  `jetbrains-plugin/build.gradle.kts`, lines 49-57), lists the file names in
+- `sync-host-views.js` reads five files from the checkout it lives in
+  (`vscode-extension/esbuild.js`, the Visual Studio `AIEngineeringFluency.csproj`,
+  `jetbrains-plugin/build.gradle.kts`, `desktop/esbuild.js` and `desktop/src/main.ts`;
+  the `PATHS` object), lists the file names in
   `vscode-extension/dist/webview`, and compares the view names it extracts with regexes.
 - It prints a report (or JSON with `--json`) to stdout and config errors to stderr.
 - No network access.
@@ -22,10 +23,10 @@ None. No environment variables, tokens or keys are read. The CI workflow that ru
 
 ## Untrusted inputs parsed
 
-- The text of the three files above and the directory listing of `dist/webview`. In a
+- The text of the five files above and the directory listing of `dist/webview`. In a
   local run this is the operator's own checkout. In `ci.yml` it is the content of the pull
   request, including pull requests from forks.
-- The files are only matched with regexes (lines 86, 120, 137-153). Nothing read from them
+- The files are only matched with regexes (lines 88, 122, 139-155, 172-184). Nothing read from them
   is evaluated, required or used to build a path.
 
 ## What it writes and where
@@ -38,14 +39,14 @@ None. The script does not use `child_process`.
 
 ## Mitigations in the code
 
-- Every value taken from the parsed files is captured with `[\w-]+` (lines 86, 120, 153),
+- Every value taken from the parsed files is captured with `[\w-]+` (lines 88, 122, 155, 176, 184),
   so the view names echoed into the report and the CI log contain only word characters and
   hyphens.
-- The paths it reads are fixed relative to the script's own location (lines 47-57); no
+- The paths it reads are fixed relative to the script's own location (lines 49-61); no
   argument or parsed value changes them.
 - `dist/webview` entries are used as names only; the bundles are never opened.
 - A missing or unreadable source file ends the run with exit code 2 and a message
-  (lines 70-76, 253-257).
+  (lines 72-78, 297-301).
 
 ## Known gaps
 
@@ -56,5 +57,5 @@ Recorded, not fixed here.
   request's code with read-only permissions, so this adds no access beyond what the job
   has.
 - The regexes run over pull-request-controlled text with no size or time limit.
-- The `ConfigError` message includes the underlying `fs` error text (line 74), which is
+- The `ConfigError` message includes the underlying `fs` error text (line 76), which is
   printed to the log.
