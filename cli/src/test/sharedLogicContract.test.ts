@@ -30,8 +30,8 @@ import { getModelUsageFromSession } from '../../../src/usageAnalysis';
 import tokenEstimatorsData from '../../../src/tokenEstimators.json';
 import modelPricingData from '../../../src/modelPricing.json';
 
-import { calculateDailyStats, calculateUsageAnalysisStats, processSessionFile } from '../helpers';
-import { aggregateIntoPeriod, buildChartPayload, createEmptyChartPayload, createEmptyPeriodStats } from '../analysis';
+import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, processSessionFile } from '../helpers';
+import { aggregateIntoPeriod, buildChartPayload, buildEfficiencyPayload, createEmptyChartPayload, createEmptyPeriodStats } from '../analysis';
 import { disableCache } from '../cliCache';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
@@ -414,4 +414,44 @@ test('CLI provider editor and billing costs remain undiscounted with Auto metada
 		assert.equal(period.billingGroupCostDatasets[0].label, 'Anthropic');
 		assert.equal(period.billingGroupCostDatasets[0].data.reduce((sum, cost) => sum + cost, 0), expectedCost);
 	}
+});
+
+/** Fields the Efficiency webview reads from `window.__INITIAL_EFFICIENCY__` (EfficiencyViewData). */
+const EFFICIENCY_PAYLOAD_KEYS = [
+	'weekly', 'hasLoc', 'hasDuration', 'hasRetry', 'hasApply', 'attribution', 'attributionWindows',
+	'deltas', 'deltaWindows', 'value', 'skillTrends', 'skillImpact', 'hasSkills', 'modelDaily',
+	'hasModelComparison', 'dailyVolume', 'sessionSamples', 'editors', 'behaviorWindowDays',
+	'cacheBreakage', 'lastUpdated', 'backendConfigured', 'compactNumbers', 'isDebugMode',
+];
+
+test('CLI efficiency payload comes from the shared builder with the fields the webview reads', async t => {
+	// The Efficiency view used to be assembled only inside the extension class, so the
+	// desktop app could not show it at all (#2316). The CLI now gathers the same inputs.
+	const file = mockAutoSession(t, 'jsonl');
+	const [dailyStats, usage, sessionInputs] = await Promise.all([
+		calculateDailyStats([file]),
+		calculateUsageAnalysisStats([file]),
+		calculateEfficiencySessionInputs([file]),
+	]);
+	assert.equal(sessionInputs.length, 1);
+	assert.equal(sessionInputs[0].editor, 'VS Code');
+	assert.equal(sessionInputs[0].interactions, 2);
+	assert.equal(sessionInputs[0].dayKey, localDayKey(new Date()), 'a session is dated by its last active day');
+
+	const payload = buildEfficiencyPayload({ dailyStats, usage, sessionInputs });
+	for (const key of EFFICIENCY_PAYLOAD_KEYS) {
+		assert.ok(key in payload, `efficiency payload is missing "${key}"`);
+	}
+	assert.deepEqual(payload.sessionSamples, sessionInputs);
+	assert.deepEqual(payload.editors, ['VS Code']);
+	assert.equal(payload.backendConfigured, false);
+	assert.equal(payload.compactNumbers, false);
+	assert.equal(payload.behaviorWindowDays, 12 * 7);
+	assert.match(payload.attributionWindows.curRange, /^[A-Z][a-z]{2} \d{1,2}, \d{4}–[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
+	// No PR data in the CLI: the Value tab must get its "never loaded" nulls, not zeroes.
+	assert.equal(payload.value.userPrs, null);
+	const volumeTokens = (payload.dailyVolume ?? []).reduce((sum, d) => sum + d.tokens, 0);
+	assert.equal(volumeTokens, dailyStats.reduce((sum, d) => sum + d.tokens, 0));
+	// Per-model counters reach the Models tab through the shared daily accumulation.
+	assert.ok(dailyStats.some(d => d.modelEfficiency && Object.keys(d.modelEfficiency).length > 0));
 });

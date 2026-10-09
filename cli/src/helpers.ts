@@ -22,6 +22,9 @@ import type { DailyTokenStats, DetailedStats, ModelUsage, UsageAnalysisStats, Wo
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
+import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
+import { EFFICIENCY_BEHAVIOR_WEEKS, toEfficiencySessionInput } from '../../src/efficiencyViewBuilder';
+import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
@@ -49,7 +52,7 @@ import {
 	formatTokens,
 } from './analysis';
 export type { SessionData } from './analysis';
-export { effectiveTokens, buildChartPayload, fmt, formatTokens } from './analysis';
+export { effectiveTokens, buildChartPayload, buildEfficiencyPayload, fmt, formatTokens } from './analysis';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
 const modelPricing = modelPricingData.pricing as { [key: string]: any };
@@ -310,18 +313,27 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  */
 
 /**
- * The per-session fields the Chart view splits by (task category, lines of code), derived
- * through the same shared helpers the extension's session analyzer uses. Best-effort: a
+ * The per-session fields the Chart and Efficiency views split by (task category, lines of code,
+ * efficiency signals), derived through the same shared helpers the extension's session analyzer uses. Best-effort: a
  * failed analysis leaves them out rather than dropping the session.
  */
-async function sessionDailyAttributes(filePath: string, content?: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage'>> {
+async function sessionDailyAttributes(filePath: string, content?: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'>> {
 	try {
 		const analysis = await analyzeSessionUsage(
 			{ warn, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
 			filePath,
 			content,
 		);
-		return { ...resolveSessionTaskAttribution(analysis), ...sessionLocFromUsageAnalysis(analysis) };
+		return {
+			...resolveSessionTaskAttribution(analysis),
+			...sessionLocFromUsageAnalysis(analysis),
+			usageAnalysis: {
+				...(analysis.modelEfficiency ? { modelEfficiency: analysis.modelEfficiency } : {}),
+				...(analysis.sessionDuration ? { sessionDuration: analysis.sessionDuration } : {}),
+				...(analysis.applyUsage ? { applyUsage: analysis.applyUsage } : {}),
+				...(analysis.skillCalls ? { skillCalls: analysis.skillCalls } : {}),
+			},
+		};
 	} catch {
 		return {};
 	}
@@ -819,8 +831,37 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			linesRemoved: data.linesRemoved,
 			languageUsage: data.languageUsage,
 		});
+		addSessionEfficiencyToDailyStats(dailyStatsMap, {
+			editorType: data.editorSource,
+			modelUsage: data.modelUsage,
+			dailyFractions: data.dailyFractions,
+			linesAdded: data.linesAdded,
+			linesRemoved: data.linesRemoved,
+			usageAnalysis: data.usageAnalysis,
+		}, modelPricing);
 	}
 	return sortedDailyStats(dailyStatsMap);
+}
+
+/**
+ * Per-session inputs for the Efficiency view's behaviour trends over the trailing
+ * `weeksBack` weeks — the Node-side counterpart of the extension's
+ * collectEfficiencySessionInputs(). Reads the cached session parse, so after a stats
+ * walk it does not re-parse files.
+ */
+export async function calculateEfficiencySessionInputs(sessionFiles: string[], weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<EfficiencySessionInput[]> {
+	const now = new Date();
+	const cutoffKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7));
+	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFile(file));
+	const inputs: EfficiencySessionInput[] = [];
+	for (const data of sessionResults) {
+		if (!data || data.interactions === 0) { continue; }
+		// The session's last active day, as the extension derives it from its daily rollups.
+		const dayKey = Object.keys(data.dailyFractions).sort().pop() ?? toLocalDayKey(data.lastModified);
+		if (dayKey < cutoffKey) { continue; }
+		inputs.push(toEfficiencySessionInput(data, dayKey, data.editorSource));
+	}
+	return inputs;
 }
 
 /** Environmental impact constants export for use in commands */

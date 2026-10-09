@@ -287,37 +287,18 @@ import { calculateEnvironmentalImpact, getEnvironmentalMethodologySourceUrl } fr
 
 // --- Efficiency analysis ---
 import {
-  buildEfficiencyTrends as _buildEfficiencyTrends,
-  buildSkillUsageTrends as _buildSkillUsageTrends,
-  computeCostAttribution as _computeCostAttribution,
-  computeEfficiencyDeltas as _computeEfficiencyDeltas,
-  computeSkillImpact as _computeSkillImpact,
-  listComparableModels as _listComparableModels,
-  listEfficiencyEditors as _listEfficiencyEditors,
-  resolveEfficiencyRange as _resolveEfficiencyRange,
-  splitModelDayByEditor as _splitModelDayByEditor,
   computeValueSignals as _computeValueSignals,
-  getTrailingWindowBoundaries as _getTrailingWindowBoundaries,
-  splitTrailingWindows as _splitTrailingWindows,
-  toEfficiencyDailyVolume as _toEfficiencyDailyVolume,
-  type EfficiencyDailyVolume,
-  type EfficiencyDeps,
   type EfficiencySessionInput,
   type EfficiencyViewData,
-  type ModelDailyInput,
-  type PeriodVolumeTotals,
   valueSignalsEqual as _valueSignalsEqual,
   type ValueSignals,
   type ValueSignalsInput,
 } from '../../src/efficiencyAnalysis';
-
-/**
- * Weeks of session logs walked for the Efficiency view's behavioural inputs
- * (duration, retries, applies, skills). Shorter than the year of daily volume
- * aggregates because it costs a full session-file scan — longer time presets
- * therefore show behavioural gaps rather than invented values.
- */
-const EFFICIENCY_BEHAVIOR_WEEKS = 12;
+import {
+  buildEfficiencyViewData as _buildEfficiencyViewData,
+  toEfficiencySessionInput as _toEfficiencySessionInput,
+  EFFICIENCY_BEHAVIOR_WEEKS,
+} from '../../src/efficiencyViewBuilder';
 
 import { DARK_FACTORY_CACHE_KEY, isReportStale, parseCacheEntry, readinessScopeKey, scanDarkFactoryReadiness } from './darkFactoryService';
 
@@ -11980,25 +11961,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 
 	/** Maps one cached session to the pure-module input shape for efficiency trends. */
 	private toEfficiencySessionInput(sessionData: SessionFileCache, mtime: number, editor?: string): EfficiencySessionInput {
-		const dayKey = this.computeLastActivityKey(sessionData, mtime);
-		const ua = sessionData.usageAnalysis;
-		let editTurns = 0, retries = 0;
-		for (const c of Object.values(ua?.modelEfficiency ?? {})) { editTurns += c.editTurns; retries += c.retries; }
-		const skillCalls = ua?.skillCalls?.byName && Object.keys(ua.skillCalls.byName).length > 0
-			? ua.skillCalls.byName
-			: undefined;
-		return {
-			dayKey,
-			activeDurationMs: ua?.sessionDuration?.activeDurationMs,
-			editTurns,
-			retries,
-			applies: ua?.applyUsage?.totalApplies,
-			codeBlocks: ua?.applyUsage?.totalCodeBlocks,
-			interactions: sessionData.interactions,
-			totalTokens: preferActualTokens(sessionData.actualTokens, sessionData.tokens),
-			skillCalls,
-			editor,
-		};
+		return _toEfficiencySessionInput(sessionData, this.computeLastActivityKey(sessionData, mtime), editor);
 	}
 
 	/**
@@ -12036,54 +11999,6 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			this.error('Error collecting efficiency session inputs:', error);
 		}
 		return inputs;
-	}
-
-	/** Sums token/session/cost totals for the daily entries within one calendar month (YYYY-MM). */
-	private monthVolumeTotals(dailyStats: DailyTokenStats[], monthKey: string): PeriodVolumeTotals {
-		let tokens = 0, sessions = 0, estimatedCost = 0;
-		for (const day of dailyStats) {
-			if (day.date.slice(0, 7) !== monthKey) { continue; }
-			tokens += day.tokens;
-			sessions += day.sessions;
-			estimatedCost += this.calculateEstimatedCost(day.modelUsage, 'copilot');
-		}
-		return { tokens, sessions, estimatedCost };
-	}
-
-	/**
-	 * Trims the daily stats down to the per-model slice the Models tab needs, over
-	 * the last year so month-vs-month comparisons have history to draw on. Days
-	 * without per-model data are dropped to keep the webview payload small.
-	 */
-	private buildModelDailyPayload(dailyStats: DailyTokenStats[], now: Date): ModelDailyInput[] {
-		// Same snapped cutoff as the volume payload: the 1-year preset starts on
-		// the first of the month, so a flat 365-day window would leave the drift
-		// chart's earliest bucket short of up to a month of data.
-		const cutoffKey = _resolveEfficiencyRange('last1y', now).startKey;
-		const payload: ModelDailyInput[] = [];
-		for (const day of dailyStats) {
-			if (day.date < cutoffKey || !day.modelEfficiency || Object.keys(day.modelEfficiency).length === 0) { continue; }
-			const split = _splitModelDayByEditor(day);
-			payload.push(...(split.length > 0 ? split : [{
-				date: day.date,
-				modelEfficiency: day.modelEfficiency,
-				...(day.taskCategoryUsage ? { taskCategoryUsage: day.taskCategoryUsage } : {}),
-			}]));
-		}
-		return payload;
-	}
-
-	/**
-	 * Compact per-day volume aggregates for the trailing year — the payload the
-	 * Efficiency view's time presets, drill-down and editor filter recompute
-	 * from. Numbers only: no session titles, paths, prompts or repositories.
-	 */
-	private buildEfficiencyDailyVolumePayload(dailyStats: DailyTokenStats[], now: Date, deps: EfficiencyDeps): EfficiencyDailyVolume[] {
-		// Cut off at the start of the widest preset rather than a flat day count:
-		// the 1-year preset snaps back to the first of the month, so a plain
-		// 365-day window would leave its earliest month half-empty.
-		const cutoffKey = _resolveEfficiencyRange('last1y', now).startKey;
-		return _toEfficiencyDailyVolume(dailyStats.filter(d => d.date >= cutoffKey), deps);
 	}
 
 	/**
@@ -12255,72 +12170,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	): Promise<EfficiencyViewData> {
 		const now = new Date();
 		const { dailyStats, usage, sessionInputs } = await this.collectEfficiencyInputs(forceRecalc, send, originGeneration);
-		const deps = {
+		// Assembly is shared with the desktop app (src/efficiencyViewBuilder.ts); this host only
+		// gathers the inputs and supplies its settings (#2316).
+		return _buildEfficiencyViewData({
+			dailyStats,
+			usage,
+			sessionInputs,
+			now,
 			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
-			now,
-		};
-		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
-		const modelDaily = this.buildModelDailyPayload(dailyStats, now);
-		const dailyVolume = this.buildEfficiencyDailyVolumePayload(dailyStats, now, deps);
-		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
-		const skillImpact = _computeSkillImpact(sessionInputs);
-		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
-		const attributionBoundaries = _getTrailingWindowBoundaries(now);
-		const attribution = _computeCostAttribution(prevDays, curDays, deps);
-		const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-		const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-		const lastMonthKey = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
-		const deltas = _computeEfficiencyDeltas(
-			usage.month, usage.lastMonth,
-			this.monthVolumeTotals(dailyStats, monthKey),
-			this.monthVolumeTotals(dailyStats, lastMonthKey),
-		);
-		const curCost = curDays.reduce((s, d) => s + this.calculateEstimatedCost(d.modelUsage, 'copilot'), 0);
-		const curLoc = curDays.reduce((s, d) => s + (d.linesAdded ?? 0) + (d.linesRemoved ?? 0), 0);
-		const value = _computeValueSignals({
-			...this.repoPrValueInputs(),
-			periodCost: curCost,
-			applyUsage: usage.last30Days.applyUsage,
-			linesChanged: curLoc,
-			now,
-		});
-		return {
-			weekly,
-			hasLoc: weekly.some(w => w.loc > 0),
-			hasDuration: weekly.some(w => w.activeMinutesPerSession !== null),
-			hasRetry: weekly.some(w => w.retryRate !== null),
-			hasApply: weekly.some(w => w.applyRate !== null),
-			attribution,
-			attributionWindows: {
-				prev: 'previous 30 days',
-				cur: 'last 30 days',
-				prevRange: `${this.formatAttributionDate(attributionBoundaries.prevStart)}–${this.formatAttributionDate(attributionBoundaries.prevEnd)}`,
-				curRange: `${this.formatAttributionDate(attributionBoundaries.curStart)}–${this.formatAttributionDate(attributionBoundaries.curEnd)}`,
-			},
-			deltas,
-			deltaWindows: {
-				prev: lastMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-				cur: `${now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (to date)`,
-			},
-			value,
-			skillTrends,
-			skillImpact,
-			hasSkills: skillTrends.totalCalls > 0,
-			modelDaily,
-			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
-			dailyVolume,
-			sessionSamples: sessionInputs,
-			editors: _listEfficiencyEditors(dailyVolume),
-			behaviorWindowDays: EFFICIENCY_BEHAVIOR_WEEKS * 7,
-			cacheBreakage: usage.last30Days.cacheBreakage ?? null,
-			lastUpdated: now.toISOString(),
+			prValueInputs: this.repoPrValueInputs(),
+			formatAttributionDate: (date) => this.formatAttributionDate(date),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
-			// Same detected locale the Usage Analysis view formats with, so both
-			// views group numbers and place currency symbols identically.
-			locale: usage.locale,
 			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
-		};
+		});
 	}
 
 	private getEfficiencyHtml(webview: vscode.Webview, data: EfficiencyViewData): string {

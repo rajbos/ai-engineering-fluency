@@ -9,8 +9,10 @@ import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant, detectRelocatedAgentHomeFromPath, getRepoDisplayName } from '../../src/workspaceHelpers';
 import { buildChartData } from '../../src/chartDataBuilder';
+import { buildEfficiencyViewData, formatAttributionDateEnUs, NO_PR_VALUE_INPUTS, type EfficiencySessionAnalysis } from '../../src/efficiencyViewBuilder';
+import type { EfficiencySessionInput, EfficiencyViewData } from '../../src/efficiencyAnalysis';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
-import type { ChartDataPayload, DailyTokenStats, LanguageUsage, ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
+import type { ChartDataPayload, DailyTokenStats, LanguageUsage, ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod, UsageAnalysisStats } from '../../src/types';
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 
@@ -54,6 +56,11 @@ export interface SessionData {
 	linesAdded?: number;
 	linesRemoved?: number;
 	languageUsage?: LanguageUsage;
+	/**
+	 * The slice of the session's usage analysis the Efficiency view reads (per-model turn
+	 * counters, active duration, apply usage, skill calls). Kept slim because it is cached.
+	 */
+	usageAnalysis?: EfficiencySessionAnalysis;
 }
 
 // ── Billing group helpers ────────────────────────────────────────────────────────────────────
@@ -300,6 +307,34 @@ export function buildChartPayload(dailyStats: DailyTokenStats[], options: CliCha
 /** The zero-state chart payload (no session files): the same builder over no days, so the shape cannot drift. */
 export function createEmptyChartPayload(now: Date = new Date()): ChartDataPayload {
 	return buildChartPayload([], { now });
+}
+
+/** Inputs the CLI gathers for the Efficiency view; see `buildEfficiencyPayload`. */
+export interface CliEfficiencyInputs {
+	dailyStats: DailyTokenStats[];
+	usage: UsageAnalysisStats;
+	sessionInputs: EfficiencySessionInput[];
+	now?: Date;
+}
+
+/**
+ * The Efficiency webview's payload, built by the same shared `buildEfficiencyViewData()` the
+ * extension uses. The CLI has no PR data, team backend or display settings, so those take
+ * their "not configured" values.
+ */
+export function buildEfficiencyPayload(inputs: CliEfficiencyInputs): EfficiencyViewData {
+	return buildEfficiencyViewData({
+		dailyStats: inputs.dailyStats,
+		usage: inputs.usage,
+		sessionInputs: inputs.sessionInputs,
+		now: inputs.now ?? new Date(),
+		calculateEstimatedCost: (modelUsage, pricingSource) => calculateEstimatedCost(modelUsage, modelPricing, pricingSource),
+		prValueInputs: NO_PR_VALUE_INPUTS,
+		formatAttributionDate: formatAttributionDateEnUs,
+		backendConfigured: false,
+		compactNumbers: false,
+		isDebugMode: false,
+	});
 }
 
 // ── Formatting utilities ────────────────────────────────────────────────────────────────────────────────
