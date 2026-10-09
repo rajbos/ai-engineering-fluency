@@ -346,14 +346,23 @@ async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData
  * processSessionFile(): token-only commands (`usage`, `environmental`, the prompt segment) keep
  * the lean parse. The enriched entry is written back to the session cache, so each session is
  * analyzed at most once per file version.
+ *
+ * Like every other cache write here, the entry is keyed by the stat taken *before* reading the
+ * file. The base parse and the analysis are two reads, so the file is stat'ed again afterwards
+ * and the entry is only cached when nothing changed in between — otherwise an actively-written
+ * session would store data parsed from an older version under the newer mtime.
  */
 export async function processSessionFileForViews(filePath: string, verbose = false): Promise<SessionData | null> {
+	let before: fs.Stats | undefined;
+	try { before = await statSessionFile(filePath); } catch { /* processSessionFile reports the failure */ }
 	const data = await processSessionFile(filePath, verbose);
 	if (!data || data.viewAttributesResolved) { return data; }
 	const enriched: SessionData = { ...data, ...(await sessionViewAttributes(filePath)), viewAttributesResolved: true };
 	try {
-		const stats = await statSessionFile(filePath);
-		setCached(filePath, stats.mtimeMs, stats.size, enriched);
+		const after = await statSessionFile(filePath);
+		if (before && after.mtimeMs === before.mtimeMs && after.size === before.size) {
+			setCached(filePath, before.mtimeMs, before.size, enriched);
+		}
 	} catch {
 		// Not cacheable (file vanished): still return the enriched data for this run.
 	}
