@@ -19,7 +19,8 @@ export const CUSTOMIZATION_TABLE_ID = 'customization';
 export const CUSTOMIZATION_PAGE_SIZE = 20;
 export const CUSTOMIZATION_FILTER_NONE_ONLY = 'noCustomizationOnly';
 
-const SECTION_ID = 'customization-matrix-section';
+/** Also the What's New / search nav anchor (`usage.health.customization` in whatsNew/viewIndex.ts). */
+const SECTION_ID = 'section-customization-files';
 
 /** The matrix last rendered, so sort/page/filter clicks can re-render without a new payload. */
 let currentMatrix: WorkspaceCustomizationMatrix | null = null;
@@ -125,7 +126,7 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 	currentMatrix = matrix && Array.isArray(matrix.workspaces) && matrix.workspaces.length > 0 ? matrix : null;
 	if (!currentMatrix) {
 		return `
-			<div class="section">
+			<div class="section" id="${SECTION_ID}">
 				<div class="section-title"><span>🛠️</span><span>${escapeHtml(localize('usage.customization.title'))}</span></div>
 				<div class="section-subtitle">${escapeHtml(localize('usage.customization.emptySubtitle'))}</div>
 				<div style="color: var(--text-muted); padding:12px;">${escapeHtml(localize('usage.customization.empty'))}</div>
@@ -133,7 +134,9 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 	}
 	const state = getPagedTableState(CUSTOMIZATION_TABLE_ID, 'interactions', 'desc', { [CUSTOMIZATION_FILTER_NONE_ONLY]: false });
 	const noneOnly = state.filters[CUSTOMIZATION_FILTER_NONE_ONLY] === true;
-	const filterToggle = currentMatrix.workspacesWithIssues > 0
+	// Keep the toggle while the filter is on, even if a refresh left no matching workspaces —
+	// otherwise a persisted filter would hide every row with no way to turn it off.
+	const filterToggle = currentMatrix.workspacesWithIssues > 0 || noneOnly
 		? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;margin-bottom:8px;">
 				<input type="checkbox" data-paged-table="${CUSTOMIZATION_TABLE_ID}" data-paged-table-filter="${CUSTOMIZATION_FILTER_NONE_ONLY}"${noneOnly ? ' checked' : ''} style="margin:0;cursor:pointer;">
 				${escapeHtml(localize('usage.customization.filter.noCustomizationOnly'))}

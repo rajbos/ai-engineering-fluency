@@ -393,6 +393,13 @@ let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 /**
+ * When a deep link that is still waiting for its section stops being honoured. Matches the
+ * host's SURFACE_REVEAL_TTL_MS for every other panel, so a conditional section that turns up
+ * much later does not scroll the user.
+ */
+const PENDING_ANCHOR_TTL_MS = 60_000;
+let pendingTabAnchorExpiresAt = 0;
+/**
  * How long an insight anchor keeps re-asserting itself once its card has been shown. Activating
  * the Insights tab immediately marks its new insights as "seen", which makes the host push a
  * fresh `updateInsights`; a background stats refresh runs the full `renderLayout`. Either rebuilds
@@ -406,8 +413,8 @@ const INSIGHT_FOCUS_WINDOW_MS = 4000;
 let focusedInsightAnchor: { anchor: string; until: number } | null = null;
 /** The node the last anchor scroll targeted, so a re-apply can tell a rebuild from a repeat. */
 let lastAnchorScrollTarget: HTMLElement | null = null;
-/** Handle of a deferred scroll to an insight card, so navigating away before it fires cancels it. */
-let pendingInsightScrollTimer: ReturnType<typeof setTimeout> | null = null;
+/** Handle of a deferred anchor scroll (section or insight card), so navigating away or a host cancel before it fires stops it. */
+let pendingAnchorScrollTimer: ReturnType<typeof setTimeout> | null = null;
 /** Elements with a highlight flash still in flight, with the styling their timer will restore. */
 const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -780,6 +787,7 @@ function getEffortDisplayName(level: string): string {
 }
 
 import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName, isKnownToolDisplayName } from '../../../../src/utils/toolUtils';
+import { preferredScrollBehavior } from '../shared/surfaceNavigation';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -1058,7 +1066,7 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 	const missed = stats.missedPotential || initialData?.missedPotential || [];
 	if (missed.length === 0) {
 		return `
-			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
+			<div id="section-missed-potential" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
 				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
 					${statusBadgeHtml('✅')} No other AI tool configs missing a Copilot counterpart
 				</div>
@@ -1073,7 +1081,7 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 	}
 
 	return `
-        <div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
+        <div id="section-missed-potential" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
             <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                 ${statusBadgeHtml('⚠️')} Missed Potential: Non-Copilot Instruction Files
             </div>
@@ -3082,7 +3090,7 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 
 	return `
 		<!-- Model Cost Section -->
-		<div class="section">
+		<div class="section" id="section-model-cost">
 			<div class="section-title"><span>💰</span><span>Model Cost Usage</span></div>
 			<div class="section-subtitle">Request distribution across cost levels — low (&lt;$2/M tokens), medium ($2–5/M), high (≥$5/M)</div>
 			<div class="three-column">
@@ -3107,7 +3115,7 @@ function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
 	if (!effortData) { return ''; }
 	return `
 		<!-- Thinking Effort Section -->
-		<div class="section">
+		<div class="section" id="section-thinking-effort">
 			<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
 			<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
 			<div class="three-column">
@@ -3179,7 +3187,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 			${renderMissedPotential(stats)}
 
 			<!-- Repository Setup Section -->
-			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div class="repo-hygiene-section" id="section-repo-hygiene" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
 				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
 					🏗️ Repository Hygiene Analysis
 				</div>
@@ -3213,7 +3221,7 @@ function buildMcpToolsSectionHtml(
 ): string {
 	return `
 		<!-- MCP Tools Section -->
-		<div class="section">
+		<div class="section" id="section-mcp-tools">
 			<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
 			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
 			${buildUnknownMcpToolsBannerHtml(stats)}
@@ -4808,7 +4816,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
 	return `
-		<div class="section">
+		<div class="section" id="section-billing-coverage">
 			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
 			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
@@ -5037,7 +5045,7 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 	const tier30 = cw30 && cw30.maxRequestInputTokens > 0 ? _tierInfoForModels(cw30.maxRequestModels) : null;
 	const bar = cw30 && tier30 ? _renderContextWindowBar(cw30.maxRequestInputTokens, tier30) : '';
 	return `
-		<div class="section">
+		<div class="section" id="section-context-window">
 			<div class="section-title"><span>🪟</span><span>Context Window &amp; Long-Context Pricing</span></div>
 			<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a request exceeds their default-tier threshold.</div>
 			<div class="three-column">
@@ -5606,7 +5614,7 @@ function buildToolsTabPanelHtml(
 	return `
 		<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
 			<!-- Tool Calls Section -->
-			<div class="section">
+			<div class="section" id="section-tool-usage">
 				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
 				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions${hideAutomaticToolCalls ? ' (automatic tool calls hidden — disable "Hide Automatic Tool Calls" in settings to show them)' : ''}</div>
 				<div class="three-column">
@@ -5641,7 +5649,7 @@ function buildToolsTabPanelHtml(
 			${buildServerMemoriesSectionHtml(currentServerMemoriesAnalysis ?? stats.serverMemoriesAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
-			<div class="section">
+			<div class="section" id="section-multi-model">
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
 				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
 				<div class="three-column">
@@ -5729,7 +5737,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	const thinkingEffortHtml = safeSectionHtml('Thinking Effort', () => buildThinkingEffortSectionHtml(stats));
 	const sessionsSummaryHtml = `
 		<!-- Summary Section -->
-		<div class="section">
+		<div class="section" id="section-sessions-summary">
 			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
 			<div class="stats-grid">
 				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
@@ -6016,7 +6024,7 @@ function handleHighlightUnknownTools(): void {
 	activateUsageTab('tools');
 	const el = document.getElementById('unknown-mcp-tools-section');
 	if (el) {
-		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
 		flashAnchorHighlight(el);
 	}
 }
@@ -6126,6 +6134,10 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateAccountBudgets(message); break;
 		case 'switchTab':
 			handleSwitchTab(message); break;
+		case 'cancelPendingNavigation':
+			// The user opened Usage Analysis itself; a deep link still waiting for its
+			// section must not scroll them away from it later.
+			clearFocusedInsightAnchor(); break;
 		default:
 			handleWorktreeMessage(message); break;
 	}
@@ -6191,7 +6203,11 @@ function handleSwitchTab(message: any): void {
 	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
+	// A newer host navigation supersedes a deferred scroll still queued for an older one,
+	// even when this one's own section has not rendered yet.
+	cancelPendingAnchorScroll();
 	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	pendingTabAnchorExpiresAt = Date.now() + PENDING_ANCHOR_TTL_MS;
 	// activateUsageTab sets activeTab even when it finds no panel, so a switch that arrives
 	// during the loading state is still honored by the render that follows.
 	activateUsageTab(tab);
@@ -6212,19 +6228,26 @@ function handleSwitchTab(message: any): void {
 
 function scrollToPendingTabAnchor(): void {
 	if (!pendingTabAnchor) { return; }
+	if (Date.now() > pendingTabAnchorExpiresAt) {
+		// The section never rendered in time. Landing on it minutes later, on some
+		// unrelated stats refresh, would yank the user away from whatever they are reading.
+		pendingTabAnchor = null;
+		return;
+	}
 	const anchor = document.getElementById(pendingTabAnchor);
 	if (anchor) {
 		pendingTabAnchor = null;
 		lastAnchorScrollTarget = anchor;
+		// Only one deferred scroll may be in flight: a newer target replaces an older one.
+		cancelPendingAnchorScroll();
 		const timer = setTimeout(() => {
-			if (pendingInsightScrollTimer === timer) { pendingInsightScrollTimer = null; }
-			anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			if (pendingAnchorScrollTimer === timer) { pendingAnchorScrollTimer = null; }
+			anchor.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
 			flashAnchorHighlight(anchor);
 		}, 50);
-		// Only an insight scroll is tracked, and so only it is cancellable: navigating away inside
-		// the defer would otherwise still scroll and flash the card the user just left behind.
-		// Section anchors keep their existing fire-and-forget behaviour.
-		if (isInsightCardAnchor(anchor.id)) { pendingInsightScrollTimer = timer; }
+		// Tracked for every anchor, so navigating away inside the defer — or the host cancelling
+		// with cancelPendingNavigation — stops it scrolling and flashing what the user left behind.
+		pendingAnchorScrollTimer = timer;
 	}
 }
 
@@ -6254,20 +6277,27 @@ function flashAnchorHighlight(element: HTMLElement): void {
 }
 
 /**
- * Forgets a pending insight deep link, so nothing later scrolls the user back to that card.
+ * Forgets any pending deep link — an insight card or a section — so nothing later scrolls the
+ * user away from where they chose to look. Called on the user's own navigation (tab and group
+ * clicks) and when the host cancels (`cancelPendingNavigation`); `handleSwitchTab` never calls
+ * it, so the host's own navigation keeps the anchor it just requested.
  *
- * Both halves have to go. A link whose card did not exist yet is still sitting in
+ * Both halves have to go. A link whose target did not exist yet is still sitting in
  * `pendingTabAnchor`, which `renderLayout` consumes without consulting the active tab — so
- * leaving it set would aim a later render at a card on a tab the user has left. Static section
- * anchors are left alone, keeping the behaviour change confined to insight deep links: the other
- * `switchTab` callers target a section on the tab they are navigating to.
+ * leaving it set would aim a later render at a section or card on a tab the user has left
+ * (a conditional section such as Thinking Effort can appear on a much later stats load).
  */
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
-	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)) { pendingTabAnchor = null; }
-	if (pendingInsightScrollTimer !== null) {
-		clearTimeout(pendingInsightScrollTimer);
-		pendingInsightScrollTimer = null;
+	pendingTabAnchor = null;
+	cancelPendingAnchorScroll();
+}
+
+/** Stops a deferred anchor scroll that has not fired yet, if any. */
+function cancelPendingAnchorScroll(): void {
+	if (pendingAnchorScrollTimer !== null) {
+		clearTimeout(pendingAnchorScrollTimer);
+		pendingAnchorScrollTimer = null;
 	}
 }
 

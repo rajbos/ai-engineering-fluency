@@ -380,7 +380,28 @@
       "title": "What's New",
       "bundle": "whatsnew",
       "global": "__INITIAL_WHATSNEW__",
-      "fixture": "whatsnew.json"
+      "fixture": "whatsnew.json",
+      "$statesComment": [
+        "'releases' is the initial render. The View index is bundled into the",
+        "webview (src/whatsNew/viewIndex.ts), so it needs nothing from the fixture."
+      ],
+      "states": [
+        {
+          "id": "index",
+          "title": "View index tab",
+          "steps": [{ "click": ".wn-tab[data-tab=\"index\"]" }],
+          "expect": "#wn-tab-panel-index .index-tree"
+        },
+        {
+          "id": "index-search",
+          "title": "View index tab filtered by a search",
+          "steps": [
+            { "click": ".wn-tab[data-tab=\"index\"]" },
+            { "type": "#view-index-search", "text": "latency" }
+          ],
+          "expect": "#wn-tab-panel-index .index-mark"
+        }
+      ]
     },
     {
       "id": "diagnostics",

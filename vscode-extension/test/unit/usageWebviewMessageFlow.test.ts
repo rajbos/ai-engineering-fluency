@@ -1639,6 +1639,94 @@ test('a deep link that never landed is dropped when the user navigates away', as
 	assert.deepEqual(harness.scrolledTo, [], 'a stale deep link must not aim a later render');
 });
 
+test('a section deep link that never landed is dropped when the user navigates away', async () => {
+	// A conditional section (here one that is never rendered) leaves its anchor in
+	// pendingTabAnchor; a later render must not scroll there once the user picked another tab.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-not-rendered-yet' });
+	harness.window.document.querySelector('.tab-button[data-tab="sessions"]')?.click();
+	harness.scrolledTo.length = 0;
+
+	const late = harness.window.document.createElement('div');
+	late.id = 'section-not-rendered-yet';
+	harness.window.document.body.append(late);
+	harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'a stale section anchor must not aim a later render');
+});
+
+test('cancelPendingNavigation drops a deep link still waiting for its section', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-not-rendered-yet' });
+	harness.post({ command: 'cancelPendingNavigation' });
+	harness.scrolledTo.length = 0;
+
+	const late = harness.window.document.createElement('div');
+	late.id = 'section-not-rendered-yet';
+	harness.window.document.body.append(late);
+	harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, []);
+});
+
+test('a section deep link that never landed expires after 60 seconds', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-shows-up-much-later' });
+	harness.scrolledTo.length = 0;
+	// The bundle runs inside jsdom's window, so its clock is that window's Date.
+	const webviewDate = (harness.window as unknown as { Date: DateConstructor }).Date;
+	const realNow = webviewDate.now;
+	webviewDate.now = () => realNow() + 61_000;
+	try {
+		const late = harness.window.document.createElement('div');
+		late.id = 'section-shows-up-much-later';
+		harness.window.document.body.append(late);
+		harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+		await harness.settleScroll();
+	} finally {
+		webviewDate.now = realNow;
+	}
+
+	assert.deepEqual(harness.scrolledTo, [], 'an expired deep link must not scroll a much later render');
+});
+
+test('a section scroll still in its paint delay is cancelled by navigation and by cancelPendingNavigation', async () => {
+	// The section exists, so the scroll is already scheduled; acting inside its 50 ms defer
+	// must still stop it.
+	const byClick = await bootWebview(buildStatsWithInsights());
+	byClick.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	byClick.window.document.querySelector('.tab-button[data-tab="sessions"]')?.click();
+	await byClick.settleScroll();
+	assert.deepEqual(byClick.scrolledTo, [], 'a tab click inside the defer cancels the section scroll');
+
+	const byHost = await bootWebview(buildStatsWithInsights());
+	byHost.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	byHost.post({ command: 'cancelPendingNavigation' });
+	await byHost.settleScroll();
+	assert.deepEqual(byHost.scrolledTo, [], 'the host cancel inside the defer stops the section scroll');
+});
+
+test('a second switchTab inside the paint delay replaces the first scroll', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-sessions-summary' });
+	await harness.settleScroll();
+	assert.deepEqual(harness.scrolledTo, ['section-sessions-summary'], 'only the newer deep link may scroll');
+});
+
+test('a newer switchTab whose section is not rendered yet still cancels the older queued scroll', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-not-rendered-yet' });
+	await harness.settleScroll();
+	assert.deepEqual(harness.scrolledTo, []);
+});
+
 test('switchTab still honours a static section anchor', async () => {
 	// switchTab clicks the tab button itself, which runs the clear-on-navigation handler, so the
 	// anchors are assigned after that click. This pins that ordering: assigning before the click

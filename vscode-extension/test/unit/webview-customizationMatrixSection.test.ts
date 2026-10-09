@@ -197,3 +197,21 @@ test('customizationMatrix: every badge carries a localized accessible name', () 
 		initializeWebviewLocalization({});
 	}
 });
+
+test('customizationMatrix: an active filter stays clearable when a refresh leaves no matching workspaces', () => {
+	buildCustomizationSectionHtml(matrix([row('a', 1), row('b', 2, { instructions: '❌', agents: '❌' })]));
+	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
+	try {
+		const html = buildCustomizationSectionHtml(matrix([row('a', 1), row('b', 2)]));
+		assert.match(html, /data-paged-table-filter="noCustomizationOnly" checked/);
+		assert.match(html, /No rows to display\./);
+	} finally {
+		setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+	}
+	assert.doesNotMatch(buildCustomizationSectionHtml(matrix([row('a', 1)])), /data-paged-table-filter/);
+});
+
+test("customizationMatrix: populated and empty sections keep the What's New nav anchor", () => {
+	assert.match(buildCustomizationSectionHtml(matrix([row('a', 1)])), /id="section-customization-files"/);
+	assert.match(buildCustomizationSectionHtml(null), /id="section-customization-files"/);
+});

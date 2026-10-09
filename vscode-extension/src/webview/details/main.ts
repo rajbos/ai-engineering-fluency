@@ -15,6 +15,7 @@ import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
 import { getBillingGroup } from '../../../../src/chartDataBuilder';
 import { ALL_PERIODS, getAllProviders, getFilterableProviders, getActiveExcludedProviders } from './providerFilter';
+import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
@@ -114,6 +115,7 @@ declare global {
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
+installSurfaceNavigation(vscode, 'details');
 const initialData = getWindowData<DetailedStats & { localization?: Record<string, string> }>('__INITIAL_DETAILS__');
 console.log('[CopilotTokenTracker] details webview loaded');
 
@@ -451,6 +453,7 @@ stats: DetailedStats,
 projections: Projections
 ): HTMLElement {
 const section = el('div', 'section');
+section.id = 'section-key-metrics';
 section.append(iconHeading('h3', 'graph', 'Key Metrics'));
 const table = document.createElement('table');
 table.className = 'stats-table';
@@ -557,6 +560,7 @@ function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
 	if (providersWithMonthlyCost.length === 0) { return null; }
 
 	const section = el('div', 'section');
+	section.id = 'section-cost-by-provider';
 	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
 	section.append(el('div', 'provider-panel-hint', 'Click a provider to hide/show it — this also filters the Editor & Model usage lists below.'));
 
@@ -867,6 +871,7 @@ return null;
 const visibleEditors = Array.from(allEditors).filter(editor => isVisibleForProviderFilter(editorBillingGroups(stats, editor)));
 
 const section = el('div', 'section');
+section.id = 'section-editor-usage';
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
 heading.classList.add('section-heading-collapsible');
 heading.setAttribute('role', 'button');
@@ -1129,6 +1134,7 @@ return null;
 const visibleModels = new Set(Array.from(allModels).filter(model => isVisibleForProviderFilter(modelBillingGroups(stats, model))));
 
 const section = el('div', 'section');
+section.id = 'section-model-usage';
 const heading = iconHeading('h3', 'symbol-numeric', 'Model Usage (Tokens)');
 section.append(heading);
 
