@@ -57,6 +57,9 @@ None.
   actually connected to is checked again. A DNS answer that changes between the
   pre-check and the connection (DNS rebinding) fails with a "blocked … address" error
   instead of reaching the internal host.
+- IP literal hosts never go through DNS (Node connects to them directly, without the
+  `lookup` hook), so `checkUrlWithMethod` classifies the unbracketed host itself and
+  refuses an internal one before any request is created.
 - Plain `http:` URLs are still checked but flagged as `INSECURE` and counted in the
   summary.
 - `GET` is only sent when `HEAD` returned 403, 405 or 501, so a URL that answers `HEAD`

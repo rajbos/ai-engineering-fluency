@@ -174,7 +174,7 @@ async function getResolvedInternalReason(hostname, lookup = dns.promises.lookup)
  * connection (DNS rebinding) still cannot reach an internal host.
  */
 function guardedLookup(hostname, options, callback, lookup = dns.lookup) {
-    lookup(hostname, options, (err, address, family) => {
+    lookup(unbracket(hostname), options, (err, address, family) => {
         if (err) { callback(err); return; }
         const entries = Array.isArray(address) ? address : [{ address, family }];
         for (const entry of entries) {
@@ -210,10 +210,20 @@ function checkUrlWithMethod(urlStr, method) {
             return;
         }
 
+        // URL.hostname keeps IPv6 literals bracketed; Node needs the bare address
+        // to connect directly instead of handing "[::1]" to DNS. IP literals skip
+        // the lookup hook entirely, so they are classified here instead.
+        const hostname = unbracket(url.hostname);
+        const internal = getInternalHostReason(hostname);
+        if (internal) {
+            resolve({ status: null, error: `blocked ${internal} host ${hostname}` });
+            return;
+        }
+
         const lib = url.protocol === 'https:' ? https : http;
         const options = {
             method,
-            hostname: url.hostname,
+            hostname,
             port: url.port || undefined,
             path: url.pathname + url.search,
             headers: {
@@ -372,6 +382,7 @@ module.exports = {
     getResolvedInternalReason,
     guardedLookup,
     checkUrl,
+    checkUrlWithMethod,
     partitionInternalUrls,
 };
 

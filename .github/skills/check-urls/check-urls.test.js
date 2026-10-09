@@ -20,6 +20,7 @@ const {
     getResolvedInternalReason,
     guardedLookup,
     checkUrl,
+    checkUrlWithMethod,
     partitionInternalUrls,
 } = require('./check-urls.js');
 
@@ -162,6 +163,75 @@ test('IPv6 URLs extracted from source are SKIPPED, not reported as invalid', asy
         ['http://[fe80::1]:8080/', 'link-local'],
     ]);
     assert.deepEqual(toCheck, ['https://[2001:4860:4860::8888]/']);
+});
+
+test('IPv6 literals are classified directly, never via DNS', async () => {
+    const neverCalled = async () => { throw new Error('IP literals must not be resolved'); };
+    const { toCheck, skipped } = await partitionInternalUrls([
+        'http://[::1]/',
+        'http://[fc00::]/',
+        'http://[fe80::]/',
+        'http://[::ffff:10.0.0.1]/',
+        'https://[2606:4700::1111]/',
+    ], neverCalled);
+    assert.deepEqual(skipped.map((s) => s.reason), ['loopback', 'private', 'link-local', 'private']);
+    assert.deepEqual(toCheck, ['https://[2606:4700::1111]/']);
+});
+
+/** Replace http(s).request for one call, capturing the options it was given. */
+async function captureRequest(url) {
+    const http = require('node:http');
+    const https = require('node:https');
+    const { EventEmitter } = require('node:events');
+    const originals = { http: http.request, https: https.request };
+    const calls = [];
+    const fake = (options, onResponse) => {
+        calls.push(options);
+        const req = new EventEmitter();
+        req.end = () => onResponse({ statusCode: 204, resume() {} });
+        req.destroy = () => {};
+        return req;
+    };
+    http.request = fake;
+    https.request = fake;
+    try {
+        const result = await checkUrlWithMethod(url, 'HEAD');
+        return { result, calls };
+    } finally {
+        http.request = originals.http;
+        https.request = originals.https;
+    }
+}
+
+test('checkUrlWithMethod passes public IPv6 literals to Node unbracketed', async () => {
+    const { result, calls } = await captureRequest('https://[2606:4700::1111]/dns-query?x=1');
+    assert.equal(result.status, 204);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].hostname, '2606:4700::1111');
+    assert.equal(calls[0].path, '/dns-query?x=1');
+});
+
+test('checkUrlWithMethod refuses internal literals without sending a request', async () => {
+    for (const [url, reason] of [
+        ['http://[::1]:8080/', 'loopback'],
+        ['http://[fc00::]/', 'private'],
+        ['http://[fe80::]/', 'link-local'],
+        ['http://[::ffff:10.0.0.1]/', 'private'],
+        ['http://169.254.169.254/', 'link-local'],
+        ['http://localhost/', 'localhost'],
+    ]) {
+        const { result, calls } = await captureRequest(url);
+        assert.equal(calls.length, 0, url);
+        assert.equal(result.status, null, url);
+        assert.match(result.error, new RegExp(`^blocked ${reason} host `), url);
+    }
+});
+
+test('guardedLookup unbrackets the hostname it resolves', async () => {
+    const seen = await new Promise((resolve) => {
+        guardedLookup('[2606:4700::1111]', {}, () => {}, (host, _o, cb) => { resolve(host); cb(null, '2606:4700::1111', 6); });
+    });
+    assert.equal(seen, '2606:4700::1111');
 });
 
 test('guardedLookup blocks internal answers at connect time', async () => {
