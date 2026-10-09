@@ -1940,14 +1940,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const tab = typeof message.tab === 'string' ? message.tab : undefined;
 				if (view) { this.recordViewVisit(view as FeatureViewId, tab); }
 			},
-			openWhatsNewFeature:    async () => {
+			// Navigation is started, not awaited: dispatch() drops a command whose key is
+			// still in flight, so awaiting a slow cold open (e.g. Details loading its data)
+			// would silently swallow the user's next pick. A newer navigation supersedes an
+			// older one by itself (surfaceNavGeneration, the reveal queue's request ids).
+			openWhatsNewFeature:    () => {
 				if (typeof message.featureId === 'string' && message.featureId) {
-					await this.openWhatsNewFeature(message.featureId);
+					this.startNavigation(`What's New feature "${message.featureId}"`, () => this.openWhatsNewFeature(message.featureId));
 				}
 			},
-			openViewIndexEntry:     async () => {
+			openViewIndexEntry:     () => {
 				if (typeof message.entryId === 'string' && message.entryId) {
-					await this.openViewIndexEntry(message.entryId);
+					this.startNavigation(`View index entry "${message.entryId}"`, () => this.openViewIndexEntry(message.entryId));
 				}
 			},
 			// A panel's script is now listening: hand it any navigation that was
@@ -2833,6 +2837,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		const { view, tab, anchor } = entry.feature.surface;
 		await this.openViewSurface(view, { ...(tab ? { tab } : {}), ...(anchor ? { anchor } : {}) });
+	}
+
+	/** Runs a navigation without blocking the command dispatcher, reporting a failure the way dispatch() would. */
+	private startNavigation(label: string, navigate: () => Promise<void>): void {
+		navigate().catch((error: unknown) => {
+			this.error(`Opening ${label} failed`, error);
+			vscode.window.showErrorMessage(`Operation failed: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}
 
 	/** Opens the view, tab and section a View index entry points at. */
