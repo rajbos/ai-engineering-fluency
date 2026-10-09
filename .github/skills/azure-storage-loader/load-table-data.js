@@ -61,11 +61,15 @@ function parseArgs(argv = process.argv) {
 	for (let i = 2; i < argv.length; i++) {
 		const arg = argv[i];
 		const nextArg = argv[i + 1];
+		// Option name without any "=value" part. Error messages use only this,
+		// never the raw argument, so a key passed by mistake is not echoed.
+		const optionName = arg.split('=')[0];
 
 		if (arg === '--help' || arg === '-h') {
 			args.help = true;
-		} else if (arg === '--sharedKey') {
-			// Deliberately not accepted: a key on argv leaks into process
+		} else if (optionName === '--sharedKey') {
+			// Deliberately not accepted, in either `--sharedKey <key>` or
+			// `--sharedKey=<key>` form: a key on argv leaks into process
 			// listings, shell history and agent transcripts. Never echo it.
 			throw new Error(`--sharedKey is not supported; set the ${SHARED_KEY_ENV_VAR} environment variable instead`);
 		} else if (Object.prototype.hasOwnProperty.call(VALUE_OPTIONS, arg)) {
@@ -74,8 +78,11 @@ function parseArgs(argv = process.argv) {
 			}
 			args[VALUE_OPTIONS[arg]] = nextArg;
 			i++;
+		} else if (arg.startsWith('-')) {
+			throw new Error(`Unknown option: ${optionName} (use --help for usage information)`);
 		} else {
-			throw new Error(`Unknown argument: ${arg} (use --help for usage information)`);
+			// A stray positional value could be a pasted secret; do not echo it
+			throw new Error(`Unexpected positional argument at position ${i - 1} (use --help for usage information)`);
 		}
 	}
 
@@ -108,7 +115,9 @@ Optional Options:
 Authentication:
   By default, uses DefaultAzureCredential (Entra ID).
   To use Shared Key auth, set the ${SHARED_KEY_ENV_VAR} environment variable.
-  The key is never accepted on the command line.
+  The key is never accepted on the command line. Set the variable without
+  typing the key into a command (which would land in shell history), e.g.
+  read it with a silent prompt: read -rs ${SHARED_KEY_ENV_VAR}; export ${SHARED_KEY_ENV_VAR}
 
 Examples:
   # Load data with Entra ID auth
@@ -117,8 +126,8 @@ Examples:
     --startDate 2026-01-01 \\
     --endDate 2026-01-31
 
-  # Load data with Shared Key auth (key from the environment) and filter by model
-  ${SHARED_KEY_ENV_VAR}="<key>" node load-table-data.js \\
+  # Load data with Shared Key auth (${SHARED_KEY_ENV_VAR} already exported) and filter by model
+  node load-table-data.js \\
     --storageAccount myaccount \\
     --startDate 2026-01-01 \\
     --endDate 2026-01-31 \\
@@ -215,24 +224,29 @@ function createTableClient(storageAccount, tableName, sharedKey) {
 }
 
 // Neutralize a free-text value that came from a table row. Rows are written by
-// every uploader, so their strings are untrusted: drop control, bidi,
-// zero-width, Unicode tag and variation-selector characters (which can hide
-// text from a human reviewer while an agent still reads it), collapse
-// whitespace and cap the length. Visible text is kept, so consumers must still
-// treat these values as data, never as instructions.
+// every uploader, so their strings are untrusted. Remove everything the
+// repository's input validator (.github/workflows/validate-input.sh) treats as
+// hidden content: control characters (\p{Cc}), all format characters (\p{Cf}:
+// bidi controls, zero-width characters, soft hyphen, word joiner, BOM, Unicode
+// tag characters), variation selectors, other invisible fillers, and HTML
+// comments. Then collapse whitespace and cap the length. Visible text is kept,
+// so consumers must still treat these values as data, never as instructions.
 function sanitizeEntityString(value) {
 	if (value === undefined || value === null || value === '') {
 		return undefined;
 	}
 	let result = String(value)
-		.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
-		.replace(/[؜​-‏‪-‮⁠-⁩﻿︀-️]/g, '')
-		.replace(/[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu, '')
+		.replace(/\p{Cc}/gu, ' ')
+		.replace(/\p{Cf}/gu, '')
+		.replace(/[\u{E0000}-\u{E007F}\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu, '')
+		.replace(/[\u034F\u115F\u1160\u180E\u3164\uFFA0]/gu, '')
+		.replace(/<!--[\s\S]*?(-->|$)/g, '')
+		.replace(/<!--|-->/g, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 	const chars = Array.from(result);
 	if (chars.length > MAX_ENTITY_STRING_LENGTH) {
-		result = chars.slice(0, MAX_ENTITY_STRING_LENGTH - 1).join('') + '…';
+		result = chars.slice(0, MAX_ENTITY_STRING_LENGTH - 1).join('') + '\u2026';
 	}
 	return result === '' ? undefined : result;
 }

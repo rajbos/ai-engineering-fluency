@@ -8,7 +8,7 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 
 - `load-table-data.js` queries one Azure Table Storage table (default `usageAggDaily`),
   one partition per day, over HTTPS at `https://<storageAccount>.table.core.windows.net`
-  (`createTableClient`, line 203). `@azure/identity` additionally talks to Entra ID token
+  (`createTableClient`, line 212). `@azure/identity` additionally talks to Entra ID token
   endpoints when the default credential chain is used.
 - It writes the normalized entities (JSON or CSV) to the `--output` file when given,
   otherwise to stdout. Progress, counts and totals go to stderr.
@@ -19,19 +19,19 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 - Default: `DefaultAzureCredential` (Entra ID: whatever the `@azure/identity` chain finds,
   such as environment variables, `az login` or a managed identity).
 - Optional: an account key read from the `AZURE_STORAGE_KEY` environment variable
-  (`main`, line 443) and passed to `AzureNamedKeyCredential`. The old `--sharedKey`
-  argument is rejected with an error that does not echo the value (line 70). The CI step
+  (`main`, line 457) and passed to `AzureNamedKeyCredential`. The old `--sharedKey`
+  argument is rejected, in both `--sharedKey <key>` and `--sharedKey=<key>` form, with an error that does not echo the value (line 74). The CI step
   in `.github/workflows/copilot-setup-steps.yml` maps `secrets.COPILOT_STORAGE_KEY` to that
   environment variable and no longer puts it on the command line.
 - The script itself never prints the key; stderr only says which auth mode is used (the
-  error handler does print `error.message` and the stack, lines 512-516).
+  error handler does print `error.message` and the stack, lines 526-530).
 
 ## Untrusted inputs parsed
 
 - Table entities returned by the storage account. Rows are written by every team member's
   client, so string fields (`model`, `workspaceName`, `machineName`, `userId`, ...) are
   attacker-influenceable text by anyone allowed to upload. They pass through
-  `normalizeEntity` / `sanitizeEntityString` (lines 223-262) before output.
+  `normalizeEntity` / `sanitizeEntityString` (lines 234-277) before output.
 - Command-line arguments (`--storageAccount`, `--tableName`, `--datasetId`, `--model`,
   `--workspaceId`, `--userId`, `--output`), which end up in the endpoint host, an OData
   filter and the output file path.
@@ -39,7 +39,7 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 ## What it writes and where
 
 - With `--output <path>`: that file only (parent directories created, new files created
-  with mode `0600`; `writeOutputFile`, lines 376-381). Nothing per-row goes to stdout.
+  with mode `0600`; `writeOutputFile`, lines 390-395). Nothing per-row goes to stdout.
 - Without `--output`: the result goes to stdout, for interactive use.
 - In both cases the result is also kept in `module.exports.tresult`.
 - The payload contains `userId`, `machineName`, `workspaceName` and `workspaceId` per row.
@@ -57,14 +57,22 @@ Update it in the same PR as any change that adds or alters a trigger surface (se
 - `--storageAccount` must match `^[a-z0-9]{3,24}$` (line 26), checked in `main` and again
   in `createTableClient` before the endpoint host is built, so the credential cannot be
   sent to another host.
-- The shared key comes only from the environment; `--sharedKey` fails closed.
+- The shared key comes only from the environment; `--sharedKey` fails closed in both
+  forms. Argument errors name only the option (the part before `=`) or the position of
+  a stray positional value, never the raw argument, so a mistakenly passed key is not
+  echoed. `SKILL.md` and the `--help` text show setting the variable with a silent
+  prompt or a secret manager rather than typing the key into a command.
 - The CI step passes `--output`, so the dataset is written to a file instead of the
   Actions log, and the file the agent expects now actually exists.
-- Entity strings have control, bidi, zero-width, Unicode tag and variation-selector
-  characters removed, whitespace collapsed and length capped at 256 characters
-  (`sanitizeEntityString`). `SKILL.md` tells agents to treat row values as data.
+- Entity strings have every hidden-content class that `.github/workflows/validate-input.sh`
+  flags removed: control characters (`\p{Cc}`), all format characters (`\p{Cf}`: bidi
+  controls, zero-width characters, soft hyphen, word joiner, BOM), the whole Unicode tag
+  block, variation selectors and HTML comments, plus a few invisible fillers (U+034F,
+  U+115F, U+1160, U+180E, U+3164, U+FFA0). Whitespace is then collapsed and the length
+  capped at 256 characters (`sanitizeEntityString`). The source uses escapes only, so
+  the ranges stay reviewable. `SKILL.md` tells agents to treat row values as data.
 - CSV cells that are strings starting with `=`, `+`, `-`, `@`, tab or CR are prefixed with
-  `'`; cells with commas, quotes or line breaks are quoted (`formatCsvCell`, lines 329-341).
+  `'`; cells with commas, quotes or line breaks are quoted (`formatCsvCell`, lines 343-355).
 - OData filter values are rejected if they contain `and`/`or`/`not` or newlines and have
   single quotes doubled; partition keys go through `sanitizeTableKey`.
 - Dates must match `YYYY-MM-DD`; `--format` is restricted to `json`/`csv`.

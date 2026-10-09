@@ -47,7 +47,9 @@ Authenticate using one of these methods:
 ### Shared Key
 Set the `AZURE_STORAGE_KEY` environment variable to the storage account key.
 The key is not accepted on the command line, so it stays out of process
-listings, shell history and transcripts.
+listings, shell history and transcripts. Set the variable with a silent prompt
+(`read -rs AZURE_STORAGE_KEY && export AZURE_STORAGE_KEY`) or a secret manager,
+not by typing the key into a command.
 
 ## Common Use Cases
 
