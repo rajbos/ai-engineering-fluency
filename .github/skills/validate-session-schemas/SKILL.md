@@ -47,6 +47,12 @@ The source of truth for supported platforms is
 **Not validated by this skill** (DB / binary formats that need the adapters'
 own parsers, so a generic JSON walker can't read them): `crush` (SQLite),
 `visual-studio` (MessagePack), `continue`, `mistral-vibe`, `claude-desktop`.
+
+OpenCode's `opencode.db` is opened read-only. Only the sessions that fall inside
+the `--days` / `--max` window are exported, as temporary JSONL files in a fresh
+`oc-dbses-*` directory under the OS temp dir, and that directory is removed when
+the run ends (in a `finally`, so also on errors). Older sessions are counted, not
+copied. The report labels these entries `…/opencode.db [session <id>]`.
 They are listed in the report under "Not validated" so coverage is never
 silently overstated. If you add a new file-based adapter, add a discovery
 function + a `schema-baselines.json` entry here too.
@@ -81,7 +87,7 @@ node .github/skills/validate-session-schemas/validate-session-schemas.js --inclu
 | `--max N` | Analyze at most N most-recent files per platform (default 5) |
 | `--platform <id>` | Validate a single platform |
 | `--update-baseline` | Rewrite `knownFields` from observed fields; never modifies `contracts` |
-| `--include-examples` | Capture truncated example values per field |
+| `--include-examples` | Capture truncated example values per field (best-effort redaction of tokens, e-mail addresses and the home directory; prompt text still passes through) |
 | `--fail-on-new-fields` | Exit non-zero when new fields are discovered |
 | `--json` | Emit JSON only |
 | `--help` | Usage |
@@ -114,7 +120,10 @@ node .github/skills/validate-session-schemas/validate-session-schemas.js --inclu
   the new fields.
 
 Field-path notation: `a.b` nested, `arr[]` array items, `arr[].c` a field inside
-array items.
+array items, `a.{key}` any key of a dictionary-like object. Object keys that are
+not shaped like a field name (paths, URLs, UUIDs, hex/numeric ids, keys with
+dots, colons or spaces) collapse to `{key}`, so identifiers from the logs never
+reach the report or `schema-baselines.json`.
 
 ## Acting on results
 

@@ -239,7 +239,91 @@ function discoverAntigravity() {
   return files;
 }
 
-function discoverOpenCode() {
+/** OpenCode session ids look like `ses_<alnum>`; anything else is not joined into a path. */
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * Discovery context shared by run() and the discoverers.
+ *   cutoff / max  — the recency window, so DB-backed platforms export only
+ *                   what will actually be analyzed.
+ *   tempDirs      — temp directories to remove when the run ends (finally).
+ *   unexported    — per-platform stats for sessions that exist but were not
+ *                   materialized as files: { found, recent, newestMs }.
+ *   displayPaths  — temp file -> stable label for the report, since the temp
+ *                   file is gone by the time the report is read.
+ */
+function newDiscoveryContext(cutoff, max) {
+  return { cutoff, max, tempDirs: [], unexported: {}, displayPaths: new Map() };
+}
+
+function removeTempDirs(ctx) {
+  for (const dir of ctx.tempDirs.splice(0)) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+/**
+ * Export the most recent OpenCode DB sessions (inside ctx.cutoff, at most
+ * ctx.max) as temp JSONL files so the framework can analyse their schema.
+ * Sessions outside the window are only counted, never written to disk.
+ */
+function exportOpenCodeDbSessions(dbPath, ctx, files) {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const hasMessages = 'EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id)';
+    const totals = db.prepare(
+      `SELECT COUNT(*) AS n, MAX(time_updated) AS newest FROM session s WHERE ${hasMessages}`
+    ).get();
+    const recentCount = db.prepare(
+      `SELECT COUNT(*) AS n FROM session s WHERE time_updated >= ? AND ${hasMessages}`
+    ).get(ctx.cutoff).n;
+    const candidates = db.prepare(
+      `SELECT id, time_updated FROM session s WHERE time_updated >= ? AND ${hasMessages} ORDER BY time_updated DESC`
+    ).all(ctx.cutoff);
+
+    const selected = [];
+    for (const session of candidates) {
+      if (selected.length >= ctx.max) { break; }
+      if (typeof session.id !== 'string' || !SAFE_SESSION_ID.test(session.id)) { continue; }
+      selected.push(session);
+    }
+
+    if (selected.length > 0) {
+      // Fresh, collision-resistant temp directory (rather than predictably-named
+      // files in the shared OS temp dir) so another local user can't
+      // pre-create/symlink our output path. Registered before any write so
+      // run() removes it even if an export below throws.
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-dbses-'));
+      ctx.tempDirs.push(tmpDir);
+      const selectMessages = db.prepare(
+        'SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC'
+      );
+      for (const session of selected) {
+        const messages = selectMessages.all(session.id);
+        const tmpPath = path.join(tmpDir, `${session.id}.jsonl`);
+        fs.writeFileSync(tmpPath, messages.map((m) => m.data).join('\n'), { encoding: 'utf8', flag: 'wx' });
+        // Stamp the temp file's mtime with the session's last-updated time so
+        // the recency filter (--days) and ordering work correctly.
+        const mtime = new Date(session.time_updated);
+        if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
+        files.push(tmpPath);
+        ctx.displayPaths.set(tmpPath, `${dbPath} [session ${session.id}]`);
+      }
+    }
+
+    const newestMs = Number(totals.newest);
+    ctx.unexported.opencode = {
+      found: Number(totals.n) - selected.length,
+      recent: Number(recentCount) - selected.length,
+      newestMs: Number.isFinite(newestMs) && totals.n > 0 ? newestMs : null,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function discoverOpenCode(ctx) {
   const dataDir = path.join(xdgDataHome(), 'opencode');
   const files = [];
 
@@ -247,36 +331,12 @@ function discoverOpenCode() {
   const sessionDir = path.join(dataDir, 'storage', 'session');
   walkFiles(sessionDir, (n) => n.startsWith('ses_') && n.endsWith('.json'), files, 4);
 
-  // Current SQLite DB sessions (opencode.db): extract message data blobs into
-  // temp JSONL files so the framework can analyse schema and detect recency.
+  // Current SQLite DB sessions (opencode.db).
   const dbPath = path.join(dataDir, 'opencode.db');
   const dbStat = statOrNull(dbPath);
   if (dbStat && dbStat.size > 0) {
-    try {
-      const { DatabaseSync } = require('node:sqlite');
-      const db = new DatabaseSync(dbPath);
-      const sessions = db.prepare('SELECT id, time_updated FROM session ORDER BY time_updated DESC').all();
-      if (sessions.length > 0) {
-        // Create a fresh, collision-resistant temp directory (rather than
-        // writing predictably-named files straight into the shared OS temp
-        // dir) so another local user can't pre-create/symlink our output path.
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-dbses-'));
-        for (const session of sessions) {
-          const messages = db.prepare(
-            'SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC'
-          ).all(session.id);
-          if (messages.length === 0) { continue; }
-          const tmpPath = path.join(tmpDir, `${session.id}.jsonl`);
-          fs.writeFileSync(tmpPath, messages.map((m) => m.data).join('\n'), 'utf8');
-          // Stamp the temp file's mtime with the session's last-updated time so
-          // the recency filter (--days) works correctly.
-          const mtime = new Date(session.time_updated);
-          if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
-          files.push(tmpPath);
-        }
-      }
-      db.close();
-    } catch { /* node:sqlite unavailable or DB locked — fall back to JSON files only */ }
+    try { exportOpenCodeDbSessions(dbPath, ctx, files); }
+    catch { /* node:sqlite unavailable or DB locked — fall back to JSON files only */ }
   }
 
   return files;
@@ -316,6 +376,28 @@ function truncate(s, n) { return s.length > n ? s.slice(0, n) + '\u2026' : s; }
 
 const ARRAY_SAMPLE = 5;
 
+/** Placeholder segment for object keys that look like data rather than a field name. */
+const DICT_KEY = '{key}';
+
+/**
+ * Field paths are built from log object keys, and the paths are printed and
+ * (with --update-baseline) persisted to the tracked baseline. Dictionaries
+ * keyed by file path, session id, URL, etc. would leak those identifiers, so
+ * any key that is not shaped like a plain field name collapses to `{key}`.
+ *
+ * Kept: identifier-like names (`requestId`, `cache_read_input_tokens`,
+ * `$schema`, `@type`) up to 64 chars. Collapsed: keys with path separators,
+ * dots, colons, whitespace or other punctuation; UUID/hex/long-id shaped keys;
+ * and keys containing a run of 4+ digits (timestamps, numeric ids).
+ */
+function normalizeKey(key) {
+  if (!/^[A-Za-z_$@][A-Za-z0-9_$@-]{0,63}$/.test(key)) { return DICT_KEY; }
+  if (/\d{4,}/.test(key)) { return DICT_KEY; }
+  if (/(?=[0-9a-f]*\d)[0-9a-f]{12,}/i.test(key)) { return DICT_KEY; }
+  if (/[A-Za-z0-9]{20,}/.test(key) && /\d/.test(key)) { return DICT_KEY; }
+  return key;
+}
+
 /**
  * Walk an object/array, recording every field path into `schemaMap`
  * (path -> { types:Set, count, examples }) and into the per-record `fieldSet`.
@@ -324,7 +406,8 @@ function walkValue(value, prefix, schemaMap, fieldSet, includeExamples) {
   const t = typeName(value);
   if (t === 'object') {
     for (const key of Object.keys(value)) {
-      const p = prefix ? `${prefix}.${key}` : key;
+      const seg = normalizeKey(key);
+      const p = prefix ? `${prefix}.${seg}` : seg;
       recordField(schemaMap, fieldSet, p, value[key], includeExamples);
       walkValue(value[key], p, schemaMap, fieldSet, includeExamples);
     }
@@ -346,9 +429,35 @@ function recordField(schemaMap, fieldSet, p, value, includeExamples) {
   info.count++;
   fieldSet.add(p);
   if (includeExamples && info.examples.length < 2 && (t === 'string' || t === 'number' || t === 'boolean')) {
-    const ex = t === 'string' ? truncate(value, 40) : value;
+    const ex = t === 'string' ? truncate(redactExample(value), 40) : value;
     if (!info.examples.includes(ex)) { info.examples.push(ex); }
   }
+}
+
+const SECRET_PATTERNS = [
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g,
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+  /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\b[A-Za-z0-9+/_-]{32,}={0,2}/g,
+];
+
+/**
+ * Best-effort redaction for --include-examples values (applied before
+ * truncation): token/key-shaped strings become `[redacted]`, e-mail addresses
+ * `[email]`, and the user's home directory `~`. Prompt text itself is not
+ * recognisable and still passes through, truncated to 40 characters.
+ */
+function redactExample(s, home = HOME) {
+  let out = s;
+  if (home && home.length > 1) {
+    for (const h of new Set([home, home.replace(/\\/g, '/')])) { out = out.split(h).join('~'); }
+  }
+  for (const re of SECRET_PATTERNS) { out = out.replace(re, '[redacted]'); }
+  out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]');
+  return out;
 }
 
 /** Detect the discriminator for a JSONL record. */
@@ -483,28 +592,18 @@ function newAggregate() {
   };
 }
 
-function run(opts) {
-  const baselinePath = path.join(__dirname, 'schema-baselines.json');
-  let baseline;
-  try { baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')); }
-  catch (e) { console.error(`Could not read baseline file ${baselinePath}: ${e.message}`); process.exitCode = 2; return; }
+function newestIso(times) {
+  const valid = times.filter((t) => typeof t === 'number' && Number.isFinite(t));
+  return valid.length ? new Date(Math.max(...valid)).toISOString() : null;
+}
 
-  const now = Date.now();
-  const cutoff = opts.days > 0 ? now - opts.days * 24 * 60 * 60 * 1000 : 0;
-
-  const platformIds = opts.platform ? [opts.platform] : Object.keys(PLATFORM_DISCOVERY);
-  for (const id of platformIds) {
-    if (!PLATFORM_DISCOVERY[id]) { console.error(`Unknown platform: ${id}`); process.exitCode = 2; return; }
-  }
-
-  const report = { generatedAt: new Date().toISOString(), options: opts, platforms: {}, notValidated: NOT_VALIDATED };
-  let anyDrift = false;
-  let anyNewFields = false;
-  let anyParseFailure = false;
-
+function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, flags) {
   for (const id of platformIds) {
     const cfg = baseline.platforms[id] || { displayName: id, contracts: [], knownFields: [] };
-    const allFiles = PLATFORM_DISCOVERY[id]();
+    const allFiles = PLATFORM_DISCOVERY[id](ctx);
+    // Sessions a discoverer counted but did not materialize as files (outside
+    // the window, or beyond --max) still count as found / recent.
+    const extra = ctx.unexported[id] || { found: 0, recent: 0, newestMs: null };
     const withStat = allFiles
       .map((f) => ({ f, st: statOrNull(f) }))
       .filter((x) => x.st && x.st.size > 0);
@@ -515,11 +614,11 @@ function run(opts) {
 
     const entry = {
       displayName: cfg.displayName,
-      filesFound: allFiles.length,
-      filesRecent: withStat.filter((x) => x.st.mtimeMs >= cutoff).length,
+      filesFound: allFiles.length + extra.found,
+      filesRecent: withStat.filter((x) => x.st.mtimeMs >= cutoff).length + extra.recent,
       filesAnalyzed: 0,
-      analyzedPaths: recent.map((x) => x.f),
-      newestMtime: withStat.length ? new Date(Math.max(...withStat.map((x) => x.st.mtimeMs))).toISOString() : null,
+      analyzedPaths: recent.map((x) => ctx.displayPaths.get(x.f) || x.f),
+      newestMtime: newestIso([...withStat.map((x) => x.st.mtimeMs), extra.newestMs]),
       status: STATUS.NO_FILES,
       contracts: [],
       newFields: [],
@@ -527,14 +626,14 @@ function run(opts) {
       notes: [],
     };
 
-    if (allFiles.length === 0) {
+    if (entry.filesFound === 0) {
       entry.status = STATUS.NO_FILES;
       report.platforms[id] = entry;
       continue;
     }
     if (recent.length === 0) {
       entry.status = STATUS.NO_RECENT_FILES;
-      entry.notes.push(`${withStat.length} file(s) exist but none modified within ${opts.days} day(s).`);
+      entry.notes.push(`${entry.filesFound} file(s) exist but none modified within ${opts.days} day(s).`);
       report.platforms[id] = entry;
       continue;
     }
@@ -548,13 +647,13 @@ function run(opts) {
 
     if (agg.malformedLines > 0) { entry.notes.push(`${agg.malformedLines} malformed JSONL line(s) skipped.`); }
     if (agg.truncatedFiles > 0) { entry.notes.push(`${agg.truncatedFiles} file(s) truncated at ${MAX_LINES} lines.`); }
-    if (agg.parseFailedFiles > 0) { entry.notes.push(`${agg.parseFailedFiles} file(s) could not be parsed.`); anyParseFailure = true; }
+    if (agg.parseFailedFiles > 0) { entry.notes.push(`${agg.parseFailedFiles} file(s) could not be parsed.`); flags.anyParseFailure = true; }
 
     // New-field detection.
     const known = new Set(cfg.knownFields || []);
     const observed = [...agg.schemaMap.keys()].sort();
     entry.newFields = observed.filter((p) => !known.has(p));
-    if (entry.newFields.length > 0) { anyNewFields = true; }
+    if (entry.newFields.length > 0) { flags.anyNewFields = true; }
 
     if (opts.includeExamples) {
       entry.fieldDetails = {};
@@ -579,12 +678,39 @@ function run(opts) {
       entry.notes.push('No parseable records found in recent files.');
     } else if (drift) {
       entry.status = STATUS.DRIFT;
-      anyDrift = true;
+      flags.anyDrift = true;
     } else {
       entry.status = STATUS.PASS;
     }
     report.platforms[id] = entry;
   }
+}
+
+function run(opts) {
+  const baselinePath = path.join(__dirname, 'schema-baselines.json');
+  let baseline;
+  try { baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')); }
+  catch (e) { console.error(`Could not read baseline file ${baselinePath}: ${e.message}`); process.exitCode = 2; return; }
+
+  const now = Date.now();
+  const cutoff = opts.days > 0 ? now - opts.days * 24 * 60 * 60 * 1000 : 0;
+
+  const platformIds = opts.platform ? [opts.platform] : Object.keys(PLATFORM_DISCOVERY);
+  for (const id of platformIds) {
+    if (!PLATFORM_DISCOVERY[id]) { console.error(`Unknown platform: ${id}`); process.exitCode = 2; return; }
+  }
+
+  const report = { generatedAt: new Date().toISOString(), options: opts, platforms: {}, notValidated: NOT_VALIDATED };
+  const flags = { anyDrift: false, anyNewFields: false, anyParseFailure: false };
+  const ctx = newDiscoveryContext(cutoff, opts.max);
+  try {
+    validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, flags);
+  } finally {
+    // Temp exports (OpenCode DB sessions) hold raw conversation text; never
+    // leave them behind, even when analysis throws.
+    removeTempDirs(ctx);
+  }
+  const { anyDrift, anyNewFields, anyParseFailure } = flags;
 
   if (opts.updateBaseline) {
     baseline.lastUpdated = new Date().toISOString().slice(0, 10);
@@ -659,4 +785,17 @@ function main() {
   run(opts);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  parseArgs,
+  normalizeKey,
+  redactExample,
+  walkValue,
+  newDiscoveryContext,
+  removeTempDirs,
+  exportOpenCodeDbSessions,
+  DICT_KEY,
+};
