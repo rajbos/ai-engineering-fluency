@@ -1718,6 +1718,7 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 	assert.ok(t('whatsNew.feature.usage.tool-execution-stats.description').includes('cost-vs-speed map'));
 	assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), 'View index');
 	assert.equal(t('whatsNew.logviewerHint'), 'Open a session from this list to see it in the Session Log Viewer.');
+	assert.equal(t('viewIndex.navigationFailed', 'boom'), 'Could not open that view: boom');
 	assert.ok(t('whatsNew.feature.whatsnew.view-index.description').startsWith('A searchable map of every view, tab and section'));
 	assert.equal(t('whatsNew.footer', '0.19.1'), 'Running version 0.19.1. The full changelog, including fixes, ships with the extension.');
 	assert.equal(t('viewIndex.summary', '97', '10'), '97 entries across 10 views');
@@ -1744,6 +1745,7 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), '工具可靠性、延迟与 MCP 健康度');
 		assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), '视图索引');
 		assert.equal(t('whatsNew.logviewerHint'), '从此列表中打开一个会话，即可在会话日志查看器中查看。');
+		assert.equal(t('viewIndex.navigationFailed', 'boom'), '无法打开该视图：boom');
 		assert.ok(t('whatsNew.feature.whatsnew.view-index.description').startsWith('“新增功能”中的一个新标签页'));
 		assert.equal(t('viewIndex.summary', '97', '10'), '10 个视图中共 97 个条目');
 		assert.equal(t('viewIndex.matchMany', '3'), '3 个匹配项');

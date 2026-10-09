@@ -2843,7 +2843,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private startNavigation(label: string, navigate: () => Promise<void>): void {
 		navigate().catch((error: unknown) => {
 			this.error(`Opening ${label} failed`, error);
-			vscode.window.showErrorMessage(`Operation failed: ${error instanceof Error ? error.message : String(error)}`);
+			vscode.window.showErrorMessage(l10n.t('viewIndex.navigationFailed', error instanceof Error ? error.message : String(error)));
 		});
 	}
 

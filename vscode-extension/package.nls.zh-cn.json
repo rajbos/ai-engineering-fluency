@@ -718,6 +718,7 @@
   "viewIndex.noMatchStatus": "没有与“{0}”匹配的内容。请尝试更少或更短的词。",
   "viewIndex.noMatch": "没有匹配的视图、标签页或部分。",
   "whatsNew.logviewerHint": "从此列表中打开一个会话，即可在会话日志查看器中查看。",
+  "viewIndex.navigationFailed": "无法打开该视图：{0}",
   "whatsNew.release.0.19.0.headline": "使用分析现在按“使用”“工作区”“GitHub”“辅导”分组，各部分按区块排列；图表视图显示官方编辑器图标，并为每个已登录的 GitHub 账户显示 Copilot 预算。",
   "whatsNew.release.0.18.3.headline": "一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。",
   "whatsNew.release.0.18.2.headline": "在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。",
