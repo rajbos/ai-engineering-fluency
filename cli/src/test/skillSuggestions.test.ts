@@ -95,17 +95,20 @@ const REPORT: RepeatedTaskReport = {
 	}],
 };
 
-test('skill-suggestions JSON leaves prompts and titles out by default', () => {
+test('skill-suggestions JSON leaves prompts, keywords and titles out by default', () => {
 	const payload = createSkillSuggestionsPayload(REPORT, false);
 	assert.equal(payload.promptsIncluded, false);
 	const json = JSON.stringify(payload);
 	assert.ok(!json.includes('run the tests and fix the failures'));
 	assert.ok(!json.includes('Fix failing tests'));
+	for (const keyword of REPORT.clusters[0].sharedKeywords) {
+		assert.ok(!json.includes(keyword), `prompt keyword "${keyword}" leaked into redacted JSON`);
+	}
 	const cluster = payload.repeatedTasks!.clusters[0];
 	assert.equal('representativePrompt' in cluster, false);
+	assert.equal('sharedKeywords' in cluster, false);
 	assert.deepEqual(Object.keys(cluster.sessions[0]).sort(), ['file', 'lastInteraction', 'repository']);
 	assert.equal(cluster.sessionCount, 2);
-	assert.deepEqual(cluster.sharedKeywords, ['failures', 'tests']);
 	assert.equal(payload.repeatedTasks!.sessionsScanned, 5);
 	// The input report is not mutated.
 	assert.equal(REPORT.clusters[0].representativePrompt, 'run the tests and fix the failures');

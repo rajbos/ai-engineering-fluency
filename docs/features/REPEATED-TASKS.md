@@ -42,7 +42,7 @@ task is the strongest signal that a workflow has stabilized enough to be capture
 - First prompts are stored only in the local extension cache and shown only in the local webview
   and the CLI; nothing is sent anywhere, and the report is never part of the sharing-server upload.
 - **CLI**: `ai-engineering-fluency skill-suggestions` prints the report; its `--json` output omits
-  prompt text and session titles unless `--include-prompts` is passed. `usage-analysis --json`
+  prompt text, prompt-derived keywords and session titles unless `--include-prompts` is passed. `usage-analysis --json`
   includes `repeatedTasks` only with `--repeated-tasks`. Other hosts (desktop, Visual Studio,
   JetBrains) do not forward the report to their usage view yet. See
   [docs/cli/README.md](../cli/README.md#skill-suggestions--repeated-tasks).

@@ -317,8 +317,8 @@ Find tasks you keep prompting for by hand — similar first prompts across sever
 
 ```bash
 ai-engineering-fluency skill-suggestions                          # Text report, prompts included
-ai-engineering-fluency skill-suggestions --json                   # JSON without prompt text or session titles
-ai-engineering-fluency skill-suggestions --json --include-prompts # JSON with prompt text and session titles
+ai-engineering-fluency skill-suggestions --json                   # JSON without prompt text, keywords or session titles
+ai-engineering-fluency skill-suggestions --json --include-prompts # JSON with prompt text, keywords and session titles
 ```
 
 Sessions active in the current or the previous calendar month (at least the last 30 days) are scanned; for editors that keep many sessions in one database (such as OpenCode and Crush), each session's own last activity decides, not the database file's date. A task is reported once at least two sessions start with a similar prompt.
@@ -337,7 +337,7 @@ Skill Suggestions — repeated tasks
 ...
 ```
 
-`--json` output has the shape `{ "promptsIncluded": false, "repeatedTasks": { "minClusterSize", "sessionsScanned", "clusters": [...] } }`; `repeatedTasks` is `null` when nothing repeats. Each cluster carries `sessionCount`, `repositories`, `sharedKeywords` and `sessions` (`file`, `lastInteraction`, `repository`). Prompts are free text you wrote, so `representativePrompt` and each session's `title` are only included with `--include-prompts`. Repositories are filled in only for editors whose session files record one.
+`--json` output has the shape `{ "promptsIncluded": false, "repeatedTasks": { "minClusterSize", "sessionsScanned", "clusters": [...] } }`; `repeatedTasks` is `null` when nothing repeats. Each cluster carries `sessionCount`, `repositories` and `sessions` (`file`, `lastInteraction`, `repository`). Prompts are free text you wrote, so `representativePrompt`, the prompt-derived `sharedKeywords` and each session's `title` are only included with `--include-prompts`. Repositories are filled in only for editors whose session files record one.
 
 ---
 
@@ -493,7 +493,7 @@ Every session file is parsed once; later runs only re-parse files that changed.
 - Everything runs locally. The CLI reads session files from your disk and writes only its [cache files](#cache-files).
 - Nothing is uploaded. The only network call is `memory-files --server` (and `--repo` / `--promote`), which takes your github.com token from the GitHub CLI (`gh auth token`) and reads the repository's Copilot memories from `api.githubcopilot.com`. It is read-only.
 - `memory-files` reads local memory files' metadata only, never their content.
-- `skill-suggestions` prints the first prompt of your sessions in its text report. Its `--json` output leaves prompt text and session titles out unless you pass `--include-prompts`, and `usage-analysis --json` only includes them with `--repeated-tasks`.
+- `skill-suggestions` prints the first prompt of your sessions in its text report. Its `--json` output leaves prompt text, the keywords taken from it and session titles out unless you pass `--include-prompts`, and `usage-analysis --json` only includes them with `--repeated-tasks`.
 
 ---
 

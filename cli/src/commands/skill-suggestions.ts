@@ -8,7 +8,8 @@
  * See docs/features/REPEATED-TASKS.md for background.
  *
  * The report carries prompt text and session titles. The text report prints
- * them to the terminal; `--json` leaves them out unless `--include-prompts` is
+ * them to the terminal; `--json` leaves them, and the prompt-derived shared
+ * keywords, out unless `--include-prompts` is
  * passed, since JSON output tends to end up in files, logs and CI output.
  */
 import { Command } from 'commander';
@@ -16,20 +17,21 @@ import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
 import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../src/types';
 
-/** A cluster in the JSON payload; prompt-derived free text is absent unless opted in. */
-export type SkillSuggestionCluster = Omit<RepeatedTaskCluster, 'representativePrompt' | 'sessions'> & {
+/** A cluster in the JSON payload; prompt-derived text (prompt, keywords, titles) is absent unless opted in. */
+export type SkillSuggestionCluster = Omit<RepeatedTaskCluster, 'representativePrompt' | 'sharedKeywords' | 'sessions'> & {
 	representativePrompt?: string;
+	sharedKeywords?: string[];
 	sessions: RepeatedTaskSessionRef[];
 };
 
 export interface SkillSuggestionsPayload {
-	/** Whether `representativePrompt` and session titles are included. */
+	/** Whether `representativePrompt`, `sharedKeywords` and session titles are included. */
 	promptsIncluded: boolean;
 	/** Null when no cluster reached the minimum size (or no sessions were found). */
 	repeatedTasks: (Omit<RepeatedTaskReport, 'clusters'> & { clusters: SkillSuggestionCluster[] }) | null;
 }
 
-/** JSON payload for `skill-suggestions --json`, with prompts and titles removed unless `includePrompts`. */
+/** JSON payload for `skill-suggestions --json`, with prompts, keywords and titles removed unless `includePrompts`. */
 export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undefined, includePrompts: boolean): SkillSuggestionsPayload {
 	if (!report) { return { promptsIncluded: includePrompts, repeatedTasks: null }; }
 	if (includePrompts) { return { promptsIncluded: true, repeatedTasks: report }; }
@@ -37,7 +39,7 @@ export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undef
 		promptsIncluded: false,
 		repeatedTasks: {
 			...report,
-			clusters: report.clusters.map(({ representativePrompt: _prompt, sessions, ...rest }) => ({
+			clusters: report.clusters.map(({ representativePrompt: _prompt, sharedKeywords: _keywords, sessions, ...rest }) => ({
 				...rest,
 				sessions: sessions.map(({ title: _title, ...session }) => session),
 			})),
@@ -72,8 +74,8 @@ export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefi
 
 export const skillSuggestionsCommand = new Command('skill-suggestions')
 	.description('Find tasks you keep prompting for by hand: candidates for a reusable skill or prompt file')
-	.option('--json', 'Output raw JSON (for machine consumption); prompts and titles are left out')
-	.option('--include-prompts', 'Include prompt text and session titles in the --json output')
+	.option('--json', 'Output raw JSON (for machine consumption); prompts, keywords and titles are left out')
+	.option('--include-prompts', 'Include prompt text, shared keywords and session titles in the --json output')
 	.action(async (options) => {
 		const files = await discoverSessionFiles();
 		const report = files.length > 0
