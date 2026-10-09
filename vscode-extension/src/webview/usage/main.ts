@@ -6222,6 +6222,10 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateAccountBudgets(message); break;
 		case 'switchTab':
 			handleSwitchTab(message); break;
+		case 'cancelPendingNavigation':
+			// The user opened Usage Analysis itself; a deep link still waiting for its
+			// section must not scroll them away from it later.
+			clearFocusedInsightAnchor(); break;
 		default:
 			handleWorktreeMessage(message); break;
 	}
@@ -6350,17 +6354,19 @@ function flashAnchorHighlight(element: HTMLElement): void {
 }
 
 /**
- * Forgets a pending insight deep link, so nothing later scrolls the user back to that card.
+ * Forgets any pending deep link — an insight card or a section — so nothing later scrolls the
+ * user away from where they chose to look. Called on the user's own navigation (tab and group
+ * clicks) and when the host cancels (`cancelPendingNavigation`); `handleSwitchTab` never calls
+ * it, so the host's own navigation keeps the anchor it just requested.
  *
- * Both halves have to go. A link whose card did not exist yet is still sitting in
+ * Both halves have to go. A link whose target did not exist yet is still sitting in
  * `pendingTabAnchor`, which `renderLayout` consumes without consulting the active tab — so
- * leaving it set would aim a later render at a card on a tab the user has left. Static section
- * anchors are left alone, keeping the behaviour change confined to insight deep links: the other
- * `switchTab` callers target a section on the tab they are navigating to.
+ * leaving it set would aim a later render at a section or card on a tab the user has left
+ * (a conditional section such as Thinking Effort can appear on a much later stats load).
  */
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
-	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)) { pendingTabAnchor = null; }
+	pendingTabAnchor = null;
 	if (pendingInsightScrollTimer !== null) {
 		clearTimeout(pendingInsightScrollTimer);
 		pendingInsightScrollTimer = null;

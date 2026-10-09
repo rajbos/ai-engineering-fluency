@@ -2884,8 +2884,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// Going to the view itself supersedes a deep link still waiting for the
 				// panel to be ready, which would otherwise redirect this open later.
 				this.pendingAnalysisNavigation = undefined;
+				const wasOpen = this.analysisPanel;
 				await this.showUsageAnalysis();
 				this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+				// A deep link that already reached the webview may still be waiting for its
+				// section to render; drop that too.
+				if (wasOpen && wasOpen === this.analysisPanel) {
+					void wasOpen.webview.postMessage({ command: 'cancelPendingNavigation' });
+				}
 			}
 			return;
 		}
