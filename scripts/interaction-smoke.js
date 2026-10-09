@@ -47,7 +47,10 @@
  *
  * Usage:
  *   node scripts/interaction-smoke.js [--view details,chart] [--isolate]
- *                                     [--json] [--out <file>]
+ *                                     [--json] [--out <file>] [--concurrency <n>]
+ *
+ * `--concurrency` is how many views are exercised at once (default 4). The
+ * report is always in registry order.
  */
 
 const fs = require('fs');
@@ -66,6 +69,7 @@ const { parseArgs, readConfig, selectViews } = require(path.join(SKILL_DIR, 'lib
 // `select` picking stays inline here because this runner also has to tell a
 // legitimate no-op (nothing else to select) from a change.
 const { PICK_OPTION, applyStep, describeStep } = require(path.join(SKILL_DIR, 'lib', 'steps.js'));
+const { parseConcurrency, runPool } = require(path.join(SKILL_DIR, 'lib', 'pool.js'));
 
 const { collectHandledCommandsFromAst, widenHandledFromText, collectTsFiles } = require('./validate-webview-contract.js');
 
@@ -542,19 +546,19 @@ async function main() {
   const chromium = loadChromium();
   const browser = await chromium.launch({ headless: true });
 
-  const reports = [];
+  // Views run side by side, each on its own pages; the clicks and scenarios
+  // *within* a view stay sequential because they share that view's page.
+  let reports;
   try {
-    for (const view of views) {
-      reports.push(
-        await smokeView({
-          browser,
-          view,
-          defaults: config.defaults,
-          handledCommands,
-          isolate: Boolean(args.isolate),
-        })
-      );
-    }
+    reports = await runPool(views, parseConcurrency(args.concurrency), (view) =>
+      smokeView({
+        browser,
+        view,
+        defaults: config.defaults,
+        handledCommands,
+        isolate: Boolean(args.isolate),
+      })
+    );
   } finally {
     await browser.close();
   }
