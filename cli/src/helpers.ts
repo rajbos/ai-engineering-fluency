@@ -24,6 +24,7 @@ import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsag
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
+import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 
@@ -560,11 +561,20 @@ export async function calculateDetailedStats(
 	};
 }
 
+/** Options for calculateUsageAnalysisStats. */
+export interface UsageAnalysisOptions {
+	/**
+	 * Also cluster the analysed sessions' first prompts into a repeated-task
+	 * (Skill Suggestions) report. Off by default: the report carries prompt text.
+	 */
+	includeRepeatedTasks?: boolean;
+}
+
 /**
  * Calculate usage analysis stats for fluency scoring.
  * This is a simplified version that uses the shared usageAnalysis module.
  */
-export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promise<UsageAnalysisStats> {
+export async function calculateUsageAnalysisStats(sessionFiles: string[], options: UsageAnalysisOptions = {}): Promise<UsageAnalysisStats> {
 	const deps = {
 		warn,
 		tokenEstimators,
@@ -587,6 +597,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 	const lastMonthPeriod = createEmptyUsageAnalysisPeriod();
 	const todaySessions: TodaySessionSummary[] = [];
 	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
+	const repeatedTaskSources: RepeatedTaskSessionSource[] = [];
 
 	for (const file of sessionFiles) {
 		try {
@@ -598,6 +609,9 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
+			if (options.includeRepeatedTasks && analysis.firstUserPrompt) {
+				repeatedTaskSources.push(await toRepeatedTaskSource(file, analysis.firstUserPrompt, stats.mtimeMs));
+			}
 			let sessionSummary: TodaySessionSummary | undefined;
 			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
 			if (data && data.interactions > 0) {
@@ -661,6 +675,20 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
 		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
+		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources) } : {}),
+	};
+}
+
+/** Session context for the repeated-task report, from the owning adapter when it has one. */
+async function toRepeatedTaskSource(file: string, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+	const meta = await getSessionMeta(file);
+	return {
+		file,
+		firstUserPrompt,
+		title: meta?.title ?? null,
+		lastInteraction: meta?.lastInteraction ?? null,
+		mtime: mtimeMs,
+		repository: meta?.repository ?? null,
 	};
 }
 

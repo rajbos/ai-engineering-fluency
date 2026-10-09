@@ -18,7 +18,7 @@
  * This module is intentionally pure (no VS Code API, no filesystem access) so
  * it can be unit-tested with mocked data and reused by the CLI and the webview.
  */
-import type { RepeatedTaskCluster, RepeatedTaskSessionRef } from './types';
+import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from './types';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -178,4 +178,62 @@ export function detectRepeatedTasks(inputs: RepeatedTaskInput[]): RepeatedTaskCl
 			};
 		})
 		.sort((a, b) => b.sessionCount - a.sessionCount);
+}
+
+// ---------------------------------------------------------------------------
+// Report building (shared by the VS Code extension and the CLI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Short `owner/repo` display name for a repository remote URL
+ * (`https://github.com/o/r.git`, `git@github.com:o/r`). Anything that does
+ * not look like a remote URL is returned unchanged.
+ */
+export function repoDisplayName(repository: string): string {
+	const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+	return m ? m[1] : repository;
+}
+
+/** What a host knows about one parsed session, before clustering. */
+export interface RepeatedTaskSessionSource {
+	file: string;
+	/** `SessionUsageAnalysis.firstUserPrompt`; sessions without one are skipped. */
+	firstUserPrompt?: string | null;
+	title?: string | null;
+	/** ISO timestamp of the last interaction; falls back to `mtime` when absent. */
+	lastInteraction?: string | null;
+	/** File modification time in epoch milliseconds. */
+	mtime: number;
+	/** Repository remote URL or name; shortened with `repoDisplayName()`. */
+	repository?: string | null;
+}
+
+/** Map a parsed session to clustering input, or null when it has no usable prompt. */
+export function toRepeatedTaskInput(source: RepeatedTaskSessionSource): RepeatedTaskInput | null {
+	if (!source.firstUserPrompt) { return null; }
+	return {
+		prompt: source.firstUserPrompt,
+		session: {
+			file: source.file,
+			title: source.title ?? null,
+			lastInteraction: source.lastInteraction ?? new Date(source.mtime).toISOString(),
+			repository: source.repository ? repoDisplayName(source.repository) : undefined,
+		},
+	};
+}
+
+/**
+ * Build the repeated-task report from parsed sessions: cluster the first user
+ * prompt of every session that has one. Returns undefined when no cluster
+ * reaches MIN_CLUSTER_SIZE.
+ */
+export function buildRepeatedTaskReport(sources: readonly RepeatedTaskSessionSource[]): RepeatedTaskReport | undefined {
+	const inputs: RepeatedTaskInput[] = [];
+	for (const source of sources) {
+		const input = toRepeatedTaskInput(source);
+		if (input) { inputs.push(input); }
+	}
+	const clusters = detectRepeatedTasks(inputs);
+	if (clusters.length === 0) { return undefined; }
+	return { minClusterSize: MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
 }

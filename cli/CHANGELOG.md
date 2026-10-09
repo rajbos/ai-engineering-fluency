@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Features
+- New `skill-suggestions` command: finds tasks you keep prompting for by hand (similar first prompts across sessions) as candidates for a reusable skill or prompt file — the same report as the VS Code extension's Skill Suggestions section, built by the same shared code. `--json` leaves prompt text and session titles out unless `--include-prompts` is passed. `usage-analysis --json --repeated-tasks` adds the report to the usage-analysis payload (#2288)
+
 ## [0.6.2] - 2026-10-02
 
 ### Bug Fixes
