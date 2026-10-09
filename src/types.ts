@@ -1732,6 +1732,31 @@ export interface ServerMemoryStaleCitation {
 }
 
 /**
+ * A server memory that already cites an instruction or documentation file — "already
+ * documented". Note the instruction-path pattern also matches `docs/` and
+ * `.github/skills|agents/`, so this covers documentation, not only instruction files.
+ */
+export interface ServerMemoryDocumentedEntry {
+  id: string;
+  subject: string;
+  fact: string;
+  /** The repo-relative instruction/doc file paths this memory cites, de-duplicated. */
+  instructionFiles: string[];
+}
+
+/**
+ * Which checked-in file a promotion should be written into. Rule (v1, intentionally simple):
+ * an existing root `AGENTS.md`, else an existing `.github/copilot-instructions.md`, else a
+ * new root `AGENTS.md`. See `selectPromotionTarget()`.
+ */
+export interface ServerMemoryPromotionTarget {
+  /** Repo-relative path. */
+  path: 'AGENTS.md' | '.github/copilot-instructions.md';
+  /** False when the file does not exist yet and the prompt asks for it to be created. */
+  exists: boolean;
+}
+
+/**
  * Full analysis of one repository's server-side memory store, produced by
  * `analyzeServerMemories()`. Consumed by the CLI report and the VS Code extension host;
  * the webview gets the smaller {@link ServerMemoriesAnalysisView} instead.
@@ -1739,6 +1764,11 @@ export interface ServerMemoryStaleCitation {
 export interface ServerMemoriesAnalysis {
   /** `owner/name` the store was read for. */
   repo: string;
+  /**
+   * Local checkout citations and {@link promotionTarget} were resolved against, when the host
+   * analyzed the repository it has checked out (set by the CLI; the extension keeps its own).
+   */
+  repoRoot?: string;
   /** `undefined` means the enablement check itself failed, not that memory is off. */
   enabled: boolean | undefined;
   /** Why the read produced nothing, when it produced nothing. */
@@ -1753,6 +1783,10 @@ export interface ServerMemoriesAnalysis {
   distinctSubjects: number;
   /** Memories citing an instruction/doc file — already written down somewhere agents read. */
   documentedCount: number;
+  /** The memories behind {@link documentedCount}, in store order. */
+  documentedMemories: ServerMemoryDocumentedEntry[];
+  /** Where promotions should be written; see {@link ServerMemoryPromotionTarget}. */
+  promotionTarget: ServerMemoryPromotionTarget;
   /** Total memories sitting inside a promotion group. */
   promotionCandidateCount: number;
   /** Promotion groups with more than one member, i.e. facts re-learned at least twice. */
@@ -1781,6 +1815,26 @@ export interface ServerMemoryPromotionGroupView {
   repeatCount: number;
   representativeFact: string;
   citationCount: number;
+  /**
+   * Copilot Chat prompt asking the agent to verify this fact and move it into the promotion
+   * target, built by the shared `buildPromotionPrompt()`. Drafted, never auto-submitted.
+   */
+  prompt?: string;
+}
+
+/** One instruction/doc file a documented memory cites, as the webview renders it. */
+export interface ServerMemoryDocumentedFileView {
+  /** Repo-relative path, for display. */
+  path: string;
+  /** Absolute path for the "Open file" button; absent when the file is not in this checkout. */
+  absolutePath?: string;
+}
+
+/** One "already documented" memory as the webview renders it. */
+export interface ServerMemoryDocumentedEntryView {
+  subject: string;
+  fact: string;
+  files: ServerMemoryDocumentedFileView[];
 }
 
 /**
@@ -1804,4 +1858,15 @@ export interface ServerMemoriesAnalysisView {
   repeatedGroupCount: number;
   fullyStaleCount: number;
   topPromotionGroups: ServerMemoryPromotionGroupView[];
+  /**
+   * Local checkout the repository was resolved from. The store itself is per GitHub
+   * repository, not per workspace, so the UI names both to make the scope unambiguous.
+   */
+  repoRoot?: string;
+  /** Number of open workspace folders; above one, only the first GitHub-backed folder is shown. */
+  workspaceFolderCount?: number;
+  /** See {@link ServerMemoriesAnalysis.promotionTarget}. */
+  promotionTarget?: ServerMemoryPromotionTarget;
+  /** The first few already-documented memories; {@link documentedCount} is the full count. */
+  documentedMemories?: ServerMemoryDocumentedEntryView[];
 }

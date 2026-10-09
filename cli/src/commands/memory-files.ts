@@ -95,6 +95,8 @@ export const memoryFilesCommand = new Command('memory-files')
 				process.stderr.write(`Could not read ${sanitizeForDisplay(serverAnalysis.repo)}: ${sanitizeForDisplay(serverAnalysis.error)}\n`);
 				process.exitCode = 1;
 			} else {
+				// stderr, so stdout stays a block that can be redirected straight into a file.
+				if (serverAnalysis.repoRoot) { process.stderr.write(`Analyzed ${sanitizeForDisplay(serverAnalysis.repo)} at ${sanitizeForDisplay(serverAnalysis.repoRoot)}\n`); }
 				process.stdout.write(renderPromotionMarkdown(serverAnalysis));
 			}
 			return;
@@ -154,7 +156,8 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// The rejected value is untrusted and may carry a credential, so neither the label nor
 		// the message echoes it — `--json` serializes both.
 		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.', truncated: false,
-			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, promotionCandidateCount: 0,
+			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, documentedMemories: [],
+			promotionTarget: { path: 'AGENTS.md', exists: false }, promotionCandidateCount: 0,
 			repeatedGroupCount: 0, promotionGroups: [], unverifiableCount: 0, staleCitations: [], fullyStaleCount: 0,
 			byAgent: {}, byModel: {} };
 	}
@@ -175,7 +178,7 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		},
 	}, limit);
 
-	return analyzeServerMemories(result, {
+	const analysis = analyzeServerMemories(result, {
 		// Only check citations against the working tree when the analyzed repo is the one
 		// checked out here. With `--repo` pointing elsewhere, the local tree says nothing
 		// about that repo's files, so every citation would look missing — report none instead.
@@ -184,6 +187,9 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// repository symlink out of the checkout would let a citation probe an arbitrary path.
 		fileExists: analyzingThisCheckout ? createRepoFileExists(root) : () => true,
 	});
+	// Named in every output mode so it is clear which checkout the citations and the promotion
+	// target were resolved against. Omitted for `--repo` elsewhere: that tree says nothing.
+	return analyzingThisCheckout ? { ...analysis, repoRoot: root } : analysis;
 }
 
 function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined): void {
@@ -204,6 +210,7 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 	// when printed verbatim — a report about what an agent learned must not be able to act on
 	// the machine reading it. JSON mode is safe by construction; this path was not.
 	process.stdout.write(`Repository:           ${sanitizeForDisplay(analysis.repo)}\n`);
+	if (analysis.repoRoot) { process.stdout.write(`Checkout:             ${sanitizeForDisplay(analysis.repoRoot)}\n`); }
 	process.stdout.write(`Memory enabled:       ${analysis.enabled ?? 'unknown'}\n`);
 	// Say so when the page was full: these routes have no pagination cursor, so every number
 	// below describes the prefix that was read, not the whole store.
@@ -231,7 +238,8 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 		return;
 	}
 
-	process.stdout.write('Top promotion candidates (consider adding these to AGENTS.md):\n');
+	const target = analysis.promotionTarget;
+	process.stdout.write(`Top promotion candidates (consider adding these to ${target.path}${target.exists ? '' : ', which does not exist yet'}):\n`);
 	for (const group of analysis.promotionGroups.slice(0, 10)) {
 		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
 		process.stdout.write(`  • ${sanitizeForDisplay(group.displaySubject)}${repeats}\n`);

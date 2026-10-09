@@ -7236,7 +7236,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private buildServerMemoriesView(): ServerMemoriesAnalysisView | null {
 		this.scheduleServerMemoriesRefresh();
-		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null);
+		const repoRoot = this._serverMemoriesRepoRoot;
+		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null, {
+			// The store is per GitHub repository, not per workspace, so the section names the
+			// checkout it resolved the repository from and how many folders it chose among.
+			repoRoot,
+			workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
+			// Only a cited file that really resolves inside the checkout gets an "Open file"
+			// button: the citation is server-supplied, so the same symlink-safe check applies.
+			resolveRepoFile: repoRoot ? this.createRepoFileResolver(repoRoot) : undefined,
+		});
+	}
+
+	private createRepoFileResolver(repoRoot: string): (repoRelativePath: string) => string | undefined {
+		const path = require('path') as typeof import('path');
+		const exists = _createRepoFileExists(repoRoot);
+		return (repoRelativePath) => (exists(repoRelativePath) ? path.join(repoRoot, repoRelativePath) : undefined);
 	}
 
 	async openMcpJson(): Promise<void> {

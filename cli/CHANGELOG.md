@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Features
+- `memory-files --promote` names the suggested target file in its Markdown block and prints the checkout it analyzed to stderr; `--json` server output gains `repoRoot`, `promotionTarget` and `documentedMemories` (#2286)
+
 ## [0.6.2] - 2026-10-02
 
 ### Bug Fixes

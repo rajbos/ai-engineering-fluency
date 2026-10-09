@@ -1211,6 +1211,39 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 	}
 });
 
+test('l10n: Copilot Repository Memories scope, action and documented-list strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.scope', 'o/n', '/repo'), 'Memories GitHub stores for o/n, the repository checked out at /repo. Shared by everyone working on this repository — not specific to this VS Code workspace.');
+	assert.equal(t('serverMemories.scopeNoPath', 'o/n'), 'Memories GitHub stores for o/n. Shared by everyone working on this repository — not specific to this VS Code workspace.');
+	assert.equal(t('serverMemories.multiRootNote', '3'), 'This workspace has 3 folders; only the first folder backed by a GitHub repository is shown.');
+	assert.equal(t('serverMemories.localVsServer'), 'Unlike Copilot Memory Files (local notes, per machine and workspace), these live on GitHub, per repository.');
+	assert.equal(t('serverMemories.targetExisting', 'AGENTS.md'), 'Suggested file: AGENTS.md.');
+	assert.equal(t('serverMemories.targetNew', 'AGENTS.md'), 'Suggested file: AGENTS.md (does not exist yet; Copilot will be asked to create it).');
+	assert.equal(t('serverMemories.table.action'), 'Action');
+	assert.equal(t('serverMemories.askCopilot'), 'Ask Copilot');
+	assert.equal(t('serverMemories.askCopilotTooltip', 'AGENTS.md'), 'Drafts a Copilot Chat prompt to verify this fact against its sources and add it to AGENTS.md. Nothing is sent until you press Enter.');
+	assert.equal(t('serverMemories.documentedHeading'), 'Already documented');
+	assert.equal(t('serverMemories.documentedHint'), 'These memories cite an instruction or documentation file (AGENTS.md, .github/instructions, skills, agents or docs/), so the stored copy is redundant. It can be deleted from the repository\'s Settings → Copilot → Memory page on GitHub.');
+	assert.equal(t('serverMemories.table.citedFile'), 'Cited file');
+	assert.equal(t('serverMemories.openFile'), 'Open file');
+	assert.equal(t('serverMemories.showingOf', '10', '99'), 'showing 10 of 99');
+
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.scope', 'o/n', '/repo'), 'GitHub 为 o/n 存储的记忆，该仓库检出于 /repo。由所有参与本仓库的人共享，并非特定于此 VS Code 工作区。');
+		assert.equal(t('serverMemories.multiRootNote', '3'), '此工作区有 3 个文件夹；仅显示第一个由 GitHub 仓库支持的文件夹。');
+		assert.equal(t('serverMemories.askCopilot'), '询问 Copilot');
+		assert.equal(t('serverMemories.documentedHeading'), '已记录');
+		assert.equal(t('serverMemories.openFile'), '打开文件');
+		assert.equal(t('serverMemories.table.action'), '操作');
+		assert.equal(t('serverMemories.table.citedFile'), '引用的文件');
+		// The zh-CN template puts the total first, so this catches a swapped placeholder.
+		assert.equal(t('serverMemories.showingOf', '10', '99'), '显示 99 条中的 10 条');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Copilot Budget gauge keys resolve in English', () => {
 	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
 	// devices/cloud) usage into the headline total so it agrees with the bar's

@@ -93,6 +93,23 @@
         "leaf button fails to render at all, which takes the visual diff, the CI",
         "screenshots and the release video's shot of that tab down with it."
       ],
+      "scenarios": [
+        {
+          "name": "Tools tab: repository memories Ask Copilot and Open file buttons",
+          "expect": "#section-server-memories",
+          "$comment": [
+            "The one-pass crawl only clicks the initial tab, so it never reaches these",
+            "buttons. Ask Copilot posts draftCopilotChatWithPrompt (drafted, never",
+            "submitted); Open file posts openFile for a documented memory's cited file."
+          ],
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
+            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": "#section-server-memories .server-memory-draft-btn" },
+            { "click": "#section-server-memories .server-memory-open-btn" }
+          ]
+        }
+      ],
       "states": [
         {
           "id": "sessions",
