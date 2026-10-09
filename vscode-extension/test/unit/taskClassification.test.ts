@@ -8,6 +8,7 @@ classifySessionTask,
 buildClassificationInputFromUsageAnalysis,
 buildClassificationInputFromChatTurns,
 countDelegationToolCalls,
+resolveSessionTaskAttribution,
 } from '../../../src/taskClassification';
 import type { ChatTurn, ContextReferenceUsage, SessionUsageAnalysis } from '../../../src/types';
 
@@ -231,4 +232,19 @@ test('countDelegationToolCalls: matches Claude Agent tool, MCP spawn tools, and 
 
 test('countDelegationToolCalls: does not match tool names merely containing "task" or "agent"', () => {
 	assert.equal(countDelegationToolCalls({ task_create: 1, todo_write: 1, manage_agents_config: 1 }), 0);
+});
+
+test('resolveSessionTaskAttribution prefers the analysis classification, else the tool heuristic', () => {
+	const classified = resolveSessionTaskAttribution({
+		toolCalls: { total: 0, byTool: {} },
+		taskClassification: { primaryCategory: 'Testing', categoryShares: { Testing: 1 } },
+	} as unknown as Parameters<typeof resolveSessionTaskAttribution>[0]);
+	assert.equal(classified.taskCategory, 'Testing');
+	assert.deepEqual(classified.taskCategoryShares, { Testing: 1 });
+
+	const heuristic = resolveSessionTaskAttribution({
+		toolCalls: { total: 1, byTool: { run_tests: 1 } },
+	} as unknown as Parameters<typeof resolveSessionTaskAttribution>[0]);
+	assert.equal(heuristic.taskCategory, classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 1, byTool: { run_tests: 1 } } } as never)));
+	assert.equal('taskCategoryShares' in heuristic, false);
 });

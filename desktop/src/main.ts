@@ -426,10 +426,7 @@ async function loadChartPayload(): Promise<object> {
     expireCachesOnDateChange();
     while (!cachedChartPayload) {
         await computeForCurrentFiles(
-            async (files) => {
-                const { labels, days, allDaysMap } = await calculateDailyStats(files);
-                return buildChartPayload(labels, days, allDaysMap);
-            },
+            async (files) => buildChartPayload(await calculateDailyStats(files)),
             (payload) => { cachedChartPayload ??= payload; },
         );
     }

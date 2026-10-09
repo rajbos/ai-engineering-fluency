@@ -8,7 +8,7 @@ import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
 import { applyWebviewLocale } from '../shared/webviewLocale';
-import type { ChartTimeWindow } from '../../../../src/types';
+import type { ChartDataPayload, ChartPeriodData as SharedChartPeriodData, ChartTimeWindow } from '../../../../src/types';
 import { filterPeriodByTimeWindow } from './timeWindowFilter';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -27,64 +27,25 @@ type ModelDataset = { label: string; data: number[]; backgroundColor: string; bo
 type EditorDataset = ModelDataset;
 type RepositoryDataset = ModelDataset & { fullRepo?: string };
 
-type ChartPeriodData = {
-	labels: string[];
-	periodKeys?: string[];
-	tokensData: number[];
-	sessionsData: number[];
-	modelDatasets: ModelDataset[];
-	editorDatasets: EditorDataset[];
-	repositoryDatasets: RepositoryDataset[];
-	taskCategoryDatasets?: ModelDataset[];
-	taskCategoryTokenDatasets?: ModelDataset[];
-	taskCategorySessionDatasets?: ModelDataset[];
-	taskCategoryCostDatasets?: ModelDataset[];
-	periodCount: number;
-	totalTokens: number;
-	totalSessions: number;
-	avgPerPeriod: number;
-	costData: number[];
-	totalCost: number;
-	avgCostPerPeriod: number;
-	locData?: number[];
-	linesAddedData?: number[];
-	linesRemovedData?: number[];
-	languageDatasets?: ModelDataset[];
-	locEditorDatasets?: ModelDataset[];
-	locRepositoryDatasets?: RepositoryDataset[];
-	totalLinesAdded?: number;
-	totalLinesRemoved?: number;
-	avgLocPerPeriod?: number;
-	editorCostDatasets?: ModelDataset[];
-	billingGroupCostDatasets?: ModelDataset[];
-	modelCostDatasets?: ModelDataset[];
-	modelSessionsDatasets?: ModelDataset[];
-	editorSessionsDatasets?: ModelDataset[];
-	providerSessionsDatasets?: ModelDataset[];
-	providerTokensDatasets?: ModelDataset[];
+/**
+ * The shared payload types (src/types.ts) with their untyped `object[]` datasets narrowed to
+ * the dataset shape this view draws. Deriving from the shared types — rather than keeping a
+ * local copy — means a field this view starts relying on has to be added to the shared
+ * payload, which the one shared builder (`buildChartData`) every host calls must then emit.
+ * A field missing from the payload is a compile error, not a blank Chart view (#2304, #2316).
+ */
+type WithTypedDatasets<T> = {
+	[K in keyof T]: Exclude<T[K], undefined> extends object[] ? RepositoryDataset[] : T[K];
 };
+
+type ChartPeriodData = WithTypedDatasets<SharedChartPeriodData>;
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
 
-type InitialChartData = {
-	labels: string[];
-	tokensData: number[];
-	sessionsData: number[];
-	modelDatasets: ModelDataset[];
-	editorDatasets: EditorDataset[];
-	repositoryDatasets: RepositoryDataset[];
-	editorTotalsMap: Record<string, number>;
-	repositoryTotalsMap: Record<string, number>;
-	dailyCount: number;
-	totalTokens: number;
-	avgTokensPerDay: number;
-	totalSessions: number;
-	lastUpdated: string;
+/** The shared payload plus the host-specific view settings the extension layers on top. */
+type InitialChartData = WithTypedDatasets<Omit<ChartDataPayload, 'periods' | 'backendConfigured'>> & {
 	backendConfigured?: boolean;
-	compactNumbers?: boolean;
 	monthlyCostBudget?: number;
-	periodsReady?: boolean;
-	hasLocData?: boolean;
 	initialPeriod?: ChartPeriod;
 	initialTimeWindow?: ChartTimeWindow;
 	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';

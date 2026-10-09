@@ -60,14 +60,14 @@ export const allCommand = new Command('all')
 		// Run the three independent stat computations in parallel.
 		// The in-memory CLI session cache means each file is only parsed once even
 		// though all three functions iterate the same session file list.
-		const [detailedStats, { labels, days, allDaysMap }, usageStats] = await Promise.all([
+		const [detailedStats, dailyStats, usageStats] = await Promise.all([
 			calculateDetailedStats(files),
 			calculateDailyStats(files),
 			calculateUsageAnalysisStats(files),
 		]);
 
 		// Build chart payload from daily stats
-		const chartPayload = buildChartPayload(labels, days, allDaysMap);
+		const chartPayload = buildChartPayload(dailyStats);
 
 		// Build details payload (mirrors the `usage --json` output)
 		const detailsPayload = createDetailsPayload(detailedStats);

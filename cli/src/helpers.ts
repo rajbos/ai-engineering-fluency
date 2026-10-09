@@ -18,9 +18,10 @@ import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
-import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
-import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
+import { resolveSessionTaskAttribution } from '../../src/taskClassification';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
@@ -36,7 +37,6 @@ import toolNamesData from '../../src/toolNames.json';
 // Pure analysis helpers from analysis.ts
 import {
 	type SessionData,
-	type DailyEntry,
 	type PeriodStats,
 	effectiveTokens,
 	getEditorSourceFromPath,
@@ -48,7 +48,7 @@ import {
 	fmt,
 	formatTokens,
 } from './analysis';
-export type { SessionData, DailyEntry } from './analysis';
+export type { SessionData } from './analysis';
 export { effectiveTokens, buildChartPayload, fmt, formatTokens } from './analysis';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
@@ -310,6 +310,24 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  */
 
 /**
+ * The per-session fields the Chart view splits by (task category, lines of code), derived
+ * through the same shared helpers the extension's session analyzer uses. Best-effort: a
+ * failed analysis leaves them out rather than dropping the session.
+ */
+async function sessionDailyAttributes(filePath: string, content?: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage'>> {
+	try {
+		const analysis = await analyzeSessionUsage(
+			{ warn, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
+			filePath,
+			content,
+		);
+		return { ...resolveSessionTaskAttribution(analysis), ...sessionLocFromUsageAnalysis(analysis) };
+	} catch {
+		return {};
+	}
+}
+
+/**
  * Process a single session file and extract its data.
  */
 export async function processSessionFile(filePath: string, verbose = false): Promise<SessionData | null> {
@@ -331,6 +349,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 				eco.getModelUsage(filePath),
 			]);
 			const mtimeDateKey = toLocalDayKey(stats.mtime);
+			const dailyAttributes = await sessionDailyAttributes(filePath);
 			const ecoResult: SessionData = {
 				file: filePath,
 				tokens: tokenResult.actualTokens > 0 ? tokenResult.actualTokens : tokenResult.tokens,
@@ -341,6 +360,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 				lastModified: stats.mtime,
 				editorSource: getEditorSourceFromPath(filePath),
 				dailyFractions: (await eco.getDailyFractions?.(filePath)) ?? { [mtimeDateKey]: 1.0 },
+				...dailyAttributes,
 			};
 			setCached(filePath, stats.mtimeMs, stats.size, ecoResult);
 			return ecoResult;
@@ -461,6 +481,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 			lastModified: stats.mtime,
 			editorSource: getEditorSourceFromPath(filePath),
 			dailyFractions,
+			...(await sessionDailyAttributes(filePath, content)),
 		};
 		setCached(filePath, stats.mtimeMs, stats.size, sessionData);
 		return sessionData;
@@ -777,83 +798,29 @@ export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, '
 }
 
 /**
- * Process session files and return per-day stats for the last 30 days.
- * Returns `{ labels, days }` where labels are sorted YYYY-MM-DD strings (UTC) and
- * days are the corresponding aggregated stats.
+ * Process session files into per-day stats over the whole history, in the
+ * `DailyTokenStats[]` shape the shared `buildChartData()` takes. Aggregation goes through
+ * the shared `addSessionToDailyStats()` — see AGENTS.md, "CLI Must Reuse Shared Functions".
  */
-export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<{
-	labels: string[];
-	days: DailyEntry[];
-	allDaysMap: Map<string, DailyEntry>;
-}> {
-	const now = new Date();
-	const last30DaysDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
-	const todayKey = toLocalDayKey(now);
-
-	// Fill in all 31 days (today inclusive) with zeroes so the chart has continuous labels
-	const dailyMap = new Map<string, DailyEntry>();
-	const cursor = new Date(last30DaysDate);
-	while (toLocalDayKey(cursor) <= todayKey) {
-		const key = toLocalDayKey(cursor);
-		dailyMap.set(key, { tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-		cursor.setDate(cursor.getDate() + 1);
-	}
-
-	// Full historical map (all time, no age filter) for weekly/monthly chart periods
-	const allDaysMap = new Map<string, DailyEntry>();
-
+export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<DailyTokenStats[]> {
+	const dailyStatsMap = new Map<string, DailyTokenStats>();
 	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFile(file, verbose));
-
 	for (const data of sessionResults) {
 		if (!data || data.tokens === 0 || data.interactions === 0) { continue; }
-
-		const displayTok = effectiveTokens(data);
-
-		for (const [dateKey, fraction] of Object.entries(data.dailyFractions)) {
-			const tokForDay = Math.round(displayTok * fraction);
-			const scaledUsage = scaleModelUsage(data.modelUsage, fraction);
-
-			// 30-day map: only add days within the window
-			const dailyEntry = dailyMap.get(dateKey);
-			if (dailyEntry) {
-				dailyEntry.tokens += tokForDay;
-				dailyEntry.sessions++;
-				addModelUsage(dailyEntry.modelUsage, scaledUsage);
-				const editor = data.editorSource;
-				if (!dailyEntry.editorUsage[editor]) {
-					dailyEntry.editorUsage[editor] = { tokens: 0, sessions: 0 };
-				}
-				dailyEntry.editorUsage[editor].tokens += tokForDay;
-				dailyEntry.editorUsage[editor].sessions++;
-				if (!dailyEntry.editorModelUsage) { dailyEntry.editorModelUsage = {}; }
-				if (!dailyEntry.editorModelUsage[editor]) { dailyEntry.editorModelUsage[editor] = {}; }
-				addModelUsage(dailyEntry.editorModelUsage[editor], scaledUsage);
-			}
-
-			// Full history map: always add regardless of age (used for weekly/monthly charts)
-			if (!allDaysMap.has(dateKey)) {
-				allDaysMap.set(dateKey, { tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-			}
-			const allEntry = allDaysMap.get(dateKey)!;
-			allEntry.tokens += tokForDay;
-			allEntry.sessions++;
-			addModelUsage(allEntry.modelUsage, scaledUsage);
-			const editor = data.editorSource;
-			if (!allEntry.editorUsage[editor]) {
-				allEntry.editorUsage[editor] = { tokens: 0, sessions: 0 };
-			}
-			allEntry.editorUsage[editor].tokens += tokForDay;
-			allEntry.editorUsage[editor].sessions++;
-			if (!allEntry.editorModelUsage) { allEntry.editorModelUsage = {}; }
-			if (!allEntry.editorModelUsage[editor]) { allEntry.editorModelUsage[editor] = {}; }
-			addModelUsage(allEntry.editorModelUsage[editor], scaledUsage);
-		}
+		addSessionToDailyStats(dailyStatsMap, {
+			editorType: data.editorSource,
+			tokens: effectiveTokens(data),
+			interactions: data.interactions,
+			modelUsage: data.modelUsage,
+			dailyFractions: data.dailyFractions,
+			taskCategory: data.taskCategory,
+			taskCategoryShares: data.taskCategoryShares,
+			linesAdded: data.linesAdded,
+			linesRemoved: data.linesRemoved,
+			languageUsage: data.languageUsage,
+		});
 	}
-
-	const labels = Array.from(dailyMap.keys()).sort();
-	const days = labels.map(l => dailyMap.get(l)!);
-	return { labels, days, allDaysMap };
+	return sortedDailyStats(dailyStatsMap);
 }
 
 /** Environmental impact constants export for use in commands */

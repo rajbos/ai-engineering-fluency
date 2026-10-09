@@ -17,7 +17,11 @@ computeFallbackDailyRollup,
 type SessionAggregateInput,
 type UtcDateRanges,
 	preferActualTokens,
+	addSessionToDailyStats,
+	sortedDailyStats,
+	sessionLocFromUsageAnalysis,
 } from '../../../src/statsHelpers';
+import type { DailyTokenStats } from '../../../src/types';
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
@@ -1743,4 +1747,53 @@ test('aggregatePeriodStats: debug-log-only exact cost appears in period totals o
 	assert.ok(Math.abs(fixed.todayStats.exactCopilotCostDollars - 0.5) < 1e-12);
 	assert.ok(Math.abs(fixed.monthStats.exactCopilotCostDollars - 0.5) < 1e-12);
 	assert.ok(Math.abs(fixed.last30DaysStats.exactCopilotCostDollars - 0.5) < 1e-12);
+});
+
+test('addSessionToDailyStats splits a session across its days like the per-day rollups', () => {
+	const map = new Map<string, DailyTokenStats>();
+	addSessionToDailyStats(map, {
+		editorType: 'Copilot CLI',
+		repository: 'o/r',
+		tokens: 1000,
+		interactions: 4,
+		modelUsage: { 'gpt-4o': { inputTokens: 800, outputTokens: 200, sessions: 0 } },
+		dailyFractions: { '2026-05-02': 0.75, '2026-05-01': 0.25 },
+		taskCategory: 'Debugging',
+		linesAdded: 10,
+		linesRemoved: 2,
+		languageUsage: { ts: { linesAdded: 10, linesRemoved: 2 } },
+	});
+	const days = sortedDailyStats(map);
+	assert.deepEqual(days.map(d => d.date), ['2026-05-01', '2026-05-02']);
+	assert.deepEqual(days.map(d => d.tokens), [250, 750]);
+	assert.deepEqual(days.map(d => d.interactions), [1, 3]);
+	assert.deepEqual(days.map(d => d.sessions), [1, 1]);
+	assert.deepEqual(days.map(d => d.modelUsage['gpt-4o'].inputTokens), [200, 600]);
+	assert.deepEqual(days.map(d => d.repositoryUsage['o/r'].tokens), [250, 750]);
+	assert.deepEqual(days.map(d => d.taskCategoryTokens?.Debugging), [250, 750]);
+	// Session-level lines of code land on the last active day only.
+	assert.equal(days[0].linesAdded, undefined);
+	assert.equal(days[1].linesAdded, 10);
+	assert.equal(days[1].linesRemoved, 2);
+	assert.equal(days[1].editorUsage['Copilot CLI'].linesAdded, 10);
+	assert.deepEqual(days[1].languageUsage, { ts: { linesAdded: 10, linesRemoved: 2 } });
+});
+
+test('addSessionToDailyStats records a missing repository as Unknown and skips unsafe day keys', () => {
+	const map = new Map<string, DailyTokenStats>();
+	const fractions = JSON.parse('{"__proto__": 0.5, "2026-05-01": 0.5}') as Record<string, number>;
+	addSessionToDailyStats(map, { editorType: 'VS Code', tokens: 100, interactions: 0, modelUsage: {}, dailyFractions: fractions });
+	assert.deepEqual([...map.keys()], ['2026-05-01']);
+	const day = map.get('2026-05-01')!;
+	assert.equal(day.repositoryUsage.Unknown.tokens, 50);
+	assert.equal(day.interactions, 1, 'a day with activity counts at least one interaction');
+});
+
+test('sessionLocFromUsageAnalysis keeps lines of code only when lines were added', () => {
+	assert.deepEqual(sessionLocFromUsageAnalysis(undefined), {});
+	assert.deepEqual(sessionLocFromUsageAnalysis({ editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0, linesAdded: 0, linesRemoved: 4 } }), {});
+	assert.deepEqual(
+		sessionLocFromUsageAnalysis({ editScope: { singleFileEdits: 1, multiFileEdits: 0, totalEditedFiles: 1, avgFilesPerSession: 1, linesAdded: 3, languageUsage: { py: { linesAdded: 3, linesRemoved: 0 } } } }),
+		{ linesAdded: 3, linesRemoved: 0, languageUsage: { py: { linesAdded: 3, linesRemoved: 0 } } },
+	);
 });

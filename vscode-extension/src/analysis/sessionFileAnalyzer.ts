@@ -26,13 +26,14 @@ import type {
 } from '../../../src/types';
 import type { WindsurfDataAccess } from '../../../src/windsurf';
 import type { TaskCategory, TaskCategoryBreakdown } from '../../../src/taskClassification';
-import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../../src/taskClassification';
+import { resolveSessionTaskAttribution, countDelegationToolCalls } from '../../../src/taskClassification';
 import {
 	reconcileModelUsageToActualTokens,
 	distributeModelUsageToDays,
 	distributeExactCostToDays,
 	scaleModelUsage,
 	reconcileDebugLogModelUsage,
+	sessionLocFromUsageAnalysis,
 } from '../../../src/statsHelpers';
 import {
 	estimateTokensFromText,
@@ -750,7 +751,6 @@ function buildOptionalSessionFields(
 	usageAnalysis: SessionUsageAnalysis,
 ): Partial<SessionFileCache> {
 	const hasDebugLog = !!debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
-	const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
 	return {
 		thinkingTokens: tokenResult.thinkingTokens,
 		...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
@@ -760,11 +760,7 @@ function buildOptionalSessionFields(
 		...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
 		...(tokenResult.truncationCount ? { truncationCount: tokenResult.truncationCount, messagesRemovedByTruncation: tokenResult.messagesRemovedByTruncation } : {}),
 		...buildContextTierFields(tokenResult, debugLogTokens),
-		...(hasEditScope ? {
-			linesAdded: usageAnalysis!.editScope!.linesAdded,
-			linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
-			...(usageAnalysis!.editScope!.languageUsage ? { languageUsage: usageAnalysis!.editScope!.languageUsage } : {}),
-		} : {}),
+		...sessionLocFromUsageAnalysis(usageAnalysis),
 	};
 }
 
@@ -787,7 +783,8 @@ function buildSessionDataObject(
 	const optionals = buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
 	// Classified once per session (not per-render) using tool names from usageAnalysis and the
 	// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
-	const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
+	// Shared with the CLI so both hosts attribute a session to the same task (#2316).
+	const { taskCategory, taskCategoryShares } = resolveSessionTaskAttribution(usageAnalysis, sessionMeta.title);
 	// Counted once per session from the same tool-name data as the task classification;
 	// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
 	// MCP tools are included because some ecosystems spawn sub-agents via MCP
@@ -798,8 +795,8 @@ function buildSessionDataObject(
 		tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 		usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 		lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
-		taskCategory: usageAnalysis.taskClassification?.primaryCategory ?? taskCategory,
-		taskCategoryShares: usageAnalysis.taskClassification?.categoryShares,
+		taskCategory,
+		taskCategoryShares,
 		...(subAgentCalls > 0 ? { subAgentCalls } : {}),
 		// Persist workspace attribution from the adapter so the Recent Sessions list can
 		// show it without requiring a separate getSessionFileDetails() parse pass.

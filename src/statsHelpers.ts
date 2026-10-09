@@ -5,7 +5,7 @@
  * imported by extension.ts and exercised in isolation by unit tests.
  */
 
-import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry, SessionUsageAnalysis } from './types';
 import type { TaskCategory, TaskCategoryBreakdown } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
@@ -359,10 +359,24 @@ function updateLocUsage(usage: { linesAdded?: number; linesRemoved?: number }, l
 }
 
 /**
+ * The session-level lines-of-code fields a host stores from a usage analysis: present only when
+ * the session actually added lines. Shared by the extension's session analyzer and the CLI.
+ */
+export function sessionLocFromUsageAnalysis(usageAnalysis: Pick<SessionUsageAnalysis, 'editScope'> | undefined): Pick<SessionFileCache, 'linesAdded' | 'linesRemoved' | 'languageUsage'> {
+	const editScope = usageAnalysis?.editScope;
+	if (!editScope?.linesAdded || editScope.linesAdded <= 0) { return {}; }
+	return {
+		linesAdded: editScope.linesAdded,
+		linesRemoved: editScope.linesRemoved ?? 0,
+		...(editScope.languageUsage ? { languageUsage: editScope.languageUsage } : {}),
+	};
+}
+
+/**
  * Attributes session-level LOC data to the given daily stats entry.
  * Updates totals, editorUsage LOC fields, repositoryUsage LOC fields, and languageUsage.
  */
-function attributeLocToDay(dailyEntry: DailyTokenStats, sessionData: SessionFileCache, editorType: string, repository: string): void {
+function attributeLocToDay(dailyEntry: DailyTokenStats, sessionData: Pick<SessionFileCache, 'linesAdded' | 'linesRemoved' | 'languageUsage'>, editorType: string, repository: string): void {
 	const linesAdded = sessionData.linesAdded ?? 0;
 	const linesRemoved = sessionData.linesRemoved ?? 0;
 	if (linesAdded === 0 && linesRemoved === 0) { return; }
@@ -773,6 +787,68 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 		entry.editorModelUsage[editorType][model].sessions += 1;
 	}
 	addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategory, taskCategoryShares);
+}
+
+/**
+ * One session's contribution to the per-day stats that feed `buildChartData()`
+ * (src/chartDataBuilder.ts), for hosts that do not keep a `SessionFileCache` —
+ * the CLI, and the desktop app through it.
+ *
+ * `dailyFractions` maps a local day key ("YYYY-MM-DD") to the share of the session
+ * that day carries; the shares should sum to 1.
+ */
+export interface DailyStatsSessionContribution {
+	editorType: string;
+	/** Repository URL or name; empty/absent is recorded as "Unknown", as in the extension. */
+	repository?: string;
+	/** Effective session tokens — see {@link preferActualTokens}. */
+	tokens: number;
+	interactions: number;
+	modelUsage: ModelUsage;
+	dailyFractions: Record<string, number>;
+	taskCategory?: TaskCategory;
+	taskCategoryShares?: TaskCategoryBreakdown;
+	linesAdded?: number;
+	linesRemoved?: number;
+	languageUsage?: LanguageUsage;
+}
+
+/**
+ * Folds one session into `dailyStatsMap` (keyed by day), splitting tokens, model usage and
+ * interactions across its days the same way the extension's per-day rollups do, and landing
+ * session-level lines of code on the session's last active day.
+ *
+ * This is the daily aggregation every non-extension host must use, so the Chart view gets the
+ * same repository / language / task-category / lines-of-code data everywhere (#2316).
+ */
+export function addSessionToDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, session: DailyStatsSessionContribution): void {
+	const repository = session.repository || 'Unknown';
+	const dayKeys = Object.keys(session.dailyFractions).filter(k => !isUnsafeObjectKey(k)).sort();
+	// Same per-day interaction split as the extension's fraction-based rollups
+	// (computeRollupsFromFractions in vscode-extension/src/analysis/sessionFileAnalyzer.ts).
+	const totalInteractions = Math.max(1, session.interactions);
+	for (const dayKey of dayKeys) {
+		const fraction = Number(session.dailyFractions[dayKey]) || 0;
+		if (fraction <= 0) { continue; }
+		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
+		addToDailyEntry(
+			entry,
+			Math.round(session.tokens * fraction),
+			Math.max(1, Math.round(totalInteractions * fraction)),
+			session.editorType,
+			repository,
+			scaleModelUsage(session.modelUsage, fraction),
+			session.taskCategory,
+			session.taskCategoryShares,
+		);
+	}
+	const lastDay = [...dayKeys].reverse().find(k => dailyStatsMap.has(k));
+	if (lastDay) { attributeLocToDay(dailyStatsMap.get(lastDay)!, session, session.editorType, repository); }
+}
+
+/** The values of a day-keyed stats map, oldest first — the input shape `buildChartData()` takes. */
+export function sortedDailyStats(dailyStatsMap: Map<string, DailyTokenStats>): DailyTokenStats[] {
+	return Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
