@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 
 import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../src/types';
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
+import { statusBadgeHtml } from '../../src/webview/usage/statusBadge';
 import {
 	getPagedTablePage,
 	getPagedTableState,
@@ -175,4 +176,24 @@ test('customizationMatrix: renders interactions column, icon headers with type l
 test('customizationMatrix: empty matrix renders the empty state', () => {
 	assert.match(buildCustomizationSectionHtml(null), /No workspaces with customization files/);
 	assert.match(buildCustomizationSectionHtml(matrix([])), /No workspaces with customization files/);
+});
+
+test('customizationMatrix: every badge carries a localized accessible name', () => {
+	const issues = buildCustomizationSectionHtml(matrix([row('a', 1), row('b', 2, { instructions: '❌', agents: '❌' })]));
+	assert.match(issues, /class="stale-warning"[^>]*><span[^>]*title="No customization files" aria-label="No customization files">!<\/span>/);
+	const allGood = buildCustomizationSectionHtml(matrix([row('a', 1)]));
+	assert.match(allGood, /title="Present and fresh" aria-label="Present and fresh">✓<\/span> All workspaces have up-to-date customizations\./);
+	initializeWebviewLocalization({
+		'usage.customization.status.fresh': '存在且最新',
+		'usage.customization.status.stale': '存在但已过时',
+		'usage.customization.status.missing': '缺失',
+	});
+	try {
+		assert.match(statusBadgeHtml('✅'), /aria-label="存在且最新"/);
+		assert.match(statusBadgeHtml('⚠️'), /aria-label="存在但已过时"/);
+		assert.match(statusBadgeHtml('❌'), /aria-label="缺失"/);
+		assert.doesNotMatch(statusBadgeHtml('❌'), / title=/);
+	} finally {
+		initializeWebviewLocalization({});
+	}
 });

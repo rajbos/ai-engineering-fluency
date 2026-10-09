@@ -767,6 +767,7 @@
   "usage.customization.status.stale": "存在但已过时",
   "usage.customization.status.missing": "缺失",
   "usage.customization.status.unknown": "状态未知",
+  "usage.customization.status.error": "错误",
   "usage.customization.badge.noCustomization": "没有自定义文件",
   "usage.customization.legend.fresh": "= 存在且最新",
   "usage.customization.legend.stale": "= 存在但已过时",

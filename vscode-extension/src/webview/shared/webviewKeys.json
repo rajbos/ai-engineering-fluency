@@ -139,6 +139,7 @@
   "usage.customization.status.stale",
   "usage.customization.status.missing",
   "usage.customization.status.unknown",
+  "usage.customization.status.error",
   "usage.customization.badge.noCustomization",
   "usage.customization.legend.fresh",
   "usage.customization.legend.stale",

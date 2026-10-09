@@ -95,6 +95,7 @@ test('l10n: customization files table controls resolve in English and zh-cn', ()
 		['usage.customization.status.stale', "Present but stale", "存在但已过时"],
 		['usage.customization.status.missing', "Missing", "缺失"],
 		['usage.customization.status.unknown', "Status unknown", "状态未知"],
+		['usage.customization.status.error', "Error", "错误"],
 		['usage.customization.badge.noCustomization', "No customization files", "没有自定义文件"],
 		['usage.customization.legend.fresh', "= Present & Fresh", "= 存在且最新"],
 		['usage.customization.legend.stale', "= Present but Stale", "= 存在但已过时"],

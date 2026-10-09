@@ -765,6 +765,7 @@
   "usage.customization.status.stale": "Present but stale",
   "usage.customization.status.missing": "Missing",
   "usage.customization.status.unknown": "Status unknown",
+  "usage.customization.status.error": "Error",
   "usage.customization.badge.noCustomization": "No customization files",
   "usage.customization.legend.fresh": "= Present & Fresh",
   "usage.customization.legend.stale": "= Present but Stale",

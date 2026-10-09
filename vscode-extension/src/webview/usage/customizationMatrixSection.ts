@@ -147,8 +147,8 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
 				${escapeHtml(localizeFormat('usage.customization.summary', currentMatrix.totalWorkspaces))}
 				${currentMatrix.workspacesWithIssues > 0
-					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${escapeHtml(localizeFormat('usage.customization.summary.issues', currentMatrix.workspacesWithIssues))}</span>`
-					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} ${escapeHtml(localize('usage.customization.summary.allGood'))}</span>`}
+					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.badge.noCustomization'))} ${escapeHtml(localizeFormat('usage.customization.summary.issues', currentMatrix.workspacesWithIssues))}</span>`
+					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.summary.allGood'))}</span>`}
 			</div>
 			${filterToggle}
 			<span id="customization-table-status" class="paged-table-status" role="status" aria-live="polite" aria-atomic="true"></span>

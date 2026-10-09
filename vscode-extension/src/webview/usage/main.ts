@@ -720,7 +720,7 @@ function showLoadError(message: string): void {
 	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
 	const icon = document.createElement('div');
 	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
-	setHtml(icon, statusBadgeHtml('❌', 'Error'));
+	setHtml(icon, statusBadgeHtml('❌', localize('usage.customization.status.error')));
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
