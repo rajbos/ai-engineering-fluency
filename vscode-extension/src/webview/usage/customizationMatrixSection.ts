@@ -182,8 +182,8 @@ function rerenderCustomizationTable(section: HTMLElement, sorted: boolean): void
 	if (status) { status.textContent = announcement; }
 }
 
-/** Applies a click on a sort header, pager button or filter toggle; undefined when it was none of those. */
-export function applyCustomizationTableAction(target: Element): 'sort' | 'page' | 'filter' | undefined {
+/** Applies a click on a sort header or pager button; undefined when it was neither. */
+export function applyCustomizationTableAction(target: Element): 'sort' | 'page' | undefined {
 	const sortButton = target.closest<HTMLButtonElement>('[data-paged-sort]');
 	if (sortButton?.getAttribute('data-paged-table') === CUSTOMIZATION_TABLE_ID) {
 		const columnId = sortButton.getAttribute('data-paged-sort');
@@ -194,12 +194,20 @@ export function applyCustomizationTableAction(target: Element): 'sort' | 'page' 
 		const page = Number(pageButton.getAttribute('data-paged-page'));
 		if (Number.isFinite(page)) { setPagedTablePage(CUSTOMIZATION_TABLE_ID, page); return 'page'; }
 	}
-	const filterInput = target.closest<HTMLInputElement>('[data-paged-table-filter]');
-	if (filterInput?.getAttribute('data-paged-table') === CUSTOMIZATION_TABLE_ID) {
-		const filterId = filterInput.getAttribute('data-paged-table-filter');
-		if (filterId) { setPagedTableFilter(CUSTOMIZATION_TABLE_ID, filterId, filterInput.checked); return 'filter'; }
-	}
 	return undefined;
+}
+
+/**
+ * Applies a filter checkbox's new state. Driven by `change`, not `click`, so it fires once however
+ * the box was toggled (the box itself, its label text, or the keyboard).
+ */
+export function applyCustomizationFilterChange(target: EventTarget | null): boolean {
+	if (!(target instanceof Element) || !target.matches('input[data-paged-table-filter]')) { return false; }
+	const input = target as HTMLInputElement;
+	const filterId = input.getAttribute('data-paged-table-filter');
+	if (input.getAttribute('data-paged-table') !== CUSTOMIZATION_TABLE_ID || !filterId) { return false; }
+	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, filterId, input.checked);
+	return true;
 }
 
 /** One delegated listener on the section, so re-rendering a page cannot orphan handlers. */
@@ -212,6 +220,9 @@ export function wireCustomizationMatrixSection(): void {
 		if (!(target instanceof Element)) { return; }
 		const action = applyCustomizationTableAction(target);
 		if (action) { rerenderCustomizationTable(section, action === 'sort'); }
+	});
+	section.addEventListener('change', event => {
+		if (applyCustomizationFilterChange(event.target)) { rerenderCustomizationTable(section, false); }
 	});
 }
 

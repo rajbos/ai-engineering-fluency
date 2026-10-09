@@ -1,5 +1,6 @@
 import test, { afterEach, beforeEach } from 'node:test';
 import * as assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 
 import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../src/types';
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
@@ -21,6 +22,7 @@ import {
 	customizationStatusRank,
 	hasNoCustomization,
 	renderCustomizationTable,
+	wireCustomizationMatrixSection,
 } from '../../src/webview/usage/customizationMatrixSection';
 
 beforeEach(() => initializeWebviewLocalization({}));
@@ -231,4 +233,36 @@ test('statusBadge: unknown renders a neutral ? badge, not the missing ✕', () =
 	assert.match(unknown, /aria-label="Status unknown"/);
 	assert.doesNotMatch(unknown, /239,68,68/);
 	assert.match(statusBadgeHtml('❌'), />✕<\/span>$/);
+});
+
+test('customizationMatrix: the filter toggles once from the label text and from a plain change event', () => {
+	const data = matrix([row('a', 3), row('b', 2, { instructions: '❌', agents: '❌' }), row('c', 1)]);
+	const dom = new JSDOM(`<body>${buildCustomizationSectionHtml(data)}</body>`, { pretendToBeVisual: true });
+	const globals = globalThis as Record<string, unknown>;
+	const saved = ['document', 'Element', 'HTMLElement'].map(key => [key, globals[key]] as const);
+	globals.document = dom.window.document;
+	globals.Element = dom.window.Element;
+	globals.HTMLElement = dom.window.HTMLElement;
+	try {
+		wireCustomizationMatrixSection();
+		const doc = dom.window.document;
+		const bodyRows = (): number => doc.querySelectorAll('#paged-table-root-customization tbody tr').length;
+		const input = doc.querySelector('input[data-paged-table-filter="noCustomizationOnly"]') as HTMLInputElement | null;
+		assert.ok(input);
+		assert.equal(bodyRows(), 3);
+		// Clicking the label text activates the checkbox and fires one change.
+		const label = input.closest('label');
+		assert.ok(label);
+		label.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+		assert.equal(input.checked, true);
+		assert.equal(bodyRows(), 1);
+		// Keyboard toggles arrive as a change too.
+		input.checked = false;
+		input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+		assert.equal(bodyRows(), 3);
+	} finally {
+		for (const [key, value] of saved) { globals[key] = value; }
+		setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+		dom.window.close();
+	}
 });
