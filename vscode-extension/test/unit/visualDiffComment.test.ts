@@ -190,6 +190,27 @@ test('renderBody starts with the marker and never leaks unsafe text', () => {
 	}
 });
 
+test('renderBody shows only the diff inline and folds before/after into a closed section', () => {
+	const { root, cleanup } = screenshotsRoot();
+	try {
+		const row: Comparison = { view: 'usage', state: 'tools', theme: 'dark', status: 'changed', baseline: 'usage--tools.dark.png', current: 'usage--tools.dark.png', diff: 'usage--tools.dark.diff.png', changedPixels: 10, changedPercent: 1 };
+		const plan = publisher.planAttachments([row], { root }, 48, new Map());
+		const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+		const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+		const fold = body.indexOf('<details><summary>Before and after');
+		assert.ok(fold > 0, 'before/after sit in a collapsed section');
+		assert.ok(!body.includes('<details open>'), 'nothing large is expanded by default');
+		const diffAt = body.indexOf(`](${path.posix.join(root, 'diff', 'usage--tools.dark.diff.png')})`);
+		assert.ok(diffAt > 0 && diffAt < fold, 'the diff is the inline image');
+		assert.ok(body.indexOf('![Before:') > fold && body.indexOf('![After:') > fold, 'before and after only appear inside the fold');
+		for (const a of plan.attachments) {
+			assert.ok(body.includes(`](${a.file})`), `every attachment is referenced: ${a.kind}`);
+		}
+	} finally {
+		cleanup();
+	}
+});
+
 test('renderBody reports an all-clear without a table when nothing changed', () => {
 	const summary = { changed: 0, unchanged: 3, added: 0, removed: 0 };
 	const rows: Comparison[] = [1, 2, 3].map((i) => ({ view: `v${i}`, state: null, theme: 'dark', status: 'unchanged' }));
