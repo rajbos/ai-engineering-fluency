@@ -28,11 +28,11 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 3. **Helps debugging** - Inspect what's being cached and when
 4. **Supports development** - Iterate with real data structures when building features
 
-By default, output omits session titles, prompt excerpts, correction snippets, workspace paths, referenced file paths, repository URLs, cache file paths, and unknown entry fields. `--include-sensitive` opts into full entries and their local paths; credentials in repository URLs are stripped even then. `--last` is capped at 100 entries.
+By default, output omits session titles, prompt excerpts, correction snippets, workspace paths, referenced file paths, per-file-type line counts (`languageUsage`, keyed by extension or extensionless basename), repository URLs, cache file paths, and unknown entry fields. `--include-sensitive` opts into full entries and their local paths; credentials in repository URLs are stripped even then. `--last` is capped at 100 entries.
 
 ## Cache File Locations
 
-The script checks for `session-cache.json` under each supported VS Code variant's globalStorage directory:
+The script reads `cache_prod.snapshot.json`, then `cache_dev.snapshot.json` (the extension's shared cache snapshot, unwrapped from its envelope), then a legacy `session-cache.json` export, under each supported VS Code variant's globalStorage directory:
 
 - **Windows:** `%APPDATA%\<variant>\User\globalStorage\<extension id>\`
 - **macOS:** `~/Library/Application Support/<variant>/User/globalStorage/<extension id>/`

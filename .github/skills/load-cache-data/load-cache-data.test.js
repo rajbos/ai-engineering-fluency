@@ -68,6 +68,8 @@ test('default output removes session-identifying fields and anonymizes paths', (
             workspaceFolderPath: path.join(fixture.home, 'private-workspace'),
             repository: 'REMOTE_URL_WITH_USERINFO_PRIVATE_REPO',
             unknownPromptField: 'future-sensitive-sentinel',
+            linesAdded: 4,
+            languageUsage: { 'top-level-basename-sentinel': { linesAdded: 4, linesRemoved: 0 } },
             usageAnalysis: {
                 firstUserPrompt: 'nested-prompt-sentinel',
                 correctionMoments: [{
@@ -75,7 +77,11 @@ test('default output removes session-identifying fields and anonymizes paths', (
                     snippet: 'correction-snippet-sentinel',
                     file: 'correction-file-path-sentinel'
                 }],
-                contextReferences: { file: 5, byPath: { 'context-path-sentinel.ts': 2 } }
+                contextReferences: { file: 5, byPath: { 'context-path-sentinel.ts': 2 } },
+                editScope: {
+                    singleFileEdits: 1,
+                    languageUsage: { 'edit-scope-basename-sentinel': { linesAdded: 4, linesRemoved: 0 } }
+                }
             }
         }
     };
@@ -88,6 +94,9 @@ test('default output removes session-identifying fields and anonymizes paths', (
     assert.equal(output.entries['session-1'].tokens, 42);
     assert.equal(output.entries['session-1'].interactions, 3);
     assert.deepEqual(output.entries['session-1'].usageAnalysis.contextReferences, { file: 5 });
+    assert.deepEqual(output.entries['session-1'].usageAnalysis.editScope, { singleFileEdits: 1 });
+    assert.equal(output.entries['session-1'].linesAdded, 4);
+    assert.equal('languageUsage' in output.entries['session-1'], false);
     assert.deepEqual(output.entries['session-1'].usageAnalysis.correctionMoments, [{
         type: 'user-correction'
     }]);
@@ -102,6 +111,8 @@ test('default output removes session-identifying fields and anonymizes paths', (
         'correction-snippet-sentinel',
         'correction-file-path-sentinel',
         'context-path-sentinel',
+        'top-level-basename-sentinel',
+        'edit-scope-basename-sentinel',
         sessionPath
     ]) {
         assert.equal(result.stdout.includes(sentinel), false, `output leaked ${sentinel}`);
@@ -139,15 +150,48 @@ test('--include-sensitive still strips credentials from repository URLs', (t) =>
     assert.equal(JSON.parse(result.stdout).entries[sessionPath].repository, 'https://github.com/owner/repo.git');
 });
 
-test('finds the cache under the current extension id', (t) => {
+function snapshotEnvelope(entries, cacheId = 'prod') {
+    // Shape written by CacheManager's shared-snapshot save (vscode-extension/src/cacheManager.ts)
+    return {
+        schemaVersion: 1,
+        cacheVersion: 1,
+        cacheId,
+        generatedAt: 1,
+        entryCount: Object.keys(entries).length,
+        entries
+    };
+}
+
+test('reads the extension snapshot envelope under the current extension id', (t) => {
     const fixture = createFixture(t);
     const currentStorage = path.join(path.dirname(fixture.storage), 'robbos.ai-engineering-fluency');
     fs.mkdirSync(currentStorage, { recursive: true });
-    fs.writeFileSync(path.join(currentStorage, 'session-cache.json'), JSON.stringify({ a: { tokens: 3, mtime: 1 } }));
+    fs.writeFileSync(path.join(currentStorage, 'cache_prod.snapshot.json'), JSON.stringify(snapshotEnvelope({
+        a: { tokens: 3, mtime: 2 },
+        b: { tokens: 5, mtime: 1 }
+    })));
 
     const result = fixture.run(['--json']);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).entries['session-1'].tokens, 3);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.totalCacheEntries, 2);
+    assert.deepEqual(Object.keys(output.entries), ['session-1', 'session-2']);
+    assert.equal(output.entries['session-1'].tokens, 3);
+});
+
+test('prefers the prod snapshot, then dev, over a legacy export', (t) => {
+    const fixture = createFixture(t);
+    fs.writeFileSync(path.join(fixture.storage, 'session-cache.json'), JSON.stringify({ legacy: { tokens: 1 } }));
+    fs.writeFileSync(path.join(fixture.storage, 'cache_dev.snapshot.json'), JSON.stringify(snapshotEnvelope({ dev: { tokens: 2 } }, 'dev')));
+
+    const devResult = fixture.run(['--json']);
+    assert.equal(devResult.status, 0, devResult.stderr);
+    assert.equal(JSON.parse(devResult.stdout).entries['session-1'].tokens, 2);
+
+    fs.writeFileSync(path.join(fixture.storage, 'cache_prod.snapshot.json'), JSON.stringify(snapshotEnvelope({ prod: { tokens: 3 } })));
+    const prodResult = fixture.run(['--json']);
+    assert.equal(prodResult.status, 0, prodResult.stderr);
+    assert.equal(JSON.parse(prodResult.stdout).entries['session-1'].tokens, 3);
 });
 
 test('ignores cache files planted in temporary and current-working directories', (t) => {

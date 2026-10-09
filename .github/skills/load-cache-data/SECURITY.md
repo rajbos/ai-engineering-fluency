@@ -23,13 +23,15 @@ None. It reads `APPDATA` and `XDG_CONFIG_HOME` only to build candidate paths.
 
 ## Untrusted inputs parsed
 
-- The first regular file found at `<VS Code user data>/User/globalStorage/<extension id>/session-cache.json`,
-  for the variants Code, Code - Insiders, Code - Exploration, VSCodium and Cursor, and the
+- The first regular file found at `<VS Code user data>/User/globalStorage/<extension id>/` named
+  `cache_prod.snapshot.json`, `cache_dev.snapshot.json` (the extension's shared cache snapshot,
+  whose `entries` are unwrapped from its envelope by `unwrapCacheEntries`) or a legacy
+  `session-cache.json` export, for the variants Code, Code - Insiders, Code - Exploration, VSCodium and Cursor, and the
   extension ids `robbos.ai-engineering-fluency` and `robbos.copilot-token-tracker`
-  (`getCacheFilePaths`, line 140). These are in the user's own profile directory.
+  (`getCacheFilePaths`, line 139). These are in the user's own profile directory.
 - The OS temp directory and the current working directory are no longer candidates, so a
   file planted there is not read.
-- The content is `JSON.parse`d (line 261) and filtered before printing; nothing in it is
+- The content is `JSON.parse`d (line 283) and filtered before printing; nothing in it is
   executed.
 
 ## What it writes and where
@@ -40,14 +42,15 @@ Nothing on disk. Stdout is one JSON line.
   `session-2`, ... instead of session file paths. Each entry keeps only allowlisted fields
   (`SAFE_CACHE_ENTRY_FIELDS`, line 186): token and interaction counts, per-model usage,
   timestamps, task categories, daily rollups and `usageAnalysis`. Inside `usageAnalysis`,
-  `firstUserPrompt`, `contextReferences.byPath` and each correction moment's `snippet` and
-  `file` are removed (`sanitizeCacheEntry`, line 196). `title`, `repository`,
-  `workspaceFolderPath`, any unrecognized top-level field and the cache file path are
-  omitted.
+  `firstUserPrompt`, `contextReferences.byPath`, `editScope.languageUsage` and each correction
+  moment's `snippet` and `file` are removed (`sanitizeCacheEntry`, line 198). `title`, `repository`,
+  `workspaceFolderPath`, top-level `languageUsage` (keyed by file extension, or by the whole
+  basename for extensionless files), any unrecognized top-level field and the cache file path
+  are omitted.
 - **`--include-sensitive`:** the cache file path (`cacheFile`), session file paths as entry
   keys, and full entries including `title`, `workspaceFolderPath` and `repository`. URL
   userinfo (`user:token@`) is stripped from `repository` even in this mode
-  (`stripUrlUserinfo`, line 236).
+  (`stripUrlUserinfo`, line 245).
 
 ## External programs run
 
@@ -61,7 +64,7 @@ None.
 - `--last` must be all digits and at least 1, otherwise the script exits 2; it is capped at
   100 entries (`parseLastCount`, line 34).
 - Only the user's VS Code globalStorage directories are searched. `fs.lstatSync(...).isFile()`
-  (line 259) means a symlink at a candidate path is not followed.
+  (line 281) means a symlink at a candidate path is not followed.
 - A file that fails to parse is skipped and the search moves on.
 
 ## Known gaps

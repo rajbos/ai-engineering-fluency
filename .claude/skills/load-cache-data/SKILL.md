@@ -113,7 +113,7 @@ node .github/skills/load-cache-data/load-cache-data.js --include-sensitive --jso
 node .github/skills/load-cache-data/load-cache-data.js --help
 ```
 
-`--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), unrecognized fields are omitted, and `usageAnalysis.contextReferences.byPath` (keyed by referenced file paths) is dropped. Even with `--include-sensitive`, credentials in a repository URL (`https://user:token@host/...`) are stripped.
+`--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), unrecognized fields are omitted, and maps keyed by file paths or names are dropped: `usageAnalysis.contextReferences.byPath`, plus `languageUsage` and `usageAnalysis.editScope.languageUsage` (keyed by file extension, or by the whole basename for extensionless files such as `Dockerfile`). Even with `--include-sensitive`, credentials in a repository URL (`https://user:token@host/...`) are stripped.
 
 **What it does:**
 - Searches for cache export files in known locations
@@ -123,19 +123,15 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 
 **Cache File Locations:**
 
-The script searches for cache export files in these locations:
+The script reads the first of these files it finds:
 
-1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\<extension id>\session-cache.json`, where the extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename)
+1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\<extension id>\`, looking for `cache_prod.snapshot.json`, then `cache_dev.snapshot.json` (the shared snapshot `CacheManager` writes; the entries are unwrapped from its envelope), then a legacy flat `session-cache.json` export. The extension id is the extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot-token-tracker` (pre-rename)
    - The Windows, macOS, and Linux locations are derived from the VS Code user-data directory.
    - Also checks other VS Code variants (Insiders, Cursor, VSCodium, etc.).
 
-**Creating Cache Export Files:**
+**Where the data comes from:**
 
-Since the extension stores cache in VS Code's globalState (internal SQLite database), the cache data must be explicitly exported to one of the above locations for this script to access it. This can be done:
-
-1. **Via Extension**: The extension can be enhanced to export cache on demand
-2. **Via Tests**: Test code can write cache data to disk for inspection
-3. **Manually**: Copy cache data from extension's globalState and save to one of the expected locations
+The extension keeps its cache in VS Code's globalState and mirrors it to the shared snapshot file above for cross-window sharing, so a normal installation has a readable cache once the extension has run. A legacy `session-cache.json` (a bare `{ [sessionFile]: entry }` map) is still read as a fallback, for exports written by tests or by hand.
 
 **Exit Codes:**
 - `0`: Cache file found and displayed successfully

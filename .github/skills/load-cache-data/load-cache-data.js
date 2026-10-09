@@ -6,8 +6,8 @@
  * The cache stores pre-computed session file statistics to avoid re-processing unchanged files.
  * 
  * The extension's cache is stored in VS Code's globalState, which is persisted in a SQLite
- * database (state.vscdb). This script looks for a cache export file that the extension or
- * tests may write to disk in a known location for inspection.
+ * database (state.vscdb). The extension also mirrors it to a shared snapshot file in its
+ * globalStorage directory (cache_<prod|dev>.snapshot.json), which this script reads.
  * 
  * Usage:
  *   node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json] [--include-sensitive]
@@ -70,15 +70,14 @@ CACHE STRUCTURE:
 
 CACHE FILE LOCATIONS:
   This script looks only in VS Code globalStorage for Code, Insiders,
-  Exploration, VSCodium, and Cursor. It does not trust files in temp or
+  Exploration, VSCodium, and Cursor. It reads the extension's shared cache
+  snapshot (cache_prod.snapshot.json, then cache_dev.snapshot.json), falling back
+  to a legacy session-cache.json export. It does not trust files in temp or
   current-working directories.
 
-  Session titles, prompts, correction excerpts, workspace paths, repository URLs,
-  and cache file paths are omitted by default. Use --include-sensitive only when
-  you intend to expose them.
-
-  To create a cache export for testing or inspection, the extension or tests
-  can write session-cache.json to the extension's globalStorage directory.
+  Session titles, prompts, correction excerpts, workspace paths, referenced file
+  paths, per-file-type line counts, repository URLs, and cache file paths are
+  omitted by default. Use --include-sensitive only when you intend to expose them.
 
 USAGE:
   node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json] [--include-sensitive]
@@ -146,8 +145,9 @@ function getCacheFilePaths() {
     const vscodeVariants = ['Code', 'Code - Insiders', 'Code - Exploration', 'VSCodium', 'Cursor'];
     // Current extension id (publisher.name, lowercased) and the pre-rename id
     const extensionIds = ['robbos.ai-engineering-fluency', 'robbos.copilot-token-tracker'];
-    // Candidate cache file names to look for (include session-cache.json used on the user's machine)
-    const candidateFiles = ['session-cache.json'];
+    // The extension's shared cache snapshot (CacheManager.getSharedSnapshotPath(): prod, then
+    // Extension Development Host), then a legacy flat export written by hand or by tests
+    const candidateFiles = ['cache_prod.snapshot.json', 'cache_dev.snapshot.json', 'session-cache.json'];
 
     if (platform === 'win32') {
         // Windows: %APPDATA%\Code\User\globalStorage\<extensionId>\<cacheFile>
@@ -190,7 +190,9 @@ const SAFE_CACHE_ENTRY_FIELDS = new Set([
     'cacheReadTokens', 'modelTurns', 'debugLogInputTokens', 'debugLogOutputTokens',
     'debugLogChecked', 'subAgentCalls', 'copilotExactCostDollars', 'truncationCount',
     'messagesRemovedByTruncation', 'maxRequestInputTokens', 'contextTier',
-    'dailyRollups', 'linesAdded', 'linesRemoved', 'languageUsage'
+    'dailyRollups', 'linesAdded', 'linesRemoved'
+    // languageUsage is omitted: it is keyed by file extension, or by the whole basename for
+    // extensionless files (Dockerfile, .env, private file names)
 ]);
 
 function sanitizeCacheEntry(cacheEntry) {
@@ -211,6 +213,13 @@ function sanitizeCacheEntry(cacheEntry) {
             const safeContextReferences = { ...contextReferences };
             delete safeContextReferences.byPath;
             safeUsageAnalysis.contextReferences = safeContextReferences;
+        }
+        const editScope = safeUsageAnalysis.editScope;
+        if (editScope && typeof editScope === 'object' && !Array.isArray(editScope)) {
+            // Same basename-keyed map as the top-level languageUsage
+            const safeEditScope = { ...editScope };
+            delete safeEditScope.languageUsage;
+            safeUsageAnalysis.editScope = safeEditScope;
         }
         if (Array.isArray(safeUsageAnalysis.correctionMoments)) {
             safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments.map(moment => {
@@ -248,6 +257,19 @@ function includeSensitiveEntry(cacheEntry) {
 }
 
 /**
+ * The extension's snapshot wraps the cache map in an envelope
+ * ({ schemaVersion, cacheVersion, cacheId, generatedAt, entryCount, entries });
+ * a legacy export is the bare map. Returns the entry map either way.
+ */
+function unwrapCacheEntries(data) {
+    if (data && typeof data === 'object' && !Array.isArray(data)
+        && 'schemaVersion' in data && data.entries && typeof data.entries === 'object' && !Array.isArray(data.entries)) {
+        return data.entries;
+    }
+    return data;
+}
+
+/**
  * Try to find and read the cache file
  * Returns { success: boolean, data?: any, filePath?: string, error?: string }
  */
@@ -258,7 +280,7 @@ function readCacheFile() {
         try {
             if (fs.lstatSync(filePath).isFile()) {
                 const content = fs.readFileSync(filePath, 'utf8');
-                const data = JSON.parse(content);
+                const data = unwrapCacheEntries(JSON.parse(content));
                 return { success: true, data, filePath };
             }
         } catch (error) {
