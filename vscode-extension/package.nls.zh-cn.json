@@ -482,6 +482,7 @@
   "memoryFiles.table.stale": "过期",
   "memoryFiles.table.lastUpdated": "最近更新",
   "customizationMatrix.mergedFolders": "已合并 {0} 个文件夹",
+  "customizationMatrix.noCustomizationFiles": "没有自定义文件",
   "customizationMatrix.ungroupedNames": "{0} 个工作区名称看起来像未分组的工作树或克隆：{1}",
   "memoryFiles.unknownWorkspace": "未知工作区",
   "memoryFiles.globalWorkspaceLabel": "用户（全局）",

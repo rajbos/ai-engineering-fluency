@@ -3119,7 +3119,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 		return `
 			<tr>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}${renderMergedWorkspaceMembers(ws.memberPaths)}
+					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', localize('customizationMatrix.noCustomizationFiles'))}</span>` : ''}${renderMergedWorkspaceMembers(ws.memberPaths)}
 				</td>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
 					${ws.sessionCount}

@@ -281,6 +281,7 @@
   "memoryFiles.table.stale",
   "memoryFiles.table.lastUpdated",
   "customizationMatrix.mergedFolders",
+  "customizationMatrix.noCustomizationFiles",
   "customizationMatrix.ungroupedNames",
   "memoryFiles.unknownWorkspace",
   "memoryFiles.globalWorkspaceLabel",

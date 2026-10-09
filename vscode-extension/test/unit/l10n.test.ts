@@ -1799,6 +1799,7 @@ test('worktree cleanup delete-feedback keys resolve in zh-cn', () => {
 test('l10n: workspace grouping strings in the Customization Files matrix resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	assert.equal(t('customizationMatrix.mergedFolders', '3'), '3 folders merged');
+	assert.equal(t('customizationMatrix.noCustomizationFiles'), 'No customization files');
 	assert.equal(
 		t('customizationMatrix.ungroupedNames', '2', 'repo-85ed99, goofy-wozniak-42f712'),
 		'2 workspace name(s) look like ungrouped worktrees or clones: repo-85ed99, goofy-wozniak-42f712'
@@ -1806,6 +1807,7 @@ test('l10n: workspace grouping strings in the Customization Files matrix resolve
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('customizationMatrix.mergedFolders', '3'), '已合并 3 个文件夹');
+		assert.equal(t('customizationMatrix.noCustomizationFiles'), '没有自定义文件');
 		assert.equal(
 			t('customizationMatrix.ungroupedNames', '2', 'a, b'),
 			'2 个工作区名称看起来像未分组的工作树或克隆：a, b'
