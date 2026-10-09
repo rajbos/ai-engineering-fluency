@@ -44,6 +44,13 @@ const TAB_BUTTON_SELECTORS = ['.tab-button', '.tab', '.eff-tab', '.tab-btn', '.w
  */
 const REVEAL_BUDGET_MS = 60_000;
 
+/**
+ * How long a landed section must stay in the DOM before the reveal is reported
+ * done. Long enough for a panel's cached-then-fresh re-render (the dashboard)
+ * to replace it, so the reveal follows the fresh node instead of being lost.
+ */
+const SETTLE_MS = 2_000;
+
 /** How long to let a tab switch paint before measuring where to scroll. */
 const PAINT_DELAY_MS = 50;
 
@@ -167,11 +174,35 @@ function targetFinder(request: SurfaceRevealRequest): (() => HTMLElement | null)
  * request took over — in which case nothing has been acknowledged and the
  * host still holds the request.
  */
-export async function revealSurface(request: SurfaceRevealRequest, budgetMs = REVEAL_BUDGET_MS): Promise<boolean> {
+export async function revealSurface(
+	request: SurfaceRevealRequest,
+	budgetMs = REVEAL_BUDGET_MS,
+	settleMs = SETTLE_MS,
+): Promise<boolean> {
 	const generation = ++revealGeneration;
 	const deadline = Date.now() + budgetMs;
 	const remaining = (): number => Math.max(0, deadline - Date.now());
 	const superseded = (): boolean => generation !== revealGeneration;
+	if (!(await openTabs(request, remaining, superseded))) { return false; }
+	const find = targetFinder(request);
+	if (!find) { return true; }
+	const found = await waitForElement(find, remaining(), superseded);
+	if (!found || superseded()) { return false; }
+	revealHiddenAncestors(found);
+	// Let the tab switch paint before scrolling, or the scroll measures the old
+	// layout. Then look the section up again: a panel can replace its whole DOM
+	// in that window (the dashboard swaps cached data for fresh), which would
+	// leave `found` detached and the scroll landing nowhere.
+	await new Promise((resolve) => setTimeout(resolve, PAINT_DELAY_MS));
+	if (superseded()) { return false; }
+	const target = found.isConnected ? found : await waitForElement(find, remaining(), superseded);
+	if (!target || superseded()) { return false; }
+	landOn(target);
+	return settle(target, find, settleMs, remaining, superseded);
+}
+
+/** Clicks the request's tab (after its group) and sub-tab once they exist. False if one never appears. */
+async function openTabs(request: SurfaceRevealRequest, remaining: () => number, superseded: () => boolean): Promise<boolean> {
 	const tab = request.tab;
 	if (tab) {
 		const tabButton = await waitForElement(() => findTabButton(tab), remaining(), superseded);
@@ -186,23 +217,41 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 		if (!subtab || superseded()) { return false; }
 		subtab.click();
 	}
-	const find = targetFinder(request);
-	if (!find) { return true; }
-	const found = await waitForElement(find, remaining(), superseded);
-	if (!found || superseded()) { return false; }
-	revealHiddenAncestors(found);
-	// Let the tab switch paint before scrolling, or the scroll measures the old
-	// layout. Then look the section up again: a panel can replace its whole DOM
-	// in that window (the dashboard swaps cached data for fresh), which would
-	// leave `found` detached and the scroll landing nowhere.
-	await new Promise((resolve) => setTimeout(resolve, PAINT_DELAY_MS));
-	if (superseded()) { return false; }
-	const target = found.isConnected ? found : await waitForElement(find, remaining(), superseded);
-	if (!target || superseded()) { return false; }
+	return true;
+}
+
+/**
+ * Stays with a landed section for `settleMs` before reporting success: a panel
+ * that first renders cached data and then fresh data (the dashboard) replaces the
+ * node just scrolled to. Follow it to the fresh node and land again, so the
+ * request is only acknowledged once the landing has stuck.
+ */
+async function settle(
+	landed: HTMLElement,
+	find: () => HTMLElement | null,
+	settleMs: number,
+	remaining: () => number,
+	superseded: () => boolean,
+): Promise<boolean> {
+	let target = landed;
+	let settledSince = Date.now();
+	while (Date.now() - settledSince < settleMs) {
+		await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+		if (superseded()) { return false; }
+		if (target.isConnected) { continue; }
+		const replacement = await waitForElement(find, remaining(), superseded);
+		if (!replacement || superseded()) { return false; }
+		target = replacement;
+		landOn(target);
+		settledSince = Date.now();
+	}
+	return true;
+}
+
+function landOn(target: HTMLElement): void {
 	revealHiddenAncestors(target);
 	target.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
 	flashSection(target);
-	return true;
 }
 
 /**

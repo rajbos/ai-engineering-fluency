@@ -180,7 +180,7 @@ test('revealSurface: opens the tab\'s group, clicks the tab, then scrolls to the
 	const clicks: string[] = [];
 	window.document.querySelector('.group-tab')!.addEventListener('click', () => clicks.push('group'));
 	window.document.querySelector('.tab-button')!.addEventListener('click', () => clicks.push('tab'));
-	assert.equal(await revealSurface({ command: 'revealSurface', tab: 'tools', anchor: 'section-x' }, 500), true);
+	assert.equal(await revealSurface({ command: 'revealSurface', tab: 'tools', anchor: 'section-x' }, 500, 150), true);
 	assert.deepEqual(clicks, ['group', 'tab']);
 	await sleep(80);
 	assert.deepEqual(scrolled, ['section-x']);
@@ -193,19 +193,19 @@ test('revealSurface: waits for content that renders later', async () => {
 		late.id = 'late';
 		window.document.getElementById('root')!.append(late);
 	}, 150);
-	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'late' }, 2_000), true);
+	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'late' }, 2_000, 150), true);
 });
 
 test('revealSurface: reports failure when the section never appears, so the host keeps the request', async () => {
 	installDom('<div id="root"></div>');
-	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'never' }, 250), false);
-	assert.equal(await revealSurface({ command: 'revealSurface', tab: 'missing', anchor: 'root' }, 250), false);
+	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'never' }, 250, 150), false);
+	assert.equal(await revealSurface({ command: 'revealSurface', tab: 'missing', anchor: 'root' }, 250, 150), false);
 });
 
 test('revealSurface: a newer request supersedes one still waiting', async () => {
 	const { window } = installDom('<div id="here">Here</div>');
-	const first = revealSurface({ command: 'revealSurface', anchor: 'not-yet' }, 2_000);
-	const second = revealSurface({ command: 'revealSurface', anchor: 'here' }, 2_000);
+	const first = revealSurface({ command: 'revealSurface', anchor: 'not-yet' }, 2_000, 150);
+	const second = revealSurface({ command: 'revealSurface', anchor: 'here' }, 2_000, 150);
 	assert.equal(await second, true);
 	const late = window.document.createElement('div');
 	late.id = 'not-yet';
@@ -215,7 +215,7 @@ test('revealSurface: a newer request supersedes one still waiting', async () => 
 
 test('revealSurface: scrolls to the fresh section when the panel replaces its DOM mid-reveal', async () => {
 	const { window, scrolled } = installDom('<div id="root"><div id="section-x" data-gen="cached"></div></div>');
-	const reveal = revealSurface({ command: 'revealSurface', anchor: 'section-x' }, 2_000);
+	const reveal = revealSurface({ command: 'revealSurface', anchor: 'section-x' }, 2_000, 150);
 	// The dashboard swaps cached data for fresh inside the paint delay.
 	const root = window.document.getElementById('root')!;
 	const fresh = window.document.createElement('div');
@@ -236,7 +236,7 @@ test('revealSurface: switches to the tab that controls a hidden section', async 
 		clicked = true;
 		window.document.getElementById('azure-content')!.style.display = '';
 	});
-	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'section-personal-summary' }, 500), true);
+	assert.equal(await revealSurface({ command: 'revealSurface', anchor: 'section-personal-summary' }, 500, 150), true);
 	assert.equal(clicked, true);
 });
 
@@ -265,7 +265,7 @@ test('installSurfaceNavigation: reports ready, then acknowledges a reveal only o
 
 	// A reveal that lands — superseding the one still waiting — is acknowledged once.
 	window.dispatchEvent(new window.MessageEvent('message', { data: { command: 'revealSurface', requestId: 7, anchor: 'present' } }));
-	await sleep(150);
+	await sleep(2_300); // the default settle window must pass before the acknowledgement
 	assert.deepEqual(posted.slice(1), [{ command: 'surfaceRevealHandled', view: 'chart', requestId: 7 }]);
 
 	// The superseded reveal never acknowledges, even once its section appears.
@@ -283,7 +283,7 @@ test('installSurfaceNavigation: reports ready, then acknowledges a reveal only o
 
 test('cancelReveal: a reveal still waiting never scrolls once the user opened the view itself', async () => {
 	const { window, scrolled } = installDom('<div id="root"></div>');
-	const waiting = revealSurface({ command: 'revealSurface', anchor: 'async-section' }, 2_000);
+	const waiting = revealSurface({ command: 'revealSurface', anchor: 'async-section' }, 2_000, 150);
 	cancelReveal();
 	const late = window.document.createElement('div');
 	late.id = 'async-section';
@@ -311,13 +311,13 @@ test('installSurfaceNavigation: a cancelReveal message abandons the waiting reve
 test('revealSurface: a cancelled or superseded reveal stops polling at once instead of running out its budget', async () => {
 	installDom('<div id="root"></div>');
 	const started = Date.now();
-	const cancelled = revealSurface({ command: 'revealSurface', anchor: 'never' }, 10_000);
+	const cancelled = revealSurface({ command: 'revealSurface', anchor: 'never' }, 10_000, 150);
 	await sleep(50);
 	cancelReveal();
 	assert.equal(await cancelled, false);
-	const superseded = revealSurface({ command: 'revealSurface', anchor: 'never-either' }, 10_000);
+	const superseded = revealSurface({ command: 'revealSurface', anchor: 'never-either' }, 10_000, 150);
 	await sleep(50);
-	void revealSurface({ command: 'revealSurface' }, 10_000);
+	void revealSurface({ command: 'revealSurface' }, 10_000, 150);
 	assert.equal(await superseded, false);
 	assert.ok(Date.now() - started < 1_000, 'both waits ended within a poll interval of being abandoned');
 });
@@ -332,4 +332,25 @@ test('preferredScrollBehavior: instant under prefers-reduced-motion, smooth othe
 	assert.equal(preferredScrollBehavior(), 'auto');
 	setReduced(false);
 	assert.equal(preferredScrollBehavior(), 'smooth');
+});
+
+test('revealSurface: follows a section the panel re-renders after landing, and only then reports success', async () => {
+	// The dashboard renders cached data, then replaces its whole root with fresh data.
+	const { window, scrolled } = installDom('<div id="root"><div id="section-x" data-gen="cached"></div></div>');
+	let settled = false;
+	const reveal = revealSurface({ command: 'revealSurface', anchor: 'section-x' }, 5_000, 400).then((landed) => {
+		settled = true;
+		return landed;
+	});
+	await sleep(150); // landed on the cached node
+	assert.deepEqual(scrolled, ['section-x']);
+	const fresh = window.document.createElement('div');
+	fresh.id = 'section-x';
+	fresh.dataset.gen = 'fresh';
+	window.document.getElementById('root')!.replaceChildren(fresh);
+	await sleep(150);
+	assert.equal(settled, false, 'not acknowledged while the landing is still moving');
+	assert.equal(await reveal, true);
+	assert.deepEqual(scrolled, ['section-x', 'section-x'], 'landed again on the fresh node');
+	assert.notEqual(fresh.style.boxShadow, '', 'the fresh node is the one highlighted');
 });
