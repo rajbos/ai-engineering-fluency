@@ -76,6 +76,7 @@ import { registerMessageHandler } from '../shared/messageHandler';
 import { createEfficiencyWebviewReadyNotifier, isValueSignalsPayload } from './valueUpdate';
 import { renderModelMixTable } from './modelMixTable';
 import { buildAttributionTooltip } from './attributionText';
+import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -89,6 +90,7 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
+installSurfaceNavigation(vscode, 'efficiency');
 const notifyEfficiencyWebviewReady = createEfficiencyWebviewReadyNotifier(
 	(message) => vscode.postMessage(message),
 );
