@@ -6299,6 +6299,9 @@ function handleSwitchTab(message: any): void {
 	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
+	// A newer host navigation supersedes a deferred scroll still queued for an older one,
+	// even when this one's own section has not rendered yet.
+	cancelPendingAnchorScroll();
 	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
 	pendingTabAnchorExpiresAt = Date.now() + PENDING_ANCHOR_TTL_MS;
 	// activateUsageTab sets activeTab even when it finds no panel, so a switch that arrives
@@ -6331,6 +6334,8 @@ function scrollToPendingTabAnchor(): void {
 	if (anchor) {
 		pendingTabAnchor = null;
 		lastAnchorScrollTarget = anchor;
+		// Only one deferred scroll may be in flight: a newer target replaces an older one.
+		cancelPendingAnchorScroll();
 		const timer = setTimeout(() => {
 			if (pendingAnchorScrollTimer === timer) { pendingAnchorScrollTimer = null; }
 			anchor.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
@@ -6381,6 +6386,11 @@ function flashAnchorHighlight(element: HTMLElement): void {
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
 	pendingTabAnchor = null;
+	cancelPendingAnchorScroll();
+}
+
+/** Stops a deferred anchor scroll that has not fired yet, if any. */
+function cancelPendingAnchorScroll(): void {
 	if (pendingAnchorScrollTimer !== null) {
 		clearTimeout(pendingAnchorScrollTimer);
 		pendingAnchorScrollTimer = null;

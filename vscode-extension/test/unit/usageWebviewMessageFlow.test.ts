@@ -1711,6 +1711,22 @@ test('a section scroll still in its paint delay is cancelled by navigation and b
 	assert.deepEqual(byHost.scrolledTo, [], 'the host cancel inside the defer stops the section scroll');
 });
 
+test('a second switchTab inside the paint delay replaces the first scroll', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-sessions-summary' });
+	await harness.settleScroll();
+	assert.deepEqual(harness.scrolledTo, ['section-sessions-summary'], 'only the newer deep link may scroll');
+});
+
+test('a newer switchTab whose section is not rendered yet still cancels the older queued scroll', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-not-rendered-yet' });
+	await harness.settleScroll();
+	assert.deepEqual(harness.scrolledTo, []);
+});
+
 test('switchTab still honours a static section anchor', async () => {
 	// switchTab clicks the tab button itself, which runs the clear-on-navigation handler, so the
 	// anchors are assigned after that click. This pins that ordering: assigning before the click
