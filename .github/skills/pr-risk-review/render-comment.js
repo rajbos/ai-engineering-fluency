@@ -43,13 +43,18 @@ const MAX_RECOMMENDATIONS = 8;
 
 // Invisible characters that make text read differently to a human reviewer than
 // to a model — the same classes `.github/workflows/validate-input.sh` rejects on
-// the way in, stripped here on the way out.
+// the way in, stripped here on the way out. Soft hyphen, combining grapheme
+// joiner, the Arabic letter mark, the Mongolian vowel separator, word joiners,
+// invisible operators and the deprecated format controls are included too:
+// each renders as nothing, so each can hide a character between two others.
 const BIDI_AND_INVISIBLE = new RegExp(
-  '[\u202A-\u202E\u2066-\u2069\u200B-\u200F\uFEFF\uFE00-\uFE0F]',
+  '[\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFE00-\uFE0F]',
   'g'
 );
 const UNICODE_TAGS = /[\u{E0000}-\u{E007F}]/gu;
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+const VARIATION_SELECTORS_SUPPLEMENT = /[\u{E0100}-\u{E01EF}]/gu;
+// C0 and C1 controls other than tab, newline and carriage return.
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 
 function fail(message) {
   console.error(`error: ${message}`);
@@ -60,21 +65,38 @@ function fail(message) {
  * Strip everything that could turn model output over an untrusted diff into
  * markup, hidden instructions, or notification spam once posted to a PR:
  * HTML comments (which would also let the model forge our sticky marker),
- * raw HTML tags, invisible/bidi control characters, and @mentions.
+ * raw HTML tags, Markdown links and images, invisible/bidi control characters,
+ * and @mentions.
+ *
+ * Order matters. Invisible and control characters go FIRST: every later step
+ * matches on adjacent characters, so removing a zero-width space after them
+ * would splice `<` + U+200B + `!-- marker -->` back into a live
+ * `<!-- marker -->` (and `<` + U+200B + `img>` into a real tag) after the HTML
+ * steps had already passed it as harmless text.
  */
 function sanitize(value, maxChars) {
   if (typeof value !== 'string') return '';
   let text = value
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<!--/g, '&lt;!--')
-    .replace(/<(\/?)([a-zA-Z][^\s>]*)/g, '&lt;$1$2')
     .replace(BIDI_AND_INVISIBLE, '')
     .replace(UNICODE_TAGS, '')
+    .replace(VARIATION_SELECTORS_SUPPLEMENT, '')
     .replace(CONTROL_CHARS, '')
+    // A space, not nothing, so removing a comment can never join the
+    // characters either side of it into new markup.
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    // Any `<` that could open a tag, comment, declaration or processing
+    // instruction, or an autolink such as `<https://...>`, is escaped.
+    .replace(/<(?=[!?/a-zA-Z])/g, '&lt;')
     // Neutralise mentions and issue cross-references so a review never pings a
     // person or back-links into an unrelated issue.
     .replace(/(^|[^\w`])@([A-Za-z0-9][-A-Za-z0-9]*)/g, '$1`@$2`')
     .replace(/(^|[^\w`])#(\d+)/g, '$1`#$2`')
+    // `[` opens every link, image (`![`), reference definition and footnote,
+    // so encoding it as an entity disables all of them while it still renders
+    // as `[`. An entity rather than `\[`, because cell() doubles backslashes
+    // and would turn `\[` back into a live bracket inside a table. It runs
+    // after the `#123` step, which would otherwise wrap the entity's `#91`.
+    .replace(/\[/g, '&#91;')
     .trim();
   if (text.length > maxChars) text = `${text.slice(0, maxChars - 1).trimEnd()}…`;
   return text;
@@ -350,4 +372,4 @@ function main() {
 
 if (require.main === module) process.exit(main());
 
-module.exports = { sanitize, normalizeLevel };
+module.exports = { sanitize, sanitizeLine, cell, normalizeLevel, loadVerdict, render };

@@ -18,6 +18,13 @@ name: PR Risk Review
 #           comments. Always exits 0: this check is advisory and must never
 #           block a merge.
 #
+# Trust note: the code that judges a PR never comes from that PR. The job
+# checks out the BASE commit and runs the skill's scripts, risk-signals.json,
+# the prompt and the Copilot CLI from there. The PR head is only ever read:
+# `git diff base...head` for the changeset, plus a read-only worktree under
+# pr-risk/head (symlinks checked out as plain files) that the model may open to
+# read changed files. Nothing in it is executed.
+#
 # Trigger note: this is `pull_request`, NOT `pull_request_target`. Fork PRs are
 # therefore skipped by the gate (their token is read-only). That is deliberate —
 # `pull_request_target` would hand write credentials to a job that runs a model
@@ -141,13 +148,36 @@ jobs:
             fi
           } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout PR head
+      # The BASE commit, not the PR head: everything this job executes — the
+      # skill's scripts, risk-signals.json, the prompt, package.json for `npx` —
+      # must come from code that has already been reviewed, or a PR could
+      # rewrite the rules that assess it. Full history so the PR head (on a
+      # branch of this repository; fork PRs never pass the gate) is present
+      # for `git diff base...head`. No persisted credentials: nothing below
+      # needs to fetch, and the model must not find a token in .git/config.
+      - name: Checkout base commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The head commit, not the merge commit, so the diff the model reads is
-          # the diff a reviewer sees on the PR.
-          ref: ${{ steps.pr.outputs.head_sha }}
+          ref: ${{ steps.pr.outputs.base_sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      # The head commit, not the merge commit, so the diff the model reads is
+      # the diff a reviewer sees on the PR. Checked out as data only, into the
+      # git-ignored pr-risk/ directory, so the model can open changed files in
+      # full. core.symlinks=false writes a symlink as a plain file holding its
+      # target, so a PR cannot point the model at a file outside the tree.
+      - name: Check out the PR head as read-only data
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::PR head ${HEAD_SHA} is not in the fetched history (force-pushed since this run started?). A newer run will review the current head."
+            exit 1
+          fi
+          git -c core.symlinks=false -c core.hooksPath=/dev/null \
+            worktree add --detach pr-risk/head "$HEAD_SHA"
 
       # No validate-input.sh step here, deliberately. That script is for PR text
       # that goes on to reach an automated system — the third condition in
@@ -168,10 +198,11 @@ jobs:
       # If you ever do feed the PR title or body to the model, add the validation
       # step back at the same time.
 
-      # This job checks out the PR head, which can be an old branch that predates
-      # the root .nvmrc — the same case #1868 fixed for copilot-setup-steps.yml.
-      # Resolve the version with a fallback so setup-node cannot fail the review
-      # on a stale branch. Keep the fallback in sync with .nvmrc.
+      # This job checks out the PR's base commit, which can be an old release
+      # branch that predates the root .nvmrc — the same case #1868 fixed for
+      # copilot-setup-steps.yml. Resolve the version with a fallback so
+      # setup-node cannot fail the review on such a base. Keep the fallback in
+      # sync with .nvmrc.
       - name: Resolve Node.js version
         id: node-version
         run: |
@@ -187,18 +218,35 @@ jobs:
         with:
           node-version: ${{ steps.node-version.outputs.version }}
 
+      # The model below may write files anywhere in the workspace, so the code
+      # and data that run AFTER it — the renderer and the changeset facts it
+      # reads — are staged outside the workspace first, where it cannot reach
+      # them. Copied from the base checkout, never from the PR head.
+      - name: Stage the trusted review scripts
+        run: |
+          set -euo pipefail
+          TRUSTED="${RUNNER_TEMP}/pr-risk-review"
+          mkdir -p "$TRUSTED"
+          cp .github/skills/pr-risk-review/collect-changeset.js \
+             .github/skills/pr-risk-review/render-comment.js \
+             .github/skills/pr-risk-review/risk-signals.json \
+             "$TRUSTED/"
+
       # Step 1 of the skill. Deterministic and dependency-free, so the facts and
-      # the mechanical baseline exist even if the model never runs.
+      # the mechanical baseline exist even if the model never runs. It reads
+      # the head only through git objects; it never executes anything there.
       - name: Collect the changeset
         env:
           BASE_SHA: ${{ steps.pr.outputs.base_sha }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           set -euo pipefail
-          node .github/skills/pr-risk-review/collect-changeset.js \
+          TRUSTED="${RUNNER_TEMP}/pr-risk-review"
+          node "$TRUSTED/collect-changeset.js" \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
             --out-dir pr-risk
+          cp pr-risk/changeset.json "$TRUSTED/changeset.json"
           cat pr-risk/changeset.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check the Copilot CLI token
@@ -223,10 +271,15 @@ jobs:
       # must degrade to the mechanical baseline, not fail a contributor's PR.
       #
       # The CLI runs deliberately narrowly for a job that reads an untrusted
-      # diff: no GitHub MCP server (so it cannot act on the PR), no `gh`, `curl`,
-      # `wget`, or `git push`, no URL access, file access confined to the
-      # workspace (no --allow-all-paths), and the token stripped from every
-      # subprocess environment and redacted from the transcript.
+      # diff. Tools are an ALLOWLIST, not a denylist: file writes (for the
+      # verdict) and a handful of read-only shell commands. Nothing that can
+      # run code or reach the network — no `node`, `python`, `npx`, `sh`,
+      # `git` (whose `--output=` can write anywhere), `sed` (`e`) or `find`
+      # (`-exec`). The old denylist stays as a second layer. No GitHub MCP
+      # server (so it cannot act on the PR), no URL access, file access
+      # confined to the workspace (no --allow-all-paths), and the token
+      # stripped from every subprocess environment and redacted from the
+      # transcript.
       - name: Run the risk review with the Copilot CLI
         id: copilot
         if: steps.auth.outputs.auth_ok == 'true'
@@ -269,7 +322,8 @@ jobs:
             echo ""
             echo "## Context Paths"
             echo ""
-            echo "- Repository root: ${GITHUB_WORKSPACE}"
+            echo "- Repository root (the PR's BASE commit, not the PR): ${GITHUB_WORKSPACE}"
+            echo "- The PR's head commit, to read changed files in full (data only; never run anything from it): ${GITHUB_WORKSPACE}/pr-risk/head"
             echo "- Skill instructions: ${GITHUB_WORKSPACE}/.github/skills/pr-risk-review/SKILL.md"
             echo "- Changeset facts: ${GITHUB_WORKSPACE}/pr-risk/changeset.md"
             echo "- Changeset diff: ${GITHUB_WORKSPACE}/pr-risk/changeset.diff"
@@ -288,7 +342,13 @@ jobs:
             --silent \
             --no-color \
             --no-ask-user \
-            --allow-all-tools \
+            --allow-tool 'write' \
+            --allow-tool 'shell(cat:*)' \
+            --allow-tool 'shell(head:*)' \
+            --allow-tool 'shell(tail:*)' \
+            --allow-tool 'shell(wc:*)' \
+            --allow-tool 'shell(ls:*)' \
+            --allow-tool 'shell(grep:*)' \
             --add-dir "${GITHUB_WORKSPACE}" \
             --disable-builtin-mcps \
             --secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN \
@@ -302,15 +362,17 @@ jobs:
       # Step 3 of the skill: validate the verdict, sanitise it, render the
       # comment. --fallback makes a missing or malformed verdict degrade to the
       # mechanical baseline (with a visible warning in the comment) rather than
-      # leaving the PR unlabelled.
+      # leaving the PR unlabelled. Runs the staged renderer and changeset, not
+      # the workspace copies the model could have rewritten.
       - name: Render the risk comment
         id: render
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          node .github/skills/pr-risk-review/render-comment.js \
-            --changeset pr-risk/changeset.json \
+          TRUSTED="${RUNNER_TEMP}/pr-risk-review"
+          node "$TRUSTED/render-comment.js" \
+            --changeset "$TRUSTED/changeset.json" \
             --verdict pr-risk/verdict.json \
             --out pr-risk/comment.md \
             --marker "${COMMENT_MARKER}" \

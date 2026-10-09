@@ -1,0 +1,202 @@
+'use strict';
+
+// Regression tests for the pr-risk-review scripts (issue #2307).
+// Run with: node --test .github/skills/pr-risk-review/tests/
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync, spawnSync } = require('child_process');
+
+const { sanitize, render } = require('../render-comment.js');
+const {
+  parseNumstatZ,
+  parseNameStatusZ,
+  classify,
+  codeSpan,
+} = require('../collect-changeset.js');
+
+const SKILL_DIR = path.resolve(__dirname, '..');
+const COLLECT = path.join(SKILL_DIR, 'collect-changeset.js');
+const CONFIG = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, 'risk-signals.json'), 'utf8'));
+const ZWSP = '​';
+
+// ── render-comment.js sanitize() ────────────────────────────────────────────
+
+test('sanitize: zero-width space cannot splice a forged sticky marker back together', () => {
+  const out = sanitize(`<${ZWSP}!-- pr-risk-review -->`, 2400);
+  assert.ok(!out.includes('<!--'), out);
+  assert.ok(!out.includes('<'), out);
+  assert.ok(!out.includes(ZWSP), out);
+});
+
+test('sanitize: zero-width space cannot splice a raw HTML tag back together', () => {
+  const out = sanitize(`<${ZWSP}img src=x>`, 2400);
+  assert.ok(!/<img/i.test(out), out);
+  assert.ok(!out.includes('<'), out);
+});
+
+test('sanitize: other invisible characters are removed before the HTML steps', () => {
+  for (const ch of ['‌', '‍', '⁠', '﻿', '­', '‮', '\u{E0041}', '\u0007']) {
+    const out = sanitize(`<${ch}!-- pr-risk-review --> <${ch}script>`, 2400);
+    assert.ok(!out.includes('<'), `U+${ch.codePointAt(0).toString(16)}: ${out}`);
+  }
+});
+
+test('sanitize: a mention hidden behind a zero-width space is still neutralised', () => {
+  assert.equal(sanitize(`ping @${ZWSP}octocat`, 2400), 'ping `@octocat`');
+});
+
+test('sanitize: a comment removed from between characters cannot form new markup', () => {
+  const out = sanitize('<<!-- x -->!-- pr-risk-review --> <<!---->img src=x>', 2400);
+  assert.ok(!out.includes('<!--'), out);
+  assert.ok(!/<img/i.test(out), out);
+});
+
+test('sanitize: closing tags, declarations and autolinks are escaped', () => {
+  const out = sanitize('</details> <!DOCTYPE html> <?xml?> <https://example.com>', 2400);
+  assert.ok(!out.includes('<'), out);
+});
+
+test('sanitize: markdown images and links are neutralised', () => {
+  const out = sanitize(
+    'See ![x](https://example.com/p.png) and [text](https://example.com) and [r][1]\n[1]: https://example.com',
+    2400
+  );
+  assert.ok(!out.includes('['), out);
+  assert.ok(out.startsWith('See !&#91;x](https://example.com/p.png) and &#91;text]'), out);
+});
+
+test('sanitize: plain comparisons and code survive', () => {
+  assert.equal(sanitize('a < b and x <= 3', 2400), 'a < b and x <= 3');
+});
+
+// ── render-comment.js render() ──────────────────────────────────────────────
+
+function changesetFixture() {
+  return {
+    stats: { files: 1, insertions: 1, deletions: 0, generatedFiles: 0, binaryFiles: 0 },
+    baseline: { level: 'low' },
+    signals: [],
+  };
+}
+
+test('render: only the renderer emits the sticky marker, even for both bypass inputs', () => {
+  const verdict = {
+    risk: 'low',
+    summary: sanitize(`<${ZWSP}!-- pr-risk-review --> <${ZWSP}img src=x>`, 2400),
+    factors: [
+      {
+        level: 'low',
+        title: sanitize(`<${ZWSP}!-- pr-risk-review -->`, 120),
+        detail: sanitize(`![x](https://example.com/p.png) <${ZWSP}img src=x>`, 400),
+      },
+    ],
+    recommendations: [sanitize('[click](https://example.com)', 400)],
+    confidence: 'high',
+    source: 'agent',
+  };
+  const comment = render(verdict, changesetFixture(), { marker: 'pr-risk-review', runUrl: '' });
+  assert.equal(comment.split('<!-- pr-risk-review -->').length - 1, 1);
+  assert.ok(!/<img/i.test(comment), comment);
+  for (const live of ['![', '[x]', '[click]']) assert.ok(!comment.includes(live), comment);
+});
+
+// ── collect-changeset.js parsing ────────────────────────────────────────────
+
+test('parseNumstatZ: renames come back as two real paths', () => {
+  const output = '3\t1\t\0a/f.txt\0.github/workflows/f.txt\0' + '2\t0\tsrc/x.ts\0' + '-\t-\tlogo.png\0';
+  assert.deepEqual(parseNumstatZ(output), [
+    { rawIns: '3', rawDel: '1', filePath: '.github/workflows/f.txt', oldPath: 'a/f.txt' },
+    { rawIns: '2', rawDel: '0', filePath: 'src/x.ts', oldPath: null },
+    { rawIns: '-', rawDel: '-', filePath: 'logo.png', oldPath: null },
+  ]);
+});
+
+test('parseNameStatusZ: rename status is keyed on the new path', () => {
+  const map = parseNameStatusZ('R100\0a/f.txt\0.github/workflows/f.txt\0M\0src/x.ts\0');
+  assert.deepEqual(map.get('.github/workflows/f.txt'), { status: 'R', oldPath: 'a/f.txt' });
+  assert.deepEqual(map.get('src/x.ts'), { status: 'M', oldPath: null });
+});
+
+function fileFixture(filePath, oldPath = null) {
+  return {
+    path: filePath,
+    oldPath,
+    status: oldPath ? 'R' : 'M',
+    insertions: 1,
+    deletions: 0,
+    binary: false,
+    categories: [],
+    generated: false,
+  };
+}
+
+test('classify: a file moved out of a sensitive directory into docs keeps the higher level', () => {
+  const [plain] = [fileFixture('.github/workflows/ci.yml')];
+  classify([plain], CONFIG);
+  const moved = fileFixture('docs/ci.yml', '.github/workflows/ci.yml');
+  classify([moved], CONFIG);
+  assert.equal(moved.effectiveLevel, plain.effectiveLevel);
+  assert.notEqual(moved.effectiveLevel, 'low');
+  assert.equal(moved.lowRisk, false);
+});
+
+// ── collect-changeset.js end to end against a scratch repository ────────────
+
+function gitIn(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+test('collect-changeset: a rename into .github/workflows is classified at its real path', (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-risk-test-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  gitIn(repo, ['init', '-q']);
+  gitIn(repo, ['config', 'user.email', 'test@example.com']);
+  gitIn(repo, ['config', 'user.name', 'test']);
+  gitIn(repo, ['config', 'commit.gpgsign', 'false']);
+  fs.mkdirSync(path.join(repo, 'a'));
+  fs.writeFileSync(path.join(repo, 'a', 'f.yml'), 'name: x\non: push\njobs: {}\n'.repeat(5));
+  gitIn(repo, ['add', '-A']);
+  gitIn(repo, ['commit', '-q', '-m', 'base']);
+  const base = gitIn(repo, ['rev-parse', 'HEAD']).trim();
+  fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
+  gitIn(repo, ['mv', 'a/f.yml', '.github/workflows/f.yml']);
+  gitIn(repo, ['commit', '-q', '-m', 'move']);
+
+  const outDir = path.join(repo, 'out');
+  const result = spawnSync(process.execPath, [COLLECT, '--base', base, '--head', 'HEAD', '--out-dir', outDir], {
+    cwd: repo,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const changeset = JSON.parse(fs.readFileSync(path.join(outDir, 'changeset.json'), 'utf8'));
+  assert.equal(changeset.files.length, 1);
+  const [file] = changeset.files;
+  assert.equal(file.path, '.github/workflows/f.yml');
+  assert.equal(file.oldPath, 'a/f.yml');
+  assert.equal(file.status, 'R');
+  assert.equal(file.effectiveLevel, 'high');
+});
+
+test('collect-changeset: --base/--head values starting with "-" are rejected', () => {
+  for (const flag of ['--base', '--head']) {
+    const result = spawnSync(process.execPath, [COLLECT, flag, '--output=/tmp/x'], { encoding: 'utf8' });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /not an option/);
+  }
+});
+
+// ── collect-changeset.js codeSpan() ─────────────────────────────────────────
+
+test('codeSpan: backticks, pipes, newlines and bidi in file names cannot break the table', () => {
+  const span = codeSpan('a`b|c\nd‮e.txt');
+  assert.ok(!span.includes('\n'));
+  assert.ok(!span.includes('‮'));
+  assert.ok(span.includes('\\u{202E}'));
+  assert.ok(span.includes('\\|'));
+  assert.ok(!/(^|[^\\])\|/.test(span), span);
+  assert.ok(span.startsWith('``') && span.endsWith('``'), span);
+});

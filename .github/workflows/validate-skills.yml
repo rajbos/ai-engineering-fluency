@@ -117,3 +117,9 @@ jobs:
 
       - name: Validate skill security classification
         run: node scripts/validate-skill-security.js
+
+      # The pr-risk-review scripts turn model output over an untrusted diff
+      # into a PR comment; these are the regression tests for their sanitizer
+      # and rename handling (#2307).
+      - name: Test the pr-risk-review scripts
+        run: node --test .github/skills/pr-risk-review/tests/
