@@ -156,6 +156,7 @@ test('exportOpenCodeDbSessions exports only recent, valid, non-empty sessions up
   const dbBefore = fs.readFileSync(dbPath);
 
   const ctx = newDiscoveryContext(Date.now() - 30 * DAY, 2);
+  t.after(() => removeTempDirs(ctx));
   const files = [];
   exportOpenCodeDbSessions(dbPath, ctx, files);
 
@@ -184,6 +185,7 @@ test('exportOpenCodeDbSessions writes nothing when no session is in the window',
   const dbPath = path.join(dir, 'opencode.db');
   makeOpenCodeDb(dbPath, [{ id: 'ses_old', ageDays: 90, messages: 3 }]);
   const ctx = newDiscoveryContext(Date.now() - 7 * DAY, 5);
+  t.after(() => removeTempDirs(ctx));
   const files = [];
   exportOpenCodeDbSessions(dbPath, ctx, files);
   assert.deepEqual(files, []);
@@ -224,4 +226,61 @@ test('end-to-end run removes the OpenCode temp export and reports counts', { ski
 
   // No raw conversation copy is left behind.
   assert.deepEqual(fs.readdirSync(tmp).filter((n) => n.startsWith('oc-dbses-')), []);
+});
+
+test('exportOpenCodeDbSessions ranks DB sessions together with legacy JSON files', { skip: !sqlite }, (t) => {
+  const dir = makeTempDir(t, 'vss-test-db-');
+  const dbPath = path.join(dir, 'opencode.db');
+  makeOpenCodeDb(dbPath, [
+    { id: 'ses_db_recent', ageDays: 5, messages: 1 },
+    { id: 'ses_dup', ageDays: 3, messages: 1 },
+  ]);
+  const legacy = [];
+  for (const [name, ageDays] of [['ses_json1', 1], ['ses_json2', 2], ['ses_dup', 0.5]]) {
+    const f = path.join(dir, `${name}.json`);
+    fs.writeFileSync(f, '{"id":"x"}');
+    const when = new Date(Date.now() - ageDays * DAY);
+    fs.utimesSync(f, when, when);
+    legacy.push(f);
+  }
+
+  // max 2: the two newer legacy files fill the window -> no DB copy written.
+  // ses_dup exists in both stores: the DB copy wins, the legacy file is dropped.
+  const ctx = newDiscoveryContext(Date.now() - 30 * DAY, 2);
+  t.after(() => removeTempDirs(ctx));
+  const files = [...legacy];
+  exportOpenCodeDbSessions(dbPath, ctx, files);
+  assert.deepEqual(files.map((f) => path.basename(f)).sort(), ['ses_json1.json', 'ses_json2.json']);
+  assert.deepEqual(ctx.tempDirs, []);
+  assert.equal(ctx.unexported.opencode.found, 2);
+  assert.equal(ctx.unexported.opencode.recent, 2);
+
+  // max 3: the deduplicated DB session (3 days old) now ranks in; the 5-day-old one does not.
+  const ctx3 = newDiscoveryContext(Date.now() - 30 * DAY, 3);
+  t.after(() => removeTempDirs(ctx3));
+  const files3 = [...legacy];
+  exportOpenCodeDbSessions(dbPath, ctx3, files3);
+  assert.deepEqual(files3.map((f) => path.basename(f)).sort(), ['ses_dup.jsonl', 'ses_json1.json', 'ses_json2.json']);
+  assert.equal(ctx3.unexported.opencode.found, 1);
+});
+
+test('recent sessions with only unsafe ids are INCONCLUSIVE, not NO_RECENT_FILES', { skip: !sqlite }, (t) => {
+  const root = makeTempDir(t, 'vss-test-e2e-');
+  const home = path.join(root, 'home');
+  const tmp = path.join(root, 'tmp');
+  const dataDir = path.join(home, '.local', 'share');
+  fs.mkdirSync(path.join(dataDir, 'opencode'), { recursive: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  makeOpenCodeDb(path.join(dataDir, 'opencode', 'opencode.db'), [
+    { id: '../../escape', ageDays: 1, messages: 1 },
+  ]);
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_DATA_HOME: dataDir, TMPDIR: tmp, TEMP: tmp, TMP: tmp };
+  const res = spawnSync(process.execPath, [SCRIPT, '--platform', 'opencode', '--json'], { env, encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  const oc = JSON.parse(res.stdout).platforms.opencode;
+  assert.equal(oc.status, 'INCONCLUSIVE');
+  assert.equal(oc.filesRecent, 1);
+  assert.equal(oc.filesAnalyzed, 0);
+  assert.ok(oc.notes.some((n) => /failed validation/.test(n)), oc.notes.join('; '));
+  assert.deepEqual(fs.readdirSync(tmp), []);
 });

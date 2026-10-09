@@ -48,11 +48,15 @@ The source of truth for supported platforms is
 own parsers, so a generic JSON walker can't read them): `crush` (SQLite),
 `visual-studio` (MessagePack), `continue`, `mistral-vibe`, `claude-desktop`.
 
-OpenCode's `opencode.db` is opened read-only. Only the sessions that fall inside
-the `--days` / `--max` window are exported, as temporary JSONL files in a fresh
-`oc-dbses-*` directory under the OS temp dir, and that directory is removed when
-the run ends (in a `finally`, so also on errors). Older sessions are counted, not
-copied. The report labels these entries `…/opencode.db [session <id>]`.
+OpenCode's `opencode.db` is opened read-only. Only the DB sessions that land in
+the platform's `--days` / `--max` window (ranked together with legacy JSON
+sessions; a session in both stores is analyzed once, from the DB) are exported,
+as temporary JSONL files in a fresh `oc-dbses-*` directory under the OS temp dir.
+That directory is removed when the run ends — in a `finally`, so also on errors,
+and before exiting on Ctrl-C / SIGTERM / SIGHUP. Other sessions are counted, not
+copied. The report labels exported entries `…/opencode.db [session <id>]`. Recent
+sessions whose id fails validation are skipped and noted; if nothing recent is
+left to analyze, the platform reports `INCONCLUSIVE`.
 They are listed in the report under "Not validated" so coverage is never
 silently overstated. If you add a new file-based adapter, add a discovery
 function + a `schema-baselines.json` entry here too.
@@ -122,8 +126,11 @@ node .github/skills/validate-session-schemas/validate-session-schemas.js --inclu
 Field-path notation: `a.b` nested, `arr[]` array items, `arr[].c` a field inside
 array items, `a.{key}` any key of a dictionary-like object. Object keys that are
 not shaped like a field name (paths, URLs, UUIDs, hex/numeric ids, keys with
-dots, colons or spaces) collapse to `{key}`, so identifiers from the logs never
-reach the report or `schema-baselines.json`.
+dots, colons or spaces) collapse to `{key}`, so those identifiers stay out of the
+report and `schema-baselines.json`. This is a heuristic, not a guarantee: keys
+that look like plain names — such as tool names or model ids used as dictionary
+keys — are kept and do appear in field paths. Review new fields before running
+`--update-baseline`.
 
 ## Acting on results
 

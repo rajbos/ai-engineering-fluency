@@ -248,7 +248,7 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
  *                   what will actually be analyzed.
  *   tempDirs      — temp directories to remove when the run ends (finally).
  *   unexported    — per-platform stats for sessions that exist but were not
- *                   materialized as files: { found, recent, newestMs }.
+ *                   materialized as files: { found, recent, unsafeRecent, newestMs }.
  *   displayPaths  — temp file -> stable label for the report, since the temp
  *                   file is gone by the time the report is read.
  */
@@ -262,32 +262,46 @@ function removeTempDirs(ctx) {
   }
 }
 
+/** Session id of a legacy OpenCode JSON file (`ses_<id>.json` -> `ses_<id>`). */
+function legacySessionId(filePath) { return path.basename(filePath, '.json'); }
+
 /**
- * Export the most recent OpenCode DB sessions (inside ctx.cutoff, at most
- * ctx.max) as temp JSONL files so the framework can analyse their schema.
- * Sessions outside the window are only counted, never written to disk.
+ * Export OpenCode DB sessions as temp JSONL files so the framework can analyse
+ * their schema — but only the ones that will actually be analyzed: the DB
+ * sessions that land in the platform-wide top `ctx.max` inside `ctx.cutoff`,
+ * ranked together with the legacy JSON files already in `files`. Everything
+ * else is only counted, never written to disk.
+ *
+ * A session present in both stores is analyzed once, from the DB (the current
+ * store): its legacy JSON file is dropped from `files`. Mutates `files`.
  */
 function exportOpenCodeDbSessions(dbPath, ctx, files) {
   const { DatabaseSync } = require('node:sqlite');
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const hasMessages = 'EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id)';
-    const totals = db.prepare(
-      `SELECT COUNT(*) AS n, MAX(time_updated) AS newest FROM session s WHERE ${hasMessages}`
-    ).get();
-    const recentCount = db.prepare(
-      `SELECT COUNT(*) AS n FROM session s WHERE time_updated >= ? AND ${hasMessages}`
-    ).get(ctx.cutoff).n;
-    const candidates = db.prepare(
-      `SELECT id, time_updated FROM session s WHERE time_updated >= ? AND ${hasMessages} ORDER BY time_updated DESC`
-    ).all(ctx.cutoff);
+    const rows = db.prepare(
+      'SELECT id, time_updated FROM session s ' +
+      'WHERE EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id) ' +
+      'ORDER BY time_updated DESC'
+    ).all();
 
-    const selected = [];
-    for (const session of candidates) {
-      if (selected.length >= ctx.max) { break; }
-      if (typeof session.id !== 'string' || !SAFE_SESSION_ID.test(session.id)) { continue; }
-      selected.push(session);
+    const dbIds = new Set(rows.map((r) => String(r.id)));
+    for (let i = files.length - 1; i >= 0; i--) {
+      if (dbIds.has(legacySessionId(files[i]))) { files.splice(i, 1); }
     }
+
+    const isRecent = (r) => Number(r.time_updated) >= ctx.cutoff;
+    const isSafe = (r) => typeof r.id === 'string' && SAFE_SESSION_ID.test(r.id);
+
+    // Rank exportable DB sessions together with recent legacy files.
+    const ranked = [
+      ...rows.filter((r) => isRecent(r) && isSafe(r)).map((r) => ({ t: Number(r.time_updated), row: r })),
+      ...files
+        .map((f) => statOrNull(f))
+        .filter((st) => st && st.size > 0 && st.mtimeMs >= ctx.cutoff)
+        .map((st) => ({ t: st.mtimeMs, row: null })),
+    ].sort((x, y) => y.t - x.t).slice(0, ctx.max);
+    const selected = ranked.filter((x) => x.row).map((x) => x.row);
 
     if (selected.length > 0) {
       // Fresh, collision-resistant temp directory (rather than predictably-named
@@ -312,11 +326,13 @@ function exportOpenCodeDbSessions(dbPath, ctx, files) {
       }
     }
 
-    const newestMs = Number(totals.newest);
+    const newestMs = rows.length ? Number(rows[0].time_updated) : NaN;
     ctx.unexported.opencode = {
-      found: Number(totals.n) - selected.length,
-      recent: Number(recentCount) - selected.length,
-      newestMs: Number.isFinite(newestMs) && totals.n > 0 ? newestMs : null,
+      found: rows.length - selected.length,
+      recent: rows.filter(isRecent).length - selected.length,
+      // Recent sessions that cannot be analyzed because their id failed validation.
+      unsafeRecent: rows.filter((r) => isRecent(r) && !isSafe(r)).length,
+      newestMs: Number.isFinite(newestMs) ? newestMs : null,
     };
   } finally {
     db.close();
@@ -603,7 +619,7 @@ function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, fla
     const allFiles = PLATFORM_DISCOVERY[id](ctx);
     // Sessions a discoverer counted but did not materialize as files (outside
     // the window, or beyond --max) still count as found / recent.
-    const extra = ctx.unexported[id] || { found: 0, recent: 0, newestMs: null };
+    const extra = ctx.unexported[id] || { found: 0, recent: 0, unsafeRecent: 0, newestMs: null };
     const withStat = allFiles
       .map((f) => ({ f, st: statOrNull(f) }))
       .filter((x) => x.st && x.st.size > 0);
@@ -628,6 +644,16 @@ function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, fla
 
     if (entry.filesFound === 0) {
       entry.status = STATUS.NO_FILES;
+      report.platforms[id] = entry;
+      continue;
+    }
+    if (extra.unsafeRecent > 0) {
+      entry.notes.push(`${extra.unsafeRecent} recent session(s) skipped: session id failed validation.`);
+    }
+    if (recent.length === 0 && entry.filesRecent > 0) {
+      // Recent sessions exist but none could be materialized (e.g. every
+      // recent id failed validation) — not the same as "nothing recent".
+      entry.status = STATUS.INCONCLUSIVE;
       report.platforms[id] = entry;
       continue;
     }
@@ -686,6 +712,8 @@ function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, fla
   }
 }
 
+const EXIT_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
 function run(opts) {
   const baselinePath = path.join(__dirname, 'schema-baselines.json');
   let baseline;
@@ -703,6 +731,15 @@ function run(opts) {
   const report = { generatedAt: new Date().toISOString(), options: opts, platforms: {}, notValidated: NOT_VALIDATED };
   const flags = { anyDrift: false, anyNewFields: false, anyParseFailure: false };
   const ctx = newDiscoveryContext(cutoff, opts.max);
+  // Without a listener, SIGINT/SIGTERM/SIGHUP terminate Node immediately and
+  // skip `finally`. With one, the signal is queued until this synchronous run
+  // returns, so the cleanup below always happens first; the handler then exits
+  // with the conventional 128+n code.
+  const onSignal = (signal) => {
+    removeTempDirs(ctx);
+    process.exit(128 + (os.constants.signals[signal] || 0));
+  };
+  for (const sig of EXIT_SIGNALS) { process.on(sig, onSignal); }
   try {
     validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, flags);
   } finally {

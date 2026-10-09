@@ -42,12 +42,15 @@ None. Environment variables read: `APPDATA`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` 
 - `--update-baseline` rewrites `schema-baselines.json` in this skill directory: it merges
   the observed field paths into `knownFields` and sets `lastUpdated`. Contracts are not
   touched. Only field paths are persisted, no values.
-- **OpenCode export to temp.** When `opencode.db` has sessions inside the `--days` window,
-  `exportOpenCodeDbSessions` creates a `mkdtemp` directory `oc-dbses-*` under the OS temp
-  dir and writes one JSONL file per selected session (at most `--max`) containing the raw
-  `message.data` of its messages. Sessions outside the window are counted, not written.
-  `run` removes the directory in a `finally` once analysis ends, including on errors. The
-  report refers to these sessions as `<dbPath> [session <id>]`, not by temp path.
+- **OpenCode export to temp.** `exportOpenCodeDbSessions` ranks the DB sessions inside the
+  `--days` window together with the recent legacy JSON session files and exports only the
+  DB sessions that land in the platform's top `--max`. A session present in both stores is
+  analyzed once, from the DB. For those, it creates a `mkdtemp` directory `oc-dbses-*` under
+  the OS temp dir and writes one JSONL file per session containing the raw `message.data`
+  of its messages. All other sessions are counted, not written. `run` removes the
+  directory in a `finally` once analysis ends, including on errors, and on SIGINT, SIGTERM
+  or SIGHUP (see Mitigations). The report refers to these sessions as
+  `<dbPath> [session <id>]`, not by temp path.
 - Stdout: the report. Example values appear only with `--include-examples` (strings
   redacted, then cut to 40 characters; numbers and booleans verbatim; 2 per field).
 
@@ -64,7 +67,15 @@ None. SQLite is accessed in-process.
 - The temp directory comes from `mkdtemp`, so another local user cannot pre-create or
   symlink a predictable path. Files inside it are written with `flag: 'wx'` (fail if they
   exist), named from validated session ids only, and the whole directory is removed in
-  `run`'s `finally`. Only sessions inside `--days`/`--max` are exported.
+  `run`'s `finally`. Only DB sessions that will actually be analyzed (combined
+  `--days`/`--max` window) are exported.
+- `run` registers SIGINT/SIGTERM/SIGHUP listeners. Without a listener Node terminates on
+  these signals immediately and skips `finally`; with one, the signal is queued until the
+  synchronous run returns (after the `finally` cleanup), and the handler then removes any
+  remaining temp directory and exits with `128 + n`.
+- Recent sessions whose id fails validation are skipped and noted in the report; a
+  platform whose recent sessions are all unanalyzable reports `INCONCLUSIVE`, not
+  `NO_RECENT_FILES`.
 - `opencode.db` is opened with `readOnly: true`; only `SELECT` statements are run.
 - `normalizeKey` collapses object keys that do not look like field names (path
   separators, dots, colons, whitespace or other punctuation, UUID/hex/long-id shapes,
@@ -74,9 +85,10 @@ None. SQLite is accessed in-process.
 - `--include-examples` values pass through `redactExample`: GitHub/OpenAI/Slack/AWS
   token shapes, JWTs, `Bearer`/`Basic` credentials and long base64/hex runs become
   `[redacted]`, e-mail addresses `[email]`, and the home directory `~`.
-- Tests in `validate-session-schemas.test.js` cover the window selection, id validation,
-  read-only open, temp cleanup (end to end), key collapsing and redaction, using
-  synthetic fixtures only.
+- Tests in `validate-session-schemas.test.js` cover the combined window selection and
+  deduplication, id validation and the unsafe-id `INCONCLUSIVE` path, read-only open,
+  temp cleanup (end to end), key collapsing and redaction, using synthetic fixtures only.
+  `validate-skills.yml` runs them whenever this skill changes.
 - The baseline file path is fixed next to the script; `--update-baseline` never edits
   contracts.
 
@@ -85,8 +97,10 @@ None. SQLite is accessed in-process.
 - Keys shaped like plain identifiers are kept, so dictionaries keyed by tool name or model
   id (for example `copilot_readFile`, `gpt-6-luna`) still appear in field paths. These are
   product identifiers, not user data, but they do reach the report and baseline.
-- The temp export still exists on disk while the run is in progress, and a hard kill
-  (`SIGKILL`, power loss) skips the `finally`.
+- The temp export still exists on disk while the run is in progress. Termination that
+  cannot be intercepted — `SIGKILL`, Windows `taskkill /F` or closing the console window,
+  a crash of the Node process itself, power loss — skips the cleanup and leaves it behind.
+  Signal handling is not covered by the tests.
 - `--include-examples` redaction is pattern-based: prompt text, file paths outside the home
   directory and secrets in unrecognised formats still print (truncated to 40 characters).
   The flag remains opt-in and documented.
