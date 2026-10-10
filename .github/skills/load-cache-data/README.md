@@ -42,14 +42,13 @@ The extension id is `robbos.ai-engineering-fluency` (current) or `robbos.copilot
 
 ## Important Note
 
-The extension stores its cache in VS Code's internal globalState (SQLite database `state.vscdb`), which external scripts cannot read directly. It also mirrors that cache to the shared snapshot file (`cache_prod.snapshot.json` / `cache_dev.snapshot.json`) in its globalStorage directory, and that file is what this script reads. No manual export is needed once the extension has run. A legacy `session-cache.json` written by tests or by hand is still accepted as a fallback.
+The extension persists its cache only to the snapshot file (`cache_prod.snapshot.json` / `cache_dev.snapshot.json`) in its globalStorage directory, and that file is what this script reads. The cache is not in VS Code's `globalState`: on activation the extension removes any leftover cache keys from it. No manual export is needed once the extension has run. A legacy `session-cache.json` written by tests or by hand is still accepted as a fallback.
 
-Inside the extension, the same data is available through its API:
+Inside the extension, the same data is the in-memory map held by `CacheManager`:
 
 ```typescript
-// In extension.ts or any file with access to ExtensionContext
-const cacheData = context.globalState.get<Record<string, SessionFileCache>>('sessionFileCache');
-const entries = Object.entries(cacheData || {});
+// CacheManager.cache is a Map<string, SessionFileCache>
+const entries = Array.from(cacheManager.cache.entries());
 
 // Sort by most recent
 entries.sort((a, b) => (b[1].mtime || 0) - (a[1].mtime || 0));

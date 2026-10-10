@@ -247,3 +247,92 @@ test('refuses a symlink at a candidate cache path', { skip: process.platform ===
     assert.equal(result.status, 1);
     assert.equal(result.stdout.includes('999'), false);
 });
+
+// ---------------------------------------------------------------------------
+// Redaction contract pinned against the cache entry types in src/types.ts.
+// Every field must be classified here; adding a field to SessionFileCache or
+// SessionUsageAnalysis without deciding whether it is safe to print fails
+// these tests instead of silently reaching the default output.
+// ---------------------------------------------------------------------------
+
+const typesPath = path.join(__dirname, '..', '..', '..', 'src', 'types.ts');
+
+function interfaceFields(name) {
+    const source = fs.readFileSync(typesPath, 'utf8').replace(/\r\n/g, '\n');
+    const start = source.indexOf(`export interface ${name} {`);
+    assert.notEqual(start, -1, `interface ${name} not found in src/types.ts`);
+    const end = source.indexOf('\n}', start);
+    const body = source.slice(start, end);
+    const fields = [...body.matchAll(/^ {2}(\w+)\??:/gm)].map(match => match[1]);
+    assert.ok(fields.length > 5, `parsed only ${fields.length} fields from ${name}; has src/types.ts changed format?`);
+    return fields;
+}
+
+// Printed by default (the script's SAFE_CACHE_ENTRY_FIELDS).
+const TOP_LEVEL_PRINTED = [
+    'tokens', 'interactions', 'modelUsage', 'mtime', 'size', 'detailsOnly',
+    'usageAnalysis', 'taskCategory', 'taskCategoryShares', 'firstInteraction',
+    'lastInteraction', 'repositoryResolved', 'thinkingTokens', 'actualTokens',
+    'cacheReadTokens', 'modelTurns', 'debugLogInputTokens', 'debugLogOutputTokens',
+    'debugLogChecked', 'subAgentCalls', 'copilotExactCostDollars', 'truncationCount',
+    'messagesRemovedByTruncation', 'maxRequestInputTokens', 'contextTier',
+    'dailyRollups', 'linesAdded', 'linesRemoved'
+];
+// Omitted by default: session text, local paths, remote URLs, basename-keyed maps.
+const TOP_LEVEL_OMITTED = ['title', 'repository', 'workspaceFolderPath', 'languageUsage'];
+
+// usageAnalysis fields printed unchanged (counts and tool/model/server names).
+const USAGE_ANALYSIS_PRINTED = [
+    'toolCalls', 'modeUsage', 'autonomyUsage', 'mcpTools', 'skillCalls', 'cacheBreakage',
+    'taskClassification', 'modelSwitching', 'thinkingEffort', 'applyUsage', 'sessionDuration',
+    'conversationPatterns', 'agentTypes', 'modelEfficiency', 'correctionCounts'
+];
+// usageAnalysis fields printed with a path/text sub-field removed.
+const USAGE_ANALYSIS_FILTERED = ['contextReferences', 'editScope', 'correctionMoments'];
+// usageAnalysis fields omitted entirely.
+const USAGE_ANALYSIS_OMITTED = ['firstUserPrompt'];
+
+test('every SessionFileCache field is classified as printed or omitted', () => {
+    const classified = new Set([...TOP_LEVEL_PRINTED, ...TOP_LEVEL_OMITTED]);
+    const unclassified = interfaceFields('SessionFileCache').filter(field => !classified.has(field));
+    assert.deepEqual(unclassified, [], 'classify these new SessionFileCache fields in load-cache-data.js and this test');
+});
+
+test('every SessionUsageAnalysis field is classified', () => {
+    const classified = new Set([...USAGE_ANALYSIS_PRINTED, ...USAGE_ANALYSIS_FILTERED, ...USAGE_ANALYSIS_OMITTED]);
+    const unclassified = interfaceFields('SessionUsageAnalysis').filter(field => !classified.has(field));
+    assert.deepEqual(unclassified, [], 'classify these new SessionUsageAnalysis fields in load-cache-data.js and this test');
+});
+
+test('default output prints exactly the classified fields of a fully populated entry', (t) => {
+    const fixture = createFixture(t);
+    const entry = Object.fromEntries(interfaceFields('SessionFileCache').map(field => [field, `top-${field}-sentinel`]));
+    entry.usageAnalysis = Object.fromEntries(interfaceFields('SessionUsageAnalysis').map(field => [field, `ua-${field}-sentinel`]));
+    entry.usageAnalysis.contextReferences = { file: 1, byPath: { 'ua-byPath-sentinel': 1 } };
+    entry.usageAnalysis.editScope = { singleFileEdits: 1, languageUsage: { 'ua-editScope-languageUsage-sentinel': {} } };
+    entry.usageAnalysis.correctionMoments = [{ type: 'user-correction', snippet: 'ua-snippet-sentinel', file: 'ua-file-sentinel' }];
+    fs.writeFileSync(path.join(fixture.storage, 'cache_prod.snapshot.json'), JSON.stringify({
+        schemaVersion: 1, cacheVersion: 1, cacheId: 'prod', generatedAt: 1, entryCount: 1,
+        entries: { [path.join(fixture.home, 'session-path-sentinel.jsonl')]: entry }
+    }));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const printed = JSON.parse(result.stdout).entries['session-1'];
+
+    const expectedTopLevel = interfaceFields('SessionFileCache').filter(field => TOP_LEVEL_PRINTED.includes(field));
+    assert.deepEqual(Object.keys(printed).sort(), expectedTopLevel.sort());
+    assert.deepEqual(Object.keys(printed.usageAnalysis).sort(),
+        interfaceFields('SessionUsageAnalysis').filter(field => !USAGE_ANALYSIS_OMITTED.includes(field)).sort());
+    assert.deepEqual(printed.usageAnalysis.contextReferences, { file: 1 });
+    assert.deepEqual(printed.usageAnalysis.editScope, { singleFileEdits: 1 });
+    assert.deepEqual(printed.usageAnalysis.correctionMoments, [{ type: 'user-correction' }]);
+
+    const leaked = [
+        ...TOP_LEVEL_OMITTED.map(field => `top-${field}-sentinel`),
+        ...USAGE_ANALYSIS_OMITTED.map(field => `ua-${field}-sentinel`),
+        'ua-byPath-sentinel', 'ua-editScope-languageUsage-sentinel', 'ua-snippet-sentinel',
+        'ua-file-sentinel', 'session-path-sentinel', 'cache_prod.snapshot.json'
+    ].filter(sentinel => result.stdout.includes(sentinel));
+    assert.deepEqual(leaked, []);
+});

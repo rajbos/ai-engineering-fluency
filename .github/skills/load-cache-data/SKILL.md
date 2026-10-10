@@ -11,7 +11,7 @@ This skill helps you access and inspect the AI Engineering Fluency's local sessi
 
 ## Overview
 
-The extension maintains a local cache of session file statistics in VS Code's `globalState`. This cache contains:
+The extension keeps a cache of session file statistics in memory and persists it to a snapshot file in its globalStorage directory (`cache_prod.snapshot.json`, or `cache_dev.snapshot.json` in the Extension Development Host). This cache contains:
 - Token counts (total and per-model)
 - Interaction counts
 - Model usage breakdowns
@@ -29,7 +29,7 @@ Use this skill when you need to:
 
 ## Cache Structure
 
-The cache is stored in VS Code's global state under the key `'sessionFileCache'`. Each cache entry is keyed by the absolute file path and contains:
+The snapshot file is an envelope (`{ schemaVersion, cacheVersion, cacheId, generatedAt, entryCount, entries }`) whose `entries` map is keyed by the absolute session file path. Each entry contains (abridged; see `SessionFileCache` in `src/types.ts`):
 
 ```typescript
 interface SessionFileCache {
@@ -58,10 +58,10 @@ interface SessionUsageAnalysis {
 
 ## Location
 
-**Cache Storage**: `VS Code globalState → 'sessionFileCache'`
-- Accessed via: `context.globalState.get<Record<string, SessionFileCache>>('sessionFileCache')`
-- Persisted automatically by VS Code
-- Lives in VS Code's internal database (`state.vscdb`)
+**Cache Storage**: `<globalStorageUri>/cache_<prod|dev>.snapshot.json`
+- In memory: `CacheManager.cache` (a `Map<string, SessionFileCache>`)
+- On disk: written by `CacheManager.trySaveCacheToStorage()`, loaded by `CacheManager.loadCacheFromStorage()`
+- Not stored in VS Code's `globalState`: on activation the extension removes any leftover cache keys from it (a one-time migration)
 
 **Implementation**: `src/extension.ts` (see `CacheManager` in `src/cacheManager.ts` below for the actual persistence logic)
 
@@ -69,12 +69,11 @@ interface SessionUsageAnalysis {
 
 ### From Within the Extension
 
-The cache can be accessed through the extension's context at runtime:
+Inside the extension the cache is the in-memory map held by `CacheManager`:
 
 ```typescript
-// Load cache from global state
-const cacheData = context.globalState.get<Record<string, SessionFileCache>>('sessionFileCache');
-const cacheEntries = Object.entries(cacheData || {});
+// CacheManager.cache is a Map<string, SessionFileCache>
+const cacheEntries = Array.from(cacheManager.cache.entries());
 
 // Get last 10 entries (sorted by modification time)
 const last10 = cacheEntries
@@ -131,7 +130,7 @@ The script reads the first of these files it finds:
 
 **Where the data comes from:**
 
-The extension keeps its cache in VS Code's globalState and mirrors it to the shared snapshot file above for cross-window sharing, so a normal installation has a readable cache once the extension has run. A legacy `session-cache.json` (a bare `{ [sessionFile]: entry }` map) is still read as a fallback, for exports written by tests or by hand.
+The snapshot file is the cache's only persistent store: `CacheManager` loads it at startup and rewrites it on save (it is also how windows share parsed results). So a normal installation has a readable cache once the extension has run. A legacy `session-cache.json` (a bare `{ [sessionFile]: entry }` map) is still read as a fallback, for exports written by tests or by hand.
 
 **Exit Codes:**
 - `0`: Cache file found and displayed successfully
@@ -218,8 +217,7 @@ for (const filePath of filesToCheck) {
 ### Example 1: Inspecting Recent Sessions
 ```typescript
 // Get cache data
-const cache = context.globalState.get('sessionFileCache');
-const entries = Object.entries(cache || {});
+const entries = Array.from(cacheManager.cache.entries());
 
 // Sort by most recent
 entries.sort((a, b) => (b[1].mtime || 0) - (a[1].mtime || 0));
@@ -235,10 +233,9 @@ entries.slice(0, 10).forEach(([path, data], i) => {
 
 ### Example 2: Analyzing Model Usage in Cache
 ```typescript
-const cache = context.globalState.get('sessionFileCache');
 const modelTotals = {};
 
-for (const [path, data] of Object.entries(cache || {})) {
+for (const [path, data] of cacheManager.cache) {
   for (const [model, usage] of Object.entries(data.modelUsage)) {
     if (!modelTotals[model]) {
       modelTotals[model] = { input: 0, output: 0 };
@@ -256,8 +253,7 @@ for (const [model, totals] of Object.entries(modelTotals)) {
 
 ### Example 3: Cache Statistics
 ```typescript
-const cache = context.globalState.get('sessionFileCache');
-const entries = Object.entries(cache || {});
+const entries = Array.from(cacheManager.cache.entries());
 
 const stats = {
   totalEntries: entries.length,
@@ -307,7 +303,7 @@ The cache is tightly integrated with the extension's token tracking:
 **Symptoms**: Extension shows no cached data or logs "No cached session files found"
 **Solutions**:
 1. Check that session files exist via `getCopilotSessionFiles()`
-2. Verify global state is accessible
+2. Check that the extension's globalStorage directory holds `cache_prod.snapshot.json` (or `cache_dev.snapshot.json`)
 3. Look for errors in Output channel (AI Engineering Fluency)
 
 ### Cache Out of Sync
@@ -347,7 +343,7 @@ The cache is tightly integrated with the extension's token tracking:
 
 ## Notes
 
-- Cache is stored in VS Code's internal SQLite database (`state.vscdb`)
+- Cache is persisted to `cache_<prod|dev>.snapshot.json` in the extension's globalStorage directory, not to VS Code's `globalState`
 - Cache entries are validated by file modification time
 - Maximum of 1000 entries maintained (FIFO eviction)
 - Cache persists between VS Code sessions

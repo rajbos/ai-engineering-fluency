@@ -68,16 +68,21 @@ None.
   (`readCacheFile`), so it cannot be swapped between check and read. On POSIX the open uses
   `O_NOFOLLOW`, so a symlink at a candidate path is refused.
 - A file that fails to parse is skipped and the search moves on.
+- `load-cache-data.test.js` pins these rules and runs in CI (`validate-skills.yml`, which
+  also triggers on `src/types.ts` changes). It parses `SessionFileCache` and
+  `SessionUsageAnalysis` from `src/types.ts` and fails when a field has not been classified
+  as printed, filtered or omitted. It also checks that a fully populated entry prints exactly
+  the printed fields and none of the omitted sentinels. Separate tests cover the cache-source
+  rules: which files are read and in what order, envelope unwrapping, temp/cwd files ignored,
+  and symlinks refused (POSIX only).
 
 ## Known gaps
 
-- The filter inside `usageAnalysis` is a denylist of known text/path fields, not an
-  allowlist. A free-text or path field added to `SessionUsageAnalysis` later would be printed
-  by default until it is added here. Map keys such as MCP server, tool and skill names are
-  printed as-is.
+- The classification test reads field names, not their contents. A field that is already
+  classified as printed and later starts carrying free text or paths (for example a new
+  sub-field inside `toolCalls`) is not caught. Map keys such as MCP server, tool and skill
+  names are printed as-is.
 - With `--include-sensitive`, session titles (which can echo a prompt), first user prompts,
   correction snippets and local paths are printed unfiltered by design.
 - On Windows `O_NOFOLLOW` does not exist, so a symlink at a candidate path is followed to its
   target (creating one there needs write access to the user's profile directory).
-- `load-cache-data.test.js` is not run by any CI workflow; it runs only when invoked
-  manually with `node --test`.

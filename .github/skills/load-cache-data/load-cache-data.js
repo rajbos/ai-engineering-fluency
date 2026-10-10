@@ -5,9 +5,9 @@
  * This script loads and displays the AI Engineering Fluency's local cache data.
  * The cache stores pre-computed session file statistics to avoid re-processing unchanged files.
  * 
- * The extension's cache is stored in VS Code's globalState, which is persisted in a SQLite
- * database (state.vscdb). The extension also mirrors it to a shared snapshot file in its
- * globalStorage directory (cache_<prod|dev>.snapshot.json), which this script reads.
+ * The extension persists its cache to a snapshot file in its globalStorage directory
+ * (cache_<prod|dev>.snapshot.json), which this script reads. The cache is not kept in
+ * VS Code's globalState.
  * 
  * Usage:
  *   node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json] [--include-sensitive]
@@ -60,8 +60,9 @@ This script loads and displays the GitHub Copilot Token Tracker's local cache da
 The cache contains pre-computed statistics for session files.
 
 CACHE STRUCTURE:
-  The cache is stored in VS Code's globalState under the key 'sessionFileCache'.
-  Each entry contains:
+  The cache is persisted to cache_<prod|dev>.snapshot.json in the extension's
+  globalStorage directory, as an envelope whose 'entries' map is keyed by session
+  file path. Each entry contains:
   - tokens: total token count
   - interactions: number of interactions
   - modelUsage: per-model token breakdown
@@ -101,9 +102,8 @@ EXAMPLES:
 FOR DEVELOPERS:
   To access the cache programmatically within the extension:
   
-  // Get cache data from global state
-  const cacheData = context.globalState.get('sessionFileCache');
-  const cacheEntries = Object.entries(cacheData || {});
+  // CacheManager.cache is a Map<string, SessionFileCache>
+  const cacheEntries = Array.from(cacheManager.cache.entries());
   
   // Get last 10 entries (sorted by modification time)
   const last10 = cacheEntries
