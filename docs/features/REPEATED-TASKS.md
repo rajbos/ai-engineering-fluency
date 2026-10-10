@@ -20,7 +20,8 @@ task is the strongest signal that a workflow has stabilized enough to be capture
    `repoDisplayName()`) to clustering input and clusters across **all** of them (cross-repository on
    purpose — tasks like "create the PR" repeat across repos). Clusters with at least
    `MIN_CLUSTER_SIZE = 2` sessions are returned largest first, with `minClusterSize` and
-   `sessionsScanned`, as `UsageAnalysisStats.repeatedTasks`; the report is undefined when nothing
+   `sessionsScanned` (sessions whose first prompt survives normalization, i.e. excluding the
+   prompts listed under "What is excluded"), as `UsageAnalysisStats.repeatedTasks`; the report is undefined when nothing
    repeats. The VS Code extension and the CLI both call this one function.
 4. **Surface**: the webview renders one card per cluster — repetition count, representative (most
    recent) prompt, shared keywords, and an expandable session list. The

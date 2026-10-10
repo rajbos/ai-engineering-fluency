@@ -705,9 +705,9 @@ export interface SessionActivityLookup {
 	readonly file: string;
 	meta(): Promise<SessionMeta | null>;
 	/**
-	 * The session's own last activity: the adapter's cheap `getLastActivity()`, or —
-	 * for DB-backed (virtual) sessions whose adapter lacks it — the metadata's
-	 * `lastInteraction`. Null when unknown; the file mtime is then the signal.
+	 * The session's own last activity, for DB-backed (virtual) sessions only: the
+	 * adapter's cheap `getLastActivity()`, else the metadata's `lastInteraction`.
+	 * Null for regular files and when unknown; the file mtime is then the signal.
 	 */
 	lastActivity(): Promise<Date | null>;
 }
@@ -719,10 +719,10 @@ export function createSessionActivityLookup(file: string, sources: SessionActivi
 		file,
 		meta: () => (meta ??= sources.getMeta(file)),
 		lastActivity: () => (lastActivity ??= (async () => {
+			// Regular files: the file mtime is the session's own; no adapter lookup needed.
+			if (sources.getBackingPath(file) === file) { return null; }
 			const cheap = await sources.getLastActivity(file);
 			if (cheap) { return cheap; }
-			// Regular files: the file mtime is the session's own; no metadata read needed.
-			if (sources.getBackingPath(file) === file) { return null; }
 			const fromMeta = (await lookup.meta())?.lastInteraction;
 			const parsed = fromMeta ? new Date(fromMeta) : null;
 			return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;

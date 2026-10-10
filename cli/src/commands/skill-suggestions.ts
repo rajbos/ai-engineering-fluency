@@ -71,7 +71,7 @@ export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefi
 		return lines.join('\n');
 	}
 	lines.push(
-		`${report.clusters.length} repeated task(s) in ${report.sessionsScanned} session(s) with a first prompt`
+		`${report.clusters.length} repeated task(s) in ${report.sessionsScanned} session(s) with a usable first prompt`
 		+ ` (a task needs at least ${report.minClusterSize} similar sessions).`,
 		'',
 	);

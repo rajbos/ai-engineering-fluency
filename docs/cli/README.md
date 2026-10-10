@@ -327,7 +327,7 @@ Sessions active in the current or the previous calendar month (at least the last
 Skill Suggestions — repeated tasks
 ==================================================
 
-2 repeated task(s) in 184 session(s) with a first prompt (a task needs at least 2 similar sessions).
+2 repeated task(s) in 184 session(s) with a usable first prompt (a task needs at least 2 similar sessions).
 
 1. "run the tests and fix the failures"
    Sessions:     4
@@ -337,7 +337,7 @@ Skill Suggestions — repeated tasks
 ...
 ```
 
-`--json` output has the shape `{ "promptsIncluded": false, "repeatedTasks": { "minClusterSize", "sessionsScanned", "clusters": [...] } }`; `repeatedTasks` is `null` when nothing repeats. Each cluster carries `sessionCount`, `repositories` and `sessions` (`file`, `lastInteraction`, `repository`). Prompts are free text you wrote, so `representativePrompt`, the prompt-derived `sharedKeywords` and each session's `title` are only included with `--include-prompts`. Repositories are filled in only for editors whose session files record one.
+`--json` output has the shape `{ "promptsIncluded": false, "repeatedTasks": { "minClusterSize", "sessionsScanned", "clusters": [...] } }`; `repeatedTasks` is `null` when nothing repeats. `sessionsScanned` counts sessions whose first prompt could be clustered — slash commands, very short prompts and prompts made only of filler words are not counted. Each cluster carries `sessionCount`, `repositories` and `sessions` (`file`, `lastInteraction`, `repository`). Prompts are free text you wrote, so `representativePrompt`, the prompt-derived `sharedKeywords` and each session's `title` are only included with `--include-prompts`. Repositories are filled in only for editors whose session files record one.
 
 ---
 

@@ -119,11 +119,11 @@ test('session activity: the cheap lookup wins and metadata is not read for it', 
 	assert.deepEqual(calls, { lastActivity: 1, meta: 0 });
 });
 
-test('session activity: regular files rely on their mtime, without a metadata read', async () => {
-	const { sources, calls } = fakeSources({ lastActivity: null, meta: META, virtual: false });
+test('session activity: regular files rely on their mtime, without any adapter lookup', async () => {
+	const { sources, calls } = fakeSources({ lastActivity: new Date('2026-10-01T00:00:00Z'), meta: META, virtual: false });
 	const lookup = createSessionActivityLookup('/sessions/a.jsonl', sources);
 	assert.equal(await lookup.lastActivity(), null);
-	assert.deepEqual(calls, { lastActivity: 1, meta: 0 });
+	assert.deepEqual(calls, { lastActivity: 0, meta: 0 });
 });
 
 const REPORT: RepeatedTaskReport = {
