@@ -13,19 +13,21 @@ the repository `AGENTS.md`).
   `vscode-extension/dist/webview`, and compares the view names it extracts with regexes.
 - It prints a report (or JSON with `--json`) to stdout and config errors to stderr.
 - No network access.
-- CI runs it: `.github/workflows/ci.yml` calls it on `pull_request` and `push` as an
-  informational step (`|| true`), so its input there is the pull request's checkout.
+- CI runs it in two workflows, both as an informational step (`|| true`) on
+  `pull_request` and `push`, so its input there is the pull request's checkout:
+  `.github/workflows/ci.yml`, and `.github/workflows/desktop-build.yml` ("Report host
+  view sync"). `desktop/package.json` also exposes it locally as `npm run check:views`.
 
 ## Credentials used and where they come from
 
-None. No environment variables, tokens or keys are read. The CI workflow that runs it has
-`permissions: contents: read`.
+None. No environment variables, tokens or keys are read. Both CI workflows that run it
+have `permissions: contents: read`.
 
 ## Untrusted inputs parsed
 
 - The text of the five files above and the directory listing of `dist/webview`. In a
-  local run this is the operator's own checkout. In `ci.yml` it is the content of the pull
-  request, including pull requests from forks.
+  local run this is the operator's own checkout. In `ci.yml` and `desktop-build.yml` it is
+  the content of the pull request, including pull requests from forks.
 - The files are only matched with regexes (lines 88, 122, 139-155, 172-184). Nothing read from them
   is evaluated, required or used to build a path.
 
@@ -52,10 +54,10 @@ None. The script does not use `child_process`.
 
 Recorded, not fixed here.
 
-- In `ci.yml` the script itself is taken from the pull request's checkout, so a pull
-  request can change the script that runs. That job already builds and tests the pull
-  request's code with read-only permissions, so this adds no access beyond what the job
-  has.
+- In `ci.yml` and `desktop-build.yml` the script itself is taken from the pull request's
+  checkout, so a pull request can change the script that runs. Both jobs already build
+  and test the pull request's code with read-only permissions, so this adds no access
+  beyond what those jobs have.
 - The regexes run over pull-request-controlled text with no size or time limit.
 - The `ConfigError` message includes the underlying `fs` error text (line 76), which is
   printed to the log.
