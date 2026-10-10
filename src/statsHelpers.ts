@@ -821,15 +821,28 @@ export interface DailyStatsSessionContribution {
  * This is the daily aggregation every non-extension host must use, so the Chart view gets the
  * same repository / language / task-category / lines-of-code data everywhere (#2316).
  */
+/**
+ * The days a session was active on — keys of `dailyFractions` with a positive share, oldest
+ * first, as `[dayKey, fraction]`. Its last entry is the session's last active day, where
+ * session-level signals (lines of code, efficiency counters) are attributed. Choosing that day
+ * from the stats map instead could land on a day another session created but this one had no
+ * share of.
+ */
+export function activeSessionDays(dailyFractions: Record<string, number>): Array<[string, number]> {
+	return Object.keys(dailyFractions)
+		.filter(k => !isUnsafeObjectKey(k))
+		.map((k): [string, number] => [k, Number(dailyFractions[k]) || 0])
+		.filter(([, fraction]) => fraction > 0)
+		.sort(([a], [b]) => a.localeCompare(b));
+}
+
 export function addSessionToDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, session: DailyStatsSessionContribution): void {
 	const repository = session.repository || 'Unknown';
-	const dayKeys = Object.keys(session.dailyFractions).filter(k => !isUnsafeObjectKey(k)).sort();
+	const activeDays = activeSessionDays(session.dailyFractions);
 	// Same per-day interaction split as the extension's fraction-based rollups
 	// (computeRollupsFromFractions in vscode-extension/src/analysis/sessionFileAnalyzer.ts).
 	const totalInteractions = Math.max(1, session.interactions);
-	for (const dayKey of dayKeys) {
-		const fraction = Number(session.dailyFractions[dayKey]) || 0;
-		if (fraction <= 0) { continue; }
+	for (const [dayKey, fraction] of activeDays) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
 		addToDailyEntry(
 			entry,
@@ -842,7 +855,7 @@ export function addSessionToDailyStats(dailyStatsMap: Map<string, DailyTokenStat
 			session.taskCategoryShares,
 		);
 	}
-	const lastDay = [...dayKeys].reverse().find(k => dailyStatsMap.has(k));
+	const lastDay = activeDays.at(-1)?.[0];
 	if (lastDay) { attributeLocToDay(dailyStatsMap.get(lastDay)!, session, session.editorType, repository); }
 }
 

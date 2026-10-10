@@ -1797,3 +1797,17 @@ test('sessionLocFromUsageAnalysis keeps lines of code only when lines were added
 		{ linesAdded: 3, linesRemoved: 0, languageUsage: { py: { linesAdded: 3, linesRemoved: 0 } } },
 	);
 });
+
+test('addSessionToDailyStats lands LOC on the session\'s own last active day, not one another session created', () => {
+	const map = new Map<string, DailyTokenStats>();
+	// Another session is active on a later day...
+	addSessionToDailyStats(map, { editorType: 'VS Code', tokens: 10, interactions: 1, modelUsage: {}, dailyFractions: { '2026-05-03': 1 } });
+	// ...which this session lists with a zero share.
+	addSessionToDailyStats(map, {
+		editorType: 'VS Code', tokens: 100, interactions: 1, modelUsage: {},
+		dailyFractions: { '2026-05-01': 1, '2026-05-03': 0 },
+		linesAdded: 9, linesRemoved: 1,
+	});
+	assert.equal(map.get('2026-05-01')!.linesAdded, 9);
+	assert.equal(map.get('2026-05-03')!.linesAdded, undefined, 'a day this session had no share of must not get its LOC');
+});

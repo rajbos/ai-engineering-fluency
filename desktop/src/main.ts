@@ -273,7 +273,7 @@ body {
 // ---------------------------------------------------------------------------
 
 // Computations currently running, by name. These walk the whole session history,
-// so a second caller (opening Chart while startup is still pre-warming it, or
+// so a second caller (opening Usage Analysis while startup is still pre-warming it, or
 // reloading a view) must join the run in progress instead of starting another.
 const inFlight = new Map<string, Promise<unknown>>();
 
@@ -1345,17 +1345,21 @@ app.whenReady().then(async () => {
     tray = createTray();
 
     // Warm the caches in the background, showing the loading page meanwhile.
-    // Detailed stats power Details/Chart/Environmental; usage stats power Usage
+    // Detailed stats power Details/Environmental; usage stats power Usage
     // Analysis and Fluency Score. Both are expensive (tens of seconds over large
     // histories) and run synchronously, so pre-warm BOTH at startup — otherwise
     // the first open of Usage Analysis / Fluency Score freezes the UI mid-click
     // and looks like the panel never loads.
+    // The Chart/Efficiency walk is deliberately NOT pre-warmed: it analyzes every
+    // historical session (usage analysis + repository lookup), which on a large
+    // history runs for minutes on this main process. Unattended, after Details is
+    // already showing, that would freeze the visible window; on demand it runs
+    // behind the loading screen showPanel() puts up first.
     getStats().then(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.loadURL(`app://panel/${currentPanel}`);
         }
-        // Continue warming the chart and usage data so those panels open instantly too.
-        return getChartPayload().then(() => getUsageStats());
+        return getUsageStats();
     }).catch(() => { /* surfaced per-panel via the error page */ });
 
     startUpdateChecks({

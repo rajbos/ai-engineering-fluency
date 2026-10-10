@@ -23,7 +23,7 @@
  * can be unit-tested with mocked data and reused by the CLI and the webview.
  */
 import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage, SessionFileCache, SessionUsageAnalysis } from './types';
-import { addModelUsage, scaleModelUsage } from './statsHelpers';
+import { activeSessionDays, addModelUsage, scaleModelUsage } from './statsHelpers';
 import { calculateEstimatedCost } from './tokenEstimation';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 
@@ -690,13 +690,13 @@ export function addSessionEfficiencyToDailyStats(
 ): void {
 	const modelEfficiency = session.usageAnalysis?.modelEfficiency;
 	if (!modelEfficiency && Object.keys(session.modelUsage).length === 0) { return; }
-	const dayKeys = Object.keys(session.dailyFractions).filter(k => dailyStatsMap.has(k)).sort();
-	for (const dayKey of dayKeys) {
-		const fraction = Number(session.dailyFractions[dayKey]) || 0;
-		if (fraction <= 0) { continue; }
+	// Only this session's own active days: one created by another session must not receive
+	// this session's counters (see activeSessionDays).
+	const activeDays = activeSessionDays(session.dailyFractions).filter(([k]) => dailyStatsMap.has(k));
+	for (const [dayKey, fraction] of activeDays) {
 		accumulateDayAndEditorModelTokens(dailyStatsMap.get(dayKey)!, session.editorType, scaleModelUsage(session.modelUsage, fraction), pricing, modelEfficiency);
 	}
-	const lastDay = dayKeys[dayKeys.length - 1];
+	const lastDay = activeDays.at(-1)?.[0];
 	if (lastDay) {
 		accumulateDayAndEditorModelCounters(dailyStatsMap.get(lastDay)!, session.editorType, buildSessionEfficiencyAttribution(session));
 	}

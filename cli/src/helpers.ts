@@ -20,7 +20,7 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { DailyTokenStats, DetailedStats, ModelUsage, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
-import { preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
+import { activeSessionDays, preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
 import { resolveSessionRepository } from '../../src/sessionRepository';
 import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
@@ -971,7 +971,7 @@ function efficiencyInputsFromSessions(sessions: Array<SessionData | null | undef
 	for (const data of sessions) {
 		if (!data || data.interactions === 0) { continue; }
 		// The session's last active day, as the extension derives it from its daily rollups.
-		const dayKey = Object.keys(data.dailyFractions).sort().pop() ?? toLocalDayKey(data.lastModified);
+		const dayKey = activeSessionDays(data.dailyFractions).at(-1)?.[0] ?? toLocalDayKey(data.lastModified);
 		if (dayKey < cutoffKey) { continue; }
 		inputs.push(toEfficiencySessionInput(data, dayKey, data.editorSource));
 	}

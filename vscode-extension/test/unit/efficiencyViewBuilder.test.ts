@@ -58,3 +58,19 @@ test('buildSessionEfficiencyAttribution keeps deletion-only LOC from editScope',
 	assert.equal(attribution.linesRemoved, 7);
 	assert.equal(attribution.linesAdded, 0);
 });
+
+test('addSessionEfficiencyToDailyStats puts counters on the session\'s own last active day', () => {
+	const map = new Map<string, DailyTokenStats>();
+	const other = { editorType: 'VS Code', tokens: 10, interactions: 1, modelUsage: { 'gpt-4o': { inputTokens: 10, outputTokens: 0, sessions: 0 } }, dailyFractions: { '2026-05-03': 1 } };
+	addSessionToDailyStats(map, other);
+	const session = {
+		editorType: 'VS Code', tokens: 100, interactions: 2,
+		modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 0, sessions: 0 } },
+		dailyFractions: { '2026-05-01': 1, '2026-05-03': 0 },
+		usageAnalysis: { modelEfficiency: { 'gpt-4o': counters() } },
+	};
+	addSessionToDailyStats(map, session);
+	addSessionEfficiencyToDailyStats(map, session, {});
+	assert.equal(map.get('2026-05-01')!.modelEfficiency?.['gpt-4o'].editTurns, 2);
+	assert.equal(map.get('2026-05-03')!.modelEfficiency?.['gpt-4o']?.editTurns ?? 0, 0, 'a day this session had no share of must not get its counters');
+});
