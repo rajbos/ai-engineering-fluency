@@ -400,7 +400,7 @@ function computeBaseline(signals, size, files) {
 // (`a\|b` -> `a\\|b`). A visible escape has neither problem, and escaping both
 // in one pass means no step ever adds a backslash that a later step re-reads.
 const ESCAPE_IN_NAMES =
-  /[\\|\u0000-\u001F\u007F-\u009F­͏؜᠎​-‏‪-‮⁠-⁤⁦-⁯﻿︀-️]|[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+  /[\\|\u0000-\u001F\u007F-\u009F\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFE00-\uFE0F]|[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 /**
  * Render an author-controlled file name as an inline code span that is safe

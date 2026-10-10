@@ -53,7 +53,14 @@ const BIDI_AND_INVISIBLE = new RegExp(
 );
 const UNICODE_TAGS = /[\u{E0000}-\u{E007F}]/gu;
 const VARIATION_SELECTORS_SUPPLEMENT = /[\u{E0100}-\u{E01EF}]/gu;
-// C0 and C1 controls other than tab, newline and carriage return.
+// Every line ending Markdown or a browser may honour is folded to `\n` before
+// anything else, because sanitizeLine() and cell() only collapse `\n`: a bare
+// `\r` (which CommonMark treats as a line ending) would otherwise survive both
+// and let a factor or recommendation break out of its table row or list item.
+// U+2028/U+2029 are folded too; U+0085 (NEL) goes with the C1 controls below.
+const LINE_ENDINGS = /\r\n?|[\u2028\u2029]/g;
+// C0 and C1 controls other than tab and newline (carriage returns are already
+// folded into newlines by LINE_ENDINGS).
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 
 function fail(message) {
@@ -77,6 +84,7 @@ function fail(message) {
 function sanitize(value, maxChars) {
   if (typeof value !== 'string') return '';
   let text = value
+    .replace(LINE_ENDINGS, '\n')
     .replace(BIDI_AND_INVISIBLE, '')
     .replace(UNICODE_TAGS, '')
     .replace(VARIATION_SELECTORS_SUPPLEMENT, '')

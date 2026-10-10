@@ -10,7 +10,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
-const { sanitize, render } = require('../render-comment.js');
+const { sanitize, sanitizeLine, cell, render } = require('../render-comment.js');
 const {
   parseNumstatZ,
   parseNameStatusZ,
@@ -23,7 +23,43 @@ const COLLECT = path.join(SKILL_DIR, 'collect-changeset.js');
 const CONFIG = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, 'risk-signals.json'), 'utf8'));
 const ZWSP = '\u200B';
 
-// ── render-comment.js sanitize() ────────────────────────────────────────────
+// ── the skill's own sources ─────────────────────────────────────────────────
+
+// Code points that render as nothing or reorder text. Checked numerically so
+// this test cannot itself be defeated by the characters it looks for.
+function isHidden(cp) {
+  return (
+    (cp < 0x20 && cp !== 0x0a && cp !== 0x09) ||
+    (cp >= 0x7f && cp <= 0x9f) ||
+    [0xad, 0x34f, 0x61c, 0x180e, 0xfeff].includes(cp) ||
+    (cp >= 0x200b && cp <= 0x200f) ||
+    (cp >= 0x2028 && cp <= 0x202e) ||
+    (cp >= 0x2060 && cp <= 0x206f) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) ||
+    cp >= 0xe0000
+  );
+}
+
+test('sources: no literal invisible, bidi or control characters (use escapes)', () => {
+  const files = ['render-comment.js', 'collect-changeset.js', 'SKILL.md', 'SECURITY.md', 'tests/pr-risk-review.test.js'];
+  for (const name of files) {
+    const text = fs.readFileSync(path.join(SKILL_DIR, name), 'utf8');
+    const found = [];
+    let line = 1;
+    let previous = 0;
+    for (const ch of text) {
+      const cp = ch.codePointAt(0);
+      // U+FE0F right after a symbol is emoji presentation (the existing ⚠️).
+      const emojiPresentation = cp === 0xfe0f && previous >= 0x2000;
+      if (ch === '\n') line += 1;
+      else if (isHidden(cp) && !emojiPresentation) found.push(`line ${line}: U+${cp.toString(16)}`);
+      previous = cp;
+    }
+    assert.deepEqual(found, [], `${name} contains literal hidden characters`);
+  }
+});
+
+// ── render-comment.js sanitize()────────────────────────────────────────────
 
 test('sanitize: zero-width space cannot splice a forged sticky marker back together', () => {
   const out = sanitize(`<${ZWSP}!-- pr-risk-review -->`, 2400);
@@ -67,6 +103,18 @@ test('sanitize: markdown images and links are neutralised', () => {
   );
   assert.ok(!out.includes('['), out);
   assert.ok(out.startsWith('See !&#91;x](https://example.com/p.png) and &#91;text]'), out);
+});
+
+test('sanitize: carriage returns and Unicode line separators are folded to newlines', () => {
+  assert.equal(sanitize('a\rb\r\nc\u2028d\u2029e\u0085f', 2400), 'a\nb\nc\nd\nef');
+});
+
+test('sanitizeLine and cell: a bare carriage return cannot break a table row or list item', () => {
+  for (const input of ['row\r| injected | cell |', 'item\r- [x] injected', 'x\u2028## heading']) {
+    const line = sanitizeLine(input, 400);
+    assert.ok(!/[\r\n\u2028\u2029]/.test(line), JSON.stringify(line));
+    assert.ok(!/[\r\n\u2028\u2029]/.test(cell(line)), JSON.stringify(cell(line)));
+  }
 });
 
 test('sanitize: plain comparisons and code survive', () => {
@@ -201,9 +249,9 @@ test('collect-changeset: --base/--head values starting with "-" are rejected', (
 // ── collect-changeset.js codeSpan() ─────────────────────────────────────────
 
 test('codeSpan: backticks, pipes, newlines and bidi in file names cannot break the table', () => {
-  const span = codeSpan('a`b|c\nd‮e.txt');
+  const span = codeSpan('a`b|c\nd\u202Ee.txt');
   assert.ok(!span.includes('\n'));
-  assert.ok(!span.includes('‮'));
+  assert.ok(!span.includes('\u202E'));
   assert.ok(!span.includes('|'), span);
   assert.ok(span.includes('\\u{202E}'));
   assert.ok(span.includes('\\u{7C}'));

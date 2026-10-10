@@ -18,12 +18,21 @@ name: PR Risk Review
 #           comments. Always exits 0: this check is advisory and must never
 #           block a merge.
 #
-# Trust note: the code that judges a PR never comes from that PR. The job
-# checks out the BASE commit and runs the skill's scripts, risk-signals.json,
-# the prompt and the Copilot CLI from there. The PR head is only ever read:
-# `git diff base...head` for the changeset, plus a read-only worktree under
-# pr-risk/head (symlinks checked out as plain files) that the model may open to
-# read changed files. Nothing in it is executed.
+# Trust note: the job checks out the BASE commit and runs the skill's scripts,
+# risk-signals.json, the prompt and the Copilot CLI from there, so a PR that
+# changes those files is judged by the reviewed versions, not its own. The PR
+# head is otherwise only read: `git diff base...head` for the changeset, plus a
+# worktree under pr-risk/head (symlinks checked out as plain files) that the
+# model may open to read changed files.
+#
+# What this does NOT cover: on `pull_request`, GitHub runs THIS FILE as it is
+# in the PR. A same-repository PR that edits this workflow can replace any
+# step, including the base checkout, and run with the job's write-scoped
+# GITHUB_TOKEN and GH_PAT. That is no new capability — anyone who can push a
+# branch here can already run a workflow of their choosing on `push` — but it
+# means the base checkout protects the judging code, not the job. Moving the
+# privileged label/comment steps to a `workflow_run` job defined on the default
+# branch would close it; see "Known gaps" in the skill's SECURITY.md.
 #
 # Trigger note: this is `pull_request`, NOT `pull_request_target`. Fork PRs are
 # therefore skipped by the gate (their token is read-only). That is deliberate —
@@ -148,10 +157,11 @@ jobs:
             fi
           } >> "$GITHUB_OUTPUT"
 
-      # The BASE commit, not the PR head: everything this job executes — the
-      # skill's scripts, risk-signals.json, the prompt, package.json for `npx` —
-      # must come from code that has already been reviewed, or a PR could
-      # rewrite the rules that assess it. Full history so the PR head (on a
+      # The BASE commit, not the PR head: the skill's scripts,
+      # risk-signals.json, the prompt and package.json for `npx` come from
+      # code that has already been reviewed, so a PR that edits them cannot
+      # rewrite the rules that assess it. (A PR that edits this workflow file
+      # itself is not covered — see the trust note at the top.) Full history so the PR head (on a
       # branch of this repository; fork PRs never pass the gate) is present
       # for `git diff base...head`. No persisted credentials: nothing below
       # needs to fetch, and the model must not find a token in .git/config.
