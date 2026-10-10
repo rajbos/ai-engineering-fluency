@@ -492,7 +492,7 @@ if (usage) {
 const byPath = await analyzeSessionFiles([claudeSessionPath, copilotEventsPath]);
 ```
 
-`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown, unparsable or oversized (over 100 MB) file, and for a session with no activity recorded yet (no turns, tokens, models or billing). It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
+`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown or unparsable file, a session file over 100 MB, and a session with no activity recorded yet (no turns, tokens, models or billing). Database-backed sessions (`…/state.db#<id>`, `session-store.db#<id>`, …) are not size-capped, because one database holds every session. It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
 
 | Field | Meaning |
 |---|---|
@@ -508,7 +508,7 @@ const byPath = await analyzeSessionFiles([claudeSessionPath, copilotEventsPath])
 
 **Polling.** Results are cached in memory, per path. A cached result is reused while the session file's modification time and size stay the same, and so do those of the side files it draws on: for Copilot CLI sessions, `~/.copilot/session-store.db` and the OTel export in `~/.copilot/otel/`; for VS Code chat sessions, the Copilot Chat debug log. A repeated call on an unchanged session therefore costs a few `stat` calls. When any of those files changes, including a Claude Code or Copilot CLI log that is still being appended to, the session is re-parsed on the next call. The OTel export is re-indexed at most every 30 seconds. Concurrent calls on the same file share one parse. Pass `{ cache: false }` to always re-parse. Returned objects are frozen, and repeated calls may hand back the same object.
 
-The library does not read or write the CLI's `cli-cache.json`, so it is safe to use while the CLI is running. Like the CLI, it does not read session files located in the OS temp directory.
+The library does not read or write the CLI's `cli-cache.json`, so it is safe to use while the CLI is running. It never reads anything stored in the OS temp directory, including databases behind `…#<id>` paths, so Visual Studio's logs under `%LOCALAPPDATA%\Temp` are not supported by the library. The CLI still reads those.
 
 ---
 

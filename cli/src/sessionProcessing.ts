@@ -14,7 +14,7 @@ import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
-import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelDir } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliStoreUsage, getCopilotCliOtelDir } from '../../src/copilotCliOtel';
 import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
@@ -80,6 +80,16 @@ function resolveModel(request: any): string {
 }
 
 /**
+ * The real file behind a discovered session path. DB-backed editors (OpenCode,
+ * Crush, ...) report virtual paths like `opencode.db#<id>`, which do not exist
+ * on disk; ordinary session files are returned unchanged.
+ */
+export function getSessionBackingPath(filePath: string): string {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	return eco ? eco.getBackingPath(filePath) : filePath;
+}
+
+/**
  * Stat a session file, handling DB virtual paths (OpenCode and Crush).
  * Virtual DB paths are resolved to the actual DB file.
  */
@@ -89,34 +99,51 @@ export async function statSessionFile(filePath: string): Promise<fs.Stats> {
 	return fs.promises.stat(filePath);
 }
 
+/** What getAuxiliarySourcesFingerprint() found for one session. */
+export interface AuxiliarySources {
+	/** path + mtime + size of every side file; '' when the session reads none. */
+	fingerprint: string;
+	/** Latest mtime (ms) among the Copilot CLI OTel export files, 0 when there are none. */
+	otelLatestMtimeMs: number;
+}
+
 /**
  * Fingerprint (path + mtime + size) of the inputs processSessionFile reads besides the
  * session file itself, so a cache keyed on the session file can tell when one of them changed:
  *  - Copilot Chat debug logs next to a VS Code chat session (they replace its token counts)
- *  - for Copilot CLI sessions, ~/.copilot/session-store.db (exact billing rows) and the
- *    OTel export files under ~/.copilot/otel (the fallback when the store has no rows)
- * Returns '' for sessions that read nothing else. Keep in step with processSessionFile.
+ *  - for Copilot CLI sessions, ~/.copilot/session-store.db (exact billing rows) and, when the
+ *    store has no rows for the session, the OTel export files under ~/.copilot/otel
+ * Keep in step with processSessionFile.
  */
-export async function getAuxiliarySourcesFingerprint(filePath: string): Promise<string> {
+export async function getAuxiliarySourcesFingerprint(filePath: string): Promise<AuxiliarySources> {
 	const sources = [...(resolveDebugLogCandidatePaths(filePath) ?? [])];
+	const otelFiles: string[] = [];
 	if (extractCopilotCliSessionId(filePath)) {
 		sources.push(path.join(os.homedir(), '.copilot', 'session-store.db'));
-		const otelDir = getCopilotCliOtelDir();
-		try {
-			const names = (await fs.promises.readdir(otelDir)).filter(name => name.endsWith('.jsonl')).sort();
-			sources.push(...names.map(name => path.join(otelDir, name)));
-		} catch { /* no OTel export */ }
+		// OTel is only the fallback for sessions without billing-store rows (getCopilotCliExactUsage);
+		// the store lookup is cached per DB mtime, so checking it here is cheap.
+		if (!(await getCopilotCliStoreUsage(filePath))) {
+			const otelDir = getCopilotCliOtelDir();
+			try {
+				const names = (await fs.promises.readdir(otelDir)).filter(name => name.endsWith('.jsonl')).sort();
+				otelFiles.push(...names.map(name => path.join(otelDir, name)));
+			} catch { /* no OTel export */ }
+			sources.push(...otelFiles);
+		}
 	}
-	if (sources.length === 0) { return ''; }
+	if (sources.length === 0) { return { fingerprint: '', otelLatestMtimeMs: 0 }; }
+	const otelSet = new Set(otelFiles);
+	let otelLatestMtimeMs = 0;
 	const parts = await Promise.all(sources.map(async source => {
 		try {
 			const stats = await fs.promises.stat(source);
+			if (otelSet.has(source)) { otelLatestMtimeMs = Math.max(otelLatestMtimeMs, stats.mtimeMs); }
 			return `${source}:${stats.mtimeMs}:${stats.size}`;
 		} catch {
 			return `${source}:-`;
 		}
 	}));
-	return parts.join('|');
+	return { fingerprint: parts.join('|'), otelLatestMtimeMs };
 }
 
 /**

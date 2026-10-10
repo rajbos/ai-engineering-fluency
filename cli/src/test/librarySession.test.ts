@@ -71,6 +71,9 @@ test('Claude Code: per-model token totals from usage blocks (replayed message.id
 	assert.equal(haiku.outputTokens, 80);
 
 	assert.equal(usage.totalTokens, 12_150 + 500 + 400 + 80);
+	for (const model of usage.models) {
+		assert.equal(usage.modelUsage[model].sessions, 0, 'single-session shape: sessions is always 0');
+	}
 	assert.equal(usage.copilotNanoAiu, 0);
 	assert.equal(usage.copilotCredits, null);
 	assert.ok(!Number.isNaN(Date.parse(usage.lastModified)));
@@ -141,6 +144,28 @@ test('cache: a Copilot Chat debug log changing is picked up without the session 
 	assert.ok(second);
 	assert.equal(fs.statSync(sessionFile).mtimeMs, before.mtimeMs);
 	assert.equal(second.totalTokens, 350);
+});
+
+test('cache: a Copilot CLI session that depends on OTel is not trusted until the OTel index can have refreshed', async () => {
+	// No session-store.db in this home, so the exact-usage lookup falls back to the OTel export.
+	const file = copilotCliSession();
+	const otelFile = path.join(fakeHome, '.copilot', 'otel', 'export.jsonl');
+	fs.mkdirSync(path.dirname(otelFile), { recursive: true });
+	fs.writeFileSync(otelFile, '');
+	const now = Date.now() / 1000;
+
+	// The export just changed: a parse now may have used an index from before that change.
+	fs.utimesSync(otelFile, now, now);
+	const first = await analyzeSessionFile(file);
+	assert.ok(first);
+	assert.notEqual(await analyzeSessionFile(file), first, 'inside the OTel refresh window: re-parse');
+
+	// The export last changed long ago: a fresh parse is trusted and then served from cache.
+	fs.utimesSync(otelFile, now - 120, now - 120);
+	const settled = await analyzeSessionFile(file);
+	assert.ok(settled);
+	assert.equal(await analyzeSessionFile(file), settled, 'outside the window: cache hit');
+	fs.rmSync(path.dirname(otelFile), { recursive: true, force: true });
 });
 
 test('cache: { cache: false } always re-parses', async () => {

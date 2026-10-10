@@ -25,10 +25,11 @@ import {
 	modelPricing,
 	tokenEstimators,
 	statSessionFile,
+	getSessionBackingPath,
 	processSessionFile as processSessionFileWith,
 	type SessionDataCache,
 } from './sessionProcessing';
-export { readDebugLogTokensForSession } from './sessionProcessing';
+export { readDebugLogTokensForSession, getSessionBackingPath } from './sessionProcessing';
 
 // Import JSON data files
 import toolNamesData from '../../src/toolNames.json';
@@ -173,16 +174,6 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 export function getDiagnosticPaths(): { path: string; exists: boolean; source: string }[] {
 	const discovery = createSessionDiscovery();
 	return discovery.getDiagnosticCandidatePaths();
-}
-
-/**
- * The real file behind a discovered session path. DB-backed editors (OpenCode,
- * Crush, ...) report virtual paths like `opencode.db#<id>`, which do not exist
- * on disk; ordinary session files are returned unchanged.
- */
-export function getSessionBackingPath(filePath: string): string {
-	const eco = getEcosystems().find(e => e.handles(filePath));
-	return eco ? eco.getBackingPath(filePath) : filePath;
 }
 
 /** What an adapter knows about one session beyond its token counts. */

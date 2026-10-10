@@ -7,6 +7,7 @@
 import test, { after } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 // sql.js has no types in the CLI's own node_modules; type just what the DB fixture uses.
@@ -100,6 +101,47 @@ test('cache: billing rows landing in session-store.db are picked up without the 
 	assert.equal(after.size, before.size);
 	assert.equal(second.copilotNanoAiu, 9_000_000_000, 'store rows win over the event log');
 	assert.equal(second.copilotCredits, 9);
+});
+
+test('per-model usage is normalized to the single-session shape (sessions: 0)', async () => {
+	// Hermes' fallback (sessions row, no session_model_usage rows) reports `sessions: 1`.
+	const SQL = await initSqlJs({ wasmBinary: fs.readFileSync(path.join(CLI_ROOT, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')).buffer as ArrayBuffer });
+	const db = new SQL.Database();
+	db.run(`CREATE TABLE sessions (id TEXT, source TEXT, display_name TEXT, model TEXT, started_at REAL, ended_at REAL,
+		message_count INTEGER, tool_call_count INTEGER, input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+		cache_write_tokens INTEGER, reasoning_tokens INTEGER, cwd TEXT, git_branch TEXT, git_repo_root TEXT, title TEXT,
+		api_call_count INTEGER, parent_session_id TEXT, archived INTEGER, pinned INTEGER);`);
+	db.run(`INSERT INTO sessions VALUES ('s1', 'cli', NULL, 'claude-sonnet-4.5', 1, 2, 2, 0, 1000, 200, 0, 0, 0,
+		NULL, NULL, NULL, 'demo', 1, NULL, 0, 0)`);
+	const hermesDb = path.join(fakeHome, 'hermes', 'state.db');
+	fs.mkdirSync(path.dirname(hermesDb), { recursive: true });
+	fs.writeFileSync(hermesDb, Buffer.from(db.export()));
+	db.close();
+
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const lib = require(PKG);
+	const usage = await lib.analyzeSessionFile(`${hermesDb}#s1`);
+	assert.ok(usage, 'expected a result for a Hermes session');
+	assert.equal(usage.modelUsage['claude-sonnet-4.5'].inputTokens, 1000);
+	assert.equal(usage.modelUsage['claude-sonnet-4.5'].sessions, 0);
+});
+
+test('adapter-handled paths whose backing file is in the OS temp directory are refused', async () => {
+	// A valid DB-only Copilot CLI session, but the store sits in os.tmpdir(): the adapter would
+	// read the whole DB, so the library refuses it before any adapter runs.
+	const sessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+	await writeSessionStore([[sessionId, 200, 1_000_000_000]]);
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aief-pkg-temp-'));
+	try {
+		const tempStore = path.join(tempRoot, 'session-store.db');
+		fs.copyFileSync(STORE_PATH, tempStore);
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const lib = require(PKG);
+		assert.ok(await lib.analyzeSessionFile(`${STORE_PATH}#${sessionId}`), 'the same store outside temp is read');
+		assert.equal(await lib.analyzeSessionFile(`${tempStore}#${sessionId}`), null);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
 });
 
 test('import() of the package subpath shares the CommonJS module instance', async () => {

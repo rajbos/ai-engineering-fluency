@@ -12,10 +12,19 @@
  * Every exported type is declared in this file, so the emitted session.d.ts is
  * self-contained and does not leak internal module paths.
  */
-import { processSessionFile, statSessionFile, getAuxiliarySourcesFingerprint, modelPricing } from '../sessionProcessing';
+import {
+	processSessionFile,
+	statSessionFile,
+	getSessionBackingPath,
+	getAuxiliarySourcesFingerprint,
+	modelPricing,
+	type AuxiliarySources,
+} from '../sessionProcessing';
 import { effectiveTokens, runWithConcurrency, type SessionData } from '../analysis';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 import { CliCachePolicy } from '../../../src/cachePolicy';
+import { COPILOT_CLI_OTEL_INDEX_TTL_MS } from '../../../src/copilotCliOtel';
+import { isPathInsideSystemTempDir, MAX_SESSION_FILE_BYTES } from '../../../src/utils/safeFileRead';
 
 /** Token counts for one model within one session. */
 export interface SessionModelTokens {
@@ -85,13 +94,15 @@ interface CacheEntry {
 	size: number;
 	/** Fingerprint of the debug logs / billing store / OTel export the parse also read. */
 	auxiliary: string;
+	/** When the parse behind this entry started (ms since epoch). */
+	parsedAt: number;
 	/** null records "not a session we can parse", so unknown files stay cheap too. */
 	usage: SessionUsage | null;
 }
 
 const cache = new Map<string, CacheEntry>();
 const cachePolicy = new CliCachePolicy<CacheEntry>(MAX_CACHE_ENTRIES);
-/** Parses in flight, keyed by path + mtime + size, so concurrent polls share one parse. */
+/** Parses in flight, keyed by path + mtime + size + side-file fingerprint, so concurrent polls share one parse. */
 const inFlight = new Map<string, Promise<SessionUsage | null>>();
 
 function deepFreeze<T>(value: T): T {
@@ -102,6 +113,18 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
+/**
+ * Copy per-model usage into the documented single-session shape: adapters disagree on
+ * `sessions` (some set 1, some leave it out), and the public type promises 0.
+ */
+function toSingleSessionModelUsage(modelUsage: SessionData['modelUsage']): SessionModelUsage {
+	const out: Record<string, SessionModelTokens> = {};
+	for (const [model, usage] of Object.entries(modelUsage)) {
+		out[model] = { ...usage, sessions: 0 };
+	}
+	return out;
+}
+
 function toSessionUsage(filePath: string, data: SessionData): SessionUsage {
 	const nanoAiu = data.copilotNanoAiu ?? 0;
 	return deepFreeze({
@@ -109,7 +132,7 @@ function toSessionUsage(filePath: string, data: SessionData): SessionUsage {
 		editorSource: data.editorSource,
 		interactions: data.interactions,
 		models: Object.keys(data.modelUsage).sort(),
-		modelUsage: data.modelUsage,
+		modelUsage: toSingleSessionModelUsage(data.modelUsage),
 		totalTokens: effectiveTokens(data),
 		copilotNanoAiu: nanoAiu,
 		copilotCredits: nanoAiu > 0 ? nanoAiu / NANO_AIU_PER_CREDIT : null,
@@ -140,38 +163,68 @@ async function parse(filePath: string): Promise<SessionUsage | null> {
 }
 
 /**
+ * The library's file policy, checked before any parser or adapter runs. Callers pass arbitrary
+ * paths, and some adapters read their backing file whole (e.g. a DB `state.db#<id>`), so:
+ *  - nothing whose backing file is in the OS temp directory is read (as safeFileRead does);
+ *  - a plain session file over MAX_SESSION_FILE_BYTES is not read. DB-backed stores are
+ *    exempt from the size cap: they legitimately grow past it (one DB holds every session).
+ */
+function isRefusedPath(filePath: string, size: number): boolean {
+	const backingPath = getSessionBackingPath(filePath);
+	if (isPathInsideSystemTempDir(backingPath)) { return true; }
+	return backingPath === filePath && size > MAX_SESSION_FILE_BYTES;
+}
+
+/**
+ * Whether a cached entry may be reused. Besides the session file and side-file fingerprint,
+ * an entry for a session that depends on the Copilot CLI OTel export is only trusted once it
+ * was parsed a full index refresh interval after the export last changed: the OTel index is
+ * cached for that long, so a parse inside the window may have used an older index.
+ */
+function isReusable(entry: CacheEntry, mtime: number, size: number, auxiliary: AuxiliarySources): boolean {
+	return cachePolicy.isValid(entry, mtime, size)
+		&& entry.auxiliary === auxiliary.fingerprint
+		&& (auxiliary.otelLatestMtimeMs === 0 || entry.parsedAt >= auxiliary.otelLatestMtimeMs + COPILOT_CLI_OTEL_INDEX_TTL_MS);
+}
+
+/**
  * Analyze one session file (Claude Code `~/.claude/projects/<cwd>/<id>.jsonl`, Copilot CLI
  * `~/.copilot/session-state/<id>/events.jsonl`, VS Code chat sessions, and the other formats
- * the CLI supports). Resolves to null for missing, unknown, unparsable or oversized files, files
- * in the OS temp directory, and sessions with no recorded activity yet (no turns, tokens,
- * models or billing); never throws. A null for a growing file is re-checked once it changes.
+ * the CLI supports). Resolves to null for missing, unknown or unparsable files, session files
+ * over 100 MB, anything stored in the OS temp directory, and sessions with no recorded
+ * activity yet (no turns, tokens, models or billing); never throws. A null for a growing file
+ * is re-checked once it changes.
  *
  * Returned objects are frozen and may be shared between calls.
  */
 export async function analyzeSessionFile(filePath: string, options: AnalyzeSessionOptions = {}): Promise<SessionUsage | null> {
 	try {
+		const stats = await statSessionFile(filePath);
+		if (isRefusedPath(filePath, stats.size)) { return null; }
 		if (options.cache === false) { return await parse(filePath); }
 
-		const [stats, auxiliary] = await Promise.all([statSessionFile(filePath), getAuxiliarySourcesFingerprint(filePath)]);
+		const auxiliary = await getAuxiliarySourcesFingerprint(filePath);
 		const mtime = stats.mtimeMs;
 		const size = stats.size;
 		const cached = cache.get(filePath);
 		// The session file alone is not enough: Copilot CLI billing (session-store.db, OTel)
 		// and Copilot Chat debug logs change without touching it.
-		if (cached && cachePolicy.isValid(cached, mtime, size) && cached.auxiliary === auxiliary) { return cached.usage; }
+		if (cached && isReusable(cached, mtime, size, auxiliary)) { return cached.usage; }
 
-		const key = `${filePath}\0${mtime}\0${size}\0${auxiliary}`;
+		const key = `${filePath}\0${mtime}\0${size}\0${auxiliary.fingerprint}`;
 		let pending = inFlight.get(key);
 		if (!pending) {
+			const parsedAt = Date.now();
 			pending = parse(filePath).finally(() => inFlight.delete(key));
 			inFlight.set(key, pending);
+			pending.then(usage => {
+				// Keyed by the pre-parse stats: if a source changed mid-parse, the next call sees
+				// a new mtime/size or fingerprint and re-parses, so a stale entry never outlives it.
+				cache.set(filePath, { mtime, size, auxiliary: auxiliary.fingerprint, parsedAt, usage });
+				cachePolicy.evict(cache);
+			}, () => { /* parse() does not reject; nothing to cache */ });
 		}
-		const usage = await pending;
-		// Keyed by the pre-parse stats: if a source changed mid-parse, the next call sees a new
-		// mtime/size or fingerprint and re-parses, so a stale entry never outlives the change.
-		cache.set(filePath, { mtime, size, auxiliary, usage });
-		cachePolicy.evict(cache);
-		return usage;
+		return await pending;
 	} catch {
 		return null;
 	}
