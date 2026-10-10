@@ -122,6 +122,9 @@ jobs:
       - name: Validate skill security classification
         run: node scripts/validate-skill-security.js
 
+      - name: Test the azure-storage-loader hardening
+        run: node --test .github/skills/azure-storage-loader/load-table-data.test.js
+
       # Pins load-cache-data's redaction and cache-source rules (its SECURITY.md
       # mitigations), including the field classification checked against
       # src/types.ts. Dependency-free: node:test only.

@@ -496,6 +496,11 @@ jobs:
         else
           echo "No visual diff report was produced." >> "$GITHUB_STEP_SUMMARY"
         fi
+        # Where the step's time went (checkout, builds, renders, compare).
+        if [ -f visual-output/timings.md ]; then
+          printf '\n' >> "$GITHUB_STEP_SUMMARY"
+          cat visual-output/timings.md >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: Upload before/after/diff screenshots
       if: always()
