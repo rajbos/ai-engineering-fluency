@@ -229,22 +229,33 @@ function describe(c, titles) {
 }
 
 /**
- * Decides which screenshots ride along inline. Dark theme first, then light,
- * largest change first within a theme, and a changed view takes its before,
- * after and diff together or not at all — two of the three tell a reviewer
- * less than none. Whatever does not fit is still in the table and the artifact.
+ * Decides which screenshots ride along inline. Views are prioritized by their
+ * largest change, with light before dark within each view, and a changed view
+ * takes its before, after and diff together or not at all — two of the three
+ * tell a reviewer less than none. Whatever does not fit is still in the table
+ * and the artifact.
  */
 function planAttachments(comparisons, roots, budget, titles) {
   const interesting = comparisons.filter((c) => c.status !== 'unchanged');
-  const order = { dark: 0, light: 1 };
-  interesting.sort((a, b) =>
-    (order[a.theme] ?? 2) - (order[b.theme] ?? 2) ||
-    (b.changedPixels || 0) - (a.changedPixels || 0) ||
-    key(a).localeCompare(key(b)));
+  const themeOrder = { light: 0, dark: 1 };
+  const groups = new Map();
+  for (const c of interesting) {
+    const groupKey = key(c);
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(c);
+  }
+  const ordered = [...groups.values()]
+    .sort((a, b) =>
+      Math.max(...b.map((c) => c.changedPixels || 0)) -
+      Math.max(...a.map((c) => c.changedPixels || 0)) ||
+      key(a[0]).localeCompare(key(b[0])))
+    .flatMap((group) => group.sort((a, b) =>
+      (themeOrder[a.theme] ?? 2) - (themeOrder[b.theme] ?? 2) ||
+      (b.changedPixels || 0) - (a.changedPixels || 0)));
 
   const attachments = [];
   const inline = new Map();
-  for (const c of interesting) {
+  for (const c of ordered) {
     const label = `${describe(c, titles)} ${c.theme}`;
     const files = [];
     if (c.status === 'changed') {
@@ -297,7 +308,9 @@ function renderImages(lines, shown, plan, titles) {
     const name = `**${describe(c, titles)}** (${c.theme} mode)`;
     lines.push(`| ${name} | ${cell(c, 'Before')} | ${cell(c, 'After')} | ${cell(c, 'Diff')} |`);
   }
-  lines.push('', '<sub>Magenta marks changed pixels in the diff. Click an image for full size.</sub>', '');
+  const hasDiff = ordered.some((c) => screenshot(c, 'Diff'));
+  const legend = hasDiff ? 'Magenta marks changed pixels in the diff. ' : '';
+  lines.push('', `<sub>${legend}Click an image for full size.</sub>`, '');
 }
 
 function renderBody(report, opts, titles, plan, { withImages }) {
