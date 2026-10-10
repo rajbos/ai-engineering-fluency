@@ -6,13 +6,14 @@ import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '..
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 import { statusBadgeHtml } from '../../src/webview/usage/statusBadge';
 import {
-	getPagedTablePage,
-	getPagedTableState,
-	setPagedTableFilter,
-	setPagedTablePage,
-	setPagedTableSort,
-	type PagedTableState,
-} from '../../src/webview/usage/pagedTable';
+	bindDataTables,
+	getDataTablePage,
+	getDataTableState,
+	setDataTableFilter,
+	setDataTablePage,
+	setDataTableSort,
+	type DataTableState,
+} from '../../src/webview/shared/dataTable';
 import {
 	CUSTOMIZATION_FILTER_NONE_ONLY,
 	CUSTOMIZATION_PAGE_SIZE,
@@ -22,7 +23,6 @@ import {
 	customizationStatusRank,
 	hasNoCustomization,
 	renderCustomizationTable,
-	wireCustomizationMatrixSection,
 } from '../../src/webview/usage/customizationMatrixSection';
 
 beforeEach(() => initializeWebviewLocalization({}));
@@ -50,7 +50,7 @@ function rows(count: number): WorkspaceCustomizationRow[] {
 	return Array.from({ length: count }, (_, i) => row(`ws-${String(i).padStart(3, '0')}`, count - i));
 }
 
-function state(overrides: Partial<PagedTableState> = {}): PagedTableState {
+function state(overrides: Partial<DataTableState> = {}): DataTableState {
 	return { sortColumn: 'interactions', sortDirection: 'desc', page: 1, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false }, ...overrides };
 }
 
@@ -58,8 +58,8 @@ function filterRows(r: WorkspaceCustomizationRow, filters: Readonly<Record<strin
 	return !filters[CUSTOMIZATION_FILTER_NONE_ONLY] || hasNoCustomization(r);
 }
 
-function page(data: WorkspaceCustomizationRow[], s: PagedTableState) {
-	return getPagedTablePage(data, buildCustomizationColumns(matrix(data)), s, filterRows, CUSTOMIZATION_PAGE_SIZE);
+function page(data: WorkspaceCustomizationRow[], s: DataTableState) {
+	return getDataTablePage(data, buildCustomizationColumns(matrix(data)), s, { filterRows, pageSize: CUSTOMIZATION_PAGE_SIZE });
 }
 
 test('customizationMatrix: page slicing at 0/1/20/21/140 rows', () => {
@@ -99,7 +99,7 @@ test('customizationMatrix: sorts by each column both directions', () => {
 		row('Alpha', 7, { instructions: '✅', agents: '❌' }, { sessionCount: 1 }),
 		row('gamma', 5, { instructions: '⚠️', agents: '⚠️' }, { sessionCount: 4 }),
 	];
-	const names = (s: PagedTableState) => page(data, s).rows.map(r => r.workspaceName);
+	const names = (s: DataTableState) => page(data, s).rows.map(r => r.workspaceName);
 	assert.deepEqual(names(state({ sortColumn: 'workspace', sortDirection: 'asc' })), ['Alpha', 'beta', 'gamma']);
 	assert.deepEqual(names(state({ sortColumn: 'workspace', sortDirection: 'desc' })), ['gamma', 'beta', 'Alpha']);
 	assert.deepEqual(names(state({ sortColumn: 'sessions', sortDirection: 'asc' })), ['Alpha', 'gamma', 'beta']);
@@ -138,22 +138,22 @@ test('customizationMatrix: rendered table resets page on sort/filter and updates
 	const data = rows(45).map((r, i) => i % 3 === 0 ? { ...r, typeStatuses: { instructions: '❌' as const, agents: '❌' as const } } : r);
 	const m = matrix(data);
 	buildCustomizationSectionHtml(m);
-	setPagedTablePage(CUSTOMIZATION_TABLE_ID, 3);
+	setDataTablePage(CUSTOMIZATION_TABLE_ID, 3);
 	assert.match(renderCustomizationTable(m), /Page 3 of 3 · Showing 41–45 of 45/);
-	setPagedTableSort(CUSTOMIZATION_TABLE_ID, 'workspace');
-	assert.equal(getPagedTableState(CUSTOMIZATION_TABLE_ID, 'interactions', 'desc').page, 1);
-	setPagedTablePage(CUSTOMIZATION_TABLE_ID, 2);
-	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
+	setDataTableSort(CUSTOMIZATION_TABLE_ID, 'workspace');
+	assert.equal(getDataTableState(CUSTOMIZATION_TABLE_ID).page, 1);
+	setDataTablePage(CUSTOMIZATION_TABLE_ID, 2);
+	setDataTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
 	const html = renderCustomizationTable(m);
 	assert.match(html, /Showing 1–15 of 15/);
-	assert.doesNotMatch(html, /data-paged-direction/);
-	assert.match(buildCustomizationSectionHtml(m), /data-paged-table-filter="noCustomizationOnly" checked/);
-	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+	assert.doesNotMatch(html, /data-table-direction/);
+	assert.match(buildCustomizationSectionHtml(m), /data-table-filter="noCustomizationOnly" checked/);
+	setDataTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
 });
 
 test('customizationMatrix: pager hidden at 20 rows, shown at 21', () => {
-	assert.doesNotMatch(renderCustomizationTable(matrix(rows(20))), /data-paged-direction/);
-	assert.match(renderCustomizationTable(matrix(rows(21))), /data-paged-direction="next"/);
+	assert.doesNotMatch(renderCustomizationTable(matrix(rows(20))), /data-table-direction/);
+	assert.match(renderCustomizationTable(matrix(rows(21))), /data-table-direction="next"/);
 });
 
 test('customizationMatrix: escapes name and path, path is the tooltip', () => {
@@ -203,15 +203,15 @@ test('customizationMatrix: every badge carries a localized accessible name', () 
 
 test('customizationMatrix: an active filter stays clearable when a refresh leaves no matching workspaces', () => {
 	buildCustomizationSectionHtml(matrix([row('a', 1), row('b', 2, { instructions: '❌', agents: '❌' })]));
-	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
+	setDataTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, true);
 	try {
 		const html = buildCustomizationSectionHtml(matrix([row('a', 1), row('b', 2)]));
-		assert.match(html, /data-paged-table-filter="noCustomizationOnly" checked/);
+		assert.match(html, /data-table-filter="noCustomizationOnly" checked/);
 		assert.match(html, /No rows to display\./);
 	} finally {
-		setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+		setDataTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
 	}
-	assert.doesNotMatch(buildCustomizationSectionHtml(matrix([row('a', 1)])), /data-paged-table-filter/);
+	assert.doesNotMatch(buildCustomizationSectionHtml(matrix([row('a', 1)])), /data-table-filter/);
 });
 
 test("customizationMatrix: populated and empty sections keep the What's New nav anchor", () => {
@@ -244,10 +244,10 @@ test('customizationMatrix: the filter toggles once from the label text and from 
 	globals.Element = dom.window.Element;
 	globals.HTMLElement = dom.window.HTMLElement;
 	try {
-		wireCustomizationMatrixSection();
 		const doc = dom.window.document;
-		const bodyRows = (): number => doc.querySelectorAll('#paged-table-root-customization tbody tr').length;
-		const input = doc.querySelector('input[data-paged-table-filter="noCustomizationOnly"]') as HTMLInputElement | null;
+		bindDataTables(doc);
+		const bodyRows = (): number => doc.querySelectorAll('#data-table-root-customization tbody tr').length;
+		const input = doc.querySelector('input[data-table-filter="noCustomizationOnly"]') as HTMLInputElement | null;
 		assert.ok(input);
 		assert.equal(bodyRows(), 3);
 		// Clicking the label text activates the checkbox and fires one change.
@@ -262,7 +262,7 @@ test('customizationMatrix: the filter toggles once from the label text and from 
 		assert.equal(bodyRows(), 3);
 	} finally {
 		for (const [key, value] of saved) { globals[key] = value; }
-		setPagedTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
+		setDataTableFilter(CUSTOMIZATION_TABLE_ID, CUSTOMIZATION_FILTER_NONE_ONLY, false);
 		dom.window.close();
 	}
 });
