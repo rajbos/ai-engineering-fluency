@@ -255,13 +255,21 @@ function sanitizeEntityString(value) {
 	return result === '' ? undefined : result;
 }
 
-// Map a raw table entity onto the output shape, sanitizing every string field
+// A non-negative integer count, or 0. Rejects strings, NaN, Infinity and
+// fractions, which JSON would otherwise serialize as text or null.
+function toCount(value) {
+	return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+// Map a raw table entity onto the output shape. Every field is validated by
+// type: strings are sanitized, numbers must be finite integers and booleans
+// must be booleans, so no uploader-chosen value passes through unchecked.
 function normalizeEntity(entity, partitionKey, datasetId, dayKey) {
 	const text = (value, fallback) => sanitizeEntityString(value) ?? fallback;
 	return {
 		partitionKey: text(entity.partitionKey, partitionKey),
 		rowKey: text(entity.rowKey, ''),
-		schemaVersion: entity.schemaVersion,
+		schemaVersion: Number.isSafeInteger(entity.schemaVersion) ? entity.schemaVersion : undefined,
 		datasetId: text(entity.datasetId, datasetId),
 		day: text(entity.day, dayKey),
 		model: text(entity.model, ''),
@@ -271,11 +279,11 @@ function normalizeEntity(entity, partitionKey, datasetId, dayKey) {
 		machineName: text(entity.machineName, undefined),
 		userId: text(entity.userId, undefined),
 		userKeyType: text(entity.userKeyType, undefined),
-		shareWithTeam: entity.shareWithTeam || undefined,
+		shareWithTeam: entity.shareWithTeam === true ? true : undefined,
 		consentAt: text(entity.consentAt, undefined),
-		inputTokens: typeof entity.inputTokens === 'number' ? entity.inputTokens : 0,
-		outputTokens: typeof entity.outputTokens === 'number' ? entity.outputTokens : 0,
-		interactions: typeof entity.interactions === 'number' ? entity.interactions : 0,
+		inputTokens: toCount(entity.inputTokens),
+		outputTokens: toCount(entity.outputTokens),
+		interactions: toCount(entity.interactions),
 		updatedAt: text(entity.updatedAt, new Date().toISOString())
 	};
 }
