@@ -151,10 +151,14 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 		// Dispatch to ecosystem adapters (OpenCode, Crush, VS, Continue, ClaudeDesktop, ClaudeCode, MistralVibe)
 		const eco = getEcosystems().find(e => e.handles(filePath));
 		if (eco) {
-			const [tokenResult, interactions, modelUsage] = await Promise.all([
+			// Copilot CLI DB-only sessions (session-store.db#<id>) carry exact billing in the same
+			// assistant_usage_events rows the adapter reads tokens from; the IEcosystemAdapter
+			// getTokens() contract has no billing field, so look it up alongside (cached per DB mtime).
+			const [tokenResult, interactions, modelUsage, exactUsage] = await Promise.all([
 				eco.getTokens(filePath),
 				eco.countInteractions(filePath),
 				eco.getModelUsage(filePath),
+				extractCopilotCliSessionId(filePath) ? getCopilotCliExactUsage(filePath) : Promise.resolve(null),
 			]);
 			const mtimeDateKey = toLocalDayKey(stats.mtime);
 			const ecoResult: SessionData = {
@@ -164,8 +168,7 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 				actualTokens: tokenResult.actualTokens,
 				interactions,
 				modelUsage,
-				// Adapter getTokens() results don't carry exact billing today.
-				copilotNanoAiu: 0,
+				copilotNanoAiu: exactUsage?.nanoAiu ?? 0,
 				lastModified: stats.mtime,
 				editorSource: getEditorSourceFromPath(filePath),
 				dailyFractions: (await eco.getDailyFractions?.(filePath)) ?? { [mtimeDateKey]: 1.0 },

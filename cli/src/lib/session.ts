@@ -20,47 +20,47 @@ import { CliCachePolicy } from '../../../src/cachePolicy';
 /** Token counts for one model within one session. */
 export interface SessionModelTokens {
 	/** Total input tokens, including cache reads and cache creation. */
-	inputTokens: number;
-	outputTokens: number;
+	readonly inputTokens: number;
+	readonly outputTokens: number;
 	/** Portion of inputTokens served from the prompt cache. */
-	cachedReadTokens?: number;
+	readonly cachedReadTokens?: number;
 	/** Portion of inputTokens written to the prompt cache. */
-	cacheCreationTokens?: number;
+	readonly cacheCreationTokens?: number;
 	/** Portion of cacheCreationTokens written with a 1-hour TTL (Anthropic). */
-	cacheCreation1hTokens?: number;
-	thinkingTokens?: number;
+	readonly cacheCreation1hTokens?: number;
+	readonly thinkingTokens?: number;
 	/** Subset of the counts above from Copilot Auto-routed requests (not additional usage). */
-	autoRouting?: Omit<SessionModelTokens, 'autoRouting' | 'sessions'>;
+	readonly autoRouting?: Omit<SessionModelTokens, 'autoRouting' | 'sessions'>;
 	/** Always 0 for a single session; kept for shape compatibility with aggregated reports. */
-	sessions: number;
+	readonly sessions: number;
 }
 
 /** Per-model token counts, keyed by model id. */
 export interface SessionModelUsage {
-	[model: string]: SessionModelTokens;
+	readonly [model: string]: SessionModelTokens;
 }
 
-/** Token usage and cost for one session file. */
+/** Token usage and cost for one session file. Returned objects are deeply frozen, hence readonly. */
 export interface SessionUsage {
 	/** The path that was analyzed, exactly as passed in. */
-	filePath: string;
+	readonly filePath: string;
 	/** Friendly editor/tool name, e.g. 'Claude Code', 'Copilot CLI', 'VS Code'. */
-	editorSource: string;
+	readonly editorSource: string;
 	/** Number of user turns. */
-	interactions: number;
+	readonly interactions: number;
 	/** Model ids that appear in modelUsage, sorted. */
-	models: string[];
-	modelUsage: SessionModelUsage;
+	readonly models: readonly string[];
+	readonly modelUsage: SessionModelUsage;
 	/** Session token total: exact counts when the log has them, otherwise an estimate. */
-	totalTokens: number;
+	readonly totalTokens: number;
 	/** Exact GitHub Copilot billed amount in nano-AI-units; 0 when unavailable. */
-	copilotNanoAiu: number;
+	readonly copilotNanoAiu: number;
 	/** copilotNanoAiu / 1e9 (1 AI credit = $0.01); null when no exact amount is available. */
-	copilotCredits: number | null;
+	readonly copilotCredits: number | null;
 	/** Estimated USD cost from per-model token counts, at provider API rates and at Copilot rates. */
-	estimatedCostUsd: { provider: number; copilot: number };
+	readonly estimatedCostUsd: { readonly provider: number; readonly copilot: number };
 	/** Session file modification time, ISO 8601. */
-	lastModified: string;
+	readonly lastModified: string;
 }
 
 export interface AnalyzeSessionOptions {

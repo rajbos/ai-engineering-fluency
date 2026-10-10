@@ -9,6 +9,11 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+// sql.js has no types in the CLI's own node_modules; type just what the DB fixture uses.
+type SqlDatabase = { run(sql: string, params?: unknown[]): void; export(): Uint8Array; close(): void };
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const initSqlJs: (config: { wasmBinary: ArrayBuffer }) => Promise<{ Database: new () => SqlDatabase }> = require('sql.js');
+
 const PKG = '@rajbos/ai-engineering-fluency/session';
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 
@@ -37,6 +42,33 @@ test('require() of the package subpath loads the built CommonJS library', async 
 	assert.equal(usage.copilotNanoAiu, 3_750_000_000);
 	assert.equal(usage.copilotCredits, 3.75);
 	assert.equal(await lib.analyzeSessionFile(path.join(fakeHome, 'missing.jsonl')), null);
+});
+
+test('Copilot CLI DB-only sessions (session-store.db#<id>) carry exact billing', async () => {
+	const SQL = await initSqlJs({ wasmBinary: fs.readFileSync(path.join(CLI_ROOT, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')).buffer as ArrayBuffer });
+	const db = new SQL.Database();
+	const sessionId = '88888888-8888-4888-8888-888888888888';
+	db.run(`CREATE TABLE sessions (id TEXT, cwd TEXT, repository TEXT, branch TEXT, summary TEXT, created_at TEXT, updated_at TEXT);
+		CREATE TABLE turns (session_id TEXT, turn_index INTEGER, user_message TEXT, assistant_response TEXT, timestamp TEXT);
+		CREATE TABLE assistant_usage_events (session_id TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER,
+			cache_read_tokens INTEGER, cache_write_tokens INTEGER, total_nano_aiu INTEGER);`);
+	db.run('INSERT INTO sessions VALUES (?, ?, NULL, NULL, NULL, ?, ?)', [sessionId, '/work/demo', '2026-10-01T09:00:00Z', '2026-10-01T09:05:00Z']);
+	db.run('INSERT INTO turns VALUES (?, 0, ?, ?, ?)', [sessionId, 'hi', 'hello', '2026-10-01T09:00:00Z']);
+	db.run('INSERT INTO assistant_usage_events VALUES (?, ?, 1000, 200, 600, 0, 2000000000)', [sessionId, 'claude-sonnet-4.5']);
+	db.run('INSERT INTO assistant_usage_events VALUES (?, ?, 500, 100, 0, 0, 500000000)', [sessionId, 'claude-sonnet-4.5']);
+	const dbPath = path.join(fakeHome, '.copilot', 'session-store.db');
+	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+	fs.writeFileSync(dbPath, Buffer.from(db.export()));
+	db.close();
+
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const lib = require(PKG);
+	const usage = await lib.analyzeSessionFile(`${dbPath}#${sessionId}`);
+	assert.ok(usage, 'expected a result for a DB-only Copilot CLI session');
+	assert.equal(usage.editorSource, 'Copilot CLI');
+	assert.equal(usage.copilotNanoAiu, 2_500_000_000);
+	assert.equal(usage.copilotCredits, 2.5);
+	assert.equal(usage.modelUsage['claude-sonnet-4.5'].outputTokens, 300);
 });
 
 test('import() of the package subpath shares the CommonJS module instance', async () => {
