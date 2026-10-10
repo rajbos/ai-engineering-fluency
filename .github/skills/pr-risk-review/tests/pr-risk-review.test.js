@@ -49,8 +49,10 @@ test('sources: no literal invisible, bidi or control characters (use escapes)', 
     let previous = 0;
     for (const ch of text) {
       const cp = ch.codePointAt(0);
-      // U+FE0F right after a symbol is emoji presentation (the existing ⚠️).
-      const emojiPresentation = cp === 0xfe0f && previous >= 0x2000;
+      // The one allowed exception: U+FE0F as the emoji presentation of the
+      // warning sign U+26A0 (the existing ⚠️ in render-comment.js). Anywhere
+      // else a variation selector is still reported.
+      const emojiPresentation = cp === 0xfe0f && previous === 0x26a0;
       if (ch === '\n') line += 1;
       else if (isHidden(cp) && !emojiPresentation) found.push(`line ${line}: U+${cp.toString(16)}`);
       previous = cp;

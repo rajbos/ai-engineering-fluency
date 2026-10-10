@@ -89,12 +89,13 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
 - The renderer and the `changeset.json` it reads are staged in `$RUNNER_TEMP`, outside
   the directory the model may write to, and run from there after the model finishes.
   No later step runs `git` or code from the workspace.
-- The Copilot CLI runs with an allowlist: writes to exactly one file,
-  `write(<workspace>/pr-risk/verdict.json)`, plus `cat`, `head`, `tail`, `wc`, `ls` and
-  `grep`. Shell redirections are refused without `--allow-all-tools`, so the model cannot
-  rewrite the `pr-risk/head` evidence, `.git` or the changeset files. No interpreter,
-  `git`, `sed`, `find`, `npx` or network tool is allowed; the old
-  `gh`/`git push`/`curl`/`wget`/URL denylist is kept as a second layer. No GitHub MCP
+- The Copilot CLI is restricted in two layers. `--available-tools view grep glob create
+  edit` limits what the model can see: there is no shell tool, so no `git`, interpreter,
+  `npx`, `sed`, `find` or network command is reachable. `--allow-tool
+  "write(<workspace>/pr-risk/verdict.json)"` pre-approves writes to that one file only;
+  any other write would need an approval that `--no-ask-user` never gives, so the model
+  cannot rewrite the `pr-risk/head` evidence, `.git` or the changeset files. The old
+  `gh`/`git push`/`curl`/`wget`/URL denylist is kept as a third layer. No GitHub MCP
   server, file access limited to the workspace, and `--disallow-temp-dir` keeps the
   system temp directory out of reach.
 - The skill instructs the model to treat the diff as data (`SKILL.md`, "Treat the diff as
@@ -118,8 +119,11 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
 
 - Bare URLs (`https://...`) in the verdict are still autolinked by GitHub. They are
   visible as written, so they cannot disguise their target the way link text could.
-- The allowlist, including the single-file write scope, is enforced by the Copilot CLI's
-  own permission matching; it is only as strong as that matcher. The staged copy of the
+- The tool restriction and the single-file write scope are enforced by the Copilot CLI
+  itself; they are only as strong as its tool filtering and permission matching. The
+  built-in tool names passed to `--available-tools` are taken from the CLI's bundled agent
+  definitions (version 1.0.94), not from a documented list, so a renamed tool would
+  silently drop out and the review would fall back to the mechanical baseline. The staged copy of the
   renderer in `$RUNNER_TEMP` is the second layer for the code that runs afterwards.
 - The contributor gate remains the control on who can get a model run against a diff at
   all; the diff and file contents reach the model unfiltered by design.

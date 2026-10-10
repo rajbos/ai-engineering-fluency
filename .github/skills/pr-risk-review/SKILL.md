@@ -184,7 +184,8 @@ In CI, `.github/workflows/pr-risk-review.yml` runs the same three steps: it
 gates on the PR author being a known contributor, runs the scripts from the
 PR's base commit (so a PR that edits them is judged by the reviewed versions;
 a PR that edits the workflow file itself is not covered, see `SECURITY.md`), runs this
-skill through the GitHub Copilot CLI with an allowlist of read-only tools, then applies one of the `risk: low` / `risk: medium` /
+skill through the GitHub Copilot CLI with only file-reading tools and a write
+scoped to `pr-risk/verdict.json`, then applies one of the `risk: low` / `risk: medium` /
 `risk: high` labels and posts `comment.md` as a sticky comment. The workflow is
 advisory — it never blocks a merge.
 

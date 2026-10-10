@@ -282,19 +282,23 @@ jobs:
       # must degrade to the mechanical baseline, not fail a contributor's PR.
       #
       # The CLI runs deliberately narrowly for a job that reads an untrusted
-      # diff. Tools are an ALLOWLIST, not a denylist: a write to exactly one
-      # file, pr-risk/verdict.json, and a handful of read-only shell commands
-      # (shell redirections need --allow-all-tools, so `cat > f` is refused).
-      # The model therefore cannot rewrite the pr-risk/head evidence, .git, or
-      # the changeset files it is judging. --disallow-temp-dir keeps it out of
-      # the system temp directory as well. Nothing that can
-      # run code or reach the network — no `node`, `python`, `npx`, `sh`,
-      # `git` (whose `--output=` can write anywhere), `sed` (`e`) or `find`
-      # (`-exec`). The old denylist stays as a second layer. No GitHub MCP
-      # server (so it cannot act on the PR), no URL access, file access
-      # confined to the workspace (no --allow-all-paths), and the token
-      # stripped from every subprocess environment and redacted from the
-      # transcript.
+      # diff, in two layers:
+      #   1. --available-tools decides what the model can SEE: the file
+      #      viewer, grep, glob, and create/edit. There is no shell tool at
+      #      all, so no `git` (whose `--output=` can write anywhere), `node`,
+      #      `npx`, `sed`, `find` or network command is reachable. (`--allow-tool`
+      #      alone only pre-approves; it does not hide anything.) Tool names
+      #      are the CLI's built-ins as its own bundled agent definitions list
+      #      them.
+      #   2. --allow-tool decides what runs without a prompt: writes to exactly
+      #      one file, pr-risk/verdict.json. Any other write needs approval, and
+      #      --no-ask-user means none comes, so the model cannot rewrite the
+      #      pr-risk/head evidence, .git or the changeset files it is judging.
+      # The old shell/URL denylist stays as a third layer. --disallow-temp-dir
+      # keeps the system temp directory out of reach, there is no GitHub MCP
+      # server (so it cannot act on the PR), file access is confined to the
+      # workspace (no --allow-all-paths), and the token is stripped from every
+      # subprocess environment and redacted from the transcript.
       - name: Run the risk review with the Copilot CLI
         id: copilot
         if: steps.auth.outputs.auth_ok == 'true'
@@ -357,13 +361,8 @@ jobs:
             --silent \
             --no-color \
             --no-ask-user \
+            --available-tools view grep glob create edit \
             --allow-tool "write(${GITHUB_WORKSPACE}/pr-risk/verdict.json)" \
-            --allow-tool 'shell(cat:*)' \
-            --allow-tool 'shell(head:*)' \
-            --allow-tool 'shell(tail:*)' \
-            --allow-tool 'shell(wc:*)' \
-            --allow-tool 'shell(ls:*)' \
-            --allow-tool 'shell(grep:*)' \
             --add-dir "${GITHUB_WORKSPACE}" \
             --disallow-temp-dir \
             --disable-builtin-mcps \
