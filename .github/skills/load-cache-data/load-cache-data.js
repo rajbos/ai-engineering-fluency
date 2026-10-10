@@ -256,17 +256,42 @@ function includeSensitiveEntry(cacheEntry) {
     return { ...cacheEntry, repository: stripUrlUserinfo(cacheEntry.repository) };
 }
 
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isSnapshotFile(filePath) {
+    return path.basename(filePath).endsWith('.snapshot.json');
+}
+
 /**
  * The extension's snapshot wraps the cache map in an envelope
  * ({ schemaVersion, cacheVersion, cacheId, generatedAt, entryCount, entries });
- * a legacy export is the bare map. Returns the entry map either way.
+ * a legacy export is the bare map. Returns { entries } or { error }.
+ *
+ * A snapshot that does not parse or lacks a usable envelope is an error, not a
+ * reason to fall back: falling back would silently report an older legacy export
+ * as the current cache, and treating the envelope as a bare map would print its
+ * metadata fields as cache entries.
  */
-function unwrapCacheEntries(data) {
-    if (data && typeof data === 'object' && !Array.isArray(data)
-        && 'schemaVersion' in data && data.entries && typeof data.entries === 'object' && !Array.isArray(data.entries)) {
-        return data.entries;
+function parseCacheEntries(filePath, content) {
+    const fileName = path.basename(filePath);
+    let data;
+    try {
+        data = JSON.parse(content);
+    } catch {
+        return { error: `Malformed cache file ${fileName}: not valid JSON` };
     }
-    return data;
+    if (isSnapshotFile(filePath)) {
+        if (!isPlainObject(data) || typeof data.schemaVersion !== 'number' || !isPlainObject(data.entries)) {
+            return { error: `Malformed cache snapshot ${fileName}: expected an envelope with a numeric schemaVersion and an entries object` };
+        }
+        return { entries: data.entries };
+    }
+    if (!isPlainObject(data)) {
+        return { error: `Malformed cache file ${fileName}: expected an object of cache entries` };
+    }
+    return { entries: data };
 }
 
 /**
@@ -275,27 +300,34 @@ function unwrapCacheEntries(data) {
  */
 function readCacheFile() {
     const possiblePaths = getCacheFilePaths();
-    
+
     // Open once and check/read through the same descriptor, so the file that was checked is
     // the file that is read. O_NOFOLLOW (POSIX only) makes open() refuse a symlink.
     const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
     for (const filePath of possiblePaths) {
         let fd;
+        let content;
         try {
             fd = fs.openSync(filePath, openFlags);
-            if (fs.fstatSync(fd).isFile()) {
-                const content = fs.readFileSync(fd, 'utf8');
-                const data = unwrapCacheEntries(JSON.parse(content));
-                return { success: true, data, filePath };
+            if (!fs.fstatSync(fd).isFile()) {
+                continue;
             }
+            content = fs.readFileSync(fd, 'utf8');
         } catch (error) {
-            // Continue to next path if this one fails
+            // Missing, unreadable or a refused symlink: try the next candidate
             continue;
         } finally {
             if (fd !== undefined) {
                 fs.closeSync(fd);
             }
         }
+
+        // The first file that exists decides the result; a malformed one stops the search.
+        const parsed = parseCacheEntries(filePath, content);
+        if (parsed.error) {
+            return { success: false, malformed: true, error: parsed.error };
+        }
+        return { success: true, data: parsed.entries, filePath };
     }
 
     return {
@@ -327,6 +359,12 @@ function readCacheFile() {
 
         console.log(JSON.stringify(output));
         return;
+    }
+
+    if (cacheResult.malformed) {
+        // A cache file exists but cannot be used: say so instead of reporting "not found"
+        console.log(JSON.stringify({ cacheFound: true, malformed: true, error: cacheResult.error }));
+        process.exit(3);
     }
 
     // No cache found: output JSON error

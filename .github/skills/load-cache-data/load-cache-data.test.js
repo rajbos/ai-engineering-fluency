@@ -194,6 +194,40 @@ test('prefers the prod snapshot, then dev, over a legacy export', (t) => {
     assert.equal(JSON.parse(prodResult.stdout).entries['session-1'].tokens, 3);
 });
 
+test('rejects a malformed snapshot instead of falling back to the legacy export', (t) => {
+    const fixture = createFixture(t);
+    fs.writeFileSync(path.join(fixture.storage, 'session-cache.json'), JSON.stringify({ legacy: { tokens: 1 } }));
+    const snapshotPath = path.join(fixture.storage, 'cache_prod.snapshot.json');
+
+    for (const [label, content] of [
+        ['invalid JSON', '{ "schemaVersion": 1, "entries": {'],
+        ['bare map without an envelope', JSON.stringify({ someSession: { tokens: 5 } })],
+        ['envelope without entries', JSON.stringify({ schemaVersion: 1, cacheVersion: 1, entryCount: 0 })],
+        ['entries is an array', JSON.stringify({ schemaVersion: 1, entries: [] })],
+        ['non-numeric schemaVersion', JSON.stringify({ schemaVersion: '1', entries: {} })],
+        ['top-level array', JSON.stringify([])]
+    ]) {
+        fs.writeFileSync(snapshotPath, content);
+        const result = fixture.run(['--json']);
+        assert.equal(result.status, 3, `${label}: expected exit 3, got ${result.status}`);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.cacheFound, true, label);
+        assert.equal(output.malformed, true, label);
+        assert.match(output.error, /cache_prod\.snapshot\.json/, label);
+        assert.equal(result.stdout.includes(fixture.root), false, `${label}: error leaked a local path`);
+        assert.equal('entries' in output, false, `${label}: fell back to the legacy export`);
+    }
+});
+
+test('rejects a legacy export that is not an object of entries', (t) => {
+    const fixture = createFixture(t);
+    fs.writeFileSync(path.join(fixture.storage, 'session-cache.json'), JSON.stringify(['not', 'a', 'map']));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 3);
+    assert.match(JSON.parse(result.stdout).error, /session-cache\.json/);
+});
+
 test('ignores cache files planted in temporary and current-working directories', (t) => {
     const fixture = createFixture(t);
     for (const [directory, fileName] of [

@@ -135,6 +135,8 @@ The snapshot file is the cache's only persistent store: `CacheManager` loads it 
 **Exit Codes:**
 - `0`: Cache file found and displayed successfully
 - `1`: No cache file found
+- `2`: Invalid `--last` value
+- `3`: The first cache file found is malformed (invalid JSON, or a snapshot without a usable `{ schemaVersion, entries }` envelope). The script reports this instead of falling back to the legacy export.
 
 **Note**: If no cache file is found, the script reports that no cache file was found without printing local filesystem paths.
 

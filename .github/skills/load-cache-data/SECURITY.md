@@ -14,7 +14,9 @@ printed behind the explicit `--include-sensitive` opt-in.
 - `load-cache-data.js` looks for the extension's session cache export on disk, parses it
   and prints the most recent `--last N` entries (default 10, at most 100) as one JSON
   document to stdout. If no file is found it prints `{ cacheFound: false, error }` (no
-  searched paths) and exits 1. An invalid `--last` value exits 2.
+  searched paths) and exits 1. An invalid `--last` value exits 2. If the first cache file it
+  finds is malformed it prints `{ cacheFound: true, malformed: true, error }` (naming only the
+  file's basename) and exits 3.
 - No network access.
 
 ## Credentials used and where they come from
@@ -31,8 +33,9 @@ None. It reads `APPDATA` and `XDG_CONFIG_HOME` only to build candidate paths.
   (`getCacheFilePaths`, line 139). These are in the user's own profile directory.
 - The OS temp directory and the current working directory are no longer candidates, so a
   file planted there is not read.
-- The content is `JSON.parse`d (line 288) and filtered before printing; nothing in it is
-  executed.
+- The content is `JSON.parse`d (`parseCacheEntries`, line 277) and filtered before printing;
+  nothing in it is executed. A snapshot must be an envelope with a numeric `schemaVersion` and
+  an `entries` object, and a legacy export must be an object.
 
 ## What it writes and where
 
@@ -67,7 +70,10 @@ None.
   once and checked with `fstatSync(fd).isFile()` and read through that same descriptor
   (`readCacheFile`), so it cannot be swapped between check and read. On POSIX the open uses
   `O_NOFOLLOW`, so a symlink at a candidate path is refused.
-- A file that fails to parse is skipped and the search moves on.
+- The first candidate file that exists decides the result. If it is malformed (invalid JSON,
+  or a snapshot without a usable envelope) the script stops with exit 3. It does not fall back
+  to an older legacy export, and it does not print an envelope's metadata fields as cache
+  entries.
 - `load-cache-data.test.js` pins these rules and runs in CI (`validate-skills.yml`, which
   also triggers on `src/types.ts` changes). It parses `SessionFileCache` and
   `SessionUsageAnalysis` from `src/types.ts` and fails when a field has not been classified
