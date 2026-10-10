@@ -83,3 +83,19 @@ test('every analysisPanel "updateStats" postMessage reuses _buildAnalysisUpdateD
 		);
 	}
 });
+
+/** Top-level `key:` names of an object literal inside a builder body (one per line). */
+function payloadKeys(body: string): Set<string> {
+	return new Set([...body.matchAll(/^\s*([A-Za-z0-9_]+):/gm)].map(match => match[1]));
+}
+
+test('the initial Usage Analysis payload carries every field the updateStats payload does', () => {
+	// bootstrap() renders window.__INITIAL_USAGE__ without requesting fresh stats, so a field
+	// only sent by updateStats leaves its section empty on open until the next refresh (this
+	// is how Skill Suggestions went missing on a cold open with cached stats).
+	const updateKeys = payloadKeys(extractBracesBlock(EXTENSION_SRC, 'private _buildAnalysisUpdateData('));
+	const initialKeys = payloadKeys(extractBracesBlock(EXTENSION_SRC, 'private _buildUsageAnalysisInitialData('));
+	assert.ok(updateKeys.has('repeatedTasks') && updateKeys.size >= 15, `key extraction looks broken: ${[...updateKeys].join(', ')}`);
+	const missing = [...updateKeys].filter(key => !initialKeys.has(key));
+	assert.deepEqual(missing, [], `_buildUsageAnalysisInitialData() is missing fields that updateStats sends: ${missing.join(', ')}`);
+});
