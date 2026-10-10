@@ -804,7 +804,8 @@ test('marks HydraFusion sessions in the recent sessions list', async () => {
 	assert.match(row.textContent, /1\.5M/);
 	assert.match(row.textContent, /\$12\.35/);
 	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
-	assert.equal(costCell?.title, '$12.3450');
+	// The table has no per-cell attributes, so the tooltip sits on the cell's content.
+	assert.equal(costCell?.querySelector('[title]')?.title, '$12.3450');
 });
 
 test('Recent Sessions Duration column falls back to wall-clock time when activeDurationMs is zero', async () => {
@@ -973,7 +974,7 @@ test('a preset-forced column survives the saved column settings restored by boot
 
 	assert.equal(doc.querySelector('#sessions-columns-menu input[data-column="contextFill"]')?.checked, true,
 		'the preset\'s column must survive the saved settings restored after it arrived');
-	const headers = [...doc.querySelectorAll('.sessions-table thead th')].map((th: any) => th.textContent.replace(/[▼▲]/g, '').trim());
+	const headers = [...doc.querySelectorAll('.sessions-table thead th')].map((th: any) => th.textContent.replace(/[↑↓]/g, '').trim());
 	assert.ok(headers.includes('Context'), `the Context column is visible; got ${headers.join(', ')}`);
 });
 
@@ -1040,14 +1041,89 @@ test('remembers the "Other models" open state across a leaderboard re-render', a
 	details.open = true;
 	details.dispatchEvent(new harness.window.Event('toggle'));
 
-	// Sorting re-renders just the leaderboard content, recreating the <details> element from
-	// scratch; without persisted state it would always snap back to collapsed.
-	const modelHeader = harness.window.document.querySelector('th[data-eff-sort="model"]');
-	modelHeader.click();
+	// Switching the chart metric re-renders the whole leaderboard content, recreating the
+	// <details> element from scratch; without persisted state it would snap back to collapsed.
+	harness.window.document.querySelector('button[data-eff-metric="outputTokens"]').click();
 
-	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
-	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
-	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
+	const detailsAfterRender = harness.window.document.getElementById('model-leaderboard-other');
+	assert.notEqual(detailsAfterRender, details, 'the metric switch must have rebuilt the group');
+	assert.equal(detailsAfterRender.open, true, 'the open state must survive the re-render');
+});
+
+test('sorting the model leaderboard sorts both tables in place and leaves "Other models" open', async () => {
+	const harness = await bootWebview(buildStatsWithLongTailModelEfficiency());
+	const doc = harness.window.document;
+	const details = doc.getElementById('model-leaderboard-other');
+	details.open = true;
+	details.dispatchEvent(new harness.window.Event('toggle'));
+	const modelSort = (tableId: string) => doc.querySelector(`#data-table-root-${tableId} [data-table-sort="model"]`)?.closest('th')?.getAttribute('aria-sort');
+
+	doc.querySelector('#data-table-root-model-leaderboard [data-table-sort="model"]').click();
+
+	assert.equal(modelSort('model-leaderboard'), 'ascending');
+	assert.equal(modelSort('model-leaderboard-other'), 'ascending', 'the "Other models" table follows the main table\'s sort');
+	assert.equal(doc.getElementById('model-leaderboard-other'), details, 'a sort re-renders only the table, not the section');
+	assert.equal(details.open, true);
+	const otherRows = [...details.querySelectorAll('tbody tr')];
+	assert.equal(otherRows.length, 3, 'sorting keeps every long-tail model');
+	assert.ok(otherRows.every((row: any) => /--model-color:/.test(row.getAttribute('style') ?? '')), 'rows keep their model colour');
+});
+
+test('Recent Sessions sorts from its headers and title links still open the session after a re-sort', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0, cachedTokens: 0, totalTokens: 1500,
+		estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z', editor: 'VS Code', models: ['gpt-5.6-terra'],
+	};
+	stats.todaySessions = [
+		{ ...baseSession, title: 'Alpha', filePath: 'alpha.jsonl', interactions: 5 },
+		{ ...baseSession, title: 'Charlie', filePath: 'charlie.jsonl', interactions: 9 },
+		{ ...baseSession, title: 'Bravo', filePath: 'bravo.jsonl', interactions: 3 },
+	];
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+	const titles = () => [...doc.querySelectorAll('.sessions-table tbody tr .session-title-link')].map((a: any) => a.textContent);
+	const ranks = () => [...doc.querySelectorAll('.sessions-table tbody tr td.session-col-rank')].map((td: any) => td.textContent);
+
+	assert.deepEqual(titles(), ['Charlie', 'Alpha', 'Bravo'], 'most active first by default');
+	doc.querySelector('.sessions-table [data-table-sort="title"]').click();
+	assert.deepEqual(titles(), ['Alpha', 'Bravo', 'Charlie']);
+	assert.deepEqual(ranks(), ['1', '2', '3'], 'the # column numbers the sorted rows');
+	assert.equal(doc.querySelector('.sessions-table th[aria-sort="ascending"]')?.textContent.replace(/[↑↓]/g, '').trim(), 'Title');
+
+	harness.posted.length = 0;
+	doc.querySelector('.sessions-table .session-title-link').click();
+	const opened = harness.posted.find((m) => m.command === 'openSessionFile');
+	assert.equal(opened?.file, 'alpha.jsonl', 'the delegated title-link handler must survive the table re-rendering itself');
+});
+
+test('worktree repositories expand into a per-worktree table that moves with its row when sorted', async () => {
+	const harness = await bootWebview(buildStats());
+	const doc = harness.window.document;
+	const worktree = (path: string, repoLabel: string, bytes: number) => ({
+		command: 'worktreeFound',
+		worktree: { path, repoLabel, branch: 'b', lastCommit: 'abc', lastCommitDate: null, pushed: 'yes', files: 1, folders: 1, bytes },
+	});
+	harness.post(worktree('C:\\wt\\a1', 'alpha', 10));
+	harness.post(worktree('C:\\wt\\b1', 'beta', 20));
+	harness.post(worktree('C:\\wt\\b2', 'beta', 30));
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	const repoOrder = () => [...doc.querySelectorAll('#data-table-root-worktree-repos tr.worktree-repo-row')].map((row: any) => row.getAttribute('data-repo'));
+
+	assert.deepEqual(repoOrder(), ['beta', 'alpha'], 'most worktrees first by default');
+	doc.querySelector('tr.worktree-repo-row[data-repo="alpha"] td').click();
+	assert.equal(doc.querySelector('tr.worktree-repo-row[data-repo="alpha"]')?.getAttribute('aria-expanded'), 'true');
+
+	doc.querySelector('#data-table-root-worktree-repos [data-table-sort="repo"]').click();
+	assert.deepEqual(repoOrder(), ['alpha', 'beta']);
+	const details = doc.querySelector('tr.worktree-repo-details[data-repo="alpha"]');
+	assert.ok(details, 'the expansion survives the sort');
+	assert.equal(details.previousElementSibling?.getAttribute('data-repo'), 'alpha', 'the details row follows its repository');
+	assert.ok(details.querySelector('#data-table-root-worktree-details-alpha'), 'the nested table has its own stable id');
+
+	harness.posted.length = 0;
+	details.querySelector('.worktree-delete-link').click();
+	assert.ok(harness.posted.some((m) => m.command === 'deleteWorktree' && m.path === 'C:\\wt\\a1'), 'nested action links keep working');
 });
 
 /** Which leaf tab is marked active, and which panel is the only visible one. */
@@ -1283,14 +1359,17 @@ test('collapses context-reference kinds with no recent usage into a closed "Othe
 
 	const otherRows = details.querySelectorAll('tbody tr');
 	assert.ok(otherRows.length > 0, 'the unused kinds must still be rendered, just collapsed');
+	// The long tail is paged like any data list; its pager reports the full row count.
+	const otherRowCount = Number(details.querySelector('.data-table-page-info, .data-table-summary')?.textContent.match(/of (\d+)\s*$/)?.[1]);
+	assert.ok(otherRowCount >= otherRows.length, `expects the pager to count every hidden kind; got ${otherRowCount}`);
 	assert.match(
 		details.querySelector('summary').textContent,
-		new RegExp(`Other references \\(${otherRows.length},`),
+		new RegExp(`Other references \\(${otherRowCount},`),
 		'the summary count must match the rows it hides',
 	);
 
 	// Every descriptor still renders somewhere: collapsing the tail must never drop a kind.
-	assert.equal(mainRows.length + otherRows.length, 21, 'expects all 21 reference kinds accounted for');
+	assert.equal(mainRows.length + otherRowCount, 21, 'expects all 21 reference kinds accounted for');
 });
 
 test('remembers the "Other references" open state across a re-render', async () => {
