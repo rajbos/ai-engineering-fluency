@@ -182,3 +182,54 @@ test('sessionActiveSince: a DB-backed session is placed by its own activity, nev
 	// … and a recent one counts even if the database file looks older.
 	assert.equal(sessionActiveSince(old, recent, cutoff), true);
 });
+
+test('buildCustomizationMatrix: the 30-day window is the extension\'s (30 calendar dates including today)', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const now = new Date();
+		const first = path.join(root, 'code', 'first-day');
+		const before = path.join(root, 'code', 'day-before');
+		for (const dir of [first, before]) { fs.mkdirSync(dir, { recursive: true }); }
+		const [firstSession, beforeSession] = makeSessions(root, [first, before]);
+		const firstDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 12);
+		const dayBefore = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 12);
+		fs.utimesSync(firstSession, firstDay, firstDay);
+		fs.utimesSync(beforeSession, dayBefore, dayBefore);
+		const matrix = await buildCustomizationMatrix([firstSession, beforeSession], undefined, now);
+		assert.deepEqual(matrix?.workspaces.map(w => w.workspaceName), ['first-day']);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('buildCustomizationMatrix: VS Code sessions are grouped by the remote of the files they referenced (parity)', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		// The repository both sessions touched; the workspace folders themselves are gone.
+		const repo = path.join(root, 'repos', 'widget-main');
+		fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+		fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+		fs.writeFileSync(path.join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/widget.git\n');
+		const touched = path.join(repo, 'src', 'index.ts');
+		fs.writeFileSync(touched, '');
+		const folders = [path.join(root, 'wt', 'checkout-a'), path.join(root, 'scratch', 'groups-dashboard-layout-85ed99')];
+		const sessions = makeSessions(root, folders);
+		const withReference = JSON.stringify({
+			version: 3,
+			requests: [{
+				requestId: 'r1', timestamp: Date.now(), message: { text: 'look at this' }, response: [{ value: 'ok' }],
+				contentReferences: [{ kind: 'reference', reference: { fsPath: touched } }],
+			}],
+		});
+		for (const s of sessions) { fs.writeFileSync(s, withReference); }
+
+		const matrix = await buildCustomizationMatrix(sessions);
+		assert.ok(matrix);
+		assert.equal(matrix.totalWorkspaces, 1, 'both folders share the referenced remote');
+		assert.equal(matrix.workspaces[0].workspaceName, 'widget');
+		assert.deepEqual(matrix.workspaces[0].memberPaths, folders.map(f => path.normalize(f)).sort());
+		assert.equal(matrix.ungroupedWorkspaceNames, undefined, 'the branch-named folder is no longer a leftover');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});

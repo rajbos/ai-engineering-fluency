@@ -15,7 +15,12 @@ the CLI's Customization evidence counts repositories, not folders.
   the result) and the CLI's `buildCustomizationMatrix()` in `cli/src/helpers.ts`, which takes
   each session's folder and remote from the owning adapter's metadata first (Copilot CLI,
   OpenCode, Crush, …) and falls back to Claude Code JSONL and VS Code `chatSessions` paths.
-  Like the extension, it only counts sessions with at least one interaction in the last 30 days.
+  For VS Code sessions, which no adapter covers, the remote comes from the files the session
+  referenced (`extractRepositoryFromSessionContent()` in `src/sessionRepository.ts`, the same
+  derivation the extension's session details use). Like the extension, it only counts sessions
+  with at least one interaction in the last 30 days (the shared `getTimeWindowStartDate('last30')`
+  window: 30 calendar dates including today), judged by a database-backed session's own last
+  activity rather than its shared database file's mtime.
 - Tests: [`vscode-extension/test/unit/workspaceGrouping.test.ts`](../../vscode-extension/test/unit/workspaceGrouping.test.ts)
   and the parity tests in `cli/src/test/customizationMatrix.test.ts`.
 

@@ -26,6 +26,8 @@ import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import { groupWorkspaces, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
+import { extractRepositoryFromSessionContent } from '../../src/sessionRepository';
+import { getTimeWindowStartDate } from '../../src/timeWindows';
 import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
@@ -148,7 +150,15 @@ async function resolveSessionWorkspace(activity: SessionActivityLookup, claudeBa
 	const meta = await activity.meta();
 	if (meta?.workspacePath) { return { path: meta.workspacePath, repository: meta.repository }; }
 	const workspacePath = await resolveSessionWorkspacePath(activity.file, claudeBasePath);
-	return workspacePath ? { path: workspacePath, repository: meta?.repository } : undefined;
+	if (!workspacePath) { return undefined; }
+	// No adapter covers VS Code chatSessions files, so take the remote from the files the
+	// session referenced, the same shared derivation the extension's session details use.
+	const repository = meta?.repository ?? await withErrorRecovery(
+		async () => extractRepositoryFromSessionContent(await fs.promises.readFile(activity.file, 'utf-8')),
+		undefined,
+		`buildCustomizationMatrix repository(${activity.file})`
+	);
+	return { path: workspacePath, ...(repository ? { repository } : {}) };
 }
 
 /** The `cwd` recorded in the first lines of a Claude Code session JSONL. */
@@ -198,11 +208,11 @@ async function resolveSessionWorkspacePath(sessionFile: string, claudeBasePath: 
 export async function buildCustomizationMatrix(
 	sessionFiles: string[],
 	probes?: WorkspaceGroupingProbes,
+	now: Date = new Date(),
 ): Promise<WorkspaceCustomizationMatrix | undefined> {
 	const claudeBasePath = path.join(os.homedir(), '.claude', 'projects');
-	const now = new Date();
-	// Same window as calculateUsageAnalysisStats()'s last-30-days period.
-	const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+	// The extension's last-30-days window (30 calendar dates including today), from the shared helper.
+	const cutoff = getTimeWindowStartDate('last30', now)!;
 	// One entry per session; the grouping sums sessions of the same folder.
 	const entries: WorkspaceUsageEntry[] = [];
 	for (const sessionFile of sessionFiles) {

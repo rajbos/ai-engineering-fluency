@@ -15,6 +15,7 @@ import type { ModelUsage, SessionFileDetails } from '../../../src/types';
 import { isJsonlContent, isUuidPointerFile, reconstructJsonlStateAsync } from '../../../src/tokenEstimation';
 import { analyzeContextReferences, analyzeRequestContext, getModelUsageFromSession } from '../../../src/usageAnalysis';
 import { extractRepositoryFromContentReferences, getRepoNameFromWorkspacePath } from '../../../src/workspaceHelpers';
+import { requestContentReferences, toolArgumentPathReferences } from '../../../src/sessionRepository';
 import { findEcosystem, toUsageAnalysisDeps, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 
 /** The two stat fields the details pass reads; plain data so it survives a worker round trip. */
@@ -85,14 +86,7 @@ function processToolExecutionEvent(event: any, details: SessionFileDetails, allC
 	if (event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
 		details.title = event.data.arguments.title;
 	}
-	if (event.data?.arguments) {
-		const args = event.data.arguments as Record<string, unknown>;
-		for (const val of Object.values(args)) {
-			if (typeof val === 'string' && val.length > 3 && (val.includes('/') || val.includes('\\'))) {
-				allContentReferences.push({ kind: 'reference', reference: { fsPath: val } });
-			}
-		}
-	}
+	allContentReferences.push(...toolArgumentPathReferences(event.data?.arguments));
 }
 
 function processCliJsonlEvent(event: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): string | undefined {
@@ -119,9 +113,7 @@ async function processDeltaJsonlDetails(lines: string[], stat: SessionStatLike, 
 		if (!request) { continue; }
 		if (request.timestamp) { timestamps.push(request.timestamp); }
 		analyzeRequestContext(request, details.contextReferences);
-		if (request.contentReferences && Array.isArray(request.contentReferences)) {
-			allContentReferences.push(...request.contentReferences);
-		}
+		allContentReferences.push(...requestContentReferences(request));
 	}
 
 	setDetailsTimestamps(details, timestamps, stat);
@@ -190,7 +182,7 @@ function processJsonRequest(request: any, details: SessionFileDetails, timestamp
 	if (ts) { timestamps.push(new Date(ts).getTime()); }
 	analyzeRequestContext(request, details.contextReferences);
 	analyzeRequestMessage(request.message, details.contextReferences);
-	if (request.contentReferences && Array.isArray(request.contentReferences)) { allContentReferences.push(...request.contentReferences); }
+	allContentReferences.push(...requestContentReferences(request));
 	if (request.variableData) { processRequestVariableData(request.variableData, details.contextReferences); }
 }
 
