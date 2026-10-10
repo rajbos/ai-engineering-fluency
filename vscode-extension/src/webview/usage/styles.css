@@ -752,6 +752,47 @@ body {
 	background: var(--list-hover-bg);
 }
 
+.customization-paged {
+	max-height: 70vh;
+	overflow: auto;
+}
+
+.customization-paged .paged-table {
+	table-layout: fixed;
+	min-width: 560px;
+	font-size: 12px;
+}
+
+.customization-paged .paged-table thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--list-hover-bg);
+	white-space: nowrap;
+}
+
+.customization-paged .paged-table th:nth-child(2),
+.customization-paged .paged-table th:nth-child(3) {
+	width: 96px;
+}
+
+.customization-paged .paged-table th:nth-child(n+4) {
+	width: 44px;
+}
+
+.customization-paged .paged-table td {
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.customization-paged .paged-table tbody tr:hover td {
+	background: var(--list-hover-bg);
+}
+
+.customization-workspace-name {
+	font-family: 'Courier New', monospace;
+	overflow-wrap: anywhere;
+}
+
 .stale-warning {
 	color: var(--warning-fg);
 	font-weight: 600;

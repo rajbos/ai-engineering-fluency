@@ -1,5 +1,376 @@
 {
   "readinessAvailable": true,
+  "customizationMatrix": {
+    "customizationTypes": [
+      {
+        "id": "copilot-instructions",
+        "icon": "📋",
+        "label": "copilot-instructions.md"
+      },
+      {
+        "id": "agents-md",
+        "icon": "🤖",
+        "label": "AGENTS.md"
+      },
+      {
+        "id": "instructions",
+        "icon": "📝",
+        "label": ".instructions.md"
+      },
+      {
+        "id": "prompts",
+        "icon": "💬",
+        "label": ".prompt.md"
+      },
+      {
+        "id": "skills",
+        "icon": "🧰",
+        "label": "SKILL.md"
+      }
+    ],
+    "workspaces": [
+      {
+        "workspacePath": "/home/dev/repos/ai-engineering-fluency",
+        "workspaceName": "ai-engineering-fluency",
+        "sessionCount": 40,
+        "interactionCount": 520,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "✅",
+          "prompts": "⚠️",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/website",
+        "workspaceName": "website",
+        "sessionCount": 38,
+        "interactionCount": 501,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "❌",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/api-gateway",
+        "workspaceName": "api-gateway",
+        "sessionCount": 36,
+        "interactionCount": 482,
+        "typeStatuses": {
+          "copilot-instructions": "⚠️",
+          "agents-md": "✅",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/docs",
+        "workspaceName": "docs",
+        "sessionCount": 34,
+        "interactionCount": 463,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/infra",
+        "workspaceName": "infra",
+        "sessionCount": 32,
+        "interactionCount": 444,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "⚠️",
+          "instructions": "✅",
+          "prompts": "✅",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/mobile-app",
+        "workspaceName": "mobile-app",
+        "sessionCount": 30,
+        "interactionCount": 425,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "✅",
+          "prompts": "⚠️",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/work/client-a/frontend",
+        "workspaceName": "frontend",
+        "sessionCount": 18,
+        "interactionCount": 410,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/design-system",
+        "workspaceName": "design-system",
+        "sessionCount": 28,
+        "interactionCount": 406,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "❌",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/data-pipeline",
+        "workspaceName": "data-pipeline",
+        "sessionCount": 26,
+        "interactionCount": 387,
+        "typeStatuses": {
+          "copilot-instructions": "⚠️",
+          "agents-md": "✅",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/billing-service",
+        "workspaceName": "billing-service",
+        "sessionCount": 24,
+        "interactionCount": 368,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/auth-service",
+        "workspaceName": "auth-service",
+        "sessionCount": 22,
+        "interactionCount": 349,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "⚠️",
+          "instructions": "✅",
+          "prompts": "✅",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/search",
+        "workspaceName": "search",
+        "sessionCount": 20,
+        "interactionCount": 330,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "✅",
+          "prompts": "⚠️",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/notifications",
+        "workspaceName": "notifications",
+        "sessionCount": 18,
+        "interactionCount": 311,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "❌",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/analytics",
+        "workspaceName": "analytics",
+        "sessionCount": 16,
+        "interactionCount": 292,
+        "typeStatuses": {
+          "copilot-instructions": "⚠️",
+          "agents-md": "✅",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/cli-tools",
+        "workspaceName": "cli-tools",
+        "sessionCount": 14,
+        "interactionCount": 273,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/sandbox",
+        "workspaceName": "sandbox",
+        "sessionCount": 12,
+        "interactionCount": 254,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "⚠️",
+          "instructions": "✅",
+          "prompts": "✅",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/playground",
+        "workspaceName": "playground",
+        "sessionCount": 10,
+        "interactionCount": 235,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "✅",
+          "prompts": "⚠️",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/work/client-b/frontend",
+        "workspaceName": "frontend",
+        "sessionCount": 7,
+        "interactionCount": 233,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/scratch",
+        "workspaceName": "scratch",
+        "sessionCount": 8,
+        "interactionCount": 216,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "❌",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/demo-app",
+        "workspaceName": "demo-app",
+        "sessionCount": 6,
+        "interactionCount": 197,
+        "typeStatuses": {
+          "copilot-instructions": "⚠️",
+          "agents-md": "✅",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/legacy-portal",
+        "workspaceName": "legacy-portal",
+        "sessionCount": 4,
+        "interactionCount": 178,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/ml-models",
+        "workspaceName": "ml-models",
+        "sessionCount": 2,
+        "interactionCount": 159,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "⚠️",
+          "instructions": "✅",
+          "prompts": "✅",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/reporting",
+        "workspaceName": "reporting",
+        "sessionCount": 1,
+        "interactionCount": 140,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "✅",
+          "instructions": "✅",
+          "prompts": "⚠️",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/admin-console",
+        "workspaceName": "admin-console",
+        "sessionCount": 1,
+        "interactionCount": 121,
+        "typeStatuses": {
+          "copilot-instructions": "✅",
+          "agents-md": "❌",
+          "instructions": "⚠️",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/sdk-js",
+        "workspaceName": "sdk-js",
+        "sessionCount": 1,
+        "interactionCount": 102,
+        "typeStatuses": {
+          "copilot-instructions": "⚠️",
+          "agents-md": "✅",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "✅"
+        }
+      },
+      {
+        "workspacePath": "/home/dev/repos/sdk-python",
+        "workspaceName": "sdk-python",
+        "sessionCount": 1,
+        "interactionCount": 83,
+        "typeStatuses": {
+          "copilot-instructions": "❌",
+          "agents-md": "❌",
+          "instructions": "❌",
+          "prompts": "❌",
+          "skills": "❌"
+        }
+      }
+    ],
+    "totalWorkspaces": 26,
+    "workspacesWithIssues": 6
+  },
   "today": {
     "sessions": 24,
     "toolCalls": {

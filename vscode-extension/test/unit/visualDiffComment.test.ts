@@ -190,6 +190,64 @@ test('renderBody starts with the marker and never leaks unsafe text', () => {
 	}
 });
 
+test('renderBody shows only the diff inline and folds before/after into a closed section', () => {
+	const { root, cleanup } = screenshotsRoot();
+	try {
+		const row: Comparison = { view: 'usage', state: 'tools', theme: 'dark', status: 'changed', baseline: 'usage--tools.dark.png', current: 'usage--tools.dark.png', diff: 'usage--tools.dark.diff.png', changedPixels: 10, changedPercent: 1 };
+		const plan = publisher.planAttachments([row], { root }, 48, new Map());
+		const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+		const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+		const fold = body.indexOf('<details><summary>Before and after');
+		assert.ok(fold > 0, 'before/after sit in a collapsed section');
+		assert.ok(!body.includes('<details open>'), 'nothing large is expanded by default');
+		const diff = plan.attachments.find((a) => a.kind === 'Diff');
+		assert.ok(diff, 'the plan attaches a diff');
+		const diffAt = body.indexOf(`](${diff.file})`);
+		assert.ok(diffAt > 0 && diffAt < fold, 'the diff is the inline image');
+		assert.ok(body.indexOf('![Before:') > fold && body.indexOf('![After:') > fold, 'before and after only appear inside the fold');
+		for (const a of plan.attachments) {
+			assert.ok(body.includes(`](${a.file})`), `every attachment is referenced: ${a.kind}`);
+		}
+	} finally {
+		cleanup();
+	}
+});
+
+test('renderBody survives a changed row with no pixel figures', () => {
+	const row: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'changed' };
+	const files = ['Before', 'After', 'Diff'].map((kind) => ({ kind, file: `visual-output/x/${kind}.png`, alt: kind }));
+	const plan: Plan = { attachments: files, inline: new Map([['usage.dark', files]]) };
+	const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+	const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+	assert.ok(body.includes('— changed'), 'a missing percentage renders as a dash, not a crash');
+});
+
+test('renderBody emits no image grid when no row has inline images', () => {
+	const row: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'changed', changedPercent: 1, changedPixels: 10 };
+	const stray = [{ kind: 'Diff', file: 'visual-output/diff/other.png', alt: 'Diff' }];
+	const plan: Plan = { attachments: stray, inline: new Map([['other.dark', stray]]) };
+	const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
+	const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
+	assert.ok(!body.includes('![') && !/^\|\s*\|$/m.test(body), 'no empty or zero-column table');
+});
+
+test('renderBody explains magenta only when the grid holds a diff', () => {
+	const summary = { changed: 0, unchanged: 0, added: 1, removed: 0 };
+	const added: Comparison = { view: 'usage', state: null, theme: 'dark', status: 'added' };
+	const shot = [{ kind: 'After', file: 'visual-output/current/usage.dark.png', alt: 'New view' }];
+	const addedOnly = publisher.renderBody({ summary, comparisons: [added] }, OPTS, new Map(), { attachments: shot, inline: new Map([['usage.dark', shot]]) }, { withImages: true });
+	assert.ok(addedOnly.includes('Click an image for full size'));
+	assert.ok(!addedOnly.includes('Magenta'), 'an added screenshot is not a diff');
+	assert.ok(!addedOnly.includes('Before and after'), 'no fold without a changed view');
+
+	const changed: Comparison = { view: 'usage', state: null, theme: 'light', status: 'changed', changedPercent: 1, changedPixels: 10 };
+	const files = ['Before', 'After', 'Diff'].map((kind) => ({ kind, file: `visual-output/x/${kind}.png`, alt: kind }));
+	const both = publisher.renderBody(
+		{ summary: { ...summary, changed: 1 }, comparisons: [added, changed] }, OPTS, new Map(),
+		{ attachments: [...shot, ...files], inline: new Map([['usage.dark', shot], ['usage.light', files]]) }, { withImages: true });
+	assert.ok(both.includes('Magenta marks changed pixels'));
+});
+
 test('renderBody reports an all-clear without a table when nothing changed', () => {
 	const summary = { changed: 0, unchanged: 3, added: 0, removed: 0 };
 	const rows: Comparison[] = [1, 2, 3].map((i) => ({ view: `v${i}`, state: null, theme: 'dark', status: 'unchanged' }));
