@@ -127,16 +127,23 @@ async function recentSessionInteractions(activity: SessionActivityLookup, cutoff
 		const data = await processSessionFile(activity.file);
 		if (!data) { return 0; }
 		if (isVirtual) { return sessionActiveSince(data.lastModified, own, cutoff, true) ? data.interactions : 0; }
-		// A regular file is placed by its last day of real activity, like the extension's
-		// computeLastActivityKey(): a recently copied or touched log of old requests does not count.
-		return sessionLastActivityDay(data.dailyFractions, data.lastModified) >= toLocalDayKey(cutoff) ? data.interactions : 0;
+		// A regular file is placed by its last day of real activity, like the extension: the owning
+		// adapter's recorded last interaction (e.g. Pi, whose daily split is otherwise synthesised
+		// from the mtime), else its daily activity. A recently copied or touched old log does not count.
+		const adapterLastInteraction = (await activity.meta())?.lastInteraction;
+		return sessionLastActivityDay(data.dailyFractions, data.lastModified, adapterLastInteraction) >= toLocalDayKey(cutoff) ? data.interactions : 0;
 	} catch {
 		return 0;
 	}
 }
 
-/** The latest day a session had activity on: its last daily-fraction day, else its file mtime's day. */
-export function sessionLastActivityDay(dailyFractions: Record<string, number> | undefined, fallback: Date): string {
+/**
+ * The latest day a session had activity on: the adapter's recorded last interaction when it is a
+ * valid timestamp, else its last daily-fraction day, else its file mtime's day.
+ */
+export function sessionLastActivityDay(dailyFractions: Record<string, number> | undefined, fallback: Date, adapterLastInteraction?: string | null): string {
+	const recorded = adapterLastInteraction ? new Date(adapterLastInteraction) : undefined;
+	if (recorded && !Number.isNaN(recorded.getTime())) { return toLocalDayKey(recorded); }
 	const days = Object.keys(dailyFractions ?? {}).sort();
 	return days.length > 0 ? days[days.length - 1] : toLocalDayKey(fallback);
 }

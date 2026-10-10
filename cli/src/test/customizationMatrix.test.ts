@@ -270,3 +270,14 @@ test('sessionLastActivityDay: the last daily-fraction day, else the fallback dat
 	assert.equal(sessionLastActivityDay({}, new Date(2026, 9, 1, 12)), '2026-10-01');
 	assert.equal(sessionLastActivityDay(undefined, new Date(2026, 9, 1, 12)), '2026-10-01');
 });
+
+test('sessionLastActivityDay: a valid adapter lastInteraction wins over synthesised daily fractions', async () => {
+	const { sessionLastActivityDay } = await import('../helpers');
+	// A copied old Pi session: the daily split was synthesised from today's mtime …
+	const synthesised = { '2026-10-10': 1 };
+	// … but the adapter recorded its real last interaction.
+	assert.equal(sessionLastActivityDay(synthesised, new Date(2026, 9, 10, 12), new Date(2026, 6, 1, 12).toISOString()), '2026-07-01');
+	// Missing or invalid metadata falls back to the daily fractions.
+	assert.equal(sessionLastActivityDay(synthesised, new Date(), null), '2026-10-10');
+	assert.equal(sessionLastActivityDay(synthesised, new Date(), 'not a date'), '2026-10-10');
+});
