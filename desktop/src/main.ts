@@ -7,9 +7,10 @@ import {
     discoverSessionFiles,
     effectiveTokens,
     calculateDetailedStats,
-    calculateDailyStats,
     calculateUsageAnalysisStats,
+    calculateViewStats,
     buildChartPayload,
+    buildEfficiencyPayload,
     getDiagnosticPaths,
     getSessionBackingPath,
     getSessionLastActivity,
@@ -19,7 +20,8 @@ import {
     saveCache,
 } from '../../cli/src/helpers';
 import { getEditorSourceFromPath, runWithConcurrency } from '../../cli/src/analysis';
-import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
@@ -63,7 +65,7 @@ protocol.registerSchemesAsPrivileged([
 // State
 // ---------------------------------------------------------------------------
 
-type PanelId = 'details' | 'environmental' | 'chart' | 'usage' | 'diagnostics' | 'maturity' | 'fluency-level-viewer';
+type PanelId = 'details' | 'environmental' | 'chart' | 'efficiency' | 'usage' | 'diagnostics' | 'maturity' | 'fluency-level-viewer';
 
 // Mirrors build.appId in package.json. Used as the Windows AppUserModelID so the
 // OS associates the taskbar button (and its icon) with this app rather than the
@@ -77,6 +79,9 @@ let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
 let cachedChartPayload: object | null = null;
+// Session-derived inputs behind both the Chart and Efficiency payloads, from one session walk.
+let cachedViewStats: ViewStats | null = null;
+let cachedEfficiencyPayload: object | null = null;
 // Local day the cached stats, usage and chart data were computed for. All three
 // have "today" / "this month" windows baked in, so a tray app left running
 // overnight must rebuild them rather than keep showing yesterday as today.
@@ -236,7 +241,9 @@ body {
 /* Controls the desktop app cannot act on yet. They are rendered by the shared
    webview bundles, so the only host-side way to avoid a dead control is to hide
    it. Remove a selector here when its message gets a handler in registerIpcHandlers. */
-#btn-efficiency,
+/* Efficiency: the Value tab's "Connect GitHub and open Repository PRs" hint and its
+   button — the whole hint, since this host has no GitHub sign-in or PR loader. */
+.value-hint,
 /* Diagnostics: formatted-file viewer, editor-path reporting, GitHub sign-in,
    backend/team-server setup, VS Code settings, folder analysis, cache reset,
    social sharing. */
@@ -266,7 +273,7 @@ body {
 // ---------------------------------------------------------------------------
 
 // Computations currently running, by name. These walk the whole session history,
-// so a second caller (opening Chart while startup is still pre-warming it, or
+// so a second caller (opening Usage Analysis while startup is still pre-warming it, or
 // reloading a view) must join the run in progress instead of starting another.
 const inFlight = new Map<string, Promise<unknown>>();
 
@@ -425,15 +432,59 @@ function getChartPayload(): Promise<object> {
 async function loadChartPayload(): Promise<object> {
     expireCachesOnDateChange();
     while (!cachedChartPayload) {
+        // Inputs are read inside the computation, so a refresh that lands meanwhile
+        // fails its generation check and the payload is rebuilt from the new data.
         await computeForCurrentFiles(
-            async (files) => {
-                const { labels, days, allDaysMap } = await calculateDailyStats(files);
-                return buildChartPayload(labels, days, allDaysMap);
-            },
+            async () => buildChartPayload((await getViewStats()).dailyStats),
             (payload) => { cachedChartPayload ??= payload; },
         );
     }
     return cachedChartPayload;
+}
+
+type ViewStats = { dailyStats: DailyTokenStats[]; efficiencySessionInputs: EfficiencySessionInput[] };
+
+/**
+ * Full-history daily stats plus the Efficiency session inputs, built in one walk over the
+ * session files and shared by the Chart and Efficiency payloads, so a cold Efficiency open
+ * does not parse and analyze every session twice.
+ */
+function getViewStats(): Promise<ViewStats> {
+    return shareInFlight('viewStats', loadViewStats);
+}
+
+async function loadViewStats(): Promise<ViewStats> {
+    expireCachesOnDateChange();
+    while (!cachedViewStats) {
+        await computeForCurrentFiles(
+            files => calculateViewStats(files),
+            (viewStats) => { cachedViewStats ??= viewStats; },
+        );
+    }
+    return cachedViewStats;
+}
+
+/**
+ * Efficiency payload, built by the same shared builder as the extension's
+ * (src/efficiencyViewBuilder.ts). Its session inputs come from the same walk as the
+ * Chart's daily stats; the usage analysis (a separate, recent-files pass) runs alongside.
+ */
+function getEfficiencyPayload(): Promise<object> {
+    return shareInFlight('efficiency', loadEfficiencyPayload);
+}
+
+async function loadEfficiencyPayload(): Promise<object> {
+    expireCachesOnDateChange();
+    while (!cachedEfficiencyPayload) {
+        await computeForCurrentFiles(
+            async () => {
+                const [viewStats, usage] = await Promise.all([getViewStats(), getUsageStats()]);
+                return buildEfficiencyPayload({ dailyStats: viewStats.dailyStats, usage, sessionInputs: viewStats.efficiencySessionInputs });
+            },
+            (payload) => { cachedEfficiencyPayload ??= payload; },
+        );
+    }
+    return cachedEfficiencyPayload;
 }
 
 /** Whether a panel can render straight away, i.e. without a long computation first. */
@@ -448,6 +499,8 @@ function expireCachesOnDateChange(): void {
         cachedStats = null;
         cachedUsageStats = null;
         cachedChartPayload = null;
+        cachedViewStats = null;
+        cachedEfficiencyPayload = null;
         // A calculation that started yesterday must not cache yesterday's
         // totals under today's day: make its generation check fail so it retries.
         dataGeneration++;
@@ -463,6 +516,8 @@ function isPanelDataReady(panel: PanelId): boolean {
             return cachedStats !== null;
         case 'chart':
             return cachedChartPayload !== null;
+        case 'efficiency':
+            return cachedEfficiencyPayload !== null;
         case 'usage':
         case 'maturity':
             return cachedUsageStats !== null;
@@ -482,6 +537,9 @@ async function loadPanelData(panel: PanelId): Promise<void> {
             break;
         case 'chart':
             await getChartPayload();
+            break;
+        case 'efficiency':
+            await getEfficiencyPayload();
             break;
         case 'usage':
         case 'maturity':
@@ -512,6 +570,8 @@ async function refreshStats(): Promise<void> {
         cachedDataDay = toLocalDayKey(stats.lastUpdated);
         cachedUsageStats = null; // reset so it recomputes on next access
         cachedChartPayload = null;
+        cachedViewStats = null;
+        cachedEfficiencyPayload = null;
         await saveCache();
     } finally {
         isRefreshing = false;
@@ -703,6 +763,10 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             monthlyBudget: 0,
         };
         initialDataScript = panelPayloadScript('__INITIAL_CHART__', chartData);
+
+    } else if (panel === 'efficiency') {
+        title = 'AI Efficiency Trends';
+        initialDataScript = panelPayloadScript('__INITIAL_EFFICIENCY__', await getEfficiencyPayload());
 
     } else if (panel === 'usage') {
         title = 'Usage Analysis';
@@ -995,9 +1059,22 @@ function createWindow(): BrowserWindow {
 function showPanel(panel: PanelId): void {
     currentPanel = panel;
     if (!mainWindow) { return; }
+    mainWindow.show();
+    mainWindow.focus();
+    navigateToPanel(panel);
+}
+
+/**
+ * Loads a panel, putting the loading screen up first when its data still has to be
+ * computed. Every navigation goes through here — including the reload after a refresh
+ * or the startup warm-up, which clear or have not yet built the caches — because a
+ * cache miss can mean a multi-minute walk on this main process (the Chart/Efficiency
+ * enrichment), and loading `app://panel/...` directly would block on it with the old
+ * page, or nothing, on screen.
+ */
+function navigateToPanel(panel: PanelId): void {
+    if (!mainWindow || mainWindow.isDestroyed()) { return; }
     const win = mainWindow;
-    win.show();
-    win.focus();
     if (isPanelDataReady(panel)) {
         win.loadURL(`app://panel/${panel}`);
         return;
@@ -1021,6 +1098,7 @@ const PANEL_MENU: { label: string; panel: PanelId }[] = [
     { label: 'Details', panel: 'details' },
     { label: 'Environmental Impact', panel: 'environmental' },
     { label: 'Token Usage Chart', panel: 'chart' },
+    { label: 'Efficiency', panel: 'efficiency' },
     { label: 'Usage Analysis', panel: 'usage' },
     { label: 'Fluency Score', panel: 'maturity' },
     { label: 'Scoring Guide', panel: 'fluency-level-viewer' },
@@ -1070,7 +1148,7 @@ function updateTrayMenu(t: Tray): void {
             click: async () => {
                 await refreshStats();
                 if (mainWindow?.isVisible()) {
-                    mainWindow.loadURL(`app://panel/${currentPanel}`);
+                    navigateToPanel(currentPanel);
                 }
             },
         },
@@ -1108,7 +1186,7 @@ function registerIpcHandlers(): void {
         switch (message.command) {
             case 'refresh':
                 await refreshStats();
-                mainWindow?.loadURL(`app://panel/${currentPanel}`);
+                navigateToPanel(currentPanel);
                 break;
 
             case 'showDetails':
@@ -1121,6 +1199,10 @@ function registerIpcHandlers(): void {
 
             case 'showChart':
                 showPanel('chart');
+                break;
+
+            case 'showEfficiency':
+                showPanel('efficiency');
                 break;
 
             case 'showUsageAnalysis':
@@ -1276,17 +1358,19 @@ app.whenReady().then(async () => {
     tray = createTray();
 
     // Warm the caches in the background, showing the loading page meanwhile.
-    // Detailed stats power Details/Chart/Environmental; usage stats power Usage
+    // Detailed stats power Details/Environmental; usage stats power Usage
     // Analysis and Fluency Score. Both are expensive (tens of seconds over large
     // histories) and run synchronously, so pre-warm BOTH at startup — otherwise
     // the first open of Usage Analysis / Fluency Score freezes the UI mid-click
     // and looks like the panel never loads.
+    // The Chart/Efficiency walk is deliberately NOT pre-warmed: it analyzes every
+    // historical session (usage analysis + repository lookup), which on a large
+    // history runs for minutes on this main process. Unattended, after Details is
+    // already showing, that would freeze the visible window; on demand it runs
+    // behind the loading screen showPanel() puts up first.
     getStats().then(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.loadURL(`app://panel/${currentPanel}`);
-        }
-        // Continue warming the chart and usage data so those panels open instantly too.
-        return getChartPayload().then(() => getUsageStats());
+        navigateToPanel(currentPanel);
+        return getUsageStats();
     }).catch(() => { /* surfaced per-panel via the error page */ });
 
     startUpdateChecks({
@@ -1299,7 +1383,7 @@ app.whenReady().then(async () => {
     // Listen for system theme changes and reload the current panel
     nativeTheme.on('updated', () => {
         if (mainWindow?.isVisible()) {
-            mainWindow.loadURL(`app://panel/${currentPanel}`);
+            navigateToPanel(currentPanel);
         }
     });
 });

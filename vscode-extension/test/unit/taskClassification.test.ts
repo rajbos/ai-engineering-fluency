@@ -1,5 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import taskClassificationDefault, {
 classifyTurn,
@@ -8,6 +10,8 @@ classifySessionTask,
 buildClassificationInputFromUsageAnalysis,
 buildClassificationInputFromChatTurns,
 countDelegationToolCalls,
+resolveSessionTaskAttribution,
+createEmptyTaskClassificationResult,
 } from '../../../src/taskClassification';
 import type { ChatTurn, ContextReferenceUsage, SessionUsageAnalysis } from '../../../src/types';
 
@@ -231,4 +235,35 @@ test('countDelegationToolCalls: matches Claude Agent tool, MCP spawn tools, and 
 
 test('countDelegationToolCalls: does not match tool names merely containing "task" or "agent"', () => {
 	assert.equal(countDelegationToolCalls({ task_create: 1, todo_write: 1, manage_agents_config: 1 }), 0);
+});
+
+test('resolveSessionTaskAttribution uses a classification that covered turns', () => {
+	const classification = classifySessionTurns([
+		{ messageText: 'run tests', toolNames: ['bash'], shellCommands: ['npm test'] },
+	]);
+	assert.ok(classification.turnCount > 0);
+	const result = resolveSessionTaskAttribution({ toolCalls: { total: 0, byTool: {} }, taskClassification: classification });
+	assert.equal(result.taskCategory, classification.primaryCategory);
+	assert.deepEqual(result.taskCategoryShares, classification.categoryShares);
+});
+
+test('resolveSessionTaskAttribution falls back to the tool heuristic for an empty classification', () => {
+	// analyzeSessionUsage() and the adapters always set taskClassification, to the empty
+	// "Conversation" placeholder when nothing was classified; that must not mask tool calls.
+	const toolCalls = { total: 1, byTool: { edit: 1 } };
+	const result = resolveSessionTaskAttribution({ toolCalls, taskClassification: createEmptyTaskClassificationResult() });
+	assert.equal(result.taskCategory, classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls })));
+	assert.notEqual(result.taskCategory, 'Conversation', 'the placeholder category must not win over the tools');
+	assert.equal('taskCategoryShares' in result, false, 'the placeholder shares must not be carried over');
+});
+
+test('wiring: the session analyzer feeds one resolved task attribution to the rollups and the entry', () => {
+	// The per-day rollups used to read usageAnalysis.taskClassification directly, so an empty
+	// placeholder still put "Conversation" on every day while the session entry carried the
+	// tool-heuristic category, and the Chart's "By Task" disagreed with the CLI.
+	const src = fs.readFileSync(path.join(__dirname, '../../../../src/analysis/sessionFileAnalyzer.ts'), 'utf8');
+	assert.match(src, /const taskAttribution = resolveSessionTaskAttribution\(usageAnalysis, sessionMeta\.title\);/);
+	assert.match(src, /computeDailyRollups\([^)]*taskAttribution\)/);
+	assert.match(src, /buildSessionDataObject\([^)]*taskAttribution, existing\)/);
+	assert.doesNotMatch(src, /usageAnalysis\.taskClassification\?\.(primaryCategory|categoryShares)/, 'nothing may bypass the resolved attribution');
 });

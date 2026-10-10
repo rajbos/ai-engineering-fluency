@@ -309,3 +309,24 @@ assert.ok(copilotDataset, 'expected GitHub Copilot provider token dataset');
 // day1: (400+100)+(300+200)=1000, day2: 300+200=500
 assert.equal((copilotDataset as any).data.reduce((a: number, b: number) => a + b, 0), 1500);
 });
+
+test('buildChartData ignores prototype-polluting usage keys from cached daily stats', () => {
+	// Daily stats can come back from a JSON cache, where JSON.parse creates an own "__proto__"
+	// key; such a key must not reach the plain-object accumulators (see protoGuard.ts).
+	const today = new Date();
+	const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+	const day = JSON.parse(JSON.stringify({
+		date, tokens: 10, sessions: 1, interactions: 1, modelUsage: {}, taskCategoryUsage: {},
+		editorUsage: { 'VS Code': { tokens: 10, sessions: 1 } },
+		repositoryUsage: { 'https://github.com/o/r': { tokens: 10, sessions: 1 } },
+	})) as DailyTokenStats;
+	(day.editorUsage as Record<string, unknown>) = JSON.parse('{"__proto__": {"tokens": 5, "sessions": 1}, "VS Code": {"tokens": 10, "sessions": 1}}');
+	(day.repositoryUsage as Record<string, unknown>) = JSON.parse('{"__proto__": {"tokens": 5, "sessions": 1}, "git@host:__proto__": {"tokens": 3, "sessions": 1}, "https://github.com/o/r": {"tokens": 10, "sessions": 1}}');
+	const payload = buildChartData([day], {
+		getRepoDisplayName: (url: string) => (url.endsWith('/r') ? 'o/r' : '__proto__'),
+		calculateEstimatedCost: () => 0, backendConfigured: false, compactNumbers: false, now: today,
+	});
+	assert.deepEqual(Object.keys(payload.editorTotalsMap), ['VS Code']);
+	assert.deepEqual(Object.keys(payload.repositoryTotalsMap), ['o/r']);
+	assert.equal(({} as Record<string, unknown>).tokens, undefined, 'Object.prototype must not gain a tokens field');
+});

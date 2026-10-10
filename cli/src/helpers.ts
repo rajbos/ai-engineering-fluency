@@ -18,9 +18,14 @@ import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
-import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, ModelUsage, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
-import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { activeSessionDays, preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
+import { resolveSessionTaskAttribution } from '../../src/taskClassification';
+import { resolveSessionAttributes } from '../../src/sessionRepository';
+import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
+import { EFFICIENCY_BEHAVIOR_WEEKS, toEfficiencySessionInput } from '../../src/efficiencyViewBuilder';
+import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
@@ -36,7 +41,6 @@ import toolNamesData from '../../src/toolNames.json';
 // Pure analysis helpers from analysis.ts
 import {
 	type SessionData,
-	type DailyEntry,
 	type PeriodStats,
 	effectiveTokens,
 	getEditorSourceFromPath,
@@ -48,8 +52,8 @@ import {
 	fmt,
 	formatTokens,
 } from './analysis';
-export type { SessionData, DailyEntry } from './analysis';
-export { effectiveTokens, buildChartPayload, fmt, formatTokens } from './analysis';
+export type { SessionData } from './analysis';
+export { effectiveTokens, buildChartPayload, buildEfficiencyPayload, fmt, formatTokens } from './analysis';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
 const modelPricing = modelPricingData.pricing as { [key: string]: any };
@@ -308,6 +312,132 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  * When adding support for a new session format, extend this function rather than creating
  * a separate attribution implementation — this keeps all formats consistent.
  */
+
+/** Completed analyses kept for reuse; bounded because a long-lived host (the desktop app) walks many files. */
+const ANALYSIS_MEMO_LIMIT = 1000;
+const analysisMemo = new Map<string, Promise<{ analysis: SessionUsageAnalysis; failed: boolean }>>();
+
+/**
+ * analyzeSessionUsage() for one file version, shared by every caller in this process.
+ *
+ * The view enrichment (processSessionFileForViews) and calculateUsageAnalysisStats() both need
+ * the full analysis of recent sessions, and `cli all` / the desktop Efficiency build run them
+ * together. The session cache only stores the slim enriched data, so without this each recent
+ * session would be analyzed twice. Keyed by path + mtime + size, so a changed file is analyzed
+ * afresh; concurrent callers share one in-flight pass. Completed results are kept only while
+ * the session cache is enabled (`--no-cache` means uncached), and a failed analysis is never
+ * kept, so the next caller retries it.
+ */
+function analyzeSessionUsageShared(
+	filePath: string,
+	version: { mtimeMs: number; size: number } | undefined,
+	content?: string,
+): Promise<{ analysis: SessionUsageAnalysis; failed: boolean }> {
+	const key = version ? `${filePath}\0${version.mtimeMs}\0${version.size}` : undefined;
+	const hit = key ? analysisMemo.get(key) : undefined;
+	if (key && hit) {
+		// Refresh its recency so the bound evicts the least recently used entry.
+		analysisMemo.delete(key);
+		analysisMemo.set(key, hit);
+		return hit;
+	}
+	let failed = false;
+	const run = analyzeSessionUsage(
+		{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
+		filePath,
+		content,
+	).then(analysis => ({ analysis, failed }));
+	if (key) {
+		analysisMemo.set(key, run);
+		while (analysisMemo.size > ANALYSIS_MEMO_LIMIT) {
+			const oldest = analysisMemo.keys().next().value;
+			if (oldest === undefined) { break; }
+			analysisMemo.delete(oldest);
+		}
+		const forget = () => { if (analysisMemo.get(key) === run) { analysisMemo.delete(key); } };
+		run.then(r => { if (r.failed || !getCacheStats().enabled) { forget(); } }, forget);
+	}
+	return run;
+}
+
+/**
+ * The per-session fields the Chart and Efficiency views split by (repository, task category,
+ * lines of code, efficiency signals), derived through the same shared helpers the extension's
+ * session analyzer and details pass use.
+ *
+ * Returns `null` when the analysis failed. analyzeSessionUsage() swallows read, parser and
+ * adapter errors and returns an empty analysis, signalling them through `deps.onAnalysisError`.
+ * An empty result from a failed read must not be marked resolved and cached, or the session
+ * would show no task/LOC/efficiency data until it changes. Plain `deps.warn` notices (a
+ * sub-step that failed, an unexpected format) leave a valid analysis and are not failures.
+ * Likewise a repository that could not be resolved (unreadable file) is a failure, while a
+ * session that names no repository resolves to `''` and is recorded as "Unknown".
+ */
+async function sessionViewAttributes(filePath: string, version: { mtimeMs: number; size: number } | undefined): Promise<Pick<SessionData, 'repository' | 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
+	try {
+		// Read a file-based session once and hand the content to both passes; ecosystem
+		// (DB-backed) sessions are read through their adapter instead. A failed read throws
+		// here and is reported as a failure below.
+		const ecosystems = getEcosystems();
+		const content = ecosystems.some(e => e.handles(filePath)) ? undefined : await fs.promises.readFile(filePath, 'utf-8');
+		const [{ analysis, failed }, sessionAttributes] = await Promise.all([
+			analyzeSessionUsageShared(filePath, version, content),
+			resolveSessionAttributes(ecosystems, filePath, content),
+		]);
+		if (failed || sessionAttributes === undefined) { return null; }
+		const { repository, title } = sessionAttributes;
+		return {
+			...(repository ? { repository } : {}),
+			// With the session title, as the extension's analyzer passes it, so the heuristic
+			// fallback (sessions whose analysis classified no turns) agrees across hosts.
+			...resolveSessionTaskAttribution(analysis, title),
+			...sessionLocFromUsageAnalysis(analysis),
+			usageAnalysis: {
+				...(analysis.modelEfficiency ? { modelEfficiency: analysis.modelEfficiency } : {}),
+				...(analysis.sessionDuration ? { sessionDuration: analysis.sessionDuration } : {}),
+				...(analysis.applyUsage ? { applyUsage: analysis.applyUsage } : {}),
+				...(analysis.skillCalls ? { skillCalls: analysis.skillCalls } : {}),
+				...(analysis.editScope ? { editScope: analysis.editScope } : {}),
+			},
+		};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * {@link processSessionFile} plus the view attributes (task category, lines of code, efficiency
+ * signals) the Chart and Efficiency payloads need.
+ *
+ * The attributes cost a full usage-analysis pass, so they are added lazily here rather than in
+ * processSessionFile(): token-only commands (`usage`, `environmental`, the prompt segment) keep
+ * the lean parse. The enriched entry is written back to the session cache, so each session is
+ * analyzed at most once per file version.
+ *
+ * Like every other cache write here, the entry is keyed by the stat taken *before* reading the
+ * file. The base parse and the analysis are two reads, so the file is stat'ed again afterwards
+ * and the entry is only cached when nothing changed in between — otherwise an actively-written
+ * session would store data parsed from an older version under the newer mtime. A failed
+ * analysis is neither marked resolved nor cached, so the next run retries it.
+ */
+export async function processSessionFileForViews(filePath: string, verbose = false): Promise<SessionData | null> {
+	let before: fs.Stats | undefined;
+	try { before = await statSessionFile(filePath); } catch { /* processSessionFile reports the failure */ }
+	const data = await processSessionFile(filePath, verbose);
+	if (!data || data.viewAttributesResolved) { return data; }
+	const attributes = await sessionViewAttributes(filePath, before);
+	if (!attributes) { return data; }
+	const enriched: SessionData = { ...data, ...attributes, viewAttributesResolved: true };
+	try {
+		const after = await statSessionFile(filePath);
+		if (before && after.mtimeMs === before.mtimeMs && after.size === before.size) {
+			setCached(filePath, before.mtimeMs, before.size, enriched);
+		}
+	} catch {
+		// Not cacheable (file vanished): still return the enriched data for this run.
+	}
+	return enriched;
+}
 
 /**
  * Process a single session file and extract its data.
@@ -575,21 +705,12 @@ export interface UsageAnalysisOptions {
  * This is a simplified version that uses the shared usageAnalysis module.
  */
 export async function calculateUsageAnalysisStats(sessionFiles: string[], options: UsageAnalysisOptions = {}): Promise<UsageAnalysisStats> {
-	const deps = {
-		warn,
-		tokenEstimators,
-		modelPricing,
-		toolNameMap,
-		ecosystems: getEcosystems(),
-	};
-
 	const now = new Date();
 	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 	const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
 	const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 	const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-	// Cutoff includes last month — which may start before the 30-day window
-	const cutoffStart = lastMonthStart < last30DaysStart ? lastMonthStart : last30DaysStart;
+	const cutoffStart = recentAnalysisCutoff(now);
 
 	const todayPeriod = createEmptyUsageAnalysisPeriod();
 	const last30DaysPeriod = createEmptyUsageAnalysisPeriod();
@@ -614,7 +735,9 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 				if (!isActiveSince(modified, await activity.lastActivity(), cutoffStart)) { continue; }
 			}
 
-			const analysis = await analyzeSessionUsage(deps, file);
+			// Shared with the view enrichment, so `cli all` and the desktop Efficiency build do not
+			// analyze each recent session twice.
+			const { analysis } = await analyzeSessionUsageShared(file, stats);
 			if (options.includeRepeatedTasks) {
 				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
 			}
@@ -777,83 +900,119 @@ export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, '
 }
 
 /**
- * Process session files and return per-day stats for the last 30 days.
- * Returns `{ labels, days }` where labels are sorted YYYY-MM-DD strings (UTC) and
- * days are the corresponding aggregated stats.
+ * The Chart and Efficiency views' session-derived inputs, from **one** walk over the files.
+ *
+ * Both need every session's enriched parse (processSessionFileForViews). Walking twice would
+ * parse and analyze each cold session twice — the session cache cannot be relied on to absorb
+ * that, since it holds a bounded number of entries and has no in-flight de-duplication.
  */
-export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<{
-	labels: string[];
-	days: DailyEntry[];
-	allDaysMap: Map<string, DailyEntry>;
+export async function calculateViewStats(sessionFiles: string[], verbose = false, weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<{
+	dailyStats: DailyTokenStats[];
+	efficiencySessionInputs: EfficiencySessionInput[];
 }> {
-	const now = new Date();
-	const last30DaysDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
-	const todayKey = toLocalDayKey(now);
+	const sessions = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose));
+	return {
+		dailyStats: dailyStatsFromSessions(sessions),
+		efficiencySessionInputs: efficiencyInputsFromSessions(sessions, weeksBack),
+	};
+}
 
-	// Fill in all 31 days (today inclusive) with zeroes so the chart has continuous labels
-	const dailyMap = new Map<string, DailyEntry>();
-	const cursor = new Date(last30DaysDate);
-	while (toLocalDayKey(cursor) <= todayKey) {
-		const key = toLocalDayKey(cursor);
-		dailyMap.set(key, { tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-		cursor.setDate(cursor.getDate() + 1);
+/**
+ * Start of the window Usage Analysis analyzes: the start of last month or 30 days ago,
+ * whichever is earlier.
+ */
+export function recentAnalysisCutoff(now: Date = new Date()): Date {
+	const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+	const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+	return lastMonthStart < last30DaysStart ? lastMonthStart : last30DaysStart;
+}
+
+export interface DailyStatsOptions {
+	/**
+	 * Only sessions modified since this date get the view enrichment (repository, task
+	 * category, lines of code, efficiency signals); older ones use the lean parse, whose
+	 * tokens, models and editors are still exact. Omit it to enrich the whole history.
+	 *
+	 * The enrichment costs a usage-analysis pass and a repository lookup per session, and
+	 * the session cache is bounded, so on a large history a full walk repeats on every new
+	 * process. Hosts that wait on a CLI command with a timeout (`all --json` for Visual
+	 * Studio) pass {@link recentAnalysisCutoff}: those sessions are analyzed for Usage
+	 * Analysis anyway, and the analysis is shared, so the extra cost is bounded.
+	 */
+	enrichSince?: Date;
+}
+
+/**
+ * Process session files into per-day stats over the whole history, in the
+ * `DailyTokenStats[]` shape the shared `buildChartData()` takes. Aggregation goes through
+ * the shared `addSessionToDailyStats()` — see AGENTS.md, "CLI Must Reuse Shared Functions".
+ * Use {@link calculateViewStats} when the Efficiency inputs are needed too.
+ */
+export async function calculateDailyStats(sessionFiles: string[], verbose = false, options: DailyStatsOptions = {}): Promise<DailyTokenStats[]> {
+	return dailyStatsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileWithinWindow(file, verbose, options.enrichSince)));
+}
+
+/** The view parse for a session modified since `enrichSince` (or always, without it), else the lean parse. */
+async function processSessionFileWithinWindow(filePath: string, verbose: boolean, enrichSince: Date | undefined): Promise<SessionData | null> {
+	if (enrichSince) {
+		let modified: Date | undefined;
+		try { modified = (await statSessionFile(filePath)).mtime; } catch { /* processSessionFile reports it */ }
+		if (!modified || modified < enrichSince) { return processSessionFile(filePath, verbose); }
 	}
+	return processSessionFileForViews(filePath, verbose);
+}
 
-	// Full historical map (all time, no age filter) for weekly/monthly chart periods
-	const allDaysMap = new Map<string, DailyEntry>();
-
-	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFile(file, verbose));
-
-	for (const data of sessionResults) {
+function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>): DailyTokenStats[] {
+	const dailyStatsMap = new Map<string, DailyTokenStats>();
+	for (const data of sessions) {
 		if (!data || data.tokens === 0 || data.interactions === 0) { continue; }
-
-		const displayTok = effectiveTokens(data);
-
-		for (const [dateKey, fraction] of Object.entries(data.dailyFractions)) {
-			const tokForDay = Math.round(displayTok * fraction);
-			const scaledUsage = scaleModelUsage(data.modelUsage, fraction);
-
-			// 30-day map: only add days within the window
-			const dailyEntry = dailyMap.get(dateKey);
-			if (dailyEntry) {
-				dailyEntry.tokens += tokForDay;
-				dailyEntry.sessions++;
-				addModelUsage(dailyEntry.modelUsage, scaledUsage);
-				const editor = data.editorSource;
-				if (!dailyEntry.editorUsage[editor]) {
-					dailyEntry.editorUsage[editor] = { tokens: 0, sessions: 0 };
-				}
-				dailyEntry.editorUsage[editor].tokens += tokForDay;
-				dailyEntry.editorUsage[editor].sessions++;
-				if (!dailyEntry.editorModelUsage) { dailyEntry.editorModelUsage = {}; }
-				if (!dailyEntry.editorModelUsage[editor]) { dailyEntry.editorModelUsage[editor] = {}; }
-				addModelUsage(dailyEntry.editorModelUsage[editor], scaledUsage);
-			}
-
-			// Full history map: always add regardless of age (used for weekly/monthly charts)
-			if (!allDaysMap.has(dateKey)) {
-				allDaysMap.set(dateKey, { tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-			}
-			const allEntry = allDaysMap.get(dateKey)!;
-			allEntry.tokens += tokForDay;
-			allEntry.sessions++;
-			addModelUsage(allEntry.modelUsage, scaledUsage);
-			const editor = data.editorSource;
-			if (!allEntry.editorUsage[editor]) {
-				allEntry.editorUsage[editor] = { tokens: 0, sessions: 0 };
-			}
-			allEntry.editorUsage[editor].tokens += tokForDay;
-			allEntry.editorUsage[editor].sessions++;
-			if (!allEntry.editorModelUsage) { allEntry.editorModelUsage = {}; }
-			if (!allEntry.editorModelUsage[editor]) { allEntry.editorModelUsage[editor] = {}; }
-			addModelUsage(allEntry.editorModelUsage[editor], scaledUsage);
-		}
+		addSessionToDailyStats(dailyStatsMap, {
+			editorType: data.editorSource,
+			repository: data.repository,
+			tokens: effectiveTokens(data),
+			interactions: data.interactions,
+			modelUsage: data.modelUsage,
+			dailyFractions: data.dailyFractions,
+			taskCategory: data.taskCategory,
+			taskCategoryShares: data.taskCategoryShares,
+			linesAdded: data.linesAdded,
+			linesRemoved: data.linesRemoved,
+			languageUsage: data.languageUsage,
+		});
+		addSessionEfficiencyToDailyStats(dailyStatsMap, {
+			editorType: data.editorSource,
+			modelUsage: data.modelUsage,
+			dailyFractions: data.dailyFractions,
+			linesAdded: data.linesAdded,
+			linesRemoved: data.linesRemoved,
+			usageAnalysis: data.usageAnalysis,
+		}, modelPricing);
 	}
+	return sortedDailyStats(dailyStatsMap);
+}
 
-	const labels = Array.from(dailyMap.keys()).sort();
-	const days = labels.map(l => dailyMap.get(l)!);
-	return { labels, days, allDaysMap };
+/**
+ * Per-session inputs for the Efficiency view's behaviour trends over the trailing
+ * `weeksBack` weeks — the Node-side counterpart of the extension's
+ * collectEfficiencySessionInputs(). Use {@link calculateViewStats} when the daily stats are
+ * needed too, so the files are walked once.
+ */
+export async function calculateEfficiencySessionInputs(sessionFiles: string[], weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<EfficiencySessionInput[]> {
+	return efficiencyInputsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file)), weeksBack);
+}
+
+function efficiencyInputsFromSessions(sessions: Array<SessionData | null | undefined>, weeksBack: number): EfficiencySessionInput[] {
+	const now = new Date();
+	const cutoffKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7));
+	const inputs: EfficiencySessionInput[] = [];
+	for (const data of sessions) {
+		if (!data || data.interactions === 0) { continue; }
+		// The session's last active day, as the extension derives it from its daily rollups.
+		const dayKey = activeSessionDays(data.dailyFractions).at(-1)?.[0] ?? toLocalDayKey(data.lastModified);
+		if (dayKey < cutoffKey) { continue; }
+		inputs.push(toEfficiencySessionInput(data, dayKey, data.editorSource));
+	}
+	return inputs;
 }
 
 /** Environmental impact constants export for use in commands */

@@ -5,7 +5,7 @@
  * imported by extension.ts and exercised in isolation by unit tests.
  */
 
-import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry, SessionUsageAnalysis } from './types';
 import type { TaskCategory, TaskCategoryBreakdown } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
@@ -353,16 +353,40 @@ export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): 
 	}
 }
 
+/**
+ * The `repositoryUsage` key for a session's repository: "Unknown" when there is none, and also
+ * when the name is an unsafe object key. Repository names come from session metadata and
+ * workspace folder names, so `__proto__` would otherwise index Object.prototype and pollute
+ * every plain object in the process — see protoGuard.ts. Every daily-stats path uses this.
+ */
+export function repositoryKey(repository: string | undefined | null): string {
+	return repository && !isUnsafeObjectKey(repository) ? repository : 'Unknown';
+}
+
 function updateLocUsage(usage: { linesAdded?: number; linesRemoved?: number }, linesAdded: number, linesRemoved: number): void {
 	usage.linesAdded = (usage.linesAdded ?? 0) + linesAdded;
 	usage.linesRemoved = (usage.linesRemoved ?? 0) + linesRemoved;
 }
 
 /**
+ * The session-level lines-of-code fields a host stores from a usage analysis: present only when
+ * the session actually added lines. Shared by the extension's session analyzer and the CLI.
+ */
+export function sessionLocFromUsageAnalysis(usageAnalysis: Pick<SessionUsageAnalysis, 'editScope'> | undefined): Pick<SessionFileCache, 'linesAdded' | 'linesRemoved' | 'languageUsage'> {
+	const editScope = usageAnalysis?.editScope;
+	if (!editScope?.linesAdded || editScope.linesAdded <= 0) { return {}; }
+	return {
+		linesAdded: editScope.linesAdded,
+		linesRemoved: editScope.linesRemoved ?? 0,
+		...(editScope.languageUsage ? { languageUsage: editScope.languageUsage } : {}),
+	};
+}
+
+/**
  * Attributes session-level LOC data to the given daily stats entry.
  * Updates totals, editorUsage LOC fields, repositoryUsage LOC fields, and languageUsage.
  */
-function attributeLocToDay(dailyEntry: DailyTokenStats, sessionData: SessionFileCache, editorType: string, repository: string): void {
+function attributeLocToDay(dailyEntry: DailyTokenStats, sessionData: Pick<SessionFileCache, 'linesAdded' | 'linesRemoved' | 'languageUsage'>, editorType: string, repository: string): void {
 	const linesAdded = sessionData.linesAdded ?? 0;
 	const linesRemoved = sessionData.linesRemoved ?? 0;
 	if (linesAdded === 0 && linesRemoved === 0) { return; }
@@ -538,7 +562,7 @@ function _apsProcessRollupDay(dayKey: string, dr: DailyRollupEntry, ranges: UtcD
 
 function _apsProcessRollupSession(sessionInput: SessionAggregateInput, ranges: UtcDateRanges, accs: ApsRollupAccs): { addedToLast30Days: boolean; addedToLastMonth: boolean } {
 	const { editorType, sessionData } = sessionInput;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const flags: ApsSessionFlags = { last30Days: false, month: false, lastMonth: false, today: false };
 	for (const [dayKey, dr] of Object.entries(sessionData.dailyRollups!)) {
 		_apsProcessRollupDay(dayKey, dr, ranges, accs, editorType, repository, flags);
@@ -595,7 +619,7 @@ function _apsProcessFallbackPeriods(lastActivityUtcKey: string, ranges: UtcDateR
 
 function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges: UtcDateRanges, accs: ApsRollupAccs): boolean {
 	const { editorType, sessionData, mtime, lastInteraction } = sessionInput;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const lastActivity = lastInteraction ? new Date(lastInteraction) : new Date(mtime);
 	const lastActivityUtcKey = toLocalDayKey(lastActivity);
 	const inLast30Days = lastActivityUtcKey >= ranges.last30DaysUtcStartKey;
@@ -776,6 +800,81 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 }
 
 /**
+ * One session's contribution to the per-day stats that feed `buildChartData()`
+ * (src/chartDataBuilder.ts), for hosts that do not keep a `SessionFileCache` —
+ * the CLI, and the desktop app through it.
+ *
+ * `dailyFractions` maps a local day key ("YYYY-MM-DD") to the share of the session
+ * that day carries; the shares should sum to 1.
+ */
+export interface DailyStatsSessionContribution {
+	editorType: string;
+	/** Repository URL or name; empty/absent is recorded as "Unknown", as in the extension. */
+	repository?: string;
+	/** Effective session tokens — see {@link preferActualTokens}. */
+	tokens: number;
+	interactions: number;
+	modelUsage: ModelUsage;
+	dailyFractions: Record<string, number>;
+	taskCategory?: TaskCategory;
+	taskCategoryShares?: TaskCategoryBreakdown;
+	linesAdded?: number;
+	linesRemoved?: number;
+	languageUsage?: LanguageUsage;
+}
+
+/**
+ * Folds one session into `dailyStatsMap` (keyed by day), splitting tokens, model usage and
+ * interactions across its days the same way the extension's per-day rollups do, and landing
+ * session-level lines of code on the session's last active day.
+ *
+ * This is the daily aggregation every non-extension host must use, so the Chart view gets the
+ * same repository / language / task-category / lines-of-code data everywhere (#2316).
+ */
+/**
+ * The days a session was active on — keys of `dailyFractions` with a positive share, oldest
+ * first, as `[dayKey, fraction]`. Its last entry is the session's last active day, where
+ * session-level signals (lines of code, efficiency counters) are attributed. Choosing that day
+ * from the stats map instead could land on a day another session created but this one had no
+ * share of.
+ */
+export function activeSessionDays(dailyFractions: Record<string, number>): Array<[string, number]> {
+	return Object.keys(dailyFractions)
+		.filter(k => !isUnsafeObjectKey(k))
+		.map((k): [string, number] => [k, Number(dailyFractions[k]) || 0])
+		.filter(([, fraction]) => fraction > 0)
+		.sort(([a], [b]) => a.localeCompare(b));
+}
+
+export function addSessionToDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, session: DailyStatsSessionContribution): void {
+	const repository = repositoryKey(session.repository);
+	const activeDays = activeSessionDays(session.dailyFractions);
+	// Same per-day interaction split as the extension's fraction-based rollups
+	// (computeRollupsFromFractions in vscode-extension/src/analysis/sessionFileAnalyzer.ts).
+	const totalInteractions = Math.max(1, session.interactions);
+	for (const [dayKey, fraction] of activeDays) {
+		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
+		addToDailyEntry(
+			entry,
+			Math.round(session.tokens * fraction),
+			Math.max(1, Math.round(totalInteractions * fraction)),
+			session.editorType,
+			repository,
+			scaleModelUsage(session.modelUsage, fraction),
+			session.taskCategory,
+			session.taskCategoryShares,
+		);
+	}
+	const lastDay = activeDays.at(-1)?.[0];
+	if (lastDay) { attributeLocToDay(dailyStatsMap.get(lastDay)!, session, session.editorType, repository); }
+}
+
+/** The values of a day-keyed stats map, oldest first — the input shape `buildChartData()` takes. */
+export function sortedDailyStats(dailyStatsMap: Map<string, DailyTokenStats>): DailyTokenStats[] {
+	return Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * Drops models served by a user-configured custom endpoint (BYOK) from a model-usage map.
  * Those requests go straight to the user's own endpoint with their own key, so they are
  * billed by that provider and must stay out of the GitHub Copilot cost estimate — they are
@@ -855,7 +954,7 @@ function bumpSubAgentSessions(sessionData: SessionFileCache, acc: PeriodAccumula
 
 function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData } = input;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
 	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
 		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository, sessionData.taskCategory);
@@ -877,7 +976,7 @@ function subAgentFlagsForFallback(lastActivityUtcKey: string, dates: UtcDateRang
 
 function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData, mtime, lastInteraction } = input;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const estimatedTokens = sessionData.tokens;
 	const actualTokens = sessionData.actualTokens || 0;
 	const tokens = actualTokens > 0 ? actualTokens : estimatedTokens;

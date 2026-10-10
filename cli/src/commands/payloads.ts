@@ -19,16 +19,8 @@ export function createEmptyDetailsPayload(now = new Date()) {
 	};
 }
 
-/** Empty chart payload (no session files found). */
-export function createEmptyChartPayload(now = new Date()) {
-	return {
-		labels: [], tokensData: [], sessionsData: [], modelDatasets: [],
-		editorDatasets: [], editorTotalsMap: {}, repositoryDatasets: [],
-		repositoryTotalsMap: {}, dailyCount: 0, totalTokens: 0,
-		avgTokensPerDay: 0, totalSessions: 0,
-		lastUpdated: now.toISOString(), backendConfigured: false,
-	};
-}
+/** Empty chart payload — built by the shared chart builder, see analysis.ts. */
+export { createEmptyChartPayload } from '../analysis';
 
 /** Empty usage-analysis payload (no session files found). */
 export function createEmptyUsageAnalysisPayload(now = new Date()) {
