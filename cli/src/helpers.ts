@@ -121,10 +121,11 @@ const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAU
 async function recentSessionInteractions(activity: SessionActivityLookup, cutoff: Date): Promise<number> {
 	try {
 		const own = await activity.lastActivity();
+		const isVirtual = getSessionBackingPath(activity.file) !== activity.file;
 		const stats = await statSessionFile(activity.file);
-		if (!sessionActiveSince(stats.mtime, own, cutoff)) { return 0; }
+		if (!sessionActiveSince(stats.mtime, own, cutoff, isVirtual)) { return 0; }
 		const data = await processSessionFile(activity.file);
-		return data && sessionActiveSince(data.lastModified, own, cutoff) ? data.interactions : 0;
+		return data && sessionActiveSince(data.lastModified, own, cutoff, isVirtual) ? data.interactions : 0;
 	} catch {
 		return 0;
 	}
@@ -132,13 +133,15 @@ async function recentSessionInteractions(activity: SessionActivityLookup, cutoff
 
 /**
  * Whether a session's own activity is on or after `cutoff`. A DB-backed (virtual) session
- * shares its database's mtime, which moves whenever any session in it changes, so its own
- * last activity from the adapter decides; the file mtime is used only for regular files
- * (`ownLastActivity` null). Unlike `isActiveSince()`, a recent database mtime alone never
- * counts, or every historical session in an active database would.
+ * shares its database's mtime, which moves whenever any session in it changes, so only its own
+ * last activity from the adapter counts — and a virtual session whose activity is unknown does
+ * not qualify, rather than borrowing the database mtime (Cursor, for one, may report none).
+ * Regular files use their own mtime. Unlike `isActiveSince()`, a recent database mtime alone
+ * never admits a session, or every historical session in an active database would count.
  */
-export function sessionActiveSince(fileMtime: Date, ownLastActivity: Date | null, cutoff: Date): boolean {
-	return (ownLastActivity ?? fileMtime) >= cutoff;
+export function sessionActiveSince(fileMtime: Date, ownLastActivity: Date | null, cutoff: Date, isVirtual = false): boolean {
+	if (ownLastActivity) { return ownLastActivity >= cutoff; }
+	return !isVirtual && fileMtime >= cutoff;
 }
 
 /**

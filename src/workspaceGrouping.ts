@@ -152,7 +152,9 @@ function splitRemote(remote: string): { host?: string; path: string } {
  * with a real GitHub repository or with another folder's same relative remote.
  */
 function isLocalRemote(remote: string): boolean {
-	return /^(?:file:|[/\\~.]|[a-z]:[/\\])/i.test(remote) || (!remote.includes(':') && remote.includes('\\'));
+	// Any leading drive designator is local, including drive-relative `C:repos/x.git`; a real
+	// scp-style host needs a user (`git@…`) or a dot, so a single letter before `:` is never one.
+	return /^(?:file:|[/\\~.]|[a-z]:)/i.test(remote) || (!remote.includes(':') && remote.includes('\\'));
 }
 
 /** Azure DevOps ssh and legacy `<org>.visualstudio.com` remotes, as `dev.azure.com/<org>/…`. */

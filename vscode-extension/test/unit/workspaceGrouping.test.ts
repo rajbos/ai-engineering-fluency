@@ -606,7 +606,7 @@ test('repositoryIdentity normalises remote URL forms', () => {
 	assert.equal(repositoryIdentity(''), undefined);
 	assert.equal(repositoryIdentity(undefined), undefined);
 	assert.equal(repositoryIdentity('C:/repos/widget.git'), undefined, 'a local path is not an scp-style remote');
-	for (const local of ['/srv/repo.git', '../repo.git', './repo', '~/repos/repo.git', 'C:\\repos\\repo.git', 'file:///srv/repo.git', 'repos\\repo']) {
+	for (const local of ['/srv/repo.git', '../repo.git', './repo', '~/repos/repo.git', 'C:\\repos\\repo.git', 'file:///srv/repo.git', 'repos\\repo', 'C:repos/repo.git', 'd:repo']) {
 		assert.equal(repositoryIdentity(local), undefined, `local remote ${local} names no hosted repository`);
 	}
 	assert.equal(repositoryIdentity('(unknown)'), undefined);

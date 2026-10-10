@@ -181,6 +181,11 @@ test('sessionActiveSince: a DB-backed session is placed by its own activity, nev
 	assert.equal(sessionActiveSince(recent, old, cutoff), false);
 	// … and a recent one counts even if the database file looks older.
 	assert.equal(sessionActiveSince(old, recent, cutoff), true);
+	// A virtual session with no activity of its own never borrows the database mtime …
+	assert.equal(sessionActiveSince(recent, null, cutoff, true), false);
+	// … while its own activity still decides when known.
+	assert.equal(sessionActiveSince(recent, recent, cutoff, true), true);
+	assert.equal(sessionActiveSince(recent, old, cutoff, true), false);
 });
 
 test('buildCustomizationMatrix: the 30-day window is the extension\'s (30 calendar dates including today)', async () => {
