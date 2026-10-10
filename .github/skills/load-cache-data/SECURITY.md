@@ -73,10 +73,14 @@ None.
   requires `--include-sensitive`.
 - `--last` must be all digits and at least 1, otherwise the script exits 2; it is capped at
   100 entries (`parseLastCount`, line 34).
-- Only the user's VS Code globalStorage directories are searched. Each candidate is opened
-  once and checked with `fstatSync(fd).isFile()` and read through that same descriptor
-  (`readCacheFile`), so it cannot be swapped between check and read. On POSIX the open uses
-  `O_NOFOLLOW`, so a symlink at a candidate path is refused.
+- Only the user's VS Code globalStorage directories are searched (`readCacheFile`, line 318).
+  Each candidate is first `lstat`ed, which does not follow links. Anything that is not a
+  regular file is skipped on every platform, including Windows: a symlink, or anything Node
+  reports as one such as a reparse point, and a directory. The candidate is then opened
+  (with `O_NOFOLLOW` on POSIX), and `fstat` on the descriptor must report a regular file
+  with the same `dev` and `ino` as the `lstat` result (compared as bigints). That detects a
+  file swapped between the check and the open. The content is read through that same
+  descriptor.
 - The first candidate file that exists decides the result. If it is malformed (invalid JSON,
   or a snapshot without a usable envelope) the script stops with exit 3. It does not fall back
   to an older legacy export, and it does not print an envelope's metadata fields as cache
@@ -91,7 +95,9 @@ None.
   at every depth) and fails if any of them appears anywhere in the default output. Separate
   tests cover the cache-source
   rules: which files are read and in what order, envelope unwrapping, temp/cwd files ignored,
-  and symlinks refused (POSIX only).
+  directories skipped, and symlinks refused and skipped in favour of the next real
+  candidate. The symlink tests run on Windows too, and skip only when the account cannot
+  create symlinks (`EPERM`).
 
 ## Known gaps
 
@@ -104,5 +110,10 @@ None.
   as-is.
 - With `--include-sensitive`, session titles (which can echo a prompt), first user prompts,
   correction snippets and local paths are printed unfiltered by design.
-- On Windows `O_NOFOLLOW` does not exist, so a symlink at a candidate path is followed to its
-  target (creating one there needs write access to the user's profile directory).
+- Only the last path component is checked for links. If a parent directory (for example
+  `globalStorage/<extension id>`, or a junction on Windows) is itself a link, it is followed.
+  This is the same on every platform.
+- A hard link at a candidate path is a regular file to `lstat`, so it is read. On Windows,
+  creating a hard link needs no special privilege, only write access to the user's profile
+  directory and a target on the same volume. Placing a link or file there already requires
+  the user's own write access, so this skill does not defend against it.

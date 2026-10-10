@@ -271,15 +271,54 @@ test('--last caps results at 100 and rejects invalid values', (t) => {
     }
 });
 
-test('refuses a symlink at a candidate cache path', { skip: process.platform === 'win32' && 'O_NOFOLLOW is POSIX-only' }, (t) => {
+test('refuses a symlink at a candidate cache path (all platforms)', (t) => {
     const fixture = createFixture(t);
     const target = path.join(fixture.temp, 'planted.json');
-    fs.writeFileSync(target, JSON.stringify({ planted: { tokens: 999 } }));
-    fs.symlinkSync(target, path.join(fixture.storage, 'cache_prod.snapshot.json'));
+    fs.writeFileSync(target, JSON.stringify(snapshotEnvelope({ planted: { tokens: 999 } })));
+    try {
+        fs.symlinkSync(target, path.join(fixture.storage, 'cache_prod.snapshot.json'), 'file');
+    } catch (error) {
+        if (error.code === 'EPERM' || error.code === 'EACCES') {
+            // Windows without Developer Mode or admin rights cannot create file symlinks
+            t.skip(`cannot create a symlink here (${error.code})`);
+            return;
+        }
+        throw error;
+    }
 
     const result = fixture.run(['--json']);
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 1, result.stdout);
     assert.equal(result.stdout.includes('999'), false);
+});
+
+test('a refused symlink falls through to the next real candidate, not its target', (t) => {
+    const fixture = createFixture(t);
+    const target = path.join(fixture.temp, 'planted.json');
+    fs.writeFileSync(target, JSON.stringify(snapshotEnvelope({ planted: { tokens: 999 } })));
+    fs.writeFileSync(path.join(fixture.storage, 'cache_dev.snapshot.json'), JSON.stringify(snapshotEnvelope({ real: { tokens: 7 } }, 'dev')));
+    try {
+        fs.symlinkSync(target, path.join(fixture.storage, 'cache_prod.snapshot.json'), 'file');
+    } catch (error) {
+        if (error.code === 'EPERM' || error.code === 'EACCES') {
+            t.skip(`cannot create a symlink here (${error.code})`);
+            return;
+        }
+        throw error;
+    }
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).entries['session-1'].tokens, 7);
+});
+
+test('ignores a directory at a candidate cache path', (t) => {
+    const fixture = createFixture(t);
+    fs.mkdirSync(path.join(fixture.storage, 'cache_prod.snapshot.json'));
+    fs.writeFileSync(path.join(fixture.storage, 'cache_dev.snapshot.json'), JSON.stringify(snapshotEnvelope({ real: { tokens: 4 } }, 'dev')));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).entries['session-1'].tokens, 4);
 });
 
 // ---------------------------------------------------------------------------

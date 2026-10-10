@@ -318,20 +318,29 @@ function parseCacheEntries(filePath, content) {
 function readCacheFile() {
     const possiblePaths = getCacheFilePaths();
 
-    // Open once and check/read through the same descriptor, so the file that was checked is
-    // the file that is read. O_NOFOLLOW (POSIX only) makes open() refuse a symlink.
+    // 1. lstat the candidate itself and accept only a regular file, so a symlink (on Windows
+    //    also a junction or other reparse point Node reports as a link) is refused on every
+    //    platform; O_NOFOLLOW alone does not exist on Windows.
+    // 2. Open it (O_NOFOLLOW where available) and confirm through the descriptor that it is
+    //    still that same file (dev + ino), so a swap between lstat and open is detected.
+    // 3. Read through the same descriptor.
     const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
     for (const filePath of possiblePaths) {
         let fd;
         let content;
         try {
+            const linkStat = fs.lstatSync(filePath, { bigint: true });
+            if (linkStat.isSymbolicLink() || !linkStat.isFile()) {
+                continue;
+            }
             fd = fs.openSync(filePath, openFlags);
-            if (!fs.fstatSync(fd).isFile()) {
+            const fileStat = fs.fstatSync(fd, { bigint: true });
+            if (!fileStat.isFile() || fileStat.dev !== linkStat.dev || fileStat.ino !== linkStat.ino) {
                 continue;
             }
             content = fs.readFileSync(fd, 'utf8');
         } catch (error) {
-            // Missing, unreadable or a refused symlink: try the next candidate
+            // Missing, unreadable, a refused symlink or swapped file: try the next candidate
             continue;
         } finally {
             if (fd !== undefined) {
