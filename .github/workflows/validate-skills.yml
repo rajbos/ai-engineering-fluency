@@ -7,6 +7,8 @@ on:
       - ".github/skills/**"
       - "scripts/validate-skill-security.js"
       - "scripts/validate-skill-security.test.js"
+      # load-cache-data's test classifies every cache field in src/types.ts
+      - "src/types.ts"
       - ".github/workflows/validate-skills.yml"
   pull_request:
     branches: [main]
@@ -14,6 +16,8 @@ on:
       - ".github/skills/**"
       - "scripts/validate-skill-security.js"
       - "scripts/validate-skill-security.test.js"
+      # load-cache-data's test classifies every cache field in src/types.ts
+      - "src/types.ts"
       - ".github/workflows/validate-skills.yml"
 
 concurrency:
@@ -120,3 +124,9 @@ jobs:
 
       - name: Test the azure-storage-loader hardening
         run: node --test .github/skills/azure-storage-loader/load-table-data.test.js
+
+      # Pins load-cache-data's redaction and cache-source rules (its SECURITY.md
+      # mitigations), including the field classification checked against
+      # src/types.ts. Dependency-free: node:test only.
+      - name: Test load-cache-data redaction contract
+        run: node --test .github/skills/load-cache-data/load-cache-data.test.js
