@@ -8,24 +8,89 @@
  * See `src/copilotServerMemories.ts` for where this data comes from, and
  * `docs/features/COPILOT-SERVER-MEMORIES.md` for why it is analyzed rather than just listed.
  */
-import type { ServerMemoriesAnalysisView } from '../../../../src/types';
+import type {
+	ServerMemoriesAnalysisView,
+	ServerMemoryDocumentedEntryView,
+	ServerMemoryPromotionGroupView,
+	ServerMemoryPromotionTarget,
+} from '../../../../src/types';
 import { renderDataTable, type DataTableColumn } from '../shared/dataTable';
 import { escapeHtml, formatNumber } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 
 export const SERVER_MEMORIES_TABLE_ID = 'server-memories-promotion';
+export const SERVER_MEMORIES_DOCUMENTED_TABLE_ID = 'server-memories-documented';
+
+/**
+ * Messages this section posts to the extension host. The promote button sends only the group's
+ * subject key, never prompt text: the host rebuilds the prompt and re-probes the target file at
+ * click time, so a button rendered from an hour-old analysis cannot aim an agent at a path that
+ * has since become unsafe.
+ */
+export type ServerMemoriesMessage =
+	| { command: 'draftServerMemoryPromotion'; subject: string }
+	| { command: 'openFile'; path: string };
+
+const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0);
+const optionalString = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+
+function sanitizePromotionGroups(raw: unknown): ServerMemoryPromotionGroupView[] {
+	if (!Array.isArray(raw)) { return []; }
+	return raw
+		.filter(group => group && typeof group.displaySubject === 'string' && typeof group.representativeFact === 'string')
+		.map(group => {
+			const view: ServerMemoryPromotionGroupView = {
+				displaySubject: group.displaySubject,
+				representativeFact: group.representativeFact,
+				repeatCount: count(group.repeatCount),
+				citationCount: count(group.citationCount),
+			};
+			const prompt = optionalString(group.prompt);
+			if (prompt) { view.prompt = prompt; }
+			const subject = optionalString(group.subject);
+			if (subject) { view.subject = subject; }
+			return view;
+		});
+}
+
+function sanitizeDocumentedMemories(raw: unknown): ServerMemoryDocumentedEntryView[] {
+	if (!Array.isArray(raw)) { return []; }
+	return raw
+		.filter(entry => entry && typeof entry.subject === 'string' && typeof entry.fact === 'string')
+		.map(entry => ({
+			subject: entry.subject,
+			fact: entry.fact,
+			files: Array.isArray(entry.files)
+				? entry.files
+					.filter((file: unknown) => file && typeof (file as { path?: unknown }).path === 'string')
+					.map((file: { path: string; absolutePath?: unknown }) => {
+						const absolutePath = optionalString(file.absolutePath);
+						return absolutePath ? { path: file.path, absolutePath } : { path: file.path };
+					})
+				: [],
+		}));
+}
+
+function sanitizePromotionTarget(raw: unknown): ServerMemoryPromotionTarget | undefined {
+	if (!raw || typeof raw !== 'object') { return undefined; }
+	const target = raw as Partial<ServerMemoryPromotionTarget>;
+	if (target.path !== 'AGENTS.md' && target.path !== '.github/copilot-instructions.md') { return undefined; }
+	return { path: target.path, exists: target.exists === true };
+}
 
 /**
  * Normalize the optional server-memories projection so rendering never throws on a partial
  * payload. Unlike `_sanitizeMemoryFilesAnalysis` in `main.ts` an *empty* analysis is still kept:
  * a repository with memory switched off, or one whose store could not be read, has no
  * groups to show but does have a reason worth rendering.
+ *
+ * The scope, target and documented-list fields are optional, so a payload from an older
+ * host (or cache) still renders — just without them.
  */
 export function sanitizeServerMemoriesAnalysis(raw: unknown): ServerMemoriesAnalysisView | null {
 	if (!raw || typeof raw !== 'object') { return null; }
 	const sm = raw as Partial<ServerMemoriesAnalysisView>;
 	if (typeof sm.repo !== 'string') { return null; }
-	const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0);
 	return {
 		repo: sm.repo,
 		// Tri-state on purpose: `undefined` means the enablement check failed, which is not
@@ -39,19 +104,127 @@ export function sanitizeServerMemoriesAnalysis(raw: unknown): ServerMemoriesAnal
 		promotionCandidateCount: count(sm.promotionCandidateCount),
 		repeatedGroupCount: count(sm.repeatedGroupCount),
 		fullyStaleCount: count(sm.fullyStaleCount),
-		topPromotionGroups: Array.isArray(sm.topPromotionGroups)
-			? sm.topPromotionGroups
-				.filter(group => group && typeof group.displaySubject === 'string' && typeof group.representativeFact === 'string')
-				.map(group => ({
-					displaySubject: group.displaySubject,
-					representativeFact: group.representativeFact,
-					repeatCount: count(group.repeatCount),
-					citationCount: count(group.citationCount),
-				}))
-			: [],
+		topPromotionGroups: sanitizePromotionGroups(sm.topPromotionGroups),
+		repoRoot: optionalString(sm.repoRoot),
+		workspaceFolderCount: count(sm.workspaceFolderCount),
+		promotionTarget: sanitizePromotionTarget(sm.promotionTarget),
+		documentedMemories: sanitizeDocumentedMemories(sm.documentedMemories),
 	};
 }
 
+/**
+ * Localize a template and escape it, then splice in pre-built HTML for its placeholders —
+ * so a value can be emphasized without letting the translation itself carry markup.
+ */
+function localizeWithHtml(key: string, ...htmlArgs: string[]): string {
+	const marker = (i: number) => `\u0001${i}\u0001`;
+	const escaped = escapeHtml(localizeFormat(key, ...htmlArgs.map((_, i) => marker(i))));
+	return escaped.replace(/\u0001(\d+)\u0001/g, (match, index) => htmlArgs[Number(index)] ?? match);
+}
+
+const BUTTON = 'font-size:11px; padding:2px 8px; cursor:pointer; white-space:nowrap;';
+
+/** Which repository, which checkout, and why that is not "this workspace". */
+function buildScopeHtml(analysis: ServerMemoriesAnalysisView): string {
+	const repo = `<strong>${escapeHtml(analysis.repo)}</strong>`;
+	const scope = analysis.repoRoot
+		? localizeWithHtml('serverMemories.scope', repo, `<code>${escapeHtml(analysis.repoRoot)}</code>`)
+		: localizeWithHtml('serverMemories.scopeNoPath', repo);
+	const multiRoot = (analysis.workspaceFolderCount ?? 0) > 1
+		? `<div>${escapeHtml(localizeFormat('serverMemories.multiRootNote', analysis.workspaceFolderCount ?? 0))}</div>`
+		: '';
+	return `<div class="server-memories-scope" style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">
+		<div>${scope}</div>
+		${multiRoot}
+		<div>${escapeHtml(localize('serverMemories.localVsServer'))}</div>
+	</div>`;
+}
+
+type PromotionGroup = ServerMemoriesAnalysisView['topPromotionGroups'][number];
+type DocumentedEntry = NonNullable<ServerMemoriesAnalysisView['documentedMemories']>[number];
+
+function buildPromoteBlockHtml(analysis: ServerMemoriesAnalysisView): string {
+	if (analysis.topPromotionGroups.length === 0) { return ''; }
+	const warn = 'var(--vscode-editorWarning-foreground, #cca700)';
+	const target = analysis.promotionTarget;
+	// A row gets the button only when the host projected a prompt for it (promotion groups with a
+	// safe target) and the subject key the host needs to rebuild that prompt at click time.
+	const canDraft = (group: PromotionGroup): boolean => Boolean(group.prompt && group.subject);
+	const hasActions = analysis.topPromotionGroups.some(canDraft);
+	const columns: DataTableColumn<PromotionGroup>[] = [
+		{
+			id: 'subject', label: localize('serverMemories.table.subject'), sortValue: group => group.displaySubject,
+			render: group => {
+				// Only a repeat is worth calling out — a badge reading "re-learned 1x" would add
+				// noise to every single-sighting row without saying anything.
+				const badge = group.repeatCount > 1
+					? ` <span style="color:${warn}; font-size:11px;">(${escapeHtml(localizeFormat('serverMemories.repeatBadge', group.repeatCount))})</span>`
+					: '';
+				return { html: `<span style="white-space:nowrap;">${escapeHtml(group.displaySubject)}${badge}</span>` };
+			},
+		},
+		{ id: 'fact', label: localize('serverMemories.table.fact'), sortValue: group => group.representativeFact, render: group => group.representativeFact },
+		{ id: 'sources', label: localize('serverMemories.table.sources'), align: 'right', sortValue: group => group.citationCount, render: group => String(group.citationCount) },
+	];
+	if (hasActions) {
+		columns.push({
+			id: 'action', label: localize('serverMemories.table.action'), align: 'right',
+			render: group => ({
+				html: canDraft(group)
+					? `<button class="server-memory-draft-btn" data-subject="${escapeHtml(group.subject ?? '')}" style="${BUTTON}" title="${escapeHtml(localizeFormat('serverMemories.askCopilotTooltip', target?.path ?? 'AGENTS.md'))}">${escapeHtml(localize('serverMemories.askCopilot'))}</button>`
+					: '',
+			}),
+		});
+	}
+	const targetNote = target
+		? ` ${localizeWithHtml(target.exists ? 'serverMemories.targetExisting' : 'serverMemories.targetNew', `<code>${escapeHtml(target.path)}</code>`)}`
+		: '';
+	// No initialSort: the host already ranks the groups by how worth promoting they are.
+	return `
+		<div style="margin-top:10px; font-size:13px; font-weight:600; color:var(--text-primary);">${escapeHtml(localize('serverMemories.promoteHeading'))}</div>
+		<div style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">${escapeHtml(localize('serverMemories.promoteHint'))}${targetNote}</div>
+		${renderDataTable({
+			tableId: SERVER_MEMORIES_TABLE_ID,
+			ariaLabel: localize('serverMemories.promoteHeading'),
+			rows: analysis.topPromotionGroups,
+			columns,
+		})}`;
+}
+
+function buildDocumentedBlockHtml(analysis: ServerMemoriesAnalysisView): string {
+	const entries = analysis.documentedMemories ?? [];
+	if (entries.length === 0) { return ''; }
+	const columns: DataTableColumn<DocumentedEntry>[] = [
+		{ id: 'subject', label: localize('serverMemories.table.subject'), sortValue: entry => entry.subject, render: entry => ({ html: `<span style="white-space:nowrap;">${escapeHtml(entry.subject)}</span>` }) },
+		{ id: 'fact', label: localize('serverMemories.table.fact'), sortValue: entry => entry.fact, render: entry => entry.fact },
+		{
+			id: 'files', label: localize('serverMemories.table.citedFile'),
+			render: entry => ({
+				html: entry.files.map(file => {
+					// No "Open file" for a citation the host could not resolve to a regular file
+					// inside this checkout.
+					const open = file.absolutePath
+						? ` <button class="server-memory-open-btn" data-path="${escapeHtml(file.absolutePath)}" style="${BUTTON}">${escapeHtml(localize('serverMemories.openFile'))}</button>`
+						: '';
+					return `<div><code>${escapeHtml(file.path)}</code>${open}</div>`;
+				}).join(''),
+			}),
+		},
+	];
+	const showing = analysis.documentedCount > entries.length
+		? ` (${escapeHtml(localizeFormat('serverMemories.showingOf', formatNumber(entries.length), formatNumber(analysis.documentedCount)))})`
+		: '';
+	return `
+		<div style="margin-top:14px; font-size:13px; font-weight:600; color:var(--text-primary);">${escapeHtml(localize('serverMemories.documentedHeading'))}${showing}</div>
+		<div style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">${escapeHtml(localize('serverMemories.documentedHint'))}</div>
+		${renderDataTable({
+			tableId: SERVER_MEMORIES_DOCUMENTED_TABLE_ID,
+			ariaLabel: localize('serverMemories.documentedHeading'),
+			rows: entries,
+			columns,
+			className: 'server-memories-documented',
+		})}`;
+}
 
 /**
  * Render this repository's server-side Copilot memories.
@@ -60,7 +233,7 @@ export function sanitizeServerMemoriesAnalysis(raw: unknown): ServerMemoriesAnal
  * a live repository can hold hundreds of memories, and reading them all is what the
  * GitHub settings page is for. What this view adds is the part that page cannot show —
  * which facts the agent keeps re-deriving from code because no instruction file states
- * them, and which memories now cite files that are gone.
+ * them, which are already written down, and which memories now cite files that are gone.
  *
  * Renders nothing at all when the workspace is not a GitHub repository (`analysis` is
  * null), but *does* render when the store is empty or unreadable, since "memory is off
@@ -86,45 +259,19 @@ export function buildServerMemoriesSectionHtml(analysis: ServerMemoriesAnalysisV
 		}
 
 		const warn = 'var(--vscode-editorWarning-foreground, #cca700)';
-		type PromotionGroup = ServerMemoriesAnalysisView['topPromotionGroups'][number];
-		const columns: DataTableColumn<PromotionGroup>[] = [
-			{
-				id: 'subject', label: localize('serverMemories.table.subject'), sortValue: group => group.displaySubject,
-				render: group => {
-					// Only a repeat is worth calling out — a badge reading "re-learned 1x" would add
-					// noise to every single-sighting row without saying anything.
-					const badge = group.repeatCount > 1
-						? ` <span style="color:${warn}; font-size:11px;">(${escapeHtml(localizeFormat('serverMemories.repeatBadge', group.repeatCount))})</span>`
-						: '';
-					return { html: `<span style="white-space:nowrap;">${escapeHtml(group.displaySubject)}${badge}</span>` };
-				},
-			},
-			{ id: 'fact', label: localize('serverMemories.table.fact'), sortValue: group => group.representativeFact, render: group => group.representativeFact },
-			{ id: 'sources', label: localize('serverMemories.table.sources'), align: 'right', sortValue: group => group.citationCount, render: group => String(group.citationCount) },
-		];
-
-		// No initialSort: the host already ranks the groups by how worth promoting they are.
-		const promoteBlock = analysis.topPromotionGroups.length === 0 ? '' : `
-			<div style="margin-top:10px; font-size:13px; font-weight:600; color:var(--text-primary);">${escapeHtml(localize('serverMemories.promoteHeading'))}</div>
-			<div style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">${escapeHtml(localize('serverMemories.promoteHint'))}</div>
-			${renderDataTable({
-				tableId: SERVER_MEMORIES_TABLE_ID,
-				ariaLabel: localize('serverMemories.promoteHeading'),
-				rows: analysis.topPromotionGroups,
-				columns,
-			})}`;
-
 		return `
 			<!-- Server Memories Section -->
 			<div id="section-server-memories" class="section">
 				${header}
+				${buildScopeHtml(analysis)}
 				<div style="margin-bottom:8px; font-size:13px; color:var(--text-primary);">
 					${escapeHtml(localizeFormat('serverMemories.summary', formatNumber(analysis.totalMemories), formatNumber(analysis.distinctSubjects)))}
 					${analysis.truncated ? ` · <span title="${escapeHtml(localize('serverMemories.truncatedTooltip'))}">${escapeHtml(localize('serverMemories.truncated'))}</span>` : ''}
-					${analysis.documentedCount > 0 ? ` · ${escapeHtml(localizeFormat('serverMemories.documentedSummary', analysis.documentedCount))}` : ''}
-					${analysis.fullyStaleCount > 0 ? ` · <span style="color:${warn};">${escapeHtml(localizeFormat('serverMemories.staleSummary', analysis.fullyStaleCount))}</span>` : ''}
+					${analysis.documentedCount > 0 ? ` · ${escapeHtml(localizeFormat(analysis.documentedCount === 1 ? 'serverMemories.documentedSummaryOne' : 'serverMemories.documentedSummary', analysis.documentedCount))}` : ''}
+					${analysis.fullyStaleCount > 0 ? ` · <span style="color:${warn};">${escapeHtml(localizeFormat(analysis.fullyStaleCount === 1 ? 'serverMemories.staleSummaryOne' : 'serverMemories.staleSummary', analysis.fullyStaleCount))}</span>` : ''}
 				</div>
-				${promoteBlock}
+				${buildPromoteBlockHtml(analysis)}
+				${buildDocumentedBlockHtml(analysis)}
 			</div>`;
 	} catch (error) {
 		console.error(`[usage-webview] buildServerMemoriesSectionHtml failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -134,4 +281,38 @@ export function buildServerMemoriesSectionHtml(analysis: ServerMemoriesAnalysisV
 				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">${escapeHtml(localize('serverMemories.renderError'))}</div>
 			</div>`;
 	}
+}
+
+/**
+ * Map a click inside the section to the host message it should send, or `null`. Split from
+ * the listener so it can be unit-tested without a DOM event loop.
+ *
+ * The "Ask Copilot" button asks the host to *draft* the prompt (never submit it): the prompt
+ * embeds agent-written memory text, so a person reviews it first.
+ */
+export function serverMemoriesMessageForClick(target: Element | null): ServerMemoriesMessage | null {
+	const draft = target?.closest<HTMLElement>('.server-memory-draft-btn');
+	const subject = draft?.getAttribute('data-subject');
+	if (subject) { return { command: 'draftServerMemoryPromotion', subject }; }
+	const open = target?.closest<HTMLElement>('.server-memory-open-btn');
+	const path = open?.getAttribute('data-path');
+	if (path) { return { command: 'openFile', path }; }
+	return null;
+}
+
+/**
+ * Wire the section's buttons with one delegated listener. Safe to call after every render:
+ * a section element that is already wired is skipped (same `data-*` guard as
+ * `wireCurationButtons` in `main.ts`), so a render that keeps the element cannot stack a
+ * second listener and post every click twice. A rebuilt section is a new element and is
+ * wired afresh.
+ */
+export function wireServerMemoriesButtons(postMessage: (message: ServerMemoriesMessage) => void): void {
+	const section = document.getElementById('section-server-memories');
+	if (!section || section.dataset.serverMemoriesWired === 'true') { return; }
+	section.dataset.serverMemoriesWired = 'true';
+	section.addEventListener('click', event => {
+		const message = serverMemoriesMessageForClick(event.target as Element | null);
+		if (message) { postMessage(message); }
+	});
 }

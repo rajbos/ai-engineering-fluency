@@ -1249,6 +1249,73 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 	}
 });
 
+test('l10n: Copilot Repository Memories scope, action and documented-list strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.scope', 'o/n', '/repo'), 'Memories GitHub stores for o/n, the repository checked out at /repo. Shared by everyone working on this repository — not specific to this VS Code workspace.');
+	assert.equal(t('serverMemories.scopeNoPath', 'o/n'), 'Memories GitHub stores for o/n. Shared by everyone working on this repository — not specific to this VS Code workspace.');
+	assert.equal(t('serverMemories.multiRootNote', '3'), 'This workspace has 3 folders; only the first folder backed by a GitHub repository is shown.');
+	assert.equal(t('serverMemories.localVsServer'), 'Unlike Copilot Memory Files (local notes, per machine and workspace), these live on GitHub, per repository.');
+	assert.equal(t('serverMemories.targetExisting', 'AGENTS.md'), 'Suggested file: AGENTS.md.');
+	assert.equal(t('serverMemories.targetNew', 'AGENTS.md'), 'Suggested file: AGENTS.md (does not exist yet; Copilot will be asked to create it).');
+	assert.equal(t('serverMemories.table.action'), 'Action');
+	assert.equal(t('serverMemories.askCopilot'), 'Ask Copilot');
+	assert.equal(t('serverMemories.askCopilotTooltip', 'AGENTS.md'), 'Drafts a Copilot Chat prompt to verify this fact against its sources and add it to AGENTS.md. Nothing is sent until you press Enter.');
+	assert.equal(t('serverMemories.documentedHeading'), 'Already documented');
+	assert.equal(t('serverMemories.documentedHint'), 'These memories cite an instruction or documentation file (AGENTS.md, .github/instructions, skills, agents or docs/), so the stored copy is redundant. It can be deleted from the repository\'s Settings → Copilot → Memory page on GitHub.');
+	assert.equal(t('serverMemories.table.citedFile'), 'Cited file');
+	assert.equal(t('serverMemories.openFile'), 'Open file');
+	assert.equal(t('serverMemories.showingOf', '10', '99'), 'showing 10 of 99');
+
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.scope', 'o/n', '/repo'), 'GitHub 为 o/n 存储的记忆，该仓库检出于 /repo。由所有参与本仓库的人共享，并非特定于此 VS Code 工作区。');
+		assert.equal(t('serverMemories.multiRootNote', '3'), '此工作区有 3 个文件夹；仅显示第一个由 GitHub 仓库支持的文件夹。');
+		assert.equal(t('serverMemories.askCopilot'), '询问 Copilot');
+		assert.equal(t('serverMemories.documentedHeading'), '已记录');
+		assert.equal(t('serverMemories.openFile'), '打开文件');
+		assert.equal(t('serverMemories.table.action'), '操作');
+		assert.equal(t('serverMemories.table.citedFile'), '引用的文件');
+		assert.equal(t('serverMemories.scopeNoPath', 'o/n'), 'GitHub 为 o/n 存储的记忆。由所有参与本仓库的人共享，并非特定于此 VS Code 工作区。');
+		assert.equal(t('serverMemories.localVsServer'), '与 Copilot 记忆文件（本地笔记，按机器和工作区）不同，这些记忆按仓库存储在 GitHub 上。');
+		assert.equal(t('serverMemories.targetExisting', 'AGENTS.md'), '建议文件：AGENTS.md。');
+		assert.equal(t('serverMemories.targetNew', 'AGENTS.md'), '建议文件：AGENTS.md（尚不存在；将请 Copilot 创建）。');
+		assert.equal(t('serverMemories.askCopilotTooltip', 'AGENTS.md'), '起草一条 Copilot Chat 提示，先对照来源验证此事实，再将其添加到 AGENTS.md。在您按 Enter 之前不会发送任何内容。');
+		assert.equal(t('serverMemories.documentedHint'), '这些记忆引用了指令或文档文件（AGENTS.md、.github/instructions、skills、agents 或 docs/），因此存储的副本是多余的。可在 GitHub 仓库的 设置 → Copilot → 记忆 页面中删除。');
+		// The zh-CN template puts the total first, so this catches a swapped placeholder.
+		assert.equal(t('serverMemories.showingOf', '10', '99'), '显示 99 条中的 10 条');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: server-memory summary counts agree with their verb in English, and resolve in zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.documentedSummaryOne', '1'), '1 already cites an instruction file');
+	assert.equal(t('serverMemories.staleSummaryOne', '1'), '1 cites only files that no longer exist');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.documentedSummaryOne', '1'), '1 条已引用指令文件');
+		assert.equal(t('serverMemories.staleSummaryOne', '1'), '1 条仅引用了已不存在的文件');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: server-memory draft refusals resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.draftBlocked', 'AGENTS.md'), 'Not drafting a prompt: AGENTS.md is not a regular file inside this checkout.');
+	assert.equal(t('serverMemories.draftNoTarget'), 'Not drafting a prompt: no safe instruction file was found in this checkout.');
+	assert.equal(t('serverMemories.draftContextChanged'), 'Not drafting a prompt: the workspace now points at a different repository than these memories were read for. The section will refresh.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.draftBlocked', 'AGENTS.md'), '未起草提示：AGENTS.md 不是此检出中的常规文件。');
+		assert.equal(t('serverMemories.draftContextChanged'), '未起草提示：工作区现在指向的仓库与读取这些记忆时的仓库不同。该板块将刷新。');
+		assert.equal(t('serverMemories.draftNoTarget'), '未起草提示：在此检出中未找到安全的指令文件。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Copilot Budget gauge keys resolve in English', () => {
 	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
 	// devices/cloud) usage into the headline total so it agrees with the bar's

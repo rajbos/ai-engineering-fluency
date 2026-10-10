@@ -58,7 +58,7 @@ import { DarkFactoryTab } from './darkFactoryTab';
 import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
-import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
+import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml, wireServerMemoriesButtons } from './serverMemories';
 import { buildBuiltinToolsHtml, buildUnusedMcpHtml, buildUnusedSkillsHtml } from './toolCurationTables';
 import { renderAgentPluginsFilter, renderAgentPluginsTable, renderMemoryFilesTable, renderMissedPotentialTable, renderRepoHygieneListTable, renderToolCountTable, type RepoHygieneListRow } from './usageListTables';
 
@@ -5507,6 +5507,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	wireAboutInfoToggle();
 	wireRepositoryButtons();
 	wireCurationButtons();
+	wireServerMemoriesButtons(message => vscode.postMessage(message));
 	renderRepositoryHygienePanels();
 	// Before setupTabs(): its first-visit replay marks new insights as seen when the render opens
 	// on the Insights tab (a deep link can), and that reads currentInsights. Assigned after, the

@@ -142,6 +142,10 @@ import {
   parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
   toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
   createRepoFileExists as _createRepoFileExists,
+  createPromotionTargetProbe as _createPromotionTargetProbe,
+  createRepoRegularFileCheck as _createRepoRegularFileCheck,
+  withFreshPromotionTarget as _withFreshPromotionTarget,
+  buildPromotionPromptForSubject as _buildPromotionPromptForSubject,
 } from '../../src/copilotServerMemories';
 import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
@@ -652,6 +656,21 @@ export interface ServerMemoriesRefreshInputs {
  *    start a new request is a separate question from whether what we are showing is still
  *    the right repository's.
  */
+/**
+ * Whether a cached server-memories analysis still belongs to the repository the workspace
+ * resolves to *now*. The panel can stay open while workspace folders change, so a promote
+ * button rendered for one repository must not draft a prompt — carrying that repository's
+ * fact — that tells an agent to edit a repo-relative file in another. Both the slug and the
+ * checkout root must match: two worktrees of one repository share a slug but not a tree.
+ */
+export function serverMemoriesDraftContextMatches(
+	cached: { repo: string | undefined; repoRoot: string | undefined },
+	current: { repo: string; repoRoot: string } | undefined,
+): boolean {
+	return Boolean(current && cached.repo && cached.repoRoot
+		&& current.repo === cached.repo && current.repoRoot === cached.repoRoot);
+}
+
 export function decideServerMemoriesRefresh(input: ServerMemoriesRefreshInputs): { clearCache: boolean; startFetch: boolean } {
 	// Switching the feature off must hide what was already fetched, not merely stop fetching.
 	if (!input.enabled) { return { clearCache: true, startFetch: false }; }
@@ -3214,6 +3233,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private setupConfigurationListener(context: vscode.ExtensionContext): void {
+		// The repository-memory cache is keyed by the workspace's repository and checkout root.
+		// Adding, removing or reordering folders (or granting trust) can change which repository
+		// that is, so drop the cached analysis rather than keep showing the previous one.
+		context.subscriptions.push(
+			vscode.workspace.onDidChangeWorkspaceFolders(() => this.invalidateServerMemoriesCache()),
+			vscode.workspace.onDidGrantWorkspaceTrust(() => this.invalidateServerMemoriesCache()),
+		);
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('aiEngineeringFluency.display')) { this.refreshOpenPanelsForSettingChange(); }
@@ -7355,6 +7381,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// to stay under the real root.
 				const analysis = _analyzeServerMemories(result, {
 					fileExists: _createRepoFileExists(context.repoRoot),
+					isRegularFile: _createRepoRegularFileCheck(context.repoRoot),
+					promotionTargetStatus: _createPromotionTargetProbe(context.repoRoot),
 				});
 				// The workspace can change, or the user can switch the feature off, while this
 				// request is in flight. Publishing unconditionally would then put one repository's
@@ -7406,7 +7434,60 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private buildServerMemoriesView(): ServerMemoriesAnalysisView | null {
 		this.scheduleServerMemoriesRefresh();
-		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null);
+		const repoRoot = this._serverMemoriesRepoRoot;
+		const cached = this._serverMemoriesAnalysis ?? null;
+		// Only the network read is cached. The promotion target is a filesystem fact that can
+		// change at any moment, so it is re-probed on every render (two lstat calls) rather than
+		// served from the hour-old analysis. The click handler probes again before drafting.
+		const analysis = cached && repoRoot ? _withFreshPromotionTarget(cached, _createPromotionTargetProbe(repoRoot)) : cached;
+		return _toServerMemoriesAnalysisView(analysis, {
+			// The store is per GitHub repository, not per workspace, so the section names the
+			// checkout it resolved the repository from and how many folders it chose among.
+			repoRoot,
+			workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
+			// Only a cited path that resolves to a regular file inside the checkout gets an "Open
+			// file" button: the citation is server-supplied, so the same symlink-safe check
+			// applies, and a directory (`docs/:1`) cannot be opened as a text document.
+			resolveRepoFile: repoRoot ? this.createRepoFileResolver(repoRoot) : undefined,
+		});
+	}
+
+	private createRepoFileResolver(repoRoot: string): (repoRelativePath: string) => string | undefined {
+		const path = require('path') as typeof import('path');
+		const isRegularFile = _createRepoRegularFileCheck(repoRoot);
+		return (repoRelativePath) => (isRegularFile(repoRelativePath) ? path.join(repoRoot, repoRelativePath) : undefined);
+	}
+
+	/**
+	 * Draft (never submit) the promotion prompt for one server-memory group. The webview sends
+	 * only the subject key; the prompt is rebuilt here with the target file probed right now, so
+	 * a button rendered from a cached analysis cannot aim the agent at a path that has since
+	 * become unsafe. With no safe target any more, nothing is drafted.
+	 */
+	private async draftServerMemoryPromotion(subject: string): Promise<void> {
+		const analysis = this._serverMemoriesAnalysis;
+		const repoRoot = this._serverMemoriesRepoRoot;
+		if (!analysis || !repoRoot) { return; }
+		// Re-resolve the workspace's repository now, not just the target file: the button may
+		// have been rendered before the workspace folders (or their trust) changed.
+		if (!serverMemoriesDraftContextMatches({ repo: this._serverMemoriesRepo, repoRoot }, this.resolveWorkspaceRepoSlug())) {
+			void vscode.window.showWarningMessage(l10n.t('serverMemories.draftContextChanged'));
+			// Drops the stale analysis and re-renders, so the old buttons disappear.
+			this.invalidateServerMemoriesCache();
+			return;
+		}
+		const result = _buildPromotionPromptForSubject(analysis, subject, _createPromotionTargetProbe(repoRoot));
+		if ('prompt' in result) {
+			await vscode.commands.executeCommand('workbench.action.chat.open', { query: result.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' });
+			return;
+		}
+		if (result.reason === 'no-safe-target') {
+			void vscode.window.showWarningMessage(result.blockedPath
+				? l10n.t('serverMemories.draftBlocked', result.blockedPath)
+				: l10n.t('serverMemories.draftNoTarget'));
+		}
+		// An unknown subject means the analysis was refreshed under the webview; the next render
+		// replaces the stale button, so there is nothing to report.
 	}
 
 	async openMcpJson(): Promise<void> {
@@ -10199,6 +10280,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 					? vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' })
 					: undefined
 			),
+			draftServerMemoryPromotion: (message) => (typeof message.subject === 'string' && message.subject
+				? this.dispatch('draftServerMemoryPromotion', () => this.draftServerMemoryPromotion(message.subject))
+				: undefined),
 			suppressUnknownTool: (message) => {
 				const toolName = message.toolName as string;
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;

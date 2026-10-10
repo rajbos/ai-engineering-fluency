@@ -127,9 +127,67 @@ available, given the API returns no timestamps.
 
 `renderPromotionMarkdown()` turns the top groups into a Markdown block. It is
 produced as text for a human to edit and commit, never written into an instruction
-file directly: these facts are an agent's unverified observations — some of this
-repository's cited files are already gone — and an instruction file is the one
-place where a wrong statement is read by every agent on every run.
+file directly by this tool: these facts are an agent's unverified observations —
+some of this repository's cited files are already gone — and an instruction file is
+the one place where a wrong statement is read by every agent on every run.
+
+The VS Code section's **Ask Copilot** button is the softer version of the same
+thing. It *drafts* a Copilot Chat prompt (agent mode, not submitted) built by the
+shared `buildPromotionPrompt()`: it quotes the fact as an unverified claim, lists
+the citations and the target file, and asks Copilot to verify the fact against the
+cited files **before** adding a concise entry, and not to commit. The person reads
+the prompt before sending it and reviews the resulting diff, so nothing reaches an
+instruction file without a human in the loop. Every server-supplied field is
+flattened to one line, so memory text cannot add steps of its own to the prompt.
+Citations are listed live-first (`orderCitationsLiveFirst()`): the existing regular
+files that made the group promotable come before `User input:` or deleted ones, so
+the five-citation cap can never hide the only verifiable source.
+
+The button sends only the group's subject key (`draftServerMemoryPromotion`). The
+memory read is cached for an hour, but the target file can change at any time, so
+the host never trusts a fetch-time answer: every render re-probes the target
+(`withFreshPromotionTarget()`), and the click handler rebuilds the prompt with
+the target probed again at that moment (`buildPromotionPromptForSubject()`). If
+there is no safe target any more, it drafts nothing and says why.
+
+The target file is chosen deterministically by `selectPromotionTarget()`: an
+existing root `AGENTS.md`, else an existing `.github/copilot-instructions.md`, else
+a new root `AGENTS.md`. Scoped `.github/instructions/*.instructions.md` files are
+not matched yet — that needs `applyTo` glob parsing. Each candidate is checked by
+its own probe, `createPromotionTargetProbe()`, not by the citation-staleness
+callback: it reports `exists` (a regular file whose real path stays inside the
+checkout), `absent` (nothing there, not even a dangling link) or `unsafe` (an
+escaping or dangling symlink, a directory, or any inspection error other than
+"not found"). When the file the rule would pick is `unsafe`, no target is offered,
+the rows get no button, and the reports say `none — <path> is not a regular file
+inside this checkout` instead of naming it (`promotionTargetBlockedPath`). When the
+analyzed repository is not checked out here (CLI `--repo` elsewhere), the target is
+reported as not checked.
+
+A subject is a promotion group only if no member is documented and at least one
+member cites a **regular file** that still exists inside the checkout
+(`createRepoRegularFileCheck()`). So `User input:`-only memories, fully stale ones
+(no cited file survives) and ones citing only directories never qualify, in the
+extension or in `--promote`. When that leaves nothing, both surfaces print the same
+explanation (`describeNoPromotionCandidates()`) with the documented / unverifiable /
+fully stale breakdown, rather than claiming every memory is already documented.
+
+## The Tools-tab section
+
+- **Scope.** The section names the repository (`owner/name`) and the local checkout
+  it was resolved from. The store is per GitHub repository, shared by everyone
+  working on it, not per VS Code workspace — unlike the local Copilot Memory Files
+  section. In a multi-root workspace only the first folder with a github.com
+  `origin` is used, and the section says so.
+- **Worth adding to AGENTS.md.** The top 10 promotion groups, each with an **Ask
+  Copilot** button (see above).
+- **Already documented.** The first 10 memories that cite an instruction or
+  documentation file, with the file(s) they cite and an **Open file** button for
+  files that resolve inside the checkout ("showing 10 of N" when there are more).
+  "Documented" follows `INSTRUCTION_PATH_PATTERN`, which also matches `docs/` and
+  `.github/skills|agents/`. The stored copy of such a memory is redundant; it can
+  only be deleted on GitHub (Settings → Copilot → Memory), since this repository
+  deliberately implements no write route.
 
 ## Usage
 
@@ -157,12 +215,12 @@ fields the typed shape does not know about. Use it when the API changes.
 
 | Piece | Location |
 |---|---|
-| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `parseRepoFromRemoteUrl()`, `isValidRepoSlug()`, `isSafeRepoRelativePath()` |
-| Types | `src/types.ts` — `ServerMemory`, `ServerMemoryPromotionGroup`, `ServerMemoryStaleCitation`, `ServerMemoriesAnalysis`, `ServerMemoriesAnalysisView` |
-| Unit tests | `vscode-extension/test/unit/copilotServerMemories.test.ts` (offline — `fetch` and `fileExists` are both injected) |
+| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `selectPromotionTarget()`, `createPromotionTargetProbe()`, `createRepoRegularFileCheck()`, `describePromotionTarget()`, `describeNoPromotionCandidates()`, `buildPromotionPrompt()`, `parseRepoFromRemoteUrl()`, `isValidRepoSlug()`, `isSafeRepoRelativePath()` |
+| Types | `src/types.ts` — `ServerMemory`, `ServerMemoryPromotionGroup`, `ServerMemoryStaleCitation`, `ServerMemoryDocumentedEntry`, `ServerMemoryPromotionTarget`, `ServerMemoriesAnalysis`, `ServerMemoriesAnalysisView` |
+| Unit tests | `vscode-extension/test/unit/copilotServerMemories.test.ts` (offline — `fetch` and `fileExists` are both injected), `vscode-extension/test/unit/webview-serverMemoriesSection.test.ts` (section HTML and click mapping) |
 | CLI | `cli/src/commands/memory-files.ts` — `--server`, `--repo`, `--limit`, `--promote` |
 | Runtime wiring | `vscode-extension/src/extension.ts` — `scheduleServerMemoriesRefresh()`, `decideServerMemoriesRefresh()` (pure, exported), `buildServerMemoriesView()`, `resolveWorkspaceRepoSlug()`, `invalidateServerMemoriesCache()`, TTL `SERVER_MEMORIES_FETCH_TTL_MS` |
-| Tools-tab UI | `vscode-extension/src/webview/usage/serverMemories.ts` — `buildServerMemoriesSectionHtml()`, `sanitizeServerMemoriesAnalysis()`, `#section-server-memories`. Split out of `main.ts`, which would otherwise have crossed the 6000-line `max-lines` ceiling; `main.ts` imports both and holds the cross-refresh cache. |
+| Tools-tab UI | `vscode-extension/src/webview/usage/serverMemories.ts` — `buildServerMemoriesSectionHtml()`, `sanitizeServerMemoriesAnalysis()`, `wireServerMemoriesButtons()`, `#section-server-memories`. The buttons post `draftServerMemoryPromotion` (subject key only; the host rebuilds and drafts) and `openFile` (only for citations that resolve to a regular file in the checkout). Both tables use the shared data-table component. Split out of `main.ts`, which would otherwise have crossed the 6000-line `max-lines` ceiling; `main.ts` imports both and holds the cross-refresh cache. |
 | Raw probe | `scripts/fetch-copilot-memories.js` |
 | Setting | `aiEngineeringFluency.serverMemories.enabled` (default `true`) |
 
