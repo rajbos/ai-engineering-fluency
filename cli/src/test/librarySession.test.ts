@@ -10,6 +10,7 @@
 import test, { after } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { analyzeSessionFile, analyzeSessionFiles } from '../lib/session';
@@ -140,6 +141,44 @@ test('bad input resolves to null instead of throwing', async () => {
 	fs.mkdirSync(path.dirname(empty), { recursive: true });
 	fs.writeFileSync(empty, '');
 	assert.equal(await analyzeSessionFile(empty), null);
+});
+
+test('malformed and non-session files resolve to null, not to an all-zero usage', async () => {
+	// Path-matched Claude Code file with garbage content: the adapter yields zero events.
+	const garbage = path.join(fakeHome, '.claude', 'projects', '-x', '55555555-5555-4555-8555-555555555555.jsonl');
+	fs.mkdirSync(path.dirname(garbage), { recursive: true });
+	fs.writeFileSync(garbage, '{not json\n\u0000\u0001\n');
+	assert.equal(await analyzeSessionFile(garbage), null);
+
+	// Valid JSON that is not a session: the generic parser maps it to zero counts.
+	const notASession = path.join(fakeHome, 'notes', 'config.json');
+	fs.mkdirSync(path.dirname(notASession), { recursive: true });
+	fs.writeFileSync(notASession, JSON.stringify({ hello: 'world', items: [1, 2, 3] }));
+	assert.equal(await analyzeSessionFile(notASession), null);
+});
+
+test('a session with no activity yet is null until it records some', async () => {
+	const file = path.join(fakeHome, '.copilot', 'session-state', '66666666-6666-4666-8666-666666666666', 'events.jsonl');
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, JSON.stringify({ type: 'session.start', timestamp: '2026-10-01T09:00:00.000Z', data: {} }) + '\n');
+	assert.equal(await analyzeSessionFile(file), null);
+
+	fs.appendFileSync(file, JSON.stringify({ type: 'user.message', timestamp: '2026-10-01T09:00:01.000Z', data: { content: 'hello' } }) + '\n');
+	const usage = await analyzeSessionFile(file);
+	assert.ok(usage, 'the cached null is re-checked once the file changes');
+	assert.equal(usage.interactions, 1);
+});
+
+test('files in the OS temp directory are refused, like everywhere else', async () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aief-lib-temp-'));
+	try {
+		const file = path.join(tempRoot, '.copilot', 'session-state', '77777777-7777-4777-8777-777777777777', 'events.jsonl');
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.copyFileSync(path.join(FIXTURES, 'copilot-cli-events.jsonl'), file);
+		assert.equal(await analyzeSessionFile(file), null);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
 });
 
 test('analyzeSessionFiles: maps each parsed path and leaves out the ones that failed', async () => {

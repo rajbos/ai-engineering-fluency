@@ -117,15 +117,30 @@ function toSessionUsage(filePath: string, data: SessionData): SessionUsage {
 	});
 }
 
+/**
+ * Whether a parse found any session activity. The parsers map malformed, non-session and
+ * not-yet-started files to an all-zero SessionData rather than null (the CLI just counts
+ * them as empty), so a result with no turns, tokens, models or billing is reported as null.
+ */
+function hasSessionActivity(data: SessionData): boolean {
+	return data.interactions > 0
+		|| effectiveTokens(data) > 0
+		// Parsers may add a zero-token placeholder model (e.g. 'unknown'), so only count models with tokens.
+		|| Object.values(data.modelUsage).some(m => m.inputTokens + m.outputTokens > 0)
+		|| (data.copilotNanoAiu ?? 0) > 0;
+}
+
 async function parse(filePath: string): Promise<SessionUsage | null> {
 	const data = await processSessionFile(filePath);
-	return data ? toSessionUsage(filePath, data) : null;
+	return data && hasSessionActivity(data) ? toSessionUsage(filePath, data) : null;
 }
 
 /**
  * Analyze one session file (Claude Code `~/.claude/projects/<cwd>/<id>.jsonl`, Copilot CLI
  * `~/.copilot/session-state/<id>/events.jsonl`, VS Code chat sessions, and the other formats
- * the CLI supports). Resolves to null for missing, unknown or unparsable files; never throws.
+ * the CLI supports). Resolves to null for missing, unknown, unparsable or oversized files, files
+ * in the OS temp directory, and sessions with no recorded activity yet (no turns, tokens,
+ * models or billing); never throws. A null for a growing file is re-checked once it changes.
  *
  * Returned objects are frozen and may be shared between calls.
  */

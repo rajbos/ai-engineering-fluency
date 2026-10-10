@@ -492,7 +492,7 @@ if (usage) {
 const byPath = await analyzeSessionFiles([claudeSessionPath, copilotEventsPath]);
 ```
 
-`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown or unparsable file. It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
+`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown, unparsable or oversized (over 100 MB) file, and for a session with no activity recorded yet (no turns, tokens, models or billing). It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
 
 | Field | Meaning |
 |---|---|

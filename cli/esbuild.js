@@ -126,7 +126,7 @@ async function buildLibrary(cliOptions) {
     path.join(typesOut, "cli", "src", "lib", "session.d.ts"),
     "utf-8"
   );
-  if (/from\s+["']|import\s*\(/.test(dts)) {
+  if (/\bfrom\s+["']|\bimport\s*\(/.test(dts)) {
     throw new Error(
       "dist/lib/session.d.ts must be self-contained, but it imports another module. " +
         "Declare every public type in cli/src/lib/session.ts."

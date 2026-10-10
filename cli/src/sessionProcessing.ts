@@ -21,6 +21,7 @@ import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { ModelUsage } from '../../src/types';
 import { getModelUsageFromSession } from '../../src/usageAnalysis';
 import { preserveAutoRouting, reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { readTextFileWithSizeGuard } from '../../src/utils/safeFileRead';
 import * as vscodeStub from './vscode-stub';
 import { type SessionData, getEditorSourceFromPath } from './analysis';
 
@@ -109,7 +110,11 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
 
 	for (const debugLogPath of candidatePaths) {
 		try {
-			const content = await fs.promises.readFile(debugLogPath, 'utf8');
+			// Most sessions have no debug log; skip missing candidates quietly (the guarded
+			// reader logs open failures).
+			if (!fs.existsSync(debugLogPath)) { continue; }
+			const content = await readTextFileWithSizeGuard(debugLogPath, 'readDebugLogTokensForSession');
+			if (content === undefined) { continue; }
 			const result = extractAllTokensFromDebugLog(content);
 			if (result) {
 				if (verbose) {
@@ -169,9 +174,11 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 			return ecoResult;
 		}
 
-		const content = await fs.promises.readFile(filePath, 'utf-8');
+		// Bounded read, as in the extension's adapters: refuses oversized files and files in the
+		// OS temp directory. Library callers pass arbitrary paths, so this must not be a raw read.
+		const content = await readTextFileWithSizeGuard(filePath, 'processSessionFile');
 
-		if (!content.trim()) {
+		if (content === undefined || !content.trim()) {
 			return null;
 		}
 
