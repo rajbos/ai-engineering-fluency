@@ -85,8 +85,14 @@ const UNRESOLVED_PREFIX = '<unresolved:';
 
 // ── Path helpers (separator-agnostic: a Windows path must parse on any host) ──────────
 
+/**
+ * Path segments, collapsing separator runs. A UNC root (`\\server\share`, `//server/share`) keeps
+ * both leading separators as two empty segments, so joining the segments back restores it.
+ */
 function splitSegments(p: string): string[] {
-	return p.split(/[\\/]+/);
+	const unc = /^[\\/]{2}(?![\\/])/.test(p);
+	const segments = p.split(/[\\/]+/);
+	return unc ? ['', ...segments] : segments;
 }
 
 function separatorOf(p: string): string {
@@ -613,7 +619,9 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 	}
 	// 3. Case-only differences (same folder on a case-insensitive filesystem).
 	if (caseFolds(platform)) {
-		unionByKey(nodes, groups, (n, i) => (conflicting(i) ? undefined : samePathKey(n.path, platform)));
+		// Only local folders: a WSL / SSH path lives on a case-sensitive filesystem, where
+		// `/home/dev/Repo` and `/home/dev/repo` can be two repositories.
+		unionByKey(nodes, groups, (n, i) => (conflicting(i) || n.remote ? undefined : samePathKey(n.path, platform)));
 	}
 	// 3–5. Name-based rules, weakest last.
 	unionByName(nodes, groups);

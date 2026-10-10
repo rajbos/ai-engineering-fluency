@@ -790,6 +790,31 @@ test('matchWorktreeConvention: a redirected home directory from the probes is th
 	assert.ok(workspaceProbePaths([entry(wt)], 'win32', home).includes('D:\\Profiles\\dev\\.claude\\worktrees\\repo-a'));
 });
 
+test('UNC roots survive path splitting: worktree anchors and a UNC home directory', () => {
+	const home = '\\\\fileserver\\profiles\\dev';
+	const wt = '\\\\fileserver\\profiles\\dev\\.claude\\worktrees\\repo-a\\goofy-wozniak-42f712';
+	assert.deepEqual(matchWorktreeConvention(wt, { homeDirectory: home }), {
+		repoName: 'repo-a', anchorPath: '\\\\fileserver\\profiles\\dev\\.claude\\worktrees\\repo-a', anchorIsCheckout: false,
+	});
+	// In-repo layout on a share: the repository root keeps its UNC prefix.
+	assert.deepEqual(matchWorktreeConvention('\\\\nas\\code\\widget\\.claude\\worktrees\\agent\\server'), {
+		repoName: 'widget', anchorPath: '\\\\nas\\code\\widget', anchorIsCheckout: true,
+	});
+	assert.deepEqual(matchWorktreeConvention('//nas/code/widget/.claude/worktrees/agent'), {
+		repoName: 'widget', anchorPath: '//nas/code/widget', anchorIsCheckout: true,
+	});
+	// Copilot app layout: the repos/<repo> checkout probed is a valid UNC path.
+	assert.ok(workspaceProbePaths([entry('\\\\nas\\u\\.copilot\\copilot-worktrees\\api\\fix')], 'win32').includes('\\\\nas\\u\\.copilot\\repos\\api'));
+	assert.equal(workspaceBasename('\\\\nas\\code\\widget'), 'widget');
+});
+
+test('case-only differences of WSL / remote paths are not folded on Windows', () => {
+	const groups = groupWorkspaces([entry('/home/dev/Repo', 1, 1), entry('/home/dev/repo', 1, 1)], probes('win32'));
+	assert.equal(groups.length, 2);
+	// Local Windows spellings still fold.
+	assert.equal(groupWorkspaces([entry('C:\\Code\\Repo', 1, 1), entry('c:\\code\\repo', 1, 1)], probes('win32')).length, 1);
+});
+
 test('a dotfiles home repository in the list claims its own .claude/worktrees sub-folders', () => {
 	const groups = groupWorkspaces([entry('/home/dev', 1, 1), entry('/home/dev/.claude/worktrees/agent/server', 1, 1)], probes('linux'));
 	assert.equal(groups.length, 1);
