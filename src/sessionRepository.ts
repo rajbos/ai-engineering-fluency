@@ -60,24 +60,69 @@ export async function resolveRepositoryFromContentReferences(refs: SessionConten
 	return refs.length > 0 ? (await extractRepositoryFromContentReferences(refs) ?? '') : '';
 }
 
-function parseJsonLines(lines: string[]): unknown[] {
-	const events: unknown[] = [];
-	for (const line of lines) {
-		try { events.push(JSON.parse(line)); } catch { /* skip malformed */ }
-	}
-	return events;
+function tryParseJson(line: string): unknown {
+	try { return JSON.parse(line); } catch { return undefined; }
 }
 
-async function contentReferencesOfJsonl(content: string): Promise<SessionContentReference[]> {
+/** References and custom title of a JSONL session, parsing each line at most once. */
+async function scanJsonl(content: string): Promise<{ refs: SessionContentReference[]; title?: string }> {
 	const lines = content.trim().split('\n').filter(l => l.trim());
-	const events = parseJsonLines(lines);
-	const first = events[0] as { kind?: unknown } | undefined;
-	if (first && typeof first.kind === 'number') {
-		// Delta-based (VS Code Chat JSONL): rebuild the session state, then read its requests.
+	// The format is decided by the first valid line alone: a delta-based (VS Code Chat) log
+	// starts with a `kind` record and is rebuilt in a single pass by reconstructJsonlStateAsync.
+	let first: unknown;
+	for (const line of lines) { first = tryParseJson(line); if (first !== undefined) { break; } }
+	if (first && typeof (first as { kind?: unknown }).kind === 'number') {
 		const { sessionState } = await reconstructJsonlStateAsync(lines);
-		return (sessionState.requests || []).flatMap(contentReferencesOfRequest);
+		const title = typeof sessionState.customTitle === 'string' && sessionState.customTitle ? sessionState.customTitle : undefined;
+		return { refs: (sessionState.requests || []).flatMap(contentReferencesOfRequest), ...(title ? { title } : {}) };
 	}
-	return events.flatMap(contentReferencesOfCliToolEvent);
+	// Copilot CLI events: stream the lines, keeping only the references (no event array).
+	const refs: SessionContentReference[] = [];
+	for (const line of lines) {
+		const event = tryParseJson(line);
+		if (event !== undefined) { refs.push(...contentReferencesOfCliToolEvent(event)); }
+	}
+	return { refs };
+}
+
+/** What {@link resolveSessionAttributes} found for one session. */
+export interface SessionAttributes {
+	/** Repository the session worked in; `''` when it names none. */
+	repository: string;
+	/**
+	 * The session's own title, when the source records one: the adapter's title, or a VS Code
+	 * session's custom title. The task heuristic reads it for sessions whose analysis classified
+	 * no turns — the case where it matters, since a file-based session with turns always gets a
+	 * turn classification.
+	 */
+	title?: string;
+}
+
+/**
+ * The repository and title of a session file, for hosts without the extension's details pass.
+ * One read of the session (one getMeta() call for adapter sessions). Returns `undefined` when
+ * the session could not be read (callers should not cache that).
+ */
+export async function resolveSessionAttributes(ecosystems: IEcosystemAdapter[], sessionFile: string, content?: string): Promise<SessionAttributes | undefined> {
+	try {
+		const eco = ecosystems.find(e => e.handles(sessionFile));
+		if (eco) {
+			const meta = await eco.getMeta(sessionFile);
+			return { repository: repositoryFromEcosystemMeta(meta) ?? '', ...(meta.title ? { title: meta.title } : {}) };
+		}
+		const fileContent = content ?? await fs.promises.readFile(sessionFile, 'utf8');
+		if (isUuidPointerFile(fileContent)) { return { repository: '' }; }
+		if (sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent)) {
+			const { refs, title } = await scanJsonl(fileContent);
+			return { repository: await resolveRepositoryFromContentReferences(refs), ...(title ? { title } : {}) };
+		}
+		const parsed = JSON.parse(fileContent) as { requests?: unknown; customTitle?: unknown };
+		const requests = Array.isArray(parsed.requests) ? parsed.requests : [];
+		const title = typeof parsed.customTitle === 'string' && parsed.customTitle ? parsed.customTitle : undefined;
+		return { repository: await resolveRepositoryFromContentReferences(requests.flatMap(contentReferencesOfRequest)), ...(title ? { title } : {}) };
+	} catch {
+		return undefined;
+	}
 }
 
 /**
@@ -86,18 +131,5 @@ async function contentReferencesOfJsonl(content: string): Promise<SessionContent
  * could not be read (callers should not cache that).
  */
 export async function resolveSessionRepository(ecosystems: IEcosystemAdapter[], sessionFile: string, content?: string): Promise<string | undefined> {
-	try {
-		const eco = ecosystems.find(e => e.handles(sessionFile));
-		if (eco) { return repositoryFromEcosystemMeta(await eco.getMeta(sessionFile)) ?? ''; }
-		const fileContent = content ?? await fs.promises.readFile(sessionFile, 'utf8');
-		if (isUuidPointerFile(fileContent)) { return ''; }
-		if (sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent)) {
-			return await resolveRepositoryFromContentReferences(await contentReferencesOfJsonl(fileContent));
-		}
-		const parsed = JSON.parse(fileContent) as { requests?: unknown };
-		const requests = Array.isArray(parsed.requests) ? parsed.requests : [];
-		return await resolveRepositoryFromContentReferences(requests.flatMap(contentReferencesOfRequest));
-	} catch {
-		return undefined;
-	}
+	return (await resolveSessionAttributes(ecosystems, sessionFile, content))?.repository;
 }

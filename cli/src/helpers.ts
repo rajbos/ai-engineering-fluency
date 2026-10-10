@@ -22,7 +22,7 @@ import type { DailyTokenStats, DetailedStats, ModelUsage, SessionUsageAnalysis, 
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { activeSessionDays, preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
-import { resolveSessionRepository } from '../../src/sessionRepository';
+import { resolveSessionAttributes } from '../../src/sessionRepository';
 import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
 import { EFFICIENCY_BEHAVIOR_WEEKS, toEfficiencySessionInput } from '../../src/efficiencyViewBuilder';
 import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
@@ -380,14 +380,17 @@ async function sessionViewAttributes(filePath: string, version: { mtimeMs: numbe
 		// here and is reported as a failure below.
 		const ecosystems = getEcosystems();
 		const content = ecosystems.some(e => e.handles(filePath)) ? undefined : await fs.promises.readFile(filePath, 'utf-8');
-		const [{ analysis, failed }, repository] = await Promise.all([
+		const [{ analysis, failed }, sessionAttributes] = await Promise.all([
 			analyzeSessionUsageShared(filePath, version, content),
-			resolveSessionRepository(ecosystems, filePath, content),
+			resolveSessionAttributes(ecosystems, filePath, content),
 		]);
-		if (failed || repository === undefined) { return null; }
+		if (failed || sessionAttributes === undefined) { return null; }
+		const { repository, title } = sessionAttributes;
 		return {
 			...(repository ? { repository } : {}),
-			...resolveSessionTaskAttribution(analysis),
+			// With the session title, as the extension's analyzer passes it, so the heuristic
+			// fallback (sessions whose analysis classified no turns) agrees across hosts.
+			...resolveSessionTaskAttribution(analysis, title),
 			...sessionLocFromUsageAnalysis(analysis),
 			usageAnalysis: {
 				...(analysis.modelEfficiency ? { modelEfficiency: analysis.modelEfficiency } : {}),

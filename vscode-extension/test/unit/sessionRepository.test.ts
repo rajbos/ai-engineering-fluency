@@ -7,6 +7,7 @@ import {
 	contentReferencesOfCliToolEvent,
 	contentReferencesOfRequest,
 	repositoryFromEcosystemMeta,
+	resolveSessionAttributes,
 	resolveSessionRepository,
 } from '../../../src/sessionRepository';
 import type { IEcosystemAdapter } from '../../../src/ecosystemAdapter';
@@ -73,4 +74,27 @@ test('resolveSessionRepository asks the owning ecosystem adapter', async () => {
 		getMeta: async () => ({ title: undefined, firstInteraction: null, lastInteraction: null, repository: 'octo/widgets', workspacePath: '/src/widgets' }),
 	} as unknown as IEcosystemAdapter;
 	assert.equal(await resolveSessionRepository([eco], 'store.db#1'), 'octo/widgets');
+});
+
+test('resolveSessionAttributes finds the repository of a delta-JSONL session and its custom title', async () => {
+	const file = makeRepoWithFile();
+	const content = [
+		{ kind: 0, v: { customTitle: 'Plan the widget rewrite', requests: [] } },
+		{ kind: 2, k: ['requests'], v: [{ requestId: 'r1', contentReferences: [{ kind: 'reference', reference: { fsPath: file } }] }] },
+	].map(e => JSON.stringify(e)).join('\n');
+	const attrs = await resolveSessionAttributes([], 'chat.jsonl', content);
+	assert.equal(attrs?.repository, REMOTE);
+	assert.equal(attrs?.title, 'Plan the widget rewrite');
+});
+
+test('resolveSessionAttributes returns the adapter title and a JSON session\'s custom title', async () => {
+	const eco = {
+		handles: (f: string) => f.endsWith('.db#2'),
+		getMeta: async () => ({ title: 'Plan the release', firstInteraction: null, lastInteraction: null, repository: 'octo/widgets' }),
+	} as unknown as IEcosystemAdapter;
+	assert.deepEqual(await resolveSessionAttributes([eco], 'store.db#2'), { repository: 'octo/widgets', title: 'Plan the release' });
+	assert.deepEqual(
+		await resolveSessionAttributes([], 'session.json', JSON.stringify({ customTitle: 'Debug the crash', requests: [] })),
+		{ repository: '', title: 'Debug the crash' },
+	);
 });

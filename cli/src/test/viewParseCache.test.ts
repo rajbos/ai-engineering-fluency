@@ -15,6 +15,7 @@ import * as path from 'path';
 
 import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, calculateViewStats, processSessionFileForViews } from '../helpers';
 import { getCached } from '../cliCache';
+import { buildClassificationInputFromUsageAnalysis, classifySessionTask } from '../../../src/taskClassification';
 
 type MockOptions = { changeDuringAnalysis?: boolean; failAnalysisRead?: boolean; content?: string };
 
@@ -106,4 +107,16 @@ test('the view walk and Usage Analysis share one analysis per file version', asy
 	const usage = await calculateUsageAnalysisStats([filePath]);
 	assert.equal(reads(), 2, 'Usage Analysis must reuse the analysis instead of reading the session again');
 	assert.equal(usage.last30Days.sessions, 1);
+});
+
+test('the view parse passes the session title to the task fallback, as the extension does', async t => {
+	// With no classified turns the shared heuristic reads the title; the extension passes it,
+	// so the CLI must too or the two hosts file the same session under different tasks.
+	const title = 'Plan the database migration';
+	const { filePath } = mockSession(t, '99999999-9999-4999-8999-999999999999', { content: JSON.stringify({ customTitle: title, requests: [] }) });
+	const data = await processSessionFileForViews(filePath);
+	assert.ok(data?.viewAttributesResolved);
+	const expected = classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 0, byTool: {} } }, title));
+	assert.equal(data.taskCategory, expected);
+	assert.notEqual(classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 0, byTool: {} } })), expected, 'the fixture title must change the category, or this test proves nothing');
 });
