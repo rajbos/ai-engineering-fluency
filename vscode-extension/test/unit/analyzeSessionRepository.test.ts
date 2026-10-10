@@ -47,16 +47,22 @@ test('analyzeSessionFile records the remote of the files a VS Code session refer
 
 		const withRef = path.join(root, 'with-ref.json');
 		fs.writeFileSync(withRef, session([touched]));
-		assert.equal((await analyze(withRef)).repository, 'https://github.com/acme/widget.git');
+		const found = await analyze(withRef);
+		assert.equal(found.repository, 'https://github.com/acme/widget.git');
+		assert.equal(found.repositoryResolved, true, 'Details can reuse the entry without re-parsing for a repository');
 
-		// None found is remembered as '' so it is not looked up again …
+		// None found is stored as '' and still counts as resolved …
 		const withoutRef = path.join(root, 'without-ref.json');
 		fs.writeFileSync(withoutRef, session([]));
-		assert.equal((await analyze(withoutRef)).repository, '');
+		const none = await analyze(withoutRef);
+		assert.equal(none.repository, '');
+		assert.equal(none.repositoryResolved, true);
 
-		// … and a previously known value (including '') is carried forward, not recomputed.
+		// … a previously found remote is carried forward …
 		assert.equal((await analyze(withRef, { repository: 'https://github.com/kept/as-is' })).repository, 'https://github.com/kept/as-is');
-		assert.equal((await analyze(withRef, { repository: '' })).repository, '');
+		// … but a previous '' is not: the file changed (that is why it is re-analysed), and a
+		// session that now references files gets its remote.
+		assert.equal((await analyze(withRef, { repository: '' })).repository, 'https://github.com/acme/widget.git');
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

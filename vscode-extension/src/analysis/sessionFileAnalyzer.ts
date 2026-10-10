@@ -764,6 +764,18 @@ function buildOptionalSessionFields(
 	};
 }
 
+/**
+ * The repository fields of a cache entry: the remote when known, and `repositoryResolved` when
+ * extraction was attempted, so getSessionFileDetailsFromCache() does not re-parse the file only
+ * to look for a repository again.
+ */
+function repositoryFields(source: Pick<SessionFileCache, 'repository' | 'repositoryResolved'> | undefined): Pick<SessionFileCache, 'repository' | 'repositoryResolved'> {
+	return {
+		...(source?.repository !== undefined ? { repository: source.repository } : {}),
+		...(source?.repositoryResolved ? { repositoryResolved: true } : {}),
+	};
+}
+
 function buildSessionDataObject(
 	tokenResult: TokenResult,
 	interactions: number,
@@ -776,7 +788,7 @@ function buildSessionDataObject(
 	finalCacheReadTokens: number | undefined,
 	debugLogTokens: DebugLogTokens | null | undefined,
 	dailyRollups: DailyRollups,
-	existingCache?: Pick<SessionFileCache, 'repository'>,
+	existingCache?: Pick<SessionFileCache, 'repository' | 'repositoryResolved'>,
 ): SessionFileCache {
 	const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 	const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
@@ -807,7 +819,7 @@ function buildSessionDataObject(
 		// "Unknown" and disappear from all "By Repository" charts — most noticeably for the
 		// "Output" (lines of code) chart, since LOC is attributed to the most recently active
 		// day, which is exactly the day whose cache entry keeps getting rebuilt.
-		...(existingCache?.repository !== undefined ? { repository: existingCache.repository } : {}),
+		...repositoryFields(existingCache),
 		...optionals,
 	};
 }
@@ -867,30 +879,37 @@ export async function analyzeSessionFile(
 
 	await applyWindsurfBreakdown(deps.windsurf, sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-	const repository = await resolveSessionRepository(sessionMeta, existing, preloadedContent, preloadedParsedJson);
+	const resolution = await resolveSessionRepository(sessionMeta, existing, preloadedContent, preloadedParsedJson);
 	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups,
-		repository !== undefined ? { repository } : undefined);
+		resolution);
 }
 
 /**
  * The session's git remote, resolved during the normal analysis — on the worker thread — so
  * workspace grouping has its strongest signal on a cold cache too, not only after the Details
- * view happened to run. Precedence: the owning adapter's recorded remote; a previously known
- * one; otherwise the remote of the files the session referenced (the same shared derivation as
- * the details pass), stored as '' when there is none so it is not looked up again.
+ * view happened to run. Precedence: the owning adapter's recorded remote; a previously found
+ * (non-empty) remote; otherwise the remote of the files the session referenced (the same shared
+ * derivation as the details pass), stored as '' when there is none.
+ *
+ * A previous '' is deliberately not carried over: this runs because the file changed, and a
+ * session analysed before it referenced any file must get another look once it does.
+ * `repositoryResolved` is set whenever extraction was attempted (including the '' result), so
+ * the Details cache path does not re-parse just to find a repository; a failed extraction stays
+ * unresolved and is retried.
  */
 async function resolveSessionRepository(
 	sessionMeta: SessionMeta,
 	existing: Pick<SessionFileCache, 'repository'> | undefined,
 	content: string | undefined,
 	parsedJson: unknown,
-): Promise<string | undefined> {
-	if (sessionMeta.repository) { return sessionMeta.repository; }
-	if (existing?.repository !== undefined) { return existing.repository; }
-	if (content === undefined) { return undefined; }
+): Promise<Pick<SessionFileCache, 'repository' | 'repositoryResolved'>> {
+	if (sessionMeta.repository) { return { repository: sessionMeta.repository, repositoryResolved: true }; }
+	if (existing?.repository) { return { repository: existing.repository, repositoryResolved: true }; }
+	// Adapter-handled sessions have no file content to scan: their metadata is the whole answer.
+	if (content === undefined) { return { repositoryResolved: true }; }
 	try {
-		return (await extractRepositoryFromSessionContent(content, parsedJson)) ?? '';
+		return { repository: (await extractRepositoryFromSessionContent(content, parsedJson)) ?? '', repositoryResolved: true };
 	} catch {
-		return undefined;
+		return {};
 	}
 }
