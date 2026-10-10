@@ -5,6 +5,7 @@ import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
+import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
@@ -140,7 +141,7 @@ function render(stats: EnvironmentalStats): void {
 	root.replaceChildren();
 
 	const themeStyle = document.createElement('style');
-	themeStyle.textContent = themeStyles;
+	themeStyle.textContent = `${themeStyles}\n${dataTableStyles}`;
 	const style = document.createElement('style');
 	style.textContent = styles;
 

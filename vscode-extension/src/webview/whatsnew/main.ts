@@ -4,6 +4,7 @@ import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
+import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { applyWebviewLocale } from '../shared/webviewLocale';
@@ -199,7 +200,7 @@ function render(data: WhatsNewViewData): void {
 	root.replaceChildren();
 
 	const themeStyle = document.createElement('style');
-	themeStyle.textContent = themeStyles;
+	themeStyle.textContent = `${themeStyles}\n${dataTableStyles}`;
 	const style = document.createElement('style');
 	style.textContent = styles;
 

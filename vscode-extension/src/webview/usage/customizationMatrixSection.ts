@@ -1,18 +1,7 @@
 import type { WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../../src/types';
-import { setHtml } from '../shared/domUtils';
+import { getDataTableState, renderDataTable, renderDataTableFilter, type DataTableColumn } from '../shared/dataTable';
 import { escapeHtml } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
-import {
-	getPagedTableAnnouncement,
-	getPagedTableFocusTarget,
-	getPagedTableState,
-	renderPagedTable,
-	restorePagedTableFocus,
-	setPagedTableFilter,
-	setPagedTablePage,
-	setPagedTableSort,
-	type PagedTableColumn,
-} from './pagedTable';
 import { statusBadgeHtml } from './statusBadge';
 
 export const CUSTOMIZATION_TABLE_ID = 'customization';
@@ -21,9 +10,6 @@ export const CUSTOMIZATION_FILTER_NONE_ONLY = 'noCustomizationOnly';
 
 /** Also the What's New / search nav anchor (`usage.health.customization` in whatsNew/viewIndex.ts). */
 const SECTION_ID = 'section-customization-files';
-
-/** The matrix last rendered, so sort/page/filter clicks can re-render without a new payload. */
-let currentMatrix: WorkspaceCustomizationMatrix | null = null;
 
 /**
  * Same test that decides the ⚠️ badge: every customization type is missing. A row with no
@@ -70,12 +56,13 @@ export function renderUngroupedWorkspaceNote(names: string[] | undefined): strin
 	return `<span class="ungrouped-workspace-note" style="display:inline-flex;align-items:center;gap:4px;" title="${escapeHtml(names.join('\n'))}">${statusBadgeHtml('⚠️', localize('customizationMatrix.ungroupedBadge'))} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedNames', names.length, examples))}</span>`;
 }
 
-export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): PagedTableColumn<WorkspaceCustomizationRow>[] {
-	const typeColumns: PagedTableColumn<WorkspaceCustomizationRow>[] = (matrix.customizationTypes ?? []).map(type => ({
+export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): DataTableColumn<WorkspaceCustomizationRow>[] {
+	const typeColumns: DataTableColumn<WorkspaceCustomizationRow>[] = (matrix.customizationTypes ?? []).map(type => ({
 		id: `type:${type.id}`,
 		label: type.icon,
 		headerTitle: type.label,
 		align: 'center',
+		width: '44px',
 		sortValue: row => customizationStatusRank(row.typeStatuses?.[type.id]),
 		render: row => {
 			const status = row.typeStatuses?.[type.id] || '❓';
@@ -99,6 +86,7 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 			id: 'sessions',
 			label: localize('usage.customization.column.sessions'),
 			align: 'right',
+			width: '96px',
 			sortValue: row => row.sessionCount,
 			render: row => String(row.sessionCount),
 		},
@@ -106,6 +94,7 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 			id: 'interactions',
 			label: localize('usage.customization.column.interactions'),
 			align: 'right',
+			width: '96px',
 			sortValue: row => row.interactionCount,
 			render: row => String(row.interactionCount),
 		},
@@ -115,17 +104,17 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 
 /** Renders only the paged table root, so sort/page/filter can swap it in place. */
 export function renderCustomizationTable(matrix: WorkspaceCustomizationMatrix): string {
-	return renderPagedTable({
+	return renderDataTable({
 		tableId: CUSTOMIZATION_TABLE_ID,
 		ariaLabel: localize('usage.customization.aria.table'),
 		rows: matrix.workspaces,
 		columns: buildCustomizationColumns(matrix),
-		initialSortColumn: 'interactions',
-		initialSortDirection: 'desc',
+		initialSort: { columnId: 'interactions', direction: 'desc' },
 		defaultFilters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false },
 		filterRows: (row, filters) => !filters[CUSTOMIZATION_FILTER_NONE_ONLY] || hasNoCustomization(row),
-		emptyMessage: localize('usage.pagedTable.noRows'),
 		pageSize: CUSTOMIZATION_PAGE_SIZE,
+		className: 'data-table--fixed',
+		rootClassName: 'data-table-root--scroll-y',
 	});
 }
 
@@ -148,7 +137,7 @@ function buildLegendHtml(matrix: WorkspaceCustomizationMatrix): string {
 }
 
 export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
-	currentMatrix = matrix && Array.isArray(matrix.workspaces) && matrix.workspaces.length > 0 ? matrix : null;
+	const currentMatrix = matrix && Array.isArray(matrix.workspaces) && matrix.workspaces.length > 0 ? matrix : null;
 	if (!currentMatrix) {
 		return `
 			<div class="section" id="${SECTION_ID}">
@@ -157,15 +146,17 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				<div style="color: var(--text-muted); padding:12px;">${escapeHtml(localize('usage.customization.empty'))}</div>
 			</div>`;
 	}
-	const state = getPagedTableState(CUSTOMIZATION_TABLE_ID, 'interactions', 'desc', { [CUSTOMIZATION_FILTER_NONE_ONLY]: false });
+	const state = getDataTableState(CUSTOMIZATION_TABLE_ID, { sort: { columnId: 'interactions', direction: 'desc' }, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false } });
 	const noneOnly = state.filters[CUSTOMIZATION_FILTER_NONE_ONLY] === true;
 	// Keep the toggle while the filter is on, even if a refresh left no matching workspaces —
 	// otherwise a persisted filter would hide every row with no way to turn it off.
 	const filterToggle = currentMatrix.workspacesWithIssues > 0 || noneOnly
-		? `<label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;margin-bottom:8px;">
-				<input type="checkbox" data-paged-table="${CUSTOMIZATION_TABLE_ID}" data-paged-table-filter="${CUSTOMIZATION_FILTER_NONE_ONLY}"${noneOnly ? ' checked' : ''} style="margin:0;cursor:pointer;">
-				${escapeHtml(localize('usage.customization.filter.noCustomizationOnly'))}
-			</label>`
+		? renderDataTableFilter({
+			tableId: CUSTOMIZATION_TABLE_ID,
+			filterId: CUSTOMIZATION_FILTER_NONE_ONLY,
+			label: localize('usage.customization.filter.noCustomizationOnly'),
+			checked: noneOnly,
+		})
 		: '';
 	return `
 		<div id="${SECTION_ID}" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
@@ -180,71 +171,9 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				${renderUngroupedWorkspaceNote(currentMatrix.ungroupedWorkspaceNames)}
 			</div>
 			${filterToggle}
-			<span id="customization-table-status" class="paged-table-status" role="status" aria-live="polite" aria-atomic="true"></span>
-			<div class="customization-matrix-container customization-paged">
+			<div class="customization-matrix-container">
 				${renderCustomizationTable(currentMatrix)}
 			</div>
 			${buildLegendHtml(currentMatrix)}
 		</div>`;
 }
-
-function rerenderCustomizationTable(section: HTMLElement, sorted: boolean): void {
-	if (!currentMatrix) { return; }
-	const root = section.querySelector<HTMLElement>(`#paged-table-root-${CUSTOMIZATION_TABLE_ID}`);
-	if (!root) { return; }
-	const focusTarget = getPagedTableFocusTarget(section, document.activeElement);
-	const staging = document.createElement('div');
-	setHtml(staging, renderCustomizationTable(currentMatrix));
-	const replacement = staging.firstElementChild;
-	if (!(replacement instanceof HTMLElement)) { return; }
-	const announcement = getPagedTableAnnouncement(replacement, sorted);
-	root.replaceWith(replacement);
-	restorePagedTableFocus(section, focusTarget);
-	const status = section.querySelector<HTMLElement>('#customization-table-status');
-	if (status) { status.textContent = announcement; }
-}
-
-/** Applies a click on a sort header or pager button; undefined when it was neither. */
-export function applyCustomizationTableAction(target: Element): 'sort' | 'page' | undefined {
-	const sortButton = target.closest<HTMLButtonElement>('[data-paged-sort]');
-	if (sortButton?.getAttribute('data-paged-table') === CUSTOMIZATION_TABLE_ID) {
-		const columnId = sortButton.getAttribute('data-paged-sort');
-		if (columnId) { setPagedTableSort(CUSTOMIZATION_TABLE_ID, columnId); return 'sort'; }
-	}
-	const pageButton = target.closest<HTMLButtonElement>('[data-paged-page]');
-	if (pageButton?.getAttribute('data-paged-table') === CUSTOMIZATION_TABLE_ID) {
-		const page = Number(pageButton.getAttribute('data-paged-page'));
-		if (Number.isFinite(page)) { setPagedTablePage(CUSTOMIZATION_TABLE_ID, page); return 'page'; }
-	}
-	return undefined;
-}
-
-/**
- * Applies a filter checkbox's new state. Driven by `change`, not `click`, so it fires once however
- * the box was toggled (the box itself, its label text, or the keyboard).
- */
-export function applyCustomizationFilterChange(target: EventTarget | null): boolean {
-	if (!(target instanceof Element) || !target.matches('input[data-paged-table-filter]')) { return false; }
-	const input = target as HTMLInputElement;
-	const filterId = input.getAttribute('data-paged-table-filter');
-	if (input.getAttribute('data-paged-table') !== CUSTOMIZATION_TABLE_ID || !filterId) { return false; }
-	setPagedTableFilter(CUSTOMIZATION_TABLE_ID, filterId, input.checked);
-	return true;
-}
-
-/** One delegated listener on the section, so re-rendering a page cannot orphan handlers. */
-export function wireCustomizationMatrixSection(): void {
-	const section = document.getElementById(SECTION_ID);
-	if (!section || section.dataset.customizationWired === 'true') { return; }
-	section.dataset.customizationWired = 'true';
-	section.addEventListener('click', event => {
-		const target = event.target;
-		if (!(target instanceof Element)) { return; }
-		const action = applyCustomizationTableAction(target);
-		if (action) { rerenderCustomizationTable(section, action === 'sort'); }
-	});
-	section.addEventListener('change', event => {
-		if (applyCustomizationFilterChange(event.target)) { rerenderCustomizationTable(section, false); }
-	});
-}
-

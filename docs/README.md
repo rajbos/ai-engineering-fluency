@@ -38,6 +38,7 @@ Per-component guides and READMEs.
 | [vscode-extension/DESIGN.md](vscode-extension/DESIGN.md) | VS Code extension UI design system (DESIGN.md spec) |
 | [vscode-extension/WEBVIEW-MESSAGING.md](vscode-extension/WEBVIEW-MESSAGING.md) | How data reaches a webview panel: trust model, readiness/replay, diagnostics, companion-extension impact |
 | [vscode-extension/VIEW-HIERARCHY.md](vscode-extension/VIEW-HIERARCHY.md) | View → sub-view → content-block map of every webview panel, and the rules for grouping them |
+| [vscode-extension/DATA-TABLE.md](vscode-extension/DATA-TABLE.md) | The shared `renderDataTable` component every webview table uses: layout, CSS, sorting, pagination, filters |
 | [visual-studio/](visual-studio/README.md) | Visual Studio extension guide |
 | [sharing-server/](sharing-server/README.md) | Sharing server setup, personal dashboard and Team Insights |
 | [Sharing server data separation contract](../sharing-server/AGENTS.md) | Authoritative server privacy, comparison semantics and coding/testing requirements |
