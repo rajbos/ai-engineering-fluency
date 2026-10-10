@@ -73,7 +73,9 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
   tag, comment, declaration or autolink, wraps `@mentions` and `#123` references in
   backticks, and encodes `[` as `&#91;` so no Markdown link, image or reference
   definition survives. Removing invisible characters first is what stops `<` + U+200B +
-  `!-- pr-risk-review -->` from turning into a live sticky marker. Lengths are capped.
+  `!-- pr-risk-review -->` from turning into a live sticky marker. Lengths are capped,
+  and the cut backs off rather than split a wrapped mention or an entity
+  (`truncateOutsideEscapes`), so truncation cannot re-expose an `@mention`.
 - The verdict is schema-checked: `risk` must be `low`, `medium` or `high`, list lengths
   are capped, and unknown fields are dropped. An unusable verdict falls back to the
   mechanical baseline (`--fallback`).
@@ -85,7 +87,8 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
   into `changeset.md` as code spans (`codeSpan`, lines 395-425) that show pipes,
   backslashes, control, bidi and invisible characters as visible `\u{...}` escapes in a
   single pass, so no backslash in a name can cancel a pipe escape, and pick a backtick
-  fence longer than any run in the name.
+  fence longer than any run in the name, padded so CommonMark's stripping of one edge
+  space cannot change how a name with leading or trailing spaces renders.
 - The workflow checks out the PR's base commit and runs the scripts from there, so
   editing the skill's scripts or signals in a PR does not change how that PR is judged.
   The PR head is read only through git objects and a worktree checked out with

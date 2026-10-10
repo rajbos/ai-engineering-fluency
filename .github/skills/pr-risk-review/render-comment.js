@@ -106,8 +106,32 @@ function sanitize(value, maxChars) {
     // after the `#123` step, which would otherwise wrap the entity's `#91`.
     .replace(/\[/g, '&#91;')
     .trim();
-  if (text.length > maxChars) text = `${text.slice(0, maxChars - 1).trimEnd()}…`;
+  if (text.length > maxChars) text = `${truncateOutsideEscapes(text, maxChars - 1).trimEnd()}…`;
   return text;
+}
+
+// The escapes sanitize() itself writes: a wrapped `@mention` or `#123`, and an
+// HTML entity such as `&lt;` or `&#91;`.
+const SANITIZER_ESCAPES = /`[@#][^`\s]*`|&#?[A-Za-z0-9]+;/g;
+
+/**
+ * Cut `text` to at most `limit` characters without splitting one of
+ * sanitize()'s own escapes. Cutting `` `@bob` `` after its opening backtick
+ * would leave an unmatched backtick, which is not a code span, so the mention
+ * would be live again; when the limit falls inside an escape, the cut moves
+ * back to where that escape starts.
+ */
+function truncateOutsideEscapes(text, limit) {
+  let cut = limit;
+  for (const match of text.matchAll(SANITIZER_ESCAPES)) {
+    const start = match.index;
+    if (start >= cut) break;
+    if (start + match[0].length > cut) {
+      cut = start;
+      break;
+    }
+  }
+  return text.slice(0, cut);
 }
 
 function sanitizeLine(value, maxChars) {

@@ -119,6 +119,22 @@ test('sanitizeLine and cell: a bare carriage return cannot break a table row or 
   }
 });
 
+test('sanitize: the length cap never splits a neutralised mention or reference', () => {
+  for (let max = 4; max <= 16; max += 1) {
+    for (const input of ['xxx @bob tail', 'xxx #123 tail', 'a <b> [c] @dave #42 end']) {
+      const out = sanitize(input, max);
+      assert.ok(out.length <= max, `${max}: ${out}`);
+      // Every backtick that is written is part of a closed pair.
+      assert.equal((out.match(/`/g) || []).length % 2, 0, `${max}: ${out}`);
+      // No mention or reference outside a code span (`&#91;` is our entity).
+      assert.ok(!/(^|[^`\w&])[@#][A-Za-z0-9]/.test(out.replace(/`[^`]*`/g, '')), `${max}: ${out}`);
+      // No entity cut in half.
+      assert.ok(!/&#?[A-Za-z0-9]*…$/.test(out), `${max}: ${out}`);
+    }
+  }
+  assert.equal(sanitize('xxx @bob tail', 10), 'xxx…');
+});
+
 test('sanitize: plain comparisons and code survive', () => {
   assert.equal(sanitize('a < b and x <= 3', 2400), 'a < b and x <= 3');
 });
@@ -258,6 +274,18 @@ test('codeSpan: backticks, pipes, newlines and bidi in file names cannot break t
   assert.ok(span.includes('\\u{202E}'));
   assert.ok(span.includes('\\u{7C}'));
   assert.ok(span.startsWith('``') && span.endsWith('``'), span);
+});
+
+test('codeSpan: leading and trailing spaces survive CommonMark stripping', () => {
+  // CommonMark strips one space from each end when both ends are spaces.
+  const stripOnce = (span) => {
+    const content = span.replace(/^`+|`+$/g, '');
+    return /^ .* $/.test(content) && /[^ ]/.test(content) ? content.slice(1, -1) : content;
+  };
+  for (const name of [' foo ', ' foo', 'foo ', '  two  ', '`tick', 'tick`']) {
+    assert.equal(stripOnce(codeSpan(name)), name, JSON.stringify(name));
+  }
+  assert.equal(codeSpan('   '), '`   `');
 });
 
 test('codeSpan: a backslash before a pipe cannot split the row', () => {

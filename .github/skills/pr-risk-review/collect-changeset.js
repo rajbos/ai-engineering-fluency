@@ -418,7 +418,13 @@ function codeSpan(value) {
   // so open with one longer than any run inside.
   const longestRun = Math.max(0, ...(text.match(/`+/g) || []).map((run) => run.length));
   const fence = '`'.repeat(longestRun + 1);
-  const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  // CommonMark strips one space from each end of a code span whose content
+  // starts AND ends with a space (` foo ` renders as `foo`), and a backtick at
+  // either end would merge with the fence. Padding with one more space on each
+  // side survives that stripping, so the name renders exactly. A name made
+  // only of spaces is left alone: CommonMark does not strip those.
+  const edgeSpace = /^ | $/.test(text) && /[^ ]/.test(text);
+  const pad = text.startsWith('`') || text.endsWith('`') || edgeSpace ? ' ' : '';
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
