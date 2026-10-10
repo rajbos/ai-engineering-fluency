@@ -18,6 +18,9 @@ import {
 	resolvePromotionTarget,
 	describePromotionTarget,
 	describeNoPromotionCandidates,
+	orderCitationsLiveFirst,
+	withFreshPromotionTarget,
+	buildPromotionPromptForSubject,
 	buildPromotionPrompt,
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
@@ -1523,4 +1526,55 @@ test('describeNoPromotionCandidates does not call a stale-only store "all docume
 
 	const documented = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1', citations: ['AGENTS.md:1'] })] }, alwaysExists);
 	assert.equal(describeNoPromotionCandidates(documented), 'No promotion candidates: every stored memory already cites an instruction file.');
+});
+
+// ---------------------------------------------------------------------------
+// Review round 4 (#2373): live citations survive the cap, the target is never
+// served from cache, and the prompt is rebuilt at click time
+// ---------------------------------------------------------------------------
+
+test('promotion groups carry their live citations, and the prompt lists them before the cap', () => {
+	// Five citations that sort before the only live one: User input and deleted files.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [memory({
+			id: '1',
+			subject: 'crowded',
+			citations: ['User input: a', 'User input: b', 'User input: c', 'a/deleted1.ts:1', 'a/deleted2.ts:1', 'z/live.ts:9'],
+		})],
+	}, { fileExists: p => p === 'z/live.ts', promotionTargetStatus: () => 'exists' });
+	const group = analysis.promotionGroups[0];
+	assert.deepEqual(group.liveCitations, ['z/live.ts:9']);
+	assert.equal(orderCitationsLiveFirst(group)[0], 'z/live.ts:9');
+	const prompt = toServerMemoriesAnalysisView(analysis)?.topPromotionGroups[0].prompt ?? '';
+	assert.match(prompt, /Cited sources: z\/live\.ts:9, /, 'the verifiable source must be listed, not hidden in "+N more"');
+	assert.match(prompt, /\(\+1 more\)/);
+	assert.match(renderPromotionMarkdown(analysis), /Sources: z\/live\.ts:9, /);
+});
+
+test('withFreshPromotionTarget replaces a cached target with what the checkout holds now', () => {
+	const cached = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1' })] },
+		{ fileExists: () => true, promotionTargetStatus: targets({ 'AGENTS.md': 'exists' }) });
+	assert.deepEqual(cached.promotionTarget, { path: 'AGENTS.md', exists: true });
+	// AGENTS.md was since replaced by an escaping symlink.
+	const fresh = withFreshPromotionTarget(cached, targets({ 'AGENTS.md': 'unsafe' }));
+	assert.equal(fresh.promotionTarget, undefined);
+	assert.equal(fresh.promotionTargetBlockedPath, 'AGENTS.md');
+	assert.equal(toServerMemoriesAnalysisView(fresh)?.topPromotionGroups[0].prompt, undefined);
+	// And it came back as a normal file.
+	assert.deepEqual(withFreshPromotionTarget(fresh, targets({ 'AGENTS.md': 'exists' })).promotionTarget, { path: 'AGENTS.md', exists: true });
+	assert.equal(cached.promotionTarget?.path, 'AGENTS.md', 'the cached analysis itself is not mutated');
+});
+
+test('buildPromotionPromptForSubject rebuilds at click time and refuses an unsafe or unknown target', () => {
+	const analysis = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1', subject: 'Caching!' })] },
+		{ fileExists: () => true, promotionTargetStatus: () => 'exists' });
+	const subject = toServerMemoriesAnalysisView(analysis)?.topPromotionGroups[0].subject ?? '';
+	assert.equal(subject, 'caching');
+	const ok = buildPromotionPromptForSubject(analysis, subject, targets({ '.github/copilot-instructions.md': 'exists' }));
+	assert.ok('prompt' in ok);
+	assert.match(ok.prompt, /`\.github\/copilot-instructions\.md`/, 'uses the target probed now, not the cached one');
+	assert.deepEqual(buildPromotionPromptForSubject(analysis, subject, targets({ 'AGENTS.md': 'unsafe' })), { reason: 'no-safe-target', blockedPath: 'AGENTS.md' });
+	assert.deepEqual(buildPromotionPromptForSubject(analysis, 'nope', () => 'exists'), { reason: 'unknown-subject' });
 });

@@ -139,6 +139,16 @@ cited files **before** adding a concise entry, and not to commit. The person rea
 the prompt before sending it and reviews the resulting diff, so nothing reaches an
 instruction file without a human in the loop. Every server-supplied field is
 flattened to one line, so memory text cannot add steps of its own to the prompt.
+Citations are listed live-first (`orderCitationsLiveFirst()`): the existing regular
+files that made the group promotable come before `User input:` or deleted ones, so
+the five-citation cap can never hide the only verifiable source.
+
+The button sends only the group's subject key (`draftServerMemoryPromotion`). The
+memory read is cached for an hour, but the target file can change at any time, so
+the host never trusts a fetch-time answer: every render re-probes the target
+(`withFreshPromotionTarget()`), and the click handler rebuilds the prompt with
+the target probed again at that moment (`buildPromotionPromptForSubject()`). If
+there is no safe target any more, it drafts nothing and says why.
 
 The target file is chosen deterministically by `selectPromotionTarget()`: an
 existing root `AGENTS.md`, else an existing `.github/copilot-instructions.md`, else
@@ -210,7 +220,7 @@ fields the typed shape does not know about. Use it when the API changes.
 | Unit tests | `vscode-extension/test/unit/copilotServerMemories.test.ts` (offline — `fetch` and `fileExists` are both injected), `vscode-extension/test/unit/webview-serverMemoriesSection.test.ts` (section HTML and click mapping) |
 | CLI | `cli/src/commands/memory-files.ts` — `--server`, `--repo`, `--limit`, `--promote` |
 | Runtime wiring | `vscode-extension/src/extension.ts` — `scheduleServerMemoriesRefresh()`, `decideServerMemoriesRefresh()` (pure, exported), `buildServerMemoriesView()`, `resolveWorkspaceRepoSlug()`, `invalidateServerMemoriesCache()`, TTL `SERVER_MEMORIES_FETCH_TTL_MS` |
-| Tools-tab UI | `vscode-extension/src/webview/usage/serverMemories.ts` — `buildServerMemoriesSectionHtml()`, `sanitizeServerMemoriesAnalysis()`, `wireServerMemoriesButtons()`, `#section-server-memories`. The buttons post the existing `draftCopilotChatWithPrompt` and `openFile` messages. Split out of `main.ts`, which would otherwise have crossed the 6000-line `max-lines` ceiling; `main.ts` imports both and holds the cross-refresh cache. |
+| Tools-tab UI | `vscode-extension/src/webview/usage/serverMemories.ts` — `buildServerMemoriesSectionHtml()`, `sanitizeServerMemoriesAnalysis()`, `wireServerMemoriesButtons()`, `#section-server-memories`. The buttons post `draftServerMemoryPromotion` (subject key only; the host rebuilds and drafts) and `openFile` (only for citations that resolve to a regular file in the checkout). Both tables use the shared data-table component. Split out of `main.ts`, which would otherwise have crossed the 6000-line `max-lines` ceiling; `main.ts` imports both and holds the cross-refresh cache. |
 | Raw probe | `scripts/fetch-copilot-memories.js` |
 | Setting | `aiEngineeringFluency.serverMemories.enabled` (default `true`) |
 

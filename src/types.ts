@@ -798,7 +798,7 @@ export interface RepeatedTaskCluster {
 /** Repeated-task candidates across all scanned sessions. */
 export interface RepeatedTaskReport {
   minClusterSize: number;
-  /** Sessions that carried a usable first user prompt. */
+  /** Sessions whose first user prompt survived normalization and was clustered (see normalizePromptTokens). */
   sessionsScanned: number;
   clusters: RepeatedTaskCluster[];
 }
@@ -1718,6 +1718,11 @@ export interface ServerMemoryPromotionGroup {
   representativeFact: string;
   /** Every distinct citation across the group, sorted. */
   citations: string[];
+  /**
+   * The subset of {@link citations} whose file is an existing regular file in the checkout —
+   * the evidence that made the group promotable. Listed first wherever citations are capped.
+   */
+  liveCitations?: string[];
   memoryIds: string[];
 }
 
@@ -1824,6 +1829,11 @@ export interface ServerMemoryPromotionGroupView {
   repeatCount: number;
   representativeFact: string;
   citationCount: number;
+  /**
+   * The group's normalized subject key. The promote button sends this, and the host rebuilds the
+   * prompt and re-probes the target file at click time.
+   */
+  subject?: string;
   /**
    * Copilot Chat prompt asking the agent to verify this fact and move it into the promotion
    * target, built by the shared `buildPromotionPrompt()`. Drafted, never auto-submitted.

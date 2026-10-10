@@ -633,6 +633,8 @@ interface MemoryScan {
 	 * directories are code-derived in form but not here.
 	 */
 	liveIds: Set<string>;
+	/** For each id in {@link liveIds}, the citations whose file is an existing regular file. */
+	liveCitations: Map<string, string[]>;
 	staleCitations: ServerMemoryStaleCitation[];
 }
 
@@ -659,15 +661,15 @@ function classifyCitations(citations: string[]): { checkable: string[]; instruct
  * whether any surviving one is a regular file (the evidence a promotion needs). Each path is
  * probed once, rather than re-scanning the missing list per citation.
  */
-function probeCitations(checkable: string[], deps: ServerMemoryAnalysisDeps): { missing: string[]; live: boolean } {
+function probeCitations(checkable: string[], deps: ServerMemoryAnalysisDeps): { missing: string[]; livePaths: Set<string> } {
 	const missing: string[] = [];
+	const livePaths = new Set<string>();
 	const isRegularFile = deps.isRegularFile ?? (() => true);
-	let live = false;
 	for (const filePath of checkable) {
 		if (!deps.fileExists(filePath)) { missing.push(filePath); continue; }
-		if (!live && isRegularFile(filePath)) { live = true; }
+		if (isRegularFile(filePath)) { livePaths.add(filePath); }
 	}
-	return { missing, live };
+	return { missing, livePaths };
 }
 
 /** Classify every memory once: subject, whether it is documented, code-derived, and stale. */
@@ -678,6 +680,7 @@ function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps):
 		documented: [],
 		codeDerivedIds: new Set<string>(),
 		liveIds: new Set<string>(),
+		liveCitations: new Map<string, string[]>(),
 		staleCitations: [],
 	};
 
@@ -698,8 +701,13 @@ function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps):
 			scan.documented.push({ id: memory.id, subject: memory.subject, fact: memory.fact, instructionFiles: Array.from(instructionFiles) });
 		}
 
-		const { missing, live } = probeCitations(checkable, deps);
-		if (live) { scan.liveIds.add(memory.id); }
+		const { missing, livePaths } = probeCitations(checkable, deps);
+		if (livePaths.size > 0) {
+			scan.liveIds.add(memory.id);
+			// Kept as the original citation strings, so the prompt can quote them with their
+			// line ranges and reserve room for them before any cap is applied.
+			scan.liveCitations.set(memory.id, memory.citations.filter(citation => livePaths.has(citationFilePath(citation) ?? '')));
+		}
 		if (missing.length > 0) {
 			scan.staleCitations.push({
 				id: memory.id,
@@ -742,6 +750,7 @@ function buildPromotionGroups(scan: MemoryScan): ServerMemoryPromotionGroup[] {
 			// the fullest wording is the most useful starting text for an instruction file.
 			representativeFact: group.reduce((longest, m) => (m.fact.length > longest.length ? m.fact : longest), group[0].fact),
 			citations: Array.from(new Set(group.flatMap(m => m.citations))).sort(),
+			liveCitations: Array.from(new Set(group.flatMap(m => scan.liveCitations.get(m.id) ?? []))).sort(),
 			memoryIds: group.map(m => m.id),
 		});
 	}
@@ -861,6 +870,7 @@ export function toServerMemoriesAnalysisView(
 			repeatCount: group.repeatCount,
 			representativeFact: group.representativeFact,
 			citationCount: group.citations.length,
+			subject: group.subject,
 			// Every promotion group is eligible by construction: buildPromotionGroups() already
 			// drops documented subjects, those with no verifiable code citation (which covers
 			// `User input:`-only memories) and fully stale ones, so the only remaining gate is a
@@ -995,6 +1005,45 @@ function defaultPromotionTargetProbeDeps(): PromotionTargetProbeDeps {
 	};
 }
 
+/**
+ * A group's citations with the live ones — existing regular files in the checkout — first, then
+ * the rest, each part sorted. Any cap applied afterwards therefore keeps the evidence that made
+ * the group promotable, instead of letting `User input:` or deleted citations that happen to
+ * sort earlier crowd it out.
+ */
+export function orderCitationsLiveFirst(group: Pick<ServerMemoryPromotionGroup, 'citations' | 'liveCitations'>): string[] {
+	const live = group.liveCitations ?? [];
+	const liveSet = new Set(live);
+	return [...live, ...group.citations.filter(citation => !liveSet.has(citation))];
+}
+
+/**
+ * The analysis with its promotion target re-resolved against the checkout *now*. The memory read
+ * is cached for an hour, but `AGENTS.md` can be created, removed or replaced by an escaping
+ * symlink at any time, so the target must never be served from that cache.
+ */
+export function withFreshPromotionTarget(analysis: ServerMemoriesAnalysis, status: PromotionTargetProbe): ServerMemoriesAnalysis {
+	const { target, blockedPath } = resolvePromotionTarget(status);
+	return { ...analysis, promotionTarget: target, promotionTargetBlockedPath: blockedPath };
+}
+
+/**
+ * Rebuild one group's promotion prompt at the moment the user asks for it, with the target
+ * re-probed. This, not anything the webview sends, is what authorizes the draft: the webview
+ * passes only the subject key, and gets no prompt when the target is no longer safe.
+ */
+export function buildPromotionPromptForSubject(
+	analysis: ServerMemoriesAnalysis,
+	subject: string,
+	status: PromotionTargetProbe,
+): { prompt: string } | { reason: 'unknown-subject' | 'no-safe-target'; blockedPath?: string } {
+	const group = analysis.promotionGroups.find(candidate => candidate.subject === subject);
+	if (!group) { return { reason: 'unknown-subject' }; }
+	const { target, blockedPath } = resolvePromotionTarget(status);
+	if (!target) { return { reason: 'no-safe-target', blockedPath }; }
+	return { prompt: buildPromotionPrompt(analysis.repo, group, target) };
+}
+
 /** How many citations a promotion prompt lists; the same cap the Markdown block uses. */
 const PROMPT_CITATION_LIMIT = 5;
 
@@ -1010,11 +1059,12 @@ const PROMPT_CITATION_LIMIT = 5;
  */
 export function buildPromotionPrompt(
 	repo: string,
-	group: Pick<ServerMemoryPromotionGroup, 'displaySubject' | 'representativeFact' | 'citations'>,
+	group: Pick<ServerMemoryPromotionGroup, 'displaySubject' | 'representativeFact' | 'citations' | 'liveCitations'>,
 	target: ServerMemoryPromotionTarget,
 ): string {
-	const citations = group.citations.slice(0, PROMPT_CITATION_LIMIT).map(flattenForMarkdown);
-	const more = group.citations.length > PROMPT_CITATION_LIMIT ? ` (+${group.citations.length - PROMPT_CITATION_LIMIT} more)` : '';
+	const ordered = orderCitationsLiveFirst(group);
+	const citations = ordered.slice(0, PROMPT_CITATION_LIMIT).map(flattenForMarkdown);
+	const more = ordered.length > PROMPT_CITATION_LIMIT ? ` (+${ordered.length - PROMPT_CITATION_LIMIT} more)` : '';
 	const targetRef = target.exists
 		? `\`${target.path}\``
 		: `\`${target.path}\` (it does not exist yet — create it at the repository root)`;
@@ -1067,7 +1117,7 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
 		const seen = group.repeatCount > 1 ? ` _(re-learned ${group.repeatCount}x)_` : '';
 		lines.push(`- **${flattenForMarkdown(group.displaySubject)}**${seen} — ${flattenForMarkdown(group.representativeFact)}`);
 		if (group.citations.length > 0) {
-			lines.push(`  - Sources: ${group.citations.slice(0, 5).map(flattenForMarkdown).join(', ')}`);
+			lines.push(`  - Sources: ${orderCitationsLiveFirst(group).slice(0, PROMPT_CITATION_LIMIT).map(flattenForMarkdown).join(', ')}`);
 		}
 	}
 	lines.push('');

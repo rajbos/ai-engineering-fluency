@@ -105,9 +105,8 @@ import {
 
 // --- Repeated-task detection (skill candidates from recurring prompts) ---
 import {
-  detectRepeatedTasks as _detectRepeatedTasks,
-  MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
-  type RepeatedTaskInput as _RepeatedTaskInput,
+  buildRepeatedTaskReport as _buildRepeatedTaskReport,
+  repoDisplayName as _repoDisplayName,
 } from '../../src/repeatedTasks';
 
 // --- Tool curation ---
@@ -145,6 +144,8 @@ import {
   createRepoFileExists as _createRepoFileExists,
   createPromotionTargetProbe as _createPromotionTargetProbe,
   createRepoRegularFileCheck as _createRepoRegularFileCheck,
+  withFreshPromotionTarget as _withFreshPromotionTarget,
+  buildPromotionPromptForSubject as _buildPromotionPromptForSubject,
 } from '../../src/copilotServerMemories';
 import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
@@ -7412,21 +7413,51 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private buildServerMemoriesView(): ServerMemoriesAnalysisView | null {
 		this.scheduleServerMemoriesRefresh();
 		const repoRoot = this._serverMemoriesRepoRoot;
-		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null, {
+		const cached = this._serverMemoriesAnalysis ?? null;
+		// Only the network read is cached. The promotion target is a filesystem fact that can
+		// change at any moment, so it is re-probed on every render (two lstat calls) rather than
+		// served from the hour-old analysis. The click handler probes again before drafting.
+		const analysis = cached && repoRoot ? _withFreshPromotionTarget(cached, _createPromotionTargetProbe(repoRoot)) : cached;
+		return _toServerMemoriesAnalysisView(analysis, {
 			// The store is per GitHub repository, not per workspace, so the section names the
 			// checkout it resolved the repository from and how many folders it chose among.
 			repoRoot,
 			workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
-			// Only a cited file that really resolves inside the checkout gets an "Open file"
-			// button: the citation is server-supplied, so the same symlink-safe check applies.
+			// Only a cited path that resolves to a regular file inside the checkout gets an "Open
+			// file" button: the citation is server-supplied, so the same symlink-safe check
+			// applies, and a directory (`docs/:1`) cannot be opened as a text document.
 			resolveRepoFile: repoRoot ? this.createRepoFileResolver(repoRoot) : undefined,
 		});
 	}
 
 	private createRepoFileResolver(repoRoot: string): (repoRelativePath: string) => string | undefined {
 		const path = require('path') as typeof import('path');
-		const exists = _createRepoFileExists(repoRoot);
-		return (repoRelativePath) => (exists(repoRelativePath) ? path.join(repoRoot, repoRelativePath) : undefined);
+		const isRegularFile = _createRepoRegularFileCheck(repoRoot);
+		return (repoRelativePath) => (isRegularFile(repoRelativePath) ? path.join(repoRoot, repoRelativePath) : undefined);
+	}
+
+	/**
+	 * Draft (never submit) the promotion prompt for one server-memory group. The webview sends
+	 * only the subject key; the prompt is rebuilt here with the target file probed right now, so
+	 * a button rendered from a cached analysis cannot aim the agent at a path that has since
+	 * become unsafe. With no safe target any more, nothing is drafted.
+	 */
+	private async draftServerMemoryPromotion(subject: string): Promise<void> {
+		const analysis = this._serverMemoriesAnalysis;
+		const repoRoot = this._serverMemoriesRepoRoot;
+		if (!analysis || !repoRoot) { return; }
+		const result = _buildPromotionPromptForSubject(analysis, subject, _createPromotionTargetProbe(repoRoot));
+		if ('prompt' in result) {
+			await vscode.commands.executeCommand('workbench.action.chat.open', { query: result.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' });
+			return;
+		}
+		if (result.reason === 'no-safe-target') {
+			void vscode.window.showWarningMessage(result.blockedPath
+				? l10n.t('serverMemories.draftBlocked', result.blockedPath)
+				: l10n.t('serverMemories.draftNoTarget'));
+		}
+		// An unknown subject means the analysis was refreshed under the webview; the next render
+		// replaces the stale button, so there is nothing to report.
 	}
 
 	async openMcpJson(): Promise<void> {
@@ -7896,12 +7927,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Maximum number of sessions with detected correction moments listed per repository. */
 	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
 
-	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
-	private repoDisplayName(repository: string): string {
-		const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
-		return m ? m[1] : repository;
-	}
-
 	/**
 	 * Build the correction-moment report from already-parsed session results:
 	 * sessions are first filtered to those carrying detected correction moments,
@@ -7917,7 +7942,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const r of results) {
 			const moments = r?.sessionData.usageAnalysis?.correctionMoments;
 			if (!r || !moments || moments.length === 0) { continue; }
-			const repo = this.repoDisplayName(r.sessionData.repository || '(unknown)');
+			const repo = _repoDisplayName(r.sessionData.repository || '(unknown)');
 			if (!byRepo.has(repo)) { byRepo.set(repo, []); }
 			byRepo.get(repo)!.push(r);
 		}
@@ -7968,23 +7993,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private buildRepeatedTaskReport(
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
 	): RepeatedTaskReport | undefined {
-		const inputs: _RepeatedTaskInput[] = [];
-		for (const r of results) {
-			const prompt = r?.sessionData.usageAnalysis?.firstUserPrompt;
-			if (!r || !prompt) { continue; }
-			inputs.push({
-				prompt,
-				session: {
-					file: r.sessionFile,
-					title: r.sessionData.title ?? null,
-					lastInteraction: r.sessionData.lastInteraction ?? new Date(r.mtime).toISOString(),
-					repository: r.sessionData.repository ? this.repoDisplayName(r.sessionData.repository) : undefined,
-				},
-			});
-		}
-		const clusters = _detectRepeatedTasks(inputs);
-		if (clusters.length === 0) { return undefined; }
-		return { minClusterSize: _MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
+		return _buildRepeatedTaskReport(results
+			.filter((r): r is NonNullable<typeof r> => !!r)
+			.map(r => ({
+				file: r.sessionFile,
+				firstUserPrompt: r.sessionData.usageAnalysis?.firstUserPrompt,
+				title: r.sessionData.title,
+				lastInteraction: r.sessionData.lastInteraction,
+				mtime: r.mtime,
+				repository: r.sessionData.repository,
+			})));
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -10232,6 +10250,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 					? vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' })
 					: undefined
 			),
+			draftServerMemoryPromotion: (message) => (typeof message.subject === 'string' && message.subject
+				? this.dispatch('draftServerMemoryPromotion', () => this.draftServerMemoryPromotion(message.subject))
+				: undefined),
 			suppressUnknownTool: (message) => {
 				const toolName = message.toolName as string;
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;

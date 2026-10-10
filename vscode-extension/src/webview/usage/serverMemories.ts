@@ -14,12 +14,21 @@ import type {
 	ServerMemoryPromotionGroupView,
 	ServerMemoryPromotionTarget,
 } from '../../../../src/types';
+import { renderDataTable, type DataTableColumn } from '../shared/dataTable';
 import { escapeHtml, formatNumber } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 
-/** Messages this section posts to the extension host; both already have analysis-panel handlers. */
+export const SERVER_MEMORIES_TABLE_ID = 'server-memories-promotion';
+export const SERVER_MEMORIES_DOCUMENTED_TABLE_ID = 'server-memories-documented';
+
+/**
+ * Messages this section posts to the extension host. The promote button sends only the group's
+ * subject key, never prompt text: the host rebuilds the prompt and re-probes the target file at
+ * click time, so a button rendered from an hour-old analysis cannot aim an agent at a path that
+ * has since become unsafe.
+ */
 export type ServerMemoriesMessage =
-	| { command: 'draftCopilotChatWithPrompt'; prompt: string }
+	| { command: 'draftServerMemoryPromotion'; subject: string }
 	| { command: 'openFile'; path: string };
 
 const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0);
@@ -38,6 +47,8 @@ function sanitizePromotionGroups(raw: unknown): ServerMemoryPromotionGroupView[]
 			};
 			const prompt = optionalString(group.prompt);
 			if (prompt) { view.prompt = prompt; }
+			const subject = optionalString(group.subject);
+			if (subject) { view.subject = subject; }
 			return view;
 		});
 }
@@ -111,8 +122,6 @@ function localizeWithHtml(key: string, ...htmlArgs: string[]): string {
 	return escaped.replace(/\u0001(\d+)\u0001/g, (match, index) => htmlArgs[Number(index)] ?? match);
 }
 
-const TH = 'padding:5px 8px; color:var(--text-primary); font-weight:600;';
-const TD = 'padding:5px 8px; color:var(--text-primary);';
 const BUTTON = 'font-size:11px; padding:2px 8px; cursor:pointer; white-space:nowrap;';
 
 /** Which repository, which checkout, and why that is not "this workspace". */
@@ -131,81 +140,90 @@ function buildScopeHtml(analysis: ServerMemoriesAnalysisView): string {
 	</div>`;
 }
 
+type PromotionGroup = ServerMemoriesAnalysisView['topPromotionGroups'][number];
+type DocumentedEntry = NonNullable<ServerMemoriesAnalysisView['documentedMemories']>[number];
+
 function buildPromoteBlockHtml(analysis: ServerMemoriesAnalysisView): string {
 	if (analysis.topPromotionGroups.length === 0) { return ''; }
 	const warn = 'var(--vscode-editorWarning-foreground, #cca700)';
 	const target = analysis.promotionTarget;
-	const hasActions = analysis.topPromotionGroups.some(group => group.prompt);
-	const rows = analysis.topPromotionGroups.map(group => {
-		// Only a repeat is worth calling out — a badge reading "re-learned 1x" would add
-		// noise to every single-sighting row without saying anything.
-		const badge = group.repeatCount > 1
-			? ` <span style="color:${warn}; font-size:11px;">(${escapeHtml(localizeFormat('serverMemories.repeatBadge', group.repeatCount))})</span>`
-			: '';
-		// A row only gets the button when the host built a prompt for it, which it does only
-		// for promotion groups — documented, user-input-only and fully stale memories never are.
-		const action = group.prompt
-			? `<button class="server-memory-draft-btn" data-prompt="${escapeHtml(group.prompt)}" style="${BUTTON}" title="${escapeHtml(localizeFormat('serverMemories.askCopilotTooltip', target?.path ?? 'AGENTS.md'))}">${escapeHtml(localize('serverMemories.askCopilot'))}</button>`
-			: '';
-		return `<tr style="border-bottom:1px solid var(--border-color);">
-			<td style="${TD} white-space:nowrap;">${escapeHtml(group.displaySubject)}${badge}</td>
-			<td style="${TD}">${escapeHtml(group.representativeFact)}</td>
-			<td style="${TD} text-align:right;">${group.citationCount}</td>
-			${hasActions ? `<td style="${TD} text-align:right;">${action}</td>` : ''}
-		</tr>`;
-	}).join('');
+	// A row gets the button only when the host projected a prompt for it (promotion groups with a
+	// safe target) and the subject key the host needs to rebuild that prompt at click time.
+	const canDraft = (group: PromotionGroup): boolean => Boolean(group.prompt && group.subject);
+	const hasActions = analysis.topPromotionGroups.some(canDraft);
+	const columns: DataTableColumn<PromotionGroup>[] = [
+		{
+			id: 'subject', label: localize('serverMemories.table.subject'), sortValue: group => group.displaySubject,
+			render: group => {
+				// Only a repeat is worth calling out — a badge reading "re-learned 1x" would add
+				// noise to every single-sighting row without saying anything.
+				const badge = group.repeatCount > 1
+					? ` <span style="color:${warn}; font-size:11px;">(${escapeHtml(localizeFormat('serverMemories.repeatBadge', group.repeatCount))})</span>`
+					: '';
+				return { html: `<span style="white-space:nowrap;">${escapeHtml(group.displaySubject)}${badge}</span>` };
+			},
+		},
+		{ id: 'fact', label: localize('serverMemories.table.fact'), sortValue: group => group.representativeFact, render: group => group.representativeFact },
+		{ id: 'sources', label: localize('serverMemories.table.sources'), align: 'right', sortValue: group => group.citationCount, render: group => String(group.citationCount) },
+	];
+	if (hasActions) {
+		columns.push({
+			id: 'action', label: localize('serverMemories.table.action'), align: 'right',
+			render: group => ({
+				html: canDraft(group)
+					? `<button class="server-memory-draft-btn" data-subject="${escapeHtml(group.subject ?? '')}" style="${BUTTON}" title="${escapeHtml(localizeFormat('serverMemories.askCopilotTooltip', target?.path ?? 'AGENTS.md'))}">${escapeHtml(localize('serverMemories.askCopilot'))}</button>`
+					: '',
+			}),
+		});
+	}
 	const targetNote = target
 		? ` ${localizeWithHtml(target.exists ? 'serverMemories.targetExisting' : 'serverMemories.targetNew', `<code>${escapeHtml(target.path)}</code>`)}`
 		: '';
+	// No initialSort: the host already ranks the groups by how worth promoting they are.
 	return `
 		<div style="margin-top:10px; font-size:13px; font-weight:600; color:var(--text-primary);">${escapeHtml(localize('serverMemories.promoteHeading'))}</div>
 		<div style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">${escapeHtml(localize('serverMemories.promoteHint'))}${targetNote}</div>
-		<div style="overflow-x:auto;">
-			<table style="width:100%; border-collapse:collapse; font-size:12px;">
-				<thead><tr style="border-bottom:1px solid var(--border-color);">
-					<th style="${TH} text-align:left;">${escapeHtml(localize('serverMemories.table.subject'))}</th>
-					<th style="${TH} text-align:left;">${escapeHtml(localize('serverMemories.table.fact'))}</th>
-					<th style="${TH} text-align:right;">${escapeHtml(localize('serverMemories.table.sources'))}</th>
-					${hasActions ? `<th style="${TH} text-align:right;">${escapeHtml(localize('serverMemories.table.action'))}</th>` : ''}
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
-		</div>`;
+		${renderDataTable({
+			tableId: SERVER_MEMORIES_TABLE_ID,
+			ariaLabel: localize('serverMemories.promoteHeading'),
+			rows: analysis.topPromotionGroups,
+			columns,
+		})}`;
 }
 
 function buildDocumentedBlockHtml(analysis: ServerMemoriesAnalysisView): string {
 	const entries = analysis.documentedMemories ?? [];
 	if (entries.length === 0) { return ''; }
-	const rows = entries.map(entry => {
-		const files = entry.files.map(file => {
-			// No "Open file" for a citation the host could not resolve inside this checkout.
-			const open = file.absolutePath
-				? ` <button class="server-memory-open-btn" data-path="${escapeHtml(file.absolutePath)}" style="${BUTTON}">${escapeHtml(localize('serverMemories.openFile'))}</button>`
-				: '';
-			return `<div><code>${escapeHtml(file.path)}</code>${open}</div>`;
-		}).join('');
-		return `<tr style="border-bottom:1px solid var(--border-color);">
-			<td style="${TD} white-space:nowrap;">${escapeHtml(entry.subject)}</td>
-			<td style="${TD}">${escapeHtml(entry.fact)}</td>
-			<td style="${TD}">${files}</td>
-		</tr>`;
-	}).join('');
+	const columns: DataTableColumn<DocumentedEntry>[] = [
+		{ id: 'subject', label: localize('serverMemories.table.subject'), sortValue: entry => entry.subject, render: entry => ({ html: `<span style="white-space:nowrap;">${escapeHtml(entry.subject)}</span>` }) },
+		{ id: 'fact', label: localize('serverMemories.table.fact'), sortValue: entry => entry.fact, render: entry => entry.fact },
+		{
+			id: 'files', label: localize('serverMemories.table.citedFile'),
+			render: entry => ({
+				html: entry.files.map(file => {
+					// No "Open file" for a citation the host could not resolve to a regular file
+					// inside this checkout.
+					const open = file.absolutePath
+						? ` <button class="server-memory-open-btn" data-path="${escapeHtml(file.absolutePath)}" style="${BUTTON}">${escapeHtml(localize('serverMemories.openFile'))}</button>`
+						: '';
+					return `<div><code>${escapeHtml(file.path)}</code>${open}</div>`;
+				}).join(''),
+			}),
+		},
+	];
 	const showing = analysis.documentedCount > entries.length
 		? ` (${escapeHtml(localizeFormat('serverMemories.showingOf', formatNumber(entries.length), formatNumber(analysis.documentedCount)))})`
 		: '';
 	return `
 		<div style="margin-top:14px; font-size:13px; font-weight:600; color:var(--text-primary);">${escapeHtml(localize('serverMemories.documentedHeading'))}${showing}</div>
 		<div style="margin-bottom:8px; font-size:12px; color:var(--text-secondary);">${escapeHtml(localize('serverMemories.documentedHint'))}</div>
-		<div style="overflow-x:auto;">
-			<table class="server-memories-documented" style="width:100%; border-collapse:collapse; font-size:12px;">
-				<thead><tr style="border-bottom:1px solid var(--border-color);">
-					<th style="${TH} text-align:left;">${escapeHtml(localize('serverMemories.table.subject'))}</th>
-					<th style="${TH} text-align:left;">${escapeHtml(localize('serverMemories.table.fact'))}</th>
-					<th style="${TH} text-align:left;">${escapeHtml(localize('serverMemories.table.citedFile'))}</th>
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
-		</div>`;
+		${renderDataTable({
+			tableId: SERVER_MEMORIES_DOCUMENTED_TABLE_ID,
+			ariaLabel: localize('serverMemories.documentedHeading'),
+			rows: entries,
+			columns,
+			className: 'server-memories-documented',
+		})}`;
 }
 
 /**
@@ -269,13 +287,13 @@ export function buildServerMemoriesSectionHtml(analysis: ServerMemoriesAnalysisV
  * Map a click inside the section to the host message it should send, or `null`. Split from
  * the listener so it can be unit-tested without a DOM event loop.
  *
- * The "Ask Copilot" button *drafts* the prompt (`draftCopilotChatWithPrompt`) rather than
- * submitting it: the prompt embeds agent-written memory text, so a person reviews it first.
+ * The "Ask Copilot" button asks the host to *draft* the prompt (never submit it): the prompt
+ * embeds agent-written memory text, so a person reviews it first.
  */
 export function serverMemoriesMessageForClick(target: Element | null): ServerMemoriesMessage | null {
 	const draft = target?.closest<HTMLElement>('.server-memory-draft-btn');
-	const prompt = draft?.getAttribute('data-prompt');
-	if (prompt) { return { command: 'draftCopilotChatWithPrompt', prompt }; }
+	const subject = draft?.getAttribute('data-subject');
+	if (subject) { return { command: 'draftServerMemoryPromotion', subject }; }
 	const open = target?.closest<HTMLElement>('.server-memory-open-btn');
 	const path = open?.getAttribute('data-path');
 	if (path) { return { command: 'openFile', path }; }

@@ -34,9 +34,10 @@ Requires **Node.js 22.14 or later**. The first run parses every session file it 
 | [`diagnostics`](#diagnostics--search-locations--stats) | Every search location and what was found there | — |
 | [`memory-files`](#memory-files--copilot-memory-files-hygiene-report) | Copilot agent memory-file hygiene | `--json`, `--stale-days`, `--large-kb`, `--server`, `--repo`, `--limit`, `--promote` |
 | [`curation`](#curation--tool-curation-report) | MCP servers and skills you load but don't use | `--json`, `--window` |
+| [`skill-suggestions`](#skill-suggestions--repeated-tasks) | Tasks you keep prompting for by hand (skill candidates) | `--json`, `--include-prompts` |
 | [`segment`](#segment--prompt-segment) | Compact, cached one-liner for shell prompts | `--ttl`, `--refresh`, `--hide-zero`, `--json` |
 | [`chart`](#integration-commands-chart-usage-analysis-all) | Daily usage payload (integration) | `--json`, `-v, --verbose` |
-| [`usage-analysis`](#integration-commands-chart-usage-analysis-all) | Usage-analysis payload (integration) | `--json` |
+| [`usage-analysis`](#integration-commands-chart-usage-analysis-all) | Usage-analysis payload (integration) | `--json`, `--repeated-tasks` |
 | [`all`](#integration-commands-chart-usage-analysis-all) | Every payload in one call (integration) | `--json` (required) |
 
 Global options, valid before any command:
@@ -310,6 +311,36 @@ Unused MCP Servers:
 
 ---
 
+### `skill-suggestions` — Repeated Tasks
+
+Find tasks you keep prompting for by hand — similar first prompts across several sessions, such as "run the tests and fix the failures" — as candidates for a reusable skill, prompt file or custom agent. This is the same report as the **Skill Suggestions** section of the VS Code extension's Usage Analysis view, built by the same shared code; see [features/REPEATED-TASKS.md](../features/REPEATED-TASKS.md).
+
+```bash
+ai-engineering-fluency skill-suggestions                          # Text report, prompts included
+ai-engineering-fluency skill-suggestions --json                   # JSON without prompt text, keywords or session titles
+ai-engineering-fluency skill-suggestions --json --include-prompts # JSON with prompt text, keywords and session titles
+```
+
+Sessions active in the current or the previous calendar month (at least the last 30 days) are scanned; for editors that keep many sessions in one database (such as OpenCode and Crush), each session's own last activity decides, not the database file's date. A task is reported once at least two sessions start with a similar prompt.
+
+```
+Skill Suggestions — repeated tasks
+==================================================
+
+2 repeated task(s) in 184 session(s) with a usable first prompt (a task needs at least 2 similar sessions).
+
+1. "run the tests and fix the failures"
+   Sessions:     4
+   Keywords:     failures, tests
+   Repositories: rajbos/ai-engineering-fluency
+   Last seen:    2026-10-08
+...
+```
+
+`--json` output has the shape `{ "promptsIncluded": false, "repeatedTasks": { "minClusterSize", "sessionsScanned", "clusters": [...] } }`; `repeatedTasks` is `null` when nothing repeats. `sessionsScanned` counts sessions whose first prompt could be clustered — slash commands, very short prompts and prompts made only of filler words are not counted. Each cluster carries `sessionCount`, `repositories` and `sessions` (`file`, `lastInteraction`, `repository`). Prompts are free text you wrote, so `representativePrompt`, the prompt-derived `sharedKeywords` and each session's `title` are only included with `--include-prompts`. Repositories are filled in only for editors whose session files record one.
+
+---
+
 ### `segment` — Prompt Segment
 
 A compact token-usage string for shell prompts such as [oh-my-posh](https://ohmyposh.dev/), backed by its own short-lived cache so each prompt render returns immediately. Setup: [omp-segment/README.md](../../omp-segment/README.md).
@@ -345,7 +376,7 @@ These print the JSON payloads that the editor front-ends render — the Visual S
 | Command | Output |
 |---|---|
 | `chart --json` | Daily token usage (labels, per-day totals, per-editor/model series). `-v, --verbose` logs debug-log discovery details to stderr. Without `--json` it prints a per-period token and cost summary. |
-| `usage-analysis --json` | Usage analysis per period: interaction modes, tool calls, MCP usage, context references. `--json` is required. |
+| `usage-analysis --json` | Usage analysis per period: interaction modes, tool calls, MCP usage, context references. `--json` is required. `--repeated-tasks` adds the `repeatedTasks` report (the [`skill-suggestions`](#skill-suggestions--repeated-tasks) data, prompts included); it is left out by default because it carries prompt text. |
 | `all --json` | One object with `details`, `chart`, `usage`, `fluency` and `curation` keys — the payloads of `usage --json`, `chart --json`, `usage-analysis --json`, `fluency --json` and `curation --json`. `--json` is required; without it the command prints a hint to stderr and exits. |
 
 ---
@@ -462,6 +493,7 @@ Every session file is parsed once; later runs only re-parse files that changed.
 - Everything runs locally. The CLI reads session files from your disk and writes only its [cache files](#cache-files).
 - Nothing is uploaded. The only network call is `memory-files --server` (and `--repo` / `--promote`), which takes your github.com token from the GitHub CLI (`gh auth token`) and reads the repository's Copilot memories from `api.githubcopilot.com`. It is read-only.
 - `memory-files` reads local memory files' metadata only, never their content.
+- `skill-suggestions` prints the first prompt of your sessions in its text report. Its `--json` output leaves prompt text, the keywords taken from it and session titles out unless you pass `--include-prompts`, and `usage-analysis --json` only includes them with `--repeated-tasks`.
 
 ---
 

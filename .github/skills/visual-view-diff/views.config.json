@@ -17,7 +17,9 @@
     "<select> or reach a control that only appears after another one was used,",
     "so a view declares those flows here: each step is a `click` or a `select`",
     "(with an optional `value`; otherwise the next enabled option is taken), and",
-    "`expect` is a selector the view must still be showing after every step.",
+    "`expect` is a selector the view must still be showing after every step. A step",
+    "may also declare `expectPosted`: the command it must post to the host (which",
+    "must have a host handler), so a click whose listener is missing fails.",
     "",
     "states: optional per-view list of the tabs and modes the visual diff also",
     "screenshots. A view is otherwise captured only in its initial render, so a",
@@ -99,14 +101,15 @@
           "expect": "#section-server-memories",
           "$comment": [
             "The one-pass crawl only clicks the initial tab, so it never reaches these",
-            "buttons. Ask Copilot posts draftCopilotChatWithPrompt (drafted, never",
-            "submitted); Open file posts openFile for a documented memory's cited file."
+            "buttons. Ask Copilot posts draftServerMemoryPromotion (the host re-probes the",
+            "target and drafts, never submits); Open file posts openFile for a documented",
+            "memory's cited file. expectPosted fails the step if the message is not sent."
           ],
           "steps": [
             { "click": ".group-tab[data-group=\"workspace\"]" },
             { "click": ".tab-button[data-tab=\"tools\"]" },
-            { "click": "#section-server-memories .server-memory-draft-btn" },
-            { "click": "#section-server-memories .server-memory-open-btn" }
+            { "click": "#section-server-memories .server-memory-draft-btn", "expectPosted": "draftServerMemoryPromotion" },
+            { "click": "#section-server-memories .server-memory-open-btn", "expectPosted": "openFile" }
           ]
         }
       ],
@@ -131,7 +134,7 @@
             { "click": ".tab-button[data-tab=\"tools\"]" },
             { "click": "#builtin-tools-details > summary" }
           ],
-          "expect": "#paged-table-root-builtin"
+          "expect": "#data-table-root-builtin"
         },
         {
           "id": "health",
@@ -142,8 +145,8 @@
         {
           "id": "health-customization-page2",
           "title": "Workspace › Workspace Health, Customization Files table on page 2",
-          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }, { "click": "#paged-table-root-customization [data-paged-direction=\"next\"]" }],
-          "expect": "#paged-table-root-customization [data-paged-direction=\"previous\"]:not([disabled])"
+          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }, { "click": "#data-table-root-customization [data-table-direction=\"next\"]" }],
+          "expect": "#data-table-root-customization [data-table-direction=\"previous\"]:not([disabled])"
         },
         {
           "id": "repos",
@@ -159,7 +162,7 @@
             { "click": ".tab-button[data-tab=\"repos\"]" },
             { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
           ],
-          "expect": "#repos-pr-content .customization-matrix"
+          "expect": "#repos-pr-content .data-table"
         },
         {
           "id": "readiness",
@@ -240,7 +243,7 @@
             { "click": ".tab-button[data-tab=\"agent\"]" },
             { "post": {"command": "agentSessionsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "totalTasks": 6, "totalSessions": 9, "totalCredits": 42, "totalPremiumRequests": 12, "accountTasksAvailable": true, "partial": false, "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "totalTasks": 4, "totalSessions": 6, "totalCredits": 30, "totalPremiumRequests": 8, "tasksScanned": 4, "tasksTotal": 4, "partial": false, "discovery": "both", "unassigned": false}, {"owner": "xebia", "repo": "xms-techradar", "totalTasks": 2, "totalSessions": 3, "totalCredits": 12, "totalPremiumRequests": 4, "tasksScanned": 2, "tasksTotal": 2, "partial": false, "discovery": "account", "unassigned": false}]}} }
           ],
-          "expect": "#agent-sessions-content .customization-matrix"
+          "expect": "#agent-sessions-content .data-table"
         },
         {
           "id": "worktrees",

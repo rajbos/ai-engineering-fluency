@@ -24,6 +24,7 @@ import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsag
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
+import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 
@@ -560,11 +561,20 @@ export async function calculateDetailedStats(
 	};
 }
 
+/** Options for calculateUsageAnalysisStats. */
+export interface UsageAnalysisOptions {
+	/**
+	 * Also cluster the analysed sessions' first prompts into a repeated-task
+	 * (Skill Suggestions) report. Off by default: the report carries prompt text.
+	 */
+	includeRepeatedTasks?: boolean;
+}
+
 /**
  * Calculate usage analysis stats for fluency scoring.
  * This is a simplified version that uses the shared usageAnalysis module.
  */
-export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promise<UsageAnalysisStats> {
+export async function calculateUsageAnalysisStats(sessionFiles: string[], options: UsageAnalysisOptions = {}): Promise<UsageAnalysisStats> {
 	const deps = {
 		warn,
 		tokenEstimators,
@@ -587,17 +597,29 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 	const lastMonthPeriod = createEmptyUsageAnalysisPeriod();
 	const todaySessions: TodaySessionSummary[] = [];
 	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
+	const repeatedTaskSources: RepeatedTaskSessionSource[] = [];
 
 	for (const file of sessionFiles) {
 		try {
 			const stats = await statSessionFile(file);
 			const modified = stats.mtime;
 
-			if (modified < cutoffStart) {
-				continue;
+			const inPeriodWindow = modified >= cutoffStart;
+			// A DB-backed session's file mtime can lag its real activity (writes still in
+			// the SQLite WAL), so the repeated-task report asks the adapter before skipping.
+			// The lookup reads the adapter at most once per session and is reused below.
+			const activity = createSessionActivityLookup(file);
+			if (!inPeriodWindow) {
+				if (!options.includeRepeatedTasks) { continue; }
+				if (!isActiveSince(modified, await activity.lastActivity(), cutoffStart)) { continue; }
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
+			if (options.includeRepeatedTasks) {
+				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
+			}
+			// Period stats keep using the file mtime, as before.
+			if (!inPeriodWindow) { continue; }
 			let sessionSummary: TodaySessionSummary | undefined;
 			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
 			if (data && data.interactions > 0) {
@@ -661,7 +683,97 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
 		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
+		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources) } : {}),
 	};
+}
+
+/** Adapter lookups a SessionActivityLookup uses; injectable for tests. */
+export interface SessionActivitySources {
+	getLastActivity(file: string): Promise<Date | null>;
+	getMeta(file: string): Promise<SessionMeta | null>;
+	getBackingPath(file: string): string;
+}
+
+const defaultActivitySources: SessionActivitySources = {
+	getLastActivity: getSessionLastActivity,
+	getMeta: getSessionMeta,
+	getBackingPath: getSessionBackingPath,
+};
+
+/** Memoized per-session adapter reads: each underlying lookup runs at most once. */
+export interface SessionActivityLookup {
+	readonly file: string;
+	meta(): Promise<SessionMeta | null>;
+	/**
+	 * The session's own last activity, for DB-backed (virtual) sessions only: the
+	 * adapter's cheap `getLastActivity()`, else the metadata's `lastInteraction`.
+	 * Null for regular files and when unknown; the file mtime is then the signal.
+	 */
+	lastActivity(): Promise<Date | null>;
+}
+
+export function createSessionActivityLookup(file: string, sources: SessionActivitySources = defaultActivitySources): SessionActivityLookup {
+	let meta: Promise<SessionMeta | null> | undefined;
+	let lastActivity: Promise<Date | null> | undefined;
+	const lookup: SessionActivityLookup = {
+		file,
+		meta: () => (meta ??= sources.getMeta(file)),
+		lastActivity: () => (lastActivity ??= (async () => {
+			// Regular files: the file mtime is the session's own; no adapter lookup needed.
+			if (sources.getBackingPath(file) === file) { return null; }
+			const cheap = await sources.getLastActivity(file);
+			if (cheap) { return cheap; }
+			const fromMeta = (await lookup.meta())?.lastInteraction;
+			const parsed = fromMeta ? new Date(fromMeta) : null;
+			return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+		})()),
+	};
+	return lookup;
+}
+
+/**
+ * Session context for the repeated-task report, from the owning adapter when it has one.
+ * DB-backed sessions share their database's mtime, so the adapter's per-session
+ * last interaction (or last activity) is what places a session in the window.
+ */
+async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+	const meta = await activity.meta();
+	const lastInteraction = meta?.lastInteraction ?? (await activity.lastActivity())?.toISOString() ?? null;
+	return {
+		file: activity.file,
+		firstUserPrompt,
+		title: meta?.title ?? null,
+		lastInteraction,
+		mtime: mtimeMs,
+		repository: meta?.repository ?? null,
+	};
+}
+
+/** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
+async function addRepeatedTaskSource(
+	sources: RepeatedTaskSessionSource[], activity: SessionActivityLookup,
+	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
+): Promise<void> {
+	if (!firstUserPrompt) { return; }
+	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs);
+	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
+}
+
+/**
+ * Whether a session was active on or after `cutoff`: by its file mtime, or by the
+ * adapter's per-session last activity when the file mtime is stale.
+ */
+export function isActiveSince(fileMtime: Date, sessionLastActivity: Date | null, cutoff: Date): boolean {
+	return fileMtime >= cutoff || (sessionLastActivity !== null && sessionLastActivity >= cutoff);
+}
+
+/**
+ * A repeated-task source's own activity time in epoch ms: its last interaction
+ * when known and parseable, otherwise the file mtime.
+ */
+export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, 'lastInteraction' | 'mtime'>): number {
+	const parsed = source.lastInteraction ? Date.parse(source.lastInteraction) : NaN;
+	return Number.isNaN(parsed) ? source.mtime : parsed;
 }
 
 /**

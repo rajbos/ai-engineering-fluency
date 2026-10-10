@@ -28,7 +28,7 @@ function view(overrides: Partial<ServerMemoriesAnalysisView> = {}): ServerMemori
 		repeatedGroupCount: 1,
 		fullyStaleCount: 0,
 		topPromotionGroups: [
-			{ displaySubject: 'caching', repeatCount: 3, representativeFact: 'Cache via snapshots.', citationCount: 2, prompt: 'Move "caching" <now> & verify' },
+			{ displaySubject: 'caching', repeatCount: 3, representativeFact: 'Cache via snapshots.', citationCount: 2, subject: 'caching <now> & "x"', prompt: 'Move "caching" <now> & verify' },
 			{ displaySubject: 'no prompt', repeatCount: 1, representativeFact: 'Legacy payload row.', citationCount: 1 },
 		],
 		repoRoot: 'C:\\code\\<repo>',
@@ -68,7 +68,9 @@ test('serverMemories section: the Ask Copilot button appears only on rows with a
 	const doc = render(view());
 	const buttons = doc.querySelectorAll('.server-memory-draft-btn');
 	assert.equal(buttons.length, 1);
-	assert.equal(buttons[0].getAttribute('data-prompt'), 'Move "caching" <now> & verify');
+	// Only the subject key travels; the host rebuilds the prompt and re-probes the target.
+	assert.equal(buttons[0].getAttribute('data-subject'), 'caching <now> & "x"');
+	assert.equal(buttons[0].getAttribute('data-prompt'), null, 'prompt text is not sent back to the host');
 	assert.match(buttons[0].getAttribute('title') ?? '', /AGENTS\.md\. Nothing is sent until you press Enter/);
 	assert.match(doc.body.innerHTML, /Suggested file: <code>AGENTS\.md<\/code>\./);
 });
@@ -104,7 +106,7 @@ test('serverMemories section: documented table lists files with Open file only f
 test('serverMemories section: clicks map to draft and open messages', () => {
 	const doc = render(view());
 	assert.deepEqual(serverMemoriesMessageForClick(doc.querySelector('.server-memory-draft-btn')),
-		{ command: 'draftCopilotChatWithPrompt', prompt: 'Move "caching" <now> & verify' });
+		{ command: 'draftServerMemoryPromotion', subject: 'caching <now> & "x"' });
 	assert.deepEqual(serverMemoriesMessageForClick(doc.querySelector('.server-memory-open-btn')),
 		{ command: 'openFile', path: 'C:\\code\\repo\\AGENTS.md' });
 	assert.equal(serverMemoriesMessageForClick(doc.querySelector('table')), null);
@@ -159,7 +161,7 @@ test('wireServerMemoriesButtons posts exactly one message per click', () => {
 		(doc.querySelector('.server-memory-open-btn') as HTMLElement).click();
 		(doc.querySelector('table') as HTMLElement).click();
 		assert.deepEqual(posted, [
-			{ command: 'draftCopilotChatWithPrompt', prompt: 'Move "caching" <now> & verify' },
+			{ command: 'draftServerMemoryPromotion', subject: 'caching <now> & "x"' },
 			{ command: 'openFile', path: 'C:\\code\\repo\\AGENTS.md' },
 		]);
 	});
@@ -181,4 +183,19 @@ test('wireServerMemoriesButtons does nothing when the section is not rendered', 
 		doc.getElementById('section-server-memories')?.remove();
 		assert.doesNotThrow(() => wireServerMemoriesButtons(() => assert.fail('nothing to click')));
 	});
+});
+
+test('serverMemories section: a row with a prompt but no subject key gets no button', () => {
+	// An older host projected prompts without subject keys; such a button could not be rebuilt
+	// host-side, so it is not offered.
+	const html = buildServerMemoriesSectionHtml(view({
+		topPromotionGroups: [{ displaySubject: 's', repeatCount: 1, representativeFact: 'f', citationCount: 1, prompt: 'p' }],
+	}));
+	assert.ok(!html.includes('server-memory-draft-btn'));
+});
+
+test('serverMemories section: both tables use the shared data-table component', () => {
+	const doc = render(view());
+	assert.ok(doc.getElementById('paged-table-root-server-memories-promotion') ?? doc.querySelector('[id*="server-memories-promotion"]'));
+	assert.ok(doc.querySelector('[id*="server-memories-documented"]'));
 });

@@ -59,26 +59,26 @@ test('l10n: missing-instructions insight is tool-neutral in English and zh-cn', 
 });
 
 test('l10n: paged curation table controls resolve in English and zh-cn', () => {
-	assert.equal(t('usage.pagedTable.previous'), 'Previous');
-	assert.equal(t('usage.pagedTable.next'), 'Next');
-	assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), 'Page 2 of 3 · Showing 11–20 of 25');
-	assert.equal(t('usage.pagedTable.showing', 1, 10, 10), 'Showing 1–10 of 10');
-	assert.equal(t('usage.pagedTable.sortBy', 'Server'), 'Sort by Server');
-	assert.equal(t('usage.pagedTable.sortedAscending'), 'Sorted ascending');
-	assert.equal(t('usage.pagedTable.sortedDescending'), 'Sorted descending');
-	assert.equal(t('usage.pagedTable.announcement.sort', 'Server', 'Sorted ascending'), 'Server: Sorted ascending');
-	assert.equal(t('usage.pagedTable.noRows'), 'No rows to display.');
+	assert.equal(t('dataTable.previous'), 'Previous');
+	assert.equal(t('dataTable.next'), 'Next');
+	assert.equal(t('dataTable.page', 2, 3, 11, 20, 25), 'Page 2 of 3 · Showing 11–20 of 25');
+	assert.equal(t('dataTable.showing', 1, 10, 10), 'Showing 1–10 of 10');
+	assert.equal(t('dataTable.sortBy', 'Server'), 'Sort by Server');
+	assert.equal(t('dataTable.sortedAscending'), 'Sorted ascending');
+	assert.equal(t('dataTable.sortedDescending'), 'Sorted descending');
+	assert.equal(t('dataTable.announcement.sort', 'Server', 'Sorted ascending'), 'Server: Sorted ascending');
+	assert.equal(t('dataTable.noRows'), 'No rows to display.');
 	mock.setLanguage('zh-cn');
 	try {
-		assert.equal(t('usage.pagedTable.previous'), '上一页');
-		assert.equal(t('usage.pagedTable.next'), '下一页');
-		assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
-		assert.equal(t('usage.pagedTable.showing', 1, 10, 10), '显示 1–10 条，共 10 条');
-		assert.equal(t('usage.pagedTable.sortBy', 'Server'), '按Server排序');
-		assert.equal(t('usage.pagedTable.sortedAscending'), '当前按升序排列');
-		assert.equal(t('usage.pagedTable.sortedDescending'), '当前按降序排列');
-		assert.equal(t('usage.pagedTable.announcement.sort', '服务器', '当前按升序排列'), '服务器：当前按升序排列');
-		assert.equal(t('usage.pagedTable.noRows'), '没有可显示的行。');
+		assert.equal(t('dataTable.previous'), '上一页');
+		assert.equal(t('dataTable.next'), '下一页');
+		assert.equal(t('dataTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
+		assert.equal(t('dataTable.showing', 1, 10, 10), '显示 1–10 条，共 10 条');
+		assert.equal(t('dataTable.sortBy', 'Server'), '按Server排序');
+		assert.equal(t('dataTable.sortedAscending'), '当前按升序排列');
+		assert.equal(t('dataTable.sortedDescending'), '当前按降序排列');
+		assert.equal(t('dataTable.announcement.sort', '服务器', '当前按升序排列'), '服务器：当前按升序排列');
+		assert.equal(t('dataTable.noRows'), '没有可显示的行。');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -1283,6 +1283,19 @@ test('l10n: Copilot Repository Memories scope, action and documented-list string
 		assert.equal(t('serverMemories.documentedHint'), '这些记忆引用了指令或文档文件（AGENTS.md、.github/instructions、skills、agents 或 docs/），因此存储的副本是多余的。可在 GitHub 仓库的 设置 → Copilot → 记忆 页面中删除。');
 		// The zh-CN template puts the total first, so this catches a swapped placeholder.
 		assert.equal(t('serverMemories.showingOf', '10', '99'), '显示 99 条中的 10 条');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: server-memory draft refusals resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.draftBlocked', 'AGENTS.md'), 'Not drafting a prompt: AGENTS.md is not a regular file inside this checkout.');
+	assert.equal(t('serverMemories.draftNoTarget'), 'Not drafting a prompt: no safe instruction file was found in this checkout.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.draftBlocked', 'AGENTS.md'), '未起草提示：AGENTS.md 不是此检出中的常规文件。');
+		assert.equal(t('serverMemories.draftNoTarget'), '未起草提示：在此检出中未找到安全的指令文件。');
 	} finally {
 		mock.setLanguage('en');
 	}
