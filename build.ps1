@@ -317,6 +317,19 @@ function Build-Desktop {
         Ensure-NpmDeps "$PSScriptRoot/vscode-extension"
         Ensure-NpmDeps "$PSScriptRoot/cli"
     }
+    if ($Target -in 'build', 'package') {
+        # Rebuild the webview bundles the app copies. desktop/esbuild.js only
+        # builds them when they are missing, so without this a standalone
+        # desktop build would ship whatever stale bundles dist/webview holds.
+        # Production (minified) for 'package', matching desktop-publish.yml.
+        Write-Step "vscode-extension: webview bundles (for desktop)"
+        Push-Location "$PSScriptRoot/vscode-extension"
+        try {
+            if ($Target -eq 'package') { node esbuild.js --production } else { node esbuild.js }
+            if ($LASTEXITCODE -ne 0) { throw "vscode-extension webview build failed" }
+        }
+        finally { Pop-Location }
+    }
     Push-Location "$PSScriptRoot/desktop"
     try {
         switch ($Target) {
