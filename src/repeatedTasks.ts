@@ -146,15 +146,23 @@ function assignToCluster(clusters: TaskClusterState[], input: RepeatedTaskInput,
  * Returns clusters largest-first; each cluster's sessions are most-recent-first.
  */
 export function detectRepeatedTasks(inputs: RepeatedTaskInput[]): RepeatedTaskCluster[] {
+	const members: TaskMember[] = [];
+	for (const input of inputs) {
+		const tokens = normalizePromptTokens(input.prompt);
+		if (tokens) { members.push({ input, tokens }); }
+	}
+	return clusterMembers(members);
+}
+
+/** Cluster already-normalized prompts (see detectRepeatedTasks). */
+function clusterMembers(members: readonly TaskMember[]): RepeatedTaskCluster[] {
 	const clusters: TaskClusterState[] = [];
 
 	// Sort by session file so identical data clusters identically across
 	// refreshes even when session discovery order varies by adapter/OS.
-	const sortedInputs = inputs.slice().sort((a, b) => a.session.file.localeCompare(b.session.file));
+	const sortedMembers = members.slice().sort((a, b) => a.input.session.file.localeCompare(b.input.session.file));
 
-	for (const input of sortedInputs) {
-		const tokens = normalizePromptTokens(input.prompt);
-		if (!tokens) { continue; }
+	for (const { input, tokens } of sortedMembers) {
 		assignToCluster(clusters, input, tokens);
 	}
 
@@ -219,14 +227,24 @@ export interface RepeatedTaskSessionSource {
  * too short, stopwords only) and clustering would drop anyway.
  */
 export function toRepeatedTaskInput(source: RepeatedTaskSessionSource): RepeatedTaskInput | null {
-	if (!source.firstUserPrompt || !normalizePromptTokens(source.firstUserPrompt)) { return null; }
+	return toTaskMember(source)?.input ?? null;
+}
+
+/** toRepeatedTaskInput() plus the prompt's normalized tokens, computed once. */
+function toTaskMember(source: RepeatedTaskSessionSource): TaskMember | null {
+	if (!source.firstUserPrompt) { return null; }
+	const tokens = normalizePromptTokens(source.firstUserPrompt);
+	if (!tokens) { return null; }
 	return {
-		prompt: source.firstUserPrompt,
-		session: {
-			file: source.file,
-			title: source.title ?? null,
-			lastInteraction: source.lastInteraction ?? new Date(source.mtime).toISOString(),
-			repository: source.repository ? repoDisplayName(source.repository) : undefined,
+		tokens,
+		input: {
+			prompt: source.firstUserPrompt,
+			session: {
+				file: source.file,
+				title: source.title ?? null,
+				lastInteraction: source.lastInteraction ?? new Date(source.mtime).toISOString(),
+				repository: source.repository ? repoDisplayName(source.repository) : undefined,
+			},
 		},
 	};
 }
@@ -237,12 +255,12 @@ export function toRepeatedTaskInput(source: RepeatedTaskSessionSource): Repeated
  * reaches MIN_CLUSTER_SIZE.
  */
 export function buildRepeatedTaskReport(sources: readonly RepeatedTaskSessionSource[]): RepeatedTaskReport | undefined {
-	const inputs: RepeatedTaskInput[] = [];
+	const members: TaskMember[] = [];
 	for (const source of sources) {
-		const input = toRepeatedTaskInput(source);
-		if (input) { inputs.push(input); }
+		const member = toTaskMember(source);
+		if (member) { members.push(member); }
 	}
-	const clusters = detectRepeatedTasks(inputs);
+	const clusters = clusterMembers(members);
 	if (clusters.length === 0) { return undefined; }
-	return { minClusterSize: MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
+	return { minClusterSize: MIN_CLUSTER_SIZE, sessionsScanned: members.length, clusters };
 }
