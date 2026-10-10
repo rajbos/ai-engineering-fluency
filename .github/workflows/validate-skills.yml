@@ -120,3 +120,9 @@ jobs:
 
       - name: Test the azure-storage-loader hardening
         run: node --test .github/skills/azure-storage-loader/load-table-data.test.js
+
+      # The pr-risk-review scripts turn model output over an untrusted diff
+      # into a PR comment; these are the regression tests for their sanitizer
+      # and rename handling (#2307).
+      - name: Test the pr-risk-review scripts
+        run: node --test .github/skills/pr-risk-review/tests/pr-risk-review.test.js
