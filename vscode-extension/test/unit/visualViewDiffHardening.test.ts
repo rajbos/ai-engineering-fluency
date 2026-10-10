@@ -26,6 +26,7 @@ const SKILL_DIR = path.join(findRepoRoot(), '.github', 'skills', 'visual-view-di
 const harness = requireFromHere(path.join(SKILL_DIR, 'lib', 'harness.js')) as {
 	resolveInside: (root: string, relativePath: unknown, label: string) => string;
 	loadFixture: (fixturePath: string, repoRoot: string) => unknown;
+	buildPageHtml: (options: { globalName: string; fixture: unknown; theme: string; bundlePath: string; repoRoot: string }) => string;
 };
 
 const visualDiff = requireFromHere(path.join(SKILL_DIR, 'visual-diff.js')) as {
@@ -42,6 +43,16 @@ const config = requireFromHere(path.join(SKILL_DIR, 'lib', 'config.js')) as {
 type RenderResult = { status: string; error?: string };
 const renderViews = requireFromHere(path.join(SKILL_DIR, 'render-views.js')) as {
 	renderView: (options: Record<string, unknown>) => Promise<RenderResult>;
+};
+
+const configLib = requireFromHere(path.join(SKILL_DIR, 'lib', 'config.js')) as {
+	parseThemes: (value: unknown) => string[];
+	parseNumberOption: (value: unknown, name: string, range: { fallback: number | undefined; min: number; max: number }) => number | undefined;
+};
+
+type RouteHandler = (route: { request: () => { url: () => string }; continue: () => string; abort: (reason: string) => string }) => string;
+const browserLib = requireFromHere(path.join(SKILL_DIR, 'lib', 'browser.js')) as {
+	blockNetwork: (page: unknown) => Promise<void>;
 };
 
 function tempDir(): string {
@@ -299,4 +310,78 @@ test('renderView refuses a fixture outside its fixture directory before opening 
 	} finally {
 		fs.rmSync(parent, { recursive: true, force: true });
 	}
+});
+
+test('--theme accepts exactly dark, light or both', () => {
+	assert.deepEqual(configLib.parseThemes(undefined), ['dark']);
+	assert.deepEqual(configLib.parseThemes('dark'), ['dark']);
+	assert.deepEqual(configLib.parseThemes('light'), ['light']);
+	assert.deepEqual(configLib.parseThemes('both'), ['dark', 'light']);
+	for (const bad of ['../../x', 'dark/../light', 'Dark', '', true, 'dark,light']) {
+		assert.throws(() => configLib.parseThemes(bad), /--theme must be dark, light or both/, String(bad));
+	}
+});
+
+test('the page builder refuses a theme that is not dark or light', () => {
+	for (const theme of ['../../../package', 'both', '']) {
+		assert.throws(() => harness.buildPageHtml({
+			globalName: '__G__', fixture: {}, theme, bundlePath: path.join(SKILL_DIR, 'dist', 'x.js'), repoRoot: findRepoRoot(),
+		}), /theme must be 'dark' or 'light'/, theme);
+	}
+});
+
+test('numeric diff options are range-checked instead of becoming NaN', () => {
+	const threshold = { fallback: 0.02, min: 0, max: 1 };
+	assert.equal(configLib.parseNumberOption(undefined, 'threshold', threshold), 0.02);
+	assert.equal(configLib.parseNumberOption('0.1', 'threshold', threshold), 0.1);
+	for (const bad of ['abc', '', '1.5', '-0.1', 'NaN', 'Infinity', true]) {
+		assert.throws(() => configLib.parseNumberOption(bad, 'threshold', threshold), /--threshold must be a number from 0 to 1/, String(bad));
+	}
+	assert.equal(configLib.parseNumberOption(undefined, 'noise-floor', { fallback: undefined, min: 0, max: Number.MAX_SAFE_INTEGER }), undefined);
+});
+
+/** A stand-in Playwright context that records the handlers blockNetwork registers. */
+function fakeContext(withWebSocketRouting: boolean) {
+	const routes: Array<{ pattern: unknown; handler: RouteHandler }> = [];
+	const sockets: Array<{ pattern: unknown; handler: (ws: { close: () => void }) => void }> = [];
+	const context: Record<string, unknown> = {
+		route: async (pattern: unknown, handler: RouteHandler) => { routes.push({ pattern, handler }); },
+	};
+	if (withWebSocketRouting) {
+		context.routeWebSocket = async (pattern: unknown, handler: (ws: { close: () => void }) => void) => { sockets.push({ pattern, handler }); };
+	}
+	return { page: { context: () => context }, routes, sockets };
+}
+
+test('blockNetwork lets local pages load and aborts every outbound request', async () => {
+	const { page, routes } = fakeContext(true);
+	await browserLib.blockNetwork(page);
+	assert.equal(routes.length, 1);
+	assert.equal(routes[0].pattern, '**/*', 'every request is routed');
+	const decide = (url: string) => routes[0].handler({
+		request: () => ({ url: () => url }),
+		continue: () => 'continue',
+		abort: (reason: string) => `abort:${reason}`,
+	});
+	for (const local of ['file:///C:/repo/vscode-extension/dist/webview/details.js', 'data:image/png;base64,AAAA', 'blob:null/1234', 'FILE:///x']) {
+		assert.equal(decide(local), 'continue', local);
+	}
+	for (const remote of ['https://example.com/x.js', 'http://127.0.0.1:8080/', 'http://localhost/', 'ws://example.com/', 'ftp://example.com/', 'https://file.example.com/data:']) {
+		assert.equal(decide(remote), 'abort:blockedbyclient', remote);
+	}
+});
+
+test('blockNetwork closes every WebSocket', async () => {
+	const { page, sockets } = fakeContext(true);
+	await browserLib.blockNetwork(page);
+	assert.equal(sockets.length, 1);
+	assert.ok(sockets[0].pattern instanceof RegExp && (sockets[0].pattern as RegExp).test('wss://example.com/socket'), 'every WebSocket URL matches');
+	let closed = 0;
+	sockets[0].handler({ close: () => { closed++; } });
+	assert.equal(closed, 1, 'the socket is closed, never connected to a server');
+});
+
+test('blockNetwork fails closed when Playwright cannot route WebSockets', async () => {
+	const { page } = fakeContext(false);
+	await assert.rejects(browserLib.blockNetwork(page), /cannot block WebSockets/);
 });

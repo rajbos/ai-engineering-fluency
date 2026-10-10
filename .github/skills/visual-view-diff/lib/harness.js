@@ -129,6 +129,11 @@ function readJsonConfigGlobals(repoRoot) {
  * @returns {string} the full HTML document
  */
 function buildPageHtml({ globalName, fixture, theme, bundlePath, repoRoot, extraGlobals = {} }) {
+	// The theme names a CSS file next to this one; refuse anything else so a
+	// caller cannot turn it into a path.
+	if (theme !== 'dark' && theme !== 'light') {
+		throw new Error(`theme must be 'dark' or 'light', got ${JSON.stringify(theme)}`);
+	}
 	const themeCss = fs.readFileSync(path.join(__dirname, `theme-${theme}.css`), 'utf8');
 	const themeKind = theme === 'light' ? 'vscode-light' : 'vscode-dark';
 	const codiconCss = path.join(path.dirname(bundlePath), 'codicons', 'codicon.css');

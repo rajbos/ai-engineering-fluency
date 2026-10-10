@@ -29,7 +29,7 @@ const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 
 const { REPO_ROOT } = require('./lib/harness');
-const { parseArgs, readConfig, baselineRegistry } = require('./lib/config');
+const { parseArgs, parseThemes, readConfig, baselineRegistry } = require('./lib/config');
 const { parseConcurrency } = require('./lib/pool');
 
 const SKILL_DIR = __dirname;
@@ -346,6 +346,9 @@ async function main() {
 	const args = requireOptionValues(parseArgs(process.argv.slice(2)));
 	const defaultOutRoot = path.resolve(REPO_ROOT, 'visual-output');
 	const outRoot = typeof args.out === 'string' ? path.resolve(args.out) : defaultOutRoot;
+	// Validated here as well as in render-views.js, so a bad value fails before
+	// the worktree and both builds rather than after them.
+	parseThemes(args.theme);
 	const theme = args.theme || 'dark';
 	const view = typeof args.view === 'string' ? args.view : undefined;
 	const concurrency = parseConcurrency(args.concurrency);

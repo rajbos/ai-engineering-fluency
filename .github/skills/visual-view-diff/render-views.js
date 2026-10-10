@@ -50,7 +50,7 @@ const {
 	resolveInside,
 } = require('./lib/harness');
 const { blockNetwork, loadChromium } = require('./lib/browser');
-const { parseArgs, readConfig, selectViews } = require('./lib/config');
+const { parseArgs, parseThemes, readConfig, selectViews } = require('./lib/config');
 const { applySteps, isShowing } = require('./lib/steps');
 const { parseConcurrency, runPool } = require('./lib/pool');
 
@@ -256,7 +256,7 @@ async function main() {
 	const distDir = path.resolve(args.dist || path.join(repoRoot, 'vscode-extension', 'dist', 'webview'));
 	const config = readConfig(__dirname, typeof args.config === 'string' ? path.resolve(args.config) : undefined);
 	const views = selectViews(config, args.view);
-	const themes = args.theme === 'both' ? ['dark', 'light'] : [args.theme || 'dark'];
+	const themes = parseThemes(args.theme);
 	const allowMissing = args['allow-missing'] === true;
 	const concurrency = parseConcurrency(args.concurrency);
 

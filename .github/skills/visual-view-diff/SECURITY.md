@@ -16,8 +16,11 @@ classification" in the repository `AGENTS.md`).
   Playwright, optionally replays declared click/select/type/post steps (`lib/steps.js`),
   and takes screenshots.
 - `diff-screenshots.js` loads two PNGs into a Chromium page and compares pixels.
-- The scripts make no network requests themselves. The rendered bundle runs inside Chromium
-  with every non-local request and WebSocket refused (`blockNetwork` in `lib/browser.js`).
+- The scripts make no network requests themselves. In `render-views.js` and
+  `scripts/interaction-smoke.js`, the rendered bundle runs inside Chromium with every
+  non-local request and WebSocket refused (`blockNetwork` in `lib/browser.js`).
+  `release-video/src/shots.ts` renders the same bundles without that block (see Known
+  gaps).
 
 ## Credentials used and where they come from
 
@@ -43,7 +46,15 @@ caller's environment; the bundles they load run in Chromium, which has no access
   install and the global npm root (`lib/browser.js`).
 - `--base`, `--out`, `--view`, `--config` and the other CLI arguments. `--base` values
   that are empty or start with `-` are refused, and `--base`, `--out`, `--theme` or
-  `--view` given without a value is an error rather than a silent default.
+  `--view` given without a value is an error rather than a silent default. `--theme`
+  must be exactly `dark`, `light` or `both` (`parseThemes` in `lib/config.js`, in both
+  `visual-diff.js` and `render-views.js`), and `buildPageHtml` refuses any theme other
+  than `dark` or `light`, since it names a CSS file and every screenshot file name.
+  `--concurrency` must be a positive integer, and `diff-screenshots.js` requires
+  `--threshold` in 0–1 and `--noise-floor` ≥ 0 (`parseNumberOption`), because `NaN`
+  would make every comparison report "unchanged". `--out`, `--dist`, `--repo-root`,
+  `--config`, `--baseline` and `--current` are paths the operator chooses and are not
+  restricted.
 
 ## What it writes and where
 
