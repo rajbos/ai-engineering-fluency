@@ -69,7 +69,9 @@ test('analyzeSessionFile records the remote of the files a VS Code session refer
 });
 
 test('analyzeSessionFile scopes the remote to the session\'s workspace folder (workspaceStorage)', async () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-repo-'));
+	// Long-form path: the workspace folder resolved from workspace.json goes through realpath,
+	// and a Windows runner's temp dir can be an 8.3 short path (RUNNER~1), so build fixtures on the real path.
+	const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-repo-')));
 	try {
 		const makeRepo = (name: string) => {
 			const repo = path.join(root, name);

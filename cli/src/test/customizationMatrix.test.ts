@@ -219,7 +219,9 @@ test('buildCustomizationMatrix: the 30-day window is the extension\'s (30 calend
 });
 
 test('buildCustomizationMatrix: VS Code sessions are grouped by the remote of the files they referenced (parity)', async () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	// Long-form path: the workspace folder resolved from workspace.json goes through realpath,
+	// and a Windows runner's temp dir can be an 8.3 short path (RUNNER~1), so build fixtures on the real path.
+	const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-')));
 	try {
 		// Two workspace folders inside one repository (a monorepo opened per package): neither
 		// folder has its own .git, so only the files the sessions referenced lead to the remote.
@@ -290,7 +292,9 @@ function sessionReferencing(file: string): string {
 }
 
 test('buildCustomizationMatrix: a file referenced from another repository is not the workspace\'s remote', async () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	// Long-form path: the workspace folder resolved from workspace.json goes through realpath,
+	// and a Windows runner's temp dir can be an 8.3 short path (RUNNER~1), so build fixtures on the real path.
+	const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-')));
 	try {
 		const other = path.join(root, 'repos', 'other-lib');
 		fs.mkdirSync(path.join(other, '.git'), { recursive: true });
