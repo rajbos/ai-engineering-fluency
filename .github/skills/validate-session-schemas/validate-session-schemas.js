@@ -765,6 +765,24 @@ function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, fla
 
 const EXIT_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
+/** Exit code for a terminating signal: 128 + its number (SIGINT 130, SIGTERM 143, SIGHUP 129). */
+function signalExitCode(signal) {
+  const n = os.constants.signals[signal];
+  return typeof n === 'number' ? 128 + n : 1;
+}
+
+/**
+ * Listener for one signal. The signal name is bound at registration rather
+ * than read from the listener's arguments, so the exit code never depends on
+ * what (if anything) the runtime passes to the callback.
+ */
+function makeSignalHandler(ctx, signal, exit = process.exit, rmSync = fs.rmSync) {
+  return () => {
+    cleanupTempDirsOrWarn(ctx, rmSync);
+    exit(signalExitCode(signal));
+  };
+}
+
 function run(opts) {
   const baselinePath = path.join(__dirname, 'schema-baselines.json');
   let baseline;
@@ -786,11 +804,7 @@ function run(opts) {
   // skip `finally`. With one, the signal is queued until this synchronous run
   // returns, so the cleanup below always happens first; the handler then exits
   // with the conventional 128+n code.
-  const onSignal = (signal) => {
-    cleanupTempDirsOrWarn(ctx);
-    process.exit(128 + (os.constants.signals[signal] || 0));
-  };
-  for (const sig of EXIT_SIGNALS) { process.on(sig, onSignal); }
+  for (const sig of EXIT_SIGNALS) { process.on(sig, makeSignalHandler(ctx, sig)); }
   try {
     validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, flags);
   } finally {
@@ -893,6 +907,9 @@ module.exports = {
   removeTempDirs,
   cleanupTempDirsOrWarn,
   isValidTimestamp,
+  signalExitCode,
+  makeSignalHandler,
+  EXIT_SIGNALS,
   newestIso,
   exportOpenCodeDbSessions,
   DICT_KEY,

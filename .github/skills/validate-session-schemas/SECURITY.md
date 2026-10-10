@@ -71,12 +71,14 @@ None. SQLite is accessed in-process.
   `retryDelay: 100`); a directory is dropped from the cleanup list only after it is
   actually gone, so the signal handler can retry it. A directory that still cannot be
   removed is reported, never swallowed: a `cleanup failed` warning with the path on
-  stderr, `tempCleanupFailed` in the report, and exit code 1. Only DB sessions that will actually be analyzed (combined
+  stderr, `tempCleanupFailed` in the report, and exit code 1. Only DB sessions that will
+  actually be analyzed (combined
   `--days`/`--max` window) are exported.
 - `run` registers SIGINT/SIGTERM/SIGHUP listeners. Without a listener Node terminates on
   these signals immediately and skips `finally`; with one, the signal is queued until the
   synchronous run returns (after the `finally` cleanup), and the handler then removes any
-  remaining temp directory and exits with `128 + n`.
+  remaining temp directory and exits with `128 + n` (130 SIGINT, 143 SIGTERM, 129 SIGHUP),
+  with the signal name bound at registration.
 - The DB export is all-or-nothing: the file list, counts and report labels are committed
   only after every export succeeded. If reading `opencode.db` or writing an export fails,
   the run falls back to the legacy JSON sessions unchanged, adds an
@@ -114,7 +116,7 @@ None. SQLite is accessed in-process.
   until the user removes it. It is reported, not retried on a later run. Termination that
   cannot be intercepted — `SIGKILL`, Windows `taskkill /F` or closing the console window,
   a crash of the Node process itself, power loss — skips the cleanup and leaves it behind.
-  Signal handling is not covered by the tests.
+  The handler itself (cleanup + exit code) is unit-tested; delivery of a real signal is not.
 - `--include-examples` redaction is pattern-based: prompt text, file paths outside the home
   directory and secrets in unrecognised formats still print (truncated to 40 characters).
   The flag remains opt-in and documented.

@@ -29,6 +29,9 @@ const {
   removeTempDirs,
   cleanupTempDirsOrWarn,
   isValidTimestamp,
+  signalExitCode,
+  makeSignalHandler,
+  EXIT_SIGNALS,
   newestIso,
   exportOpenCodeDbSessions,
   DICT_KEY,
@@ -406,4 +409,22 @@ test('an out-of-range DB timestamp does not abort the run', { skip: !sqlite }, (
   const newest = ctx.unexported.opencode.newestMs;
   assert.ok(isValidTimestamp(newest));
   assert.doesNotThrow(() => newestIso([newest]));
+});
+
+test('signal handlers clean up and exit with 128 + the bound signal number', () => {
+  assert.equal(signalExitCode('SIGINT'), 130);
+  assert.equal(signalExitCode('SIGTERM'), 143);
+  assert.equal(signalExitCode('SIGHUP'), 129);
+  assert.equal(signalExitCode(undefined), 1);
+  for (const sig of EXIT_SIGNALS) {
+    const ctx = newDiscoveryContext(0, 5);
+    ctx.tempDirs.push(`/tmp/oc-dbses-${sig}`);
+    const removed = [];
+    const exits = [];
+    // Invoked with no arguments: the exit code must come from the bound name.
+    makeSignalHandler(ctx, sig, (code) => exits.push(code), (dir) => removed.push(dir))();
+    assert.deepEqual(removed, [`/tmp/oc-dbses-${sig}`], sig);
+    assert.deepEqual(ctx.tempDirs, [], sig);
+    assert.deepEqual(exits, [128 + os.constants.signals[sig]], sig);
+  }
 });
