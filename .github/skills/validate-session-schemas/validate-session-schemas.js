@@ -252,9 +252,11 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
  *                   materialized as files: { found, recent, unsafeRecent, newestMs }.
  *   displayPaths  — temp file -> stable label for the report, since the temp
  *                   file is gone by the time the report is read.
+ *   discoveryNotes — per-platform note when part of discovery failed (e.g. the
+ *                   OpenCode DB could not be read and only JSON was validated).
  */
 function newDiscoveryContext(cutoff, max) {
-  return { cutoff, max, tempDirs: [], unexported: {}, displayPaths: new Map() };
+  return { cutoff, max, tempDirs: [], unexported: {}, displayPaths: new Map(), discoveryNotes: {} };
 }
 
 /**
@@ -298,7 +300,13 @@ function legacySessionId(filePath) { return path.basename(filePath, '.json'); }
  * else is only counted, never written to disk.
  *
  * A session present in both stores is analyzed once, from the DB (the current
- * store): its legacy JSON file is dropped from `files`. Mutates `files`.
+ * store): its legacy JSON file is dropped from `files`.
+ *
+ * All-or-nothing: the new file list, the unexported counts and the report
+ * labels are built locally and committed to `files` / `ctx` only after every
+ * export succeeded. If anything throws, `files` and `ctx` are untouched (the
+ * caller falls back to legacy JSON only); a temp dir created before the
+ * failure is already in ctx.tempDirs, so run() still removes it.
  */
 function exportOpenCodeDbSessions(dbPath, ctx, files) {
   const { DatabaseSync } = require('node:sqlite');
@@ -311,9 +319,8 @@ function exportOpenCodeDbSessions(dbPath, ctx, files) {
     ).all();
 
     const dbIds = new Set(rows.map((r) => String(r.id)));
-    for (let i = files.length - 1; i >= 0; i--) {
-      if (dbIds.has(legacySessionId(files[i]))) { files.splice(i, 1); }
-    }
+    const out = files.filter((f) => !dbIds.has(legacySessionId(f)));
+    const labels = new Map();
 
     const isRecent = (r) => Number(r.time_updated) >= ctx.cutoff;
     const isSafe = (r) => typeof r.id === 'string' && SAFE_SESSION_ID.test(r.id);
@@ -321,7 +328,7 @@ function exportOpenCodeDbSessions(dbPath, ctx, files) {
     // Rank exportable DB sessions together with recent legacy files.
     const ranked = [
       ...rows.filter((r) => isRecent(r) && isSafe(r)).map((r) => ({ t: Number(r.time_updated), row: r })),
-      ...files
+      ...out
         .map((f) => statOrNull(f))
         .filter((st) => st && st.size > 0 && st.mtimeMs >= ctx.cutoff)
         .map((st) => ({ t: st.mtimeMs, row: null })),
@@ -346,19 +353,25 @@ function exportOpenCodeDbSessions(dbPath, ctx, files) {
         // the recency filter (--days) and ordering work correctly.
         const mtime = new Date(session.time_updated);
         if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
-        files.push(tmpPath);
-        ctx.displayPaths.set(tmpPath, `${dbPath} [session ${session.id}]`);
+        out.push(tmpPath);
+        labels.set(tmpPath, `${dbPath} [session ${session.id}]`);
       }
     }
 
-    const newestMs = rows.length ? Number(rows[0].time_updated) : NaN;
-    ctx.unexported.opencode = {
+    // time_updated is untrusted: ignore values that are not a representable Date.
+    const validTimes = rows.map((r) => Number(r.time_updated)).filter(isValidTimestamp);
+    const unexported = {
       found: rows.length - selected.length,
       recent: rows.filter(isRecent).length - selected.length,
       // Recent sessions that cannot be analyzed because their id failed validation.
       unsafeRecent: rows.filter((r) => isRecent(r) && !isSafe(r)).length,
-      newestMs: Number.isFinite(newestMs) ? newestMs : null,
+      newestMs: validTimes.length ? Math.max(...validTimes) : null,
     };
+
+    // Commit — nothing below can throw.
+    files.splice(0, files.length, ...out);
+    for (const [k, v] of labels) { ctx.displayPaths.set(k, v); }
+    ctx.unexported.opencode = unexported;
   } finally {
     db.close();
   }
@@ -377,7 +390,13 @@ function discoverOpenCode(ctx) {
   const dbStat = statOrNull(dbPath);
   if (dbStat && dbStat.size > 0) {
     try { exportOpenCodeDbSessions(dbPath, ctx, files); }
-    catch { /* node:sqlite unavailable or DB locked — fall back to JSON files only */ }
+    catch (e) {
+      // node:sqlite unavailable, DB locked/corrupt, or an export write failed:
+      // `files` is unchanged (legacy JSON only). Say so in the report rather
+      // than letting a JSON-only result pass as a full one.
+      ctx.discoveryNotes.opencode = `opencode.db could not be read (${e && e.message ? e.message : e}); ` +
+        'validated legacy JSON sessions only.';
+    }
   }
 
   return files;
@@ -633,8 +652,13 @@ function newAggregate() {
   };
 }
 
+/** True for a number that `new Date()` can represent (so toISOString won't throw). */
+function isValidTimestamp(t) {
+  return typeof t === 'number' && Number.isFinite(t) && !Number.isNaN(new Date(t).getTime());
+}
+
 function newestIso(times) {
-  const valid = times.filter((t) => typeof t === 'number' && Number.isFinite(t));
+  const valid = times.filter(isValidTimestamp);
   return valid.length ? new Date(Math.max(...valid)).toISOString() : null;
 }
 
@@ -667,8 +691,10 @@ function validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, fla
       notes: [],
     };
 
+    if (ctx.discoveryNotes[id]) { entry.notes.push(ctx.discoveryNotes[id]); }
     if (entry.filesFound === 0) {
-      entry.status = STATUS.NO_FILES;
+      // A store we could not read is not the same as "no sessions".
+      entry.status = ctx.discoveryNotes[id] ? STATUS.INCONCLUSIVE : STATUS.NO_FILES;
       report.platforms[id] = entry;
       continue;
     }
@@ -866,6 +892,8 @@ module.exports = {
   newDiscoveryContext,
   removeTempDirs,
   cleanupTempDirsOrWarn,
+  isValidTimestamp,
+  newestIso,
   exportOpenCodeDbSessions,
   DICT_KEY,
 };

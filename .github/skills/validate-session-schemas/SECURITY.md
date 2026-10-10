@@ -77,6 +77,14 @@ None. SQLite is accessed in-process.
   these signals immediately and skips `finally`; with one, the signal is queued until the
   synchronous run returns (after the `finally` cleanup), and the handler then removes any
   remaining temp directory and exits with `128 + n`.
+- The DB export is all-or-nothing: the file list, counts and report labels are committed
+  only after every export succeeded. If reading `opencode.db` or writing an export fails,
+  the run falls back to the legacy JSON sessions unchanged, adds an
+  `opencode.db could not be read` note to the report (status `INCONCLUSIVE` if no JSON
+  sessions exist either), and still removes any temp directory already created.
+- DB `time_updated` values are untrusted: only values `new Date()` can represent are used
+  for the reported newest date, so a corrupt or unit-shifted timestamp cannot make
+  `toISOString` throw and abort the run.
 - Recent sessions whose id fails validation are skipped and noted in the report; a
   platform whose recent sessions are all unanalyzable reports `INCONCLUSIVE`, not
   `NO_RECENT_FILES`.

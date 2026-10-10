@@ -28,6 +28,8 @@ const {
   newDiscoveryContext,
   removeTempDirs,
   cleanupTempDirsOrWarn,
+  isValidTimestamp,
+  newestIso,
   exportOpenCodeDbSessions,
   DICT_KEY,
 } = require('./validate-session-schemas.js');
@@ -323,4 +325,85 @@ test('cleanupTempDirsOrWarn warns on stderr with the path when a delete fails', 
   assert.match(errors[0], /EPERM/);
   assert.deepEqual(ctx.tempDirs, ['/tmp/oc-dbses-locked']);
   assert.equal(cleanupTempDirsOrWarn(ctx, () => {}), true);
+});
+
+/** opencode.db whose message table lacks `data`: the session queries work, the export query fails. */
+function makeBrokenOpenCodeDb(dbPath, sessions) {
+  const db = new sqlite.DatabaseSync(dbPath);
+  db.exec('CREATE TABLE session (id TEXT PRIMARY KEY, time_updated INTEGER)');
+  db.exec('CREATE TABLE message (id INTEGER PRIMARY KEY, session_id TEXT, time_created INTEGER)');
+  for (const s of sessions) {
+    db.prepare('INSERT INTO session (id, time_updated) VALUES (?, ?)').run(s.id, Date.now() - s.ageDays * DAY);
+    db.prepare('INSERT INTO message (session_id, time_created) VALUES (?, 0)').run(s.id);
+  }
+  db.close();
+}
+
+test('a failed export leaves files and ctx untouched (all-or-nothing)', { skip: !sqlite }, (t) => {
+  const dir = makeTempDir(t, 'vss-test-db-');
+  const dbPath = path.join(dir, 'opencode.db');
+  makeBrokenOpenCodeDb(dbPath, [{ id: 'ses_dup', ageDays: 1 }, { id: 'ses_other', ageDays: 2 }]);
+  const legacy = path.join(dir, 'ses_dup.json');
+  fs.writeFileSync(legacy, '{"id":"x"}');
+
+  const ctx = newDiscoveryContext(Date.now() - 30 * DAY, 5);
+  t.after(() => removeTempDirs(ctx));
+  const files = [legacy];
+  assert.throws(() => exportOpenCodeDbSessions(dbPath, ctx, files));
+  // The duplicate legacy session was not dropped and no partial export was added.
+  assert.deepEqual(files, [legacy]);
+  assert.equal(ctx.unexported.opencode, undefined);
+  assert.equal(ctx.displayPaths.size, 0);
+  // The temp dir created before the failure is still registered for cleanup.
+  assert.equal(ctx.tempDirs.length, 1);
+});
+
+test('end-to-end: unreadable opencode.db falls back to JSON only, with a note', { skip: !sqlite }, (t) => {
+  const root = makeTempDir(t, 'vss-test-e2e-');
+  const home = path.join(root, 'home');
+  const tmp = path.join(root, 'tmp');
+  const dataDir = path.join(home, '.local', 'share');
+  const sessionDir = path.join(dataDir, 'opencode', 'storage', 'session', 'proj');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  makeBrokenOpenCodeDb(path.join(dataDir, 'opencode', 'opencode.db'), [{ id: 'ses_dup', ageDays: 1 }]);
+  fs.writeFileSync(path.join(sessionDir, 'ses_dup.json'), '{"id":"ses_dup","time":{"created":1}}');
+
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_DATA_HOME: dataDir, TMPDIR: tmp, TEMP: tmp, TMP: tmp };
+  const res = spawnSync(process.execPath, [SCRIPT, '--platform', 'opencode', '--json'], { env, encoding: 'utf8' });
+  const oc = JSON.parse(res.stdout).platforms.opencode;
+  assert.equal(oc.filesFound, 1);
+  assert.equal(oc.filesAnalyzed, 1);
+  assert.match(oc.analyzedPaths[0], /ses_dup\.json$/);
+  assert.ok(oc.notes.some((n) => /opencode\.db could not be read/.test(n)), oc.notes.join('; '));
+  assert.deepEqual(fs.readdirSync(tmp), []);
+});
+
+test('isValidTimestamp / newestIso reject finite values outside the Date range', () => {
+  assert.equal(isValidTimestamp(Date.now()), true);
+  assert.equal(isValidTimestamp(9e15), false); // > 8.64e15 ms: finite but not a Date
+  assert.equal(isValidTimestamp(NaN), false);
+  assert.equal(isValidTimestamp(null), false);
+  assert.equal(newestIso([9e15, null]), null);
+  assert.equal(newestIso([9e15, 0]), new Date(0).toISOString());
+});
+
+test('an out-of-range DB timestamp does not abort the run', { skip: !sqlite }, (t) => {
+  const dir = makeTempDir(t, 'vss-test-db-');
+  const dbPath = path.join(dir, 'opencode.db');
+  makeOpenCodeDb(dbPath, [{ id: 'ses_ok', ageDays: 1, messages: 1 }]);
+  const db = new sqlite.DatabaseSync(dbPath);
+  db.prepare('INSERT INTO session (id, time_updated) VALUES (?, ?)').run('ses_future', 9e15);
+  db.prepare('INSERT INTO message (session_id, time_created, data) VALUES (?, 0, ?)').run('ses_future', '{}');
+  db.close();
+
+  const ctx = newDiscoveryContext(Date.now() - 30 * DAY, 5);
+  t.after(() => removeTempDirs(ctx));
+  const files = [];
+  exportOpenCodeDbSessions(dbPath, ctx, files);
+  assert.equal(files.length, 2);
+  // newestMs ignores the unrepresentable value and stays formattable.
+  const newest = ctx.unexported.opencode.newestMs;
+  assert.ok(isValidTimestamp(newest));
+  assert.doesNotThrow(() => newestIso([newest]));
 });
