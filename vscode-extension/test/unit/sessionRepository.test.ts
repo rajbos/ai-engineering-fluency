@@ -86,6 +86,20 @@ test('referencesWithinWorkspace keeps only files inside the workspace folder', (
 	assert.equal(referencesWithinWorkspace([ref('/home/u/app')], '/home/u/app').length, 1, 'the folder itself counts');
 });
 
+test('referencesWithinWorkspace resolves dot segments and folds case only on case-insensitive filesystems', () => {
+	// `..` is resolved before the boundary check: this file is in /home/u/lib, not /home/u/app.
+	assert.equal(referencesWithinWorkspace([ref('/home/u/app/../lib/file.ts')], '/home/u/app', 'linux').length, 0);
+	assert.equal(referencesWithinWorkspace([ref('/home/u/app/./src/../file.ts')], '/home/u/app', 'linux').length, 1);
+	assert.equal(referencesWithinWorkspace([ref('C:\\code\\app\\..\\lib\\x.ts')], 'C:\\code\\app', 'win32').length, 0);
+	// Linux paths keep their case; Windows paths and macOS fold it.
+	assert.equal(referencesWithinWorkspace([ref('/home/u/App/x.ts')], '/home/u/app', 'linux').length, 0);
+	assert.equal(referencesWithinWorkspace([ref('/Users/u/App/x.ts')], '/Users/u/app', 'darwin').length, 1);
+	assert.equal(referencesWithinWorkspace([ref('C:\\Code\\App\\x.ts')], 'c:\\code\\app', 'linux').length, 1, 'a drive-letter path is case-insensitive whatever the host');
+	// UNC roots keep their double separator and still match.
+	assert.equal(referencesWithinWorkspace([ref('\\\\nas\\code\\app\\x.ts')], '//nas/code/app', 'win32').length, 1);
+	assert.equal(referencesWithinWorkspace([ref('\\\\nas\\code\\app\\x.ts')], '/nas/code/app', 'linux').length, 0, 'a UNC path is not the POSIX /nas path');
+});
+
 test('extractWorkspaceRepository ignores a repository the session only referenced from outside its workspace', async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-repo-'));
 	try {

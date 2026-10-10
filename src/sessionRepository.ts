@@ -7,6 +7,7 @@
  * (src/workspaceGrouping.ts). One definition of "what counts as a content reference" keeps the
  * two surfaces from drifting apart.
  */
+import * as path from 'path';
 import { isJsonlContent, isUuidPointerFile, reconstructJsonlStateAsync } from './tokenEstimation';
 import { extractRepositoryFromContentReferences } from './workspaceHelpers';
 
@@ -69,9 +70,19 @@ export async function extractRepositoryFromSessionContent(content: string, parse
 	return extractWorkspaceRepository(await collectSessionContentReferences(content, parsedJson), workspacePath);
 }
 
-/** Comparable form of a path: forward slashes, no `/C:` URI prefix, no trailing slash, lower case. */
-function comparablePath(p: string): string {
-	return p.replace(/\\/g, '/').replace(/^\/(?=[a-z]:)/i, '').replace(/\/+$/, '').toLowerCase();
+/**
+ * Comparable form of a path for containment checks: forward slashes, no `/C:` URI prefix,
+ * `.` / `..` segments resolved (so `/app/../lib/x` is not inside `/app`), no trailing slash.
+ * Case is folded only where the filesystem is case-insensitive: Windows-style paths (a drive
+ * letter or UNC root) and macOS; POSIX paths elsewhere keep their case, as `/a/App` and `/a/app`
+ * are different folders there.
+ */
+function comparablePath(p: string, platform: string): string {
+	const slashed = p.replace(/\\/g, '/').replace(/^\/(?=[a-z]:)/i, '');
+	const isWindowsPath = /^[a-z]:\//i.test(slashed) || slashed.startsWith('//');
+	const unc = slashed.startsWith('//') ? '/' : '';
+	const normalized = (unc + path.posix.normalize(slashed)).replace(/\/+$/, '');
+	return isWindowsPath || platform === 'win32' || platform === 'darwin' ? normalized.toLowerCase() : normalized;
 }
 
 /** The file path a content reference points at, if any. */
@@ -82,12 +93,12 @@ function referencePath(ref: ContentReferences[number]): string | undefined {
 }
 
 /** References to files inside `workspacePath` (the folder itself or below it). */
-export function referencesWithinWorkspace(refs: ContentReferences, workspacePath: string): ContentReferences {
-	const root = comparablePath(workspacePath);
+export function referencesWithinWorkspace(refs: ContentReferences, workspacePath: string, platform: string = process.platform): ContentReferences {
+	const root = comparablePath(workspacePath, platform);
 	return refs.filter(ref => {
 		const p = referencePath(ref);
 		if (!p) { return false; }
-		const candidate = comparablePath(p);
+		const candidate = comparablePath(p, platform);
 		return candidate === root || candidate.startsWith(`${root}/`);
 	});
 }
