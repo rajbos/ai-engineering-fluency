@@ -5,6 +5,7 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { buildShareCardHeaderHtml, shareCardContainerStyle } from './shareCard';
+import { buildQualityStripHtml, sanitizeAgenticQuality } from './qualityStrip';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -54,6 +55,8 @@ type MaturityData = {
 	fluencyLevels?: CategoryLevelData[];
 	backendConfigured?: boolean;
 	installedHooks?: string[];
+	/** Rework next to adoption; local only, never part of an export. */
+	agenticQuality?: unknown;
 };
 
 // Maps a category name to the hook id that provides a session reminder for it
@@ -479,6 +482,7 @@ function buildMaturityRootHtml(
         <div class="stage-banner-title stage-${data.overallStage}">${escapeHtml(data.overallLabel)}</div>
         <div class="stage-banner-subtitle">${escapeHtml(STAGE_DESCRIPTIONS[data.overallStage] || '')}</div>
       </div>
+      ${buildQualityStripHtml(sanitizeAgenticQuality(data.agenticQuality))}
       ${data.isDebugMode ? renderDemoControls(data.categories) : ''}
       <div class="radar-wrapper">
         <div class="radar-container">
