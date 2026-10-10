@@ -7,9 +7,11 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { buildShareCardHeaderHtml, shareCardContainerStyle } from './shareCard';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
+import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { applyWebviewLocale } from '../shared/webviewLocale';
+import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 
 type UsageAnalysisPeriod = {
 	sessions: number;
@@ -69,6 +71,7 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
+installSurfaceNavigation(vscode, 'maturity');
 const initialData = getWindowData<MaturityData & { localization?: Record<string, string> }>('__INITIAL_MATURITY__');
 
 // Initialize localization for webview
@@ -449,7 +452,7 @@ function buildMaturityRootHtml(
     ? Math.round(demoStageOverrides.reduce((s, v) => s + v, 0) / demoStageOverrides.length)
     : data.overallStage;
   return `
-    <style>${themeStyles}</style>
+    <style>${themeStyles}</style><style>${dataTableStyles}</style>
     <style>${styles}</style>
     <div class="container">
       <div class="header">

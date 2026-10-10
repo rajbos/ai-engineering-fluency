@@ -152,6 +152,9 @@ function safeText(text) {
 }
 
 function formatPercent(value) {
+  // normalizeComparison always yields a number; this keeps a caller that
+  // skips it from failing the whole comment on a missing value.
+  if (!Number.isFinite(value)) return '—';
   if (value === 0) return '0%';
   if (value < 0.01) return '<0.01%';
   return `${value.toFixed(2)}%`;
@@ -270,6 +273,55 @@ function planAttachments(comparisons, roots, budget, titles) {
   return { attachments, inline };
 }
 
+/** Screenshots per row in the inline grid; three keeps a full-page shot readable without endless scrolling. */
+const GRID_COLUMNS = 3;
+
+const image = (f) => `![${f.alt}](${f.file})`;
+
+/**
+ * Only one image per view is shown inline: the diff for a changed view, the
+ * screenshot itself for an added or removed one. The webview screenshots are
+ * full-page (often 6000+ px tall), so a before/after/diff row per view made
+ * the comment one long scroll. Before and after still matter — the diff paints
+ * changed pixels solid magenta, so it shows where the UI changed but not what
+ * it now looks like — and sit in a collapsed section, one click away.
+ */
+function renderImages(lines, shown, plan, titles) {
+  const files = (c) => plan.inline.get(`${key(c)}.${c.theme}`);
+  if (shown.length === 0) return;
+  const cells = shown.map((c) => {
+    const lead = files(c).find((f) => f.kind === 'Diff') || files(c)[0];
+    const note = c.status === 'changed' ? `${formatPercent(c.changedPercent)} changed` : c.status;
+    return `<code>${key(c)}</code> · ${c.theme}<br>${note}<br>${image(lead)}`;
+  });
+  // One table rather than one per row: GitHub sizes columns per table, so a
+  // short last row keeps the width of the full rows above it instead of
+  // stretching its images across the whole comment. `gh --attach` only
+  // rewrites Markdown image references, so an <img width> is not an option.
+  const columns = Math.min(GRID_COLUMNS, cells.length);
+  lines.push(`|${' |'.repeat(columns)}`, `|${' --- |'.repeat(columns)}`);
+  for (let i = 0; i < cells.length; i += columns) {
+    const row = cells.slice(i, i + columns);
+    while (row.length < columns) row.push(' ');
+    lines.push(`| ${row.join(' | ')} |`);
+  }
+  // Added and removed views show the screenshot itself, not a diff, so the
+  // magenta legend only belongs when a changed view is in the grid.
+  const pairs = shown.filter((c) => c.status === 'changed');
+  const legend = pairs.length > 0 ? 'Magenta marks changed pixels; the rest is the new screenshot, dimmed. ' : '';
+  lines.push('', `<sub>${legend}Click an image for full size.</sub>`, '');
+
+  if (pairs.length > 0) {
+    lines.push(`<details><summary>Before and after screenshots (${pairs.length})</summary>`, '');
+    for (const c of pairs) {
+      const [before, after] = ['Before', 'After'].map((kind) => files(c).find((f) => f.kind === kind));
+      lines.push(`**<code>${key(c)}</code> · ${describe(c, titles)} · ${c.theme}**`, '');
+      lines.push('| Before | After |', '| --- | --- |', `| ${image(before)} | ${image(after)} |`, '');
+    }
+    lines.push('</details>', '');
+  }
+}
+
 function renderBody(report, opts, titles, plan, { withImages }) {
   const { summary, comparisons } = report;
   const lines = [`<!-- ${opts.marker} -->`, '## 📸 Webview screenshots', ''];
@@ -298,17 +350,7 @@ function renderBody(report, opts, titles, plan, { withImages }) {
     lines.push('');
 
     if (withImages && plan.inline.size > 0) {
-      for (const c of comparisons.filter((x) => x.status !== 'unchanged')) {
-        const files = plan.inline.get(`${key(c)}.${c.theme}`);
-        if (!files) continue;
-        const heading = `<code>${key(c)}</code> · ${describe(c, titles)} · ${c.theme}` +
-          (c.status === 'changed' ? ` · ${formatChange(c)} changed` : ` · ${c.status}`);
-        lines.push(`<details open><summary>${heading}</summary>`, '');
-        lines.push(`| ${files.map((f) => f.kind).join(' | ')} |`);
-        lines.push(`| ${files.map(() => '---').join(' | ')} |`);
-        lines.push(`| ${files.map((f) => `![${f.alt}](${f.file})`).join(' | ')} |`);
-        lines.push('', '</details>', '');
-      }
+      renderImages(lines, comparisons.filter((x) => plan.inline.has(`${key(x)}.${x.theme}`)), plan, titles);
       const shown = plan.inline.size;
       const wanted = comparisons.filter((x) => x.status !== 'unchanged').length;
       if (shown < wanted) {
