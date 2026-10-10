@@ -380,4 +380,5 @@ module.exports = {
   collectHandledCommandsFromAst,
   widenHandledFromText,
   collectTsFiles,
+  ts,
 };

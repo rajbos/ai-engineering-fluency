@@ -12,7 +12,11 @@
     "start": "npm run build && electron .",
     "pack": "npm run build:production && electron-builder --dir",
     "dist": "npm run build:production && electron-builder --win nsis --publish never",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "check:contract": "node ../scripts/validate-desktop-contract.js",
+    "check:shell": "node ../scripts/validate-webview-shell.js",
+    "check:views": "node ../.github/skills/sync-host-views/sync-host-views.js",
+    "check": "npm run check-types && npm run check:contract && npm run check:shell"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
