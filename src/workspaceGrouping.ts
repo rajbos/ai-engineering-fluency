@@ -104,8 +104,15 @@ function isUnresolved(p: string): boolean {
 }
 
 /** A POSIX-style path seen on Windows: a WSL / SSH / dev-container workspace. */
+/**
+ * A POSIX-style path seen on Windows: a WSL / SSH / dev-container workspace. `path.normalize()`
+ * on Windows turns `/home/x` into `\home\x`, so a single leading separator of either kind
+ * counts; a UNC network share (`\\server\share`, `//server/share`) is local and does not.
+ */
 function isRemotePath(p: string, platform: string): boolean {
-	return platform === 'win32' && p.replace(/\\/g, '/').startsWith('/');
+	if (platform !== 'win32') { return false; }
+	const isSeparator = (c: string): boolean => c === '/' || c === '\\';
+	return isSeparator(p.charAt(0)) && !isSeparator(p.charAt(1));
 }
 
 function caseFolds(platform: string): boolean {
@@ -120,26 +127,48 @@ function samePathKey(p: string, platform: string): string {
 
 // ── Repository identity ──────────────────────────────────────────────────────
 
+/** Host assumed for a bare `owner/name` (how Copilot records a GitHub repository). */
+const DEFAULT_REMOTE_HOST = 'github.com';
+
+/** Split a remote into host and path: `scheme://[user@]host[:port]/path`, `[user@]host:path`, or a bare path. */
+function splitRemote(remote: string): { host?: string; path: string } {
+	const url = remote.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)(?::\d+)?\/(.*)$/i);
+	if (url) { return { host: url[1], path: url[2] }; }
+	// scp-like `git@host:owner/name`: needs a user or a dotted host, so `C:/repos/x` is not read as one.
+	const scp = remote.match(/^(?:([^@/\s]+)@)?([^:/\s]+):(?!\/\/)(.+)$/);
+	if (scp && (scp[1] || scp[2].includes('.'))) { return { host: scp[2], path: scp[3] }; }
+	return { path: remote };
+}
+
+/** Azure DevOps ssh and legacy `<org>.visualstudio.com` remotes, as `dev.azure.com/<org>/…`. */
+function normalizeAzureDevOps(host: string | undefined, parts: string[]): { host: string | undefined; parts: string[] } {
+	if (host === 'ssh.dev.azure.com' || host === 'vs-ssh.visualstudio.com') {
+		return { host: 'dev.azure.com', parts: parts[0]?.toLowerCase() === 'v3' ? parts.slice(1) : parts };
+	}
+	if (host?.endsWith('.visualstudio.com')) {
+		return { host: 'dev.azure.com', parts: [host.slice(0, -'.visualstudio.com'.length), ...parts] };
+	}
+	return { host, parts };
+}
+
 /**
- * Normalise a git remote URL to a lower-case `owner/name` identity.
- * Accepts https, ssh (`git@host:owner/name.git`), `ssh://` and bare `owner/name` forms.
- * Azure DevOps `org/project/_git/repo` becomes `project/repo`. Returns undefined for
- * anything it cannot read as a repository.
+ * Normalise a git remote to a lower-case `host/namespace/name` identity, so one repository
+ * matches across https, ssh (`git@host:owner/name.git`) and `ssh://` forms while repositories on
+ * different hosts or organisations stay distinct (`github.com/acme/widget` is not
+ * `gitlab.com/acme/widget`). A bare `owner/name` is a GitHub repository. Azure DevOps https, ssh
+ * (`v3/…`) and legacy `<org>.visualstudio.com` remotes all become
+ * `dev.azure.com/<org>/<project>/<repo>`. Returns undefined for anything that is not a repository.
  */
 export function repositoryIdentity(remote: string | undefined): string | undefined {
-	if (!remote) { return undefined; }
-	let s = remote.trim();
-	if (!s) { return undefined; }
-	s = s.replace(/^[a-z+]+:\/\/[^/]*\//i, '');      // scheme://host/
-	s = s.replace(/^[^@/\s]+@[^:/\s]+:/, '');         // git@host:
-	s = s.replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/\.git$/i, '');
-	const parts = s.split('/').filter(Boolean);
-	const gitIdx = parts.indexOf('_git');
-	if (gitIdx > 0 && gitIdx + 1 < parts.length) {
-		return `${parts[gitIdx - 1]}/${parts[gitIdx + 1]}`.toLowerCase();
-	}
-	if (parts.length < 2) { return undefined; }
-	return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`.toLowerCase();
+	const trimmed = remote?.trim();
+	if (!trimmed) { return undefined; }
+	const split = splitRemote(trimmed);
+	const rawParts = split.path.replace(/[?#].*$/, '').split('/').filter(p => p.length > 0 && p !== '_git');
+	if (rawParts.length > 0) { rawParts[rawParts.length - 1] = rawParts[rawParts.length - 1].replace(/\.git$/i, ''); }
+	const { host, parts } = normalizeAzureDevOps(split.host?.toLowerCase(), rawParts);
+	if (!host && parts.length !== 2) { return undefined; }
+	if (parts.length < 2 || parts.some(p => !p)) { return undefined; }
+	return `${host ?? DEFAULT_REMOTE_HOST}/${parts.join('/')}`.toLowerCase();
 }
 
 function repositoryName(repositoryId: string): string {

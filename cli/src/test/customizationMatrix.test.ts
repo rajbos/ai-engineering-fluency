@@ -12,6 +12,15 @@ import * as path from 'node:path';
 
 import { buildCustomizationMatrix } from '../helpers';
 
+/**
+ * A VS Code chat session with one request: the matrix only counts sessions with interactions
+ * in the last 30 days, like the extension, so an empty `{}` file would be skipped.
+ */
+const ONE_REQUEST_SESSION = JSON.stringify({
+	version: 3,
+	requests: [{ requestId: 'r1', timestamp: Date.now(), message: { text: 'hello' }, response: [{ value: 'hi' }] }],
+});
+
 /** Build a VS Code-style session file whose workspace.json points at a temp workspace. */
 function makeWorkspace(files: string[]): { root: string; sessionFile: string } {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
@@ -30,7 +39,7 @@ function makeWorkspace(files: string[]): { root: string; sessionFile: string } {
 		JSON.stringify({ folder: 'file:///' + workspace.replace(/\\/g, '/') })
 	);
 	const sessionFile = path.join(chatDir, 's1.json');
-	fs.writeFileSync(sessionFile, '{}');
+	fs.writeFileSync(sessionFile, ONE_REQUEST_SESSION);
 	return { root, sessionFile };
 }
 
@@ -75,7 +84,7 @@ function makeSessions(root: string, folders: string[]): string[] {
 		fs.mkdirSync(chatDir, { recursive: true });
 		fs.writeFileSync(path.join(hashDir, 'workspace.json'), JSON.stringify({ folder: 'file:///' + folder.replace(/\\/g, '/') }));
 		const sessionFile = path.join(chatDir, 's.json');
-		fs.writeFileSync(sessionFile, '{}');
+		fs.writeFileSync(sessionFile, ONE_REQUEST_SESSION);
 		return sessionFile;
 	});
 }
@@ -131,6 +140,30 @@ test('buildCustomizationMatrix: grouped totals match the shared grouping the ext
 		assert.equal(matrix.totalWorkspaces, 2);
 		// The branch-named scratch clone has nothing to join, so the detector reports it.
 		assert.deepEqual(matrix.ungroupedWorkspaceNames, ['groups-dashboard-layout-85ed99']);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('buildCustomizationMatrix: only sessions with interactions in the last 30 days count, like the extension', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const active = path.join(root, 'code', 'active-repo');
+		const old = path.join(root, 'code', 'old-repo');
+		const empty = path.join(root, 'code', 'empty-repo');
+		for (const dir of [active, old, empty]) { fs.mkdirSync(dir, { recursive: true }); }
+		const [activeSession, oldSession, emptySession] = makeSessions(root, [active, old, empty]);
+		const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+		fs.utimesSync(oldSession, sixtyDaysAgo, sixtyDaysAgo);
+		fs.writeFileSync(emptySession, '{}');
+		assert.ok(activeSession);
+
+		const matrix = await buildCustomizationMatrix([activeSession, oldSession, emptySession]);
+		assert.ok(matrix);
+		assert.deepEqual(matrix.workspaces.map(w => w.workspaceName), ['active-repo']);
+		assert.equal(matrix.workspaces[0].sessionCount, 1);
+		assert.ok(matrix.workspaces[0].interactionCount > 0, 'interactions are counted, not left at 0');
+		assert.equal(await buildCustomizationMatrix([oldSession, emptySession]), undefined);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

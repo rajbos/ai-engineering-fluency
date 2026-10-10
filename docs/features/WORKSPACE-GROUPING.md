@@ -15,6 +15,7 @@ the CLI's Customization evidence counts repositories, not folders.
   the result) and the CLI's `buildCustomizationMatrix()` in `cli/src/helpers.ts`, which takes
   each session's folder and remote from the owning adapter's metadata first (Copilot CLI,
   OpenCode, Crush, …) and falls back to Claude Code JSONL and VS Code `chatSessions` paths.
+  Like the extension, it only counts sessions with at least one interaction in the last 30 days.
 - Tests: [`vscode-extension/test/unit/workspaceGrouping.test.ts`](../../vscode-extension/test/unit/workspaceGrouping.test.ts)
   and the parity tests in `cli/src/test/customizationMatrix.test.ts`.
 
@@ -22,9 +23,14 @@ the CLI's Customization evidence counts repositories, not folders.
 
 1. **Same git remote** — folders whose sessions recorded the same `repository` remote, or whose
    `.git/config` (read while the folder still exists) names the same `origin`, are one
-   repository. A folder seen with two different remotes (reused for another repository) has no
-   identity rather than either one. The remote is normalised to `owner/name` (https, ssh, `ssh://` and Azure DevOps
-   `_git` forms). The group is displayed as the repository name.
+   repository. The remote is normalised to `host/namespace/name`, so https, ssh and `ssh://`
+   forms of one repository match while the same `owner/name` on another host (GitHub vs GitLab,
+   GitHub Enterprise) or Azure DevOps organisation stays apart; a bare `owner/name` is GitHub,
+   and Azure DevOps https, ssh and `visualstudio.com` remotes all read as
+   `dev.azure.com/<org>/<project>/<repo>`. A folder seen with two different remotes (reused for
+   another repository) is *conflicting*: it is never merged by name, and a worktree whose remote
+   differs from its main checkout stays apart from it. The group is displayed as the repository
+   name.
 2. **Worktree pointer** — an existing linked worktree's `.git` file
    (`gitdir: <main>/.git/worktrees/<name>`) leads to its main checkout, which becomes the group's
    canonical folder even when it had no sessions of its own.
@@ -39,7 +45,8 @@ the CLI's Customization evidence counts repositories, not folders.
      it is a home directory (`/home/<user>`, `/Users/<user>`, `C:\Users\<user>`, `/root`,
      `/mnt/<drive>/Users/<user>`), and the repository otherwise.
    - Case-only differences on Windows and macOS.
-   - A WSL / SSH path seen on Windows that has the same folder name as a local checkout.
+   - A WSL / SSH path seen on Windows (`/home/…`, or `\home\…` after normalisation) that has the
+     same folder name as a local checkout. UNC network shares (`\\server\share\…`) are local.
 4. **Sibling artefact folders** — `<repo>-wt`, `<repo>-<word>-wt` and `<repo>-<hex>` join the
    workspace named `<repo>` when one is in the list.
 5. **Same folder name** — the weakest signal, applied last.

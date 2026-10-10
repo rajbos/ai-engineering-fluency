@@ -112,6 +112,22 @@ const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAU
 
 /** Workspace folder a session belongs to, or undefined when it cannot be resolved. */
 /**
+ * Interactions of a session that counts towards workspace usage, or 0 when it does not: the
+ * extension only counts sessions with at least one interaction in its last-30-days window, so
+ * old or empty sessions must not add CLI workspaces, remotes or session counts either.
+ */
+async function recentSessionInteractions(sessionFile: string, cutoff: Date): Promise<number> {
+	try {
+		const stats = await statSessionFile(sessionFile);
+		if (stats.mtime < cutoff) { return 0; }
+		const data = await processSessionFile(sessionFile);
+		return data && data.lastModified >= cutoff ? data.interactions : 0;
+	} catch {
+		return 0;
+	}
+}
+
+/**
  * A session's workspace folder and git remote. The owning adapter's metadata comes first
  * (Copilot CLI, OpenCode, Crush and the other adapter-backed editors record both); the
  * format-specific fallbacks below cover Claude Code JSONL and VS Code chatSessions files.
@@ -123,23 +139,27 @@ async function resolveSessionWorkspace(sessionFile: string, claudeBasePath: stri
 	return workspacePath ? { path: workspacePath, repository: meta?.repository } : undefined;
 }
 
+/** The `cwd` recorded in the first lines of a Claude Code session JSONL. */
+async function readClaudeSessionCwd(sessionFile: string): Promise<string | undefined> {
+	const content = await withErrorRecovery(
+		() => fs.promises.readFile(sessionFile, 'utf-8'),
+		null,
+		`buildCustomizationMatrix readFile(${sessionFile})`
+	);
+	for (const line of (content ?? '').split('\n').slice(0, 30)) {
+		if (!line.trim()) { continue; }
+		try {
+			const event = JSON.parse(line);
+			if (event.cwd && typeof event.cwd === 'string') { return event.cwd; }
+		} catch { /* skip malformed lines */ }
+	}
+	return undefined;
+}
+
 async function resolveSessionWorkspacePath(sessionFile: string, claudeBasePath: string): Promise<string | undefined> {
 	// Claude Code session: ~/.claude/projects/<hash>/<uuid>.jsonl
 	if (sessionFile.startsWith(claudeBasePath + path.sep) || sessionFile.startsWith(claudeBasePath + '/')) {
-		const content = await withErrorRecovery(
-			() => fs.promises.readFile(sessionFile, 'utf-8'),
-			null,
-			`buildCustomizationMatrix readFile(${sessionFile})`
-		);
-		if (content === null) { return undefined; }
-		for (const line of content.split('\n').slice(0, 30)) {
-			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-				if (event.cwd && typeof event.cwd === 'string') { return event.cwd; }
-			} catch { /* skip malformed lines */ }
-		}
-		return undefined;
+		return readClaudeSessionCwd(sessionFile);
 	}
 
 	// VS Code session: .../workspaceStorage/<hash>/chatSessions/<file>
@@ -168,13 +188,18 @@ export async function buildCustomizationMatrix(
 	probes?: WorkspaceGroupingProbes,
 ): Promise<WorkspaceCustomizationMatrix | undefined> {
 	const claudeBasePath = path.join(os.homedir(), '.claude', 'projects');
+	const now = new Date();
+	// Same window as calculateUsageAnalysisStats()'s last-30-days period.
+	const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
 	// One entry per session; the grouping sums sessions of the same folder.
 	const entries: WorkspaceUsageEntry[] = [];
 	for (const sessionFile of sessionFiles) {
+		const interactions = await recentSessionInteractions(sessionFile, cutoff);
+		if (interactions === 0) { continue; }
 		const workspace = await resolveSessionWorkspace(sessionFile, claudeBasePath);
 		if (!workspace) { continue; }
 		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
-		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: 0, repository: workspace.repository });
+		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });
 	}
 	if (entries.length === 0) { return undefined; }
 

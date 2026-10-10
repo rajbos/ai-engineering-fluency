@@ -228,7 +228,7 @@ test('same basename but different remotes stays two groups', () => {
 		entry('C:\\b\\app', 1, 1, 'https://github.com/other/app'),
 	], probes('win32'));
 	assert.equal(groups.length, 2);
-	assert.deepEqual(groups.map(g => g.repositoryId).sort(), ['acme/app', 'other/app']);
+	assert.deepEqual(groups.map(g => g.repositoryId).sort(), ['github.com/acme/app', 'github.com/other/app']);
 });
 
 test('a -wt / hash name pattern never merges across different remotes', () => {
@@ -323,7 +323,7 @@ test('a path seen with two different remotes has no identity, so neither remote 
 	}
 	// The same remote twice is not a conflict.
 	const [same] = groupWorkspaces([entry('C:\\r', 1, 1, 'acme/r'), entry('C:\\r', 1, 1, 'https://github.com/acme/r.git')], probes('win32'));
-	assert.equal(same.repositoryId, 'acme/r');
+	assert.equal(same.repositoryId, 'github.com/acme/r');
 });
 
 test('a conflicted path is not merged by name even when only one same-named repository is a candidate', () => {
@@ -371,7 +371,7 @@ test('a worktree whose remote differs from its existing main checkout is not mer
 	for (const order of permutations([entry(main, 1, 1, 'https://github.com/acme/gadget'), entry(wt, 1, 1, 'https://github.com/fork/other')])) {
 		const groups = groupWorkspaces(order, p);
 		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [[main], [wt]]);
-		assert.deepEqual(groups.map(g => g.repositoryId).sort(), ['acme/gadget', 'fork/other']);
+		assert.deepEqual(groups.map(g => g.repositoryId).sort(), ['github.com/acme/gadget', 'github.com/fork/other']);
 	}
 	// Same remote (or none on the main checkout): the pointer still merges them.
 	assert.equal(groupWorkspaces([entry(main, 1, 1, 'acme/gadget'), entry(wt, 1, 1, 'https://github.com/acme/gadget')], p).length, 1);
@@ -538,15 +538,60 @@ test('an existing main checkout found through a worktree pointer becomes canonic
 // ── Building blocks ──────────────────────────────────────────────────────────
 
 test('repositoryIdentity normalises remote URL forms', () => {
-	assert.equal(repositoryIdentity('https://github.com/Acme/Widget.git'), 'acme/widget');
-	assert.equal(repositoryIdentity('git@github.com:acme/widget.git'), 'acme/widget');
-	assert.equal(repositoryIdentity('ssh://git@github.com:22/acme/widget'), 'acme/widget');
-	assert.equal(repositoryIdentity('https://user@dev.azure.com/org/Project/_git/Repo'), 'project/repo');
-	assert.equal(repositoryIdentity('acme/widget'), 'acme/widget');
-	assert.equal(repositoryIdentity('https://github.com/acme/widget/'), 'acme/widget');
+	const widget = 'github.com/acme/widget';
+	assert.equal(repositoryIdentity('https://github.com/Acme/Widget.git'), widget);
+	assert.equal(repositoryIdentity('git@github.com:acme/widget.git'), widget);
+	assert.equal(repositoryIdentity('ssh://git@github.com:22/acme/widget'), widget);
+	assert.equal(repositoryIdentity('https://github.com/acme/widget/'), widget);
+	assert.equal(repositoryIdentity('acme/widget'), widget, 'a bare owner/name is a GitHub repository');
 	assert.equal(repositoryIdentity(''), undefined);
 	assert.equal(repositoryIdentity(undefined), undefined);
+	assert.equal(repositoryIdentity('C:/repos/widget.git'), undefined, 'a local path is not an scp-style remote');
 	assert.equal(repositoryIdentity('(unknown)'), undefined);
+});
+
+test('repositoryIdentity keeps hosts and namespaces apart', () => {
+	assert.notEqual(repositoryIdentity('https://github.com/acme/widget'), repositoryIdentity('https://gitlab.com/acme/widget'));
+	assert.equal(repositoryIdentity('https://gitlab.com/group/sub/widget.git'), 'gitlab.com/group/sub/widget');
+	assert.equal(repositoryIdentity('git@gitlab.com:group/sub/widget.git'), 'gitlab.com/group/sub/widget');
+	assert.equal(repositoryIdentity('https://ghe.example.com/acme/widget'), 'ghe.example.com/acme/widget');
+	assert.notEqual(repositoryIdentity('https://ghe.example.com/acme/widget'), repositoryIdentity('acme/widget'));
+	// Azure DevOps: https, ssh and legacy visualstudio.com all name the same repository …
+	const ado = 'dev.azure.com/org/project/repo';
+	assert.equal(repositoryIdentity('https://user@dev.azure.com/org/Project/_git/Repo'), ado);
+	assert.equal(repositoryIdentity('git@ssh.dev.azure.com:v3/org/Project/Repo'), ado);
+	assert.equal(repositoryIdentity('https://org.visualstudio.com/Project/_git/Repo'), ado);
+	assert.equal(repositoryIdentity('org@vs-ssh.visualstudio.com:v3/org/Project/Repo'), ado);
+	// … while the same project/repo in another organisation is a different one.
+	assert.notEqual(repositoryIdentity('https://dev.azure.com/other-org/Project/_git/Repo'), ado);
+});
+
+test('same owner/name on two hosts stays two groups', () => {
+	const groups = groupWorkspaces([
+		entry('C:\\a\\widget', 1, 1, 'https://github.com/acme/widget'),
+		entry('C:\\b\\widget', 1, 1, 'https://gitlab.com/acme/widget'),
+	], probes('win32'));
+	assert.equal(groups.length, 2);
+});
+
+test('UNC network shares are local paths, WSL / remote paths are not', () => {
+	const unc = '\\\\server\\share\\acme-app';
+	const p = probes('win32', [unc], { [unc]: { remote: 'https://github.com/acme/acme-app' } });
+	const cases: Array<[string, boolean]> = [
+		[unc, false],
+		['//server/share/acme-app', false],
+		['/home/dev/acme-app', true],
+		['\\home\\dev\\acme-app', true], // what path.normalize() makes of a WSL path on Windows
+	];
+	for (const [folder, remote] of cases) {
+		const groups = groupWorkspaces([entry('C:\\code\\acme-app', 1, 1), entry(folder, 5, 5)], p);
+		assert.equal(groups.length, 1, folder);
+		// A remote spelling never becomes canonical; a UNC share with more activity does.
+		assert.equal(groups[0].canonicalPath === folder, !remote, folder);
+	}
+	// The UNC share is probed like any local folder, so its git remote counts.
+	assert.equal(groupWorkspaces([entry(unc)], p)[0].repositoryId, 'github.com/acme/acme-app');
+	assert.ok(workspaceProbePaths([entry(unc)], 'win32').includes(unc));
 });
 
 test('classifyArtefactName recognises the known shapes and avoids hex-looking words', () => {
