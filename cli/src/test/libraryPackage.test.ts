@@ -103,6 +103,22 @@ test('cache: billing rows landing in session-store.db are picked up without the 
 	assert.equal(second.copilotCredits, 9);
 });
 
+test('Copilot billing is only matched to Copilot CLI paths, not to another tool with the same UUID', async () => {
+	// Same UUID as billing rows in ~/.copilot/session-store.db, but the file is not under
+	// ~/.copilot/session-state/, so it must not pick up Copilot's exact usage.
+	const sessionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+	await writeSessionStore([[sessionId, 400, 7_000_000_000]]);
+	const elsewhere = path.join(fakeHome, 'other-tool', 'session-state', sessionId, 'events.jsonl');
+	fs.mkdirSync(path.dirname(elsewhere), { recursive: true });
+	fs.copyFileSync(path.join(FIXTURES, 'copilot-cli-events.jsonl'), elsewhere);
+
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const lib = require(PKG);
+	const usage = await lib.analyzeSessionFile(elsewhere);
+	assert.ok(usage);
+	assert.equal(usage.copilotNanoAiu, 3_750_000_000, 'from its own usage_checkpoint, not the store row');
+});
+
 test('per-model usage is normalized to the single-session shape (sessions: 0)', async () => {
 	// Hermes' fallback (sessions row, no session_model_usage rows) reports `sessions: 1`.
 	const SQL = await initSqlJs({ wasmBinary: fs.readFileSync(path.join(CLI_ROOT, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')).buffer as ArrayBuffer });

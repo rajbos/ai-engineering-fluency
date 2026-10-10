@@ -17,7 +17,7 @@ import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTo
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliStoreUsage, getCopilotCliOtelDir } from '../../src/copilotCliOtel';
 import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
-import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
+import { isCopilotCliSessionPath, isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { ModelUsage } from '../../src/types';
 import { getModelUsageFromSession } from '../../src/usageAnalysis';
@@ -31,6 +31,17 @@ import modelPricingData from '../../src/modelPricing.json';
 
 export const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
 export const modelPricing = modelPricingData.pricing as { [key: string]: any };
+
+/**
+ * Whether a path is a Copilot CLI session: a file under ~/.copilot/session-state/<id>/ or a
+ * `session-store.db#<id>` virtual path. extractCopilotCliSessionId() on its own also accepts
+ * other tools' `<db>#<uuid>` paths (Crush, Devin, Cursor, ...), which must not be matched
+ * against Copilot's billing store or OTel export.
+ */
+function isCopilotCliPath(filePath: string): boolean {
+	return (isCopilotCliSessionPath(filePath) || filePath.includes('session-store.db#'))
+		&& extractCopilotCliSessionId(filePath) !== null;
+}
 
 /** Quiet by default: parsing problems surface as a null result, not console output. */
 const warn = (_msg: string) => { /* quiet by default */ };
@@ -118,7 +129,7 @@ export interface AuxiliarySources {
 export async function getAuxiliarySourcesFingerprint(filePath: string): Promise<AuxiliarySources> {
 	const sources = [...(resolveDebugLogCandidatePaths(filePath) ?? [])];
 	const otelFiles: string[] = [];
-	if (extractCopilotCliSessionId(filePath)) {
+	if (isCopilotCliPath(filePath)) {
 		sources.push(path.join(os.homedir(), '.copilot', 'session-store.db'));
 		// OTel is only the fallback for sessions without billing-store rows (getCopilotCliExactUsage);
 		// the store lookup is cached per DB mtime, so checking it here is cheap.
@@ -216,7 +227,7 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 				eco.getTokens(filePath),
 				eco.countInteractions(filePath),
 				eco.getModelUsage(filePath),
-				extractCopilotCliSessionId(filePath) ? getCopilotCliExactUsage(filePath) : Promise.resolve(null),
+				isCopilotCliPath(filePath) ? getCopilotCliExactUsage(filePath) : Promise.resolve(null),
 			]);
 			const mtimeDateKey = toLocalDayKey(stats.mtime);
 			const ecoResult: SessionData = {
@@ -253,7 +264,7 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 		let fileModelUsage: ModelUsage = {};
 
 		if (isJsonl) {
-			const exactUsage = extractCopilotCliSessionId(filePath) ? await getCopilotCliExactUsage(filePath) : null;
+			const exactUsage = isCopilotCliPath(filePath) ? await getCopilotCliExactUsage(filePath) : null;
 			const result = estimateTokensFromJsonlSession(content, exactUsage);
 			// Prefer actualTokens (from session.shutdown modelMetrics) over estimated tokens,
 			// matching VS Code's logic: actualTokens > 0 ? actualTokens : estimatedTokens
