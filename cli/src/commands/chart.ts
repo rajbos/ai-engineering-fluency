@@ -36,7 +36,7 @@ export const chartCommand = new Command('chart')
 		// The shared payload's periods reach back to the earliest session (for the webview's
 		// "All time" window); the summary shows the recent window each heading names.
 		const periodNames = [
-			{ key: 'day', label: 'Daily (last 30 days)', recent: 31 },
+			{ key: 'day', label: 'Daily (last 30 days)', recent: 30 },
 			{ key: 'week', label: 'Weekly (last 6 weeks)', recent: 6 },
 			{ key: 'month', label: 'Monthly (last 12 months)', recent: 12 },
 		] as const;

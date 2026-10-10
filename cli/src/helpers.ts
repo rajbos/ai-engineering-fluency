@@ -18,7 +18,7 @@ import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
-import type { DailyTokenStats, DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, ModelUsage, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
@@ -313,6 +313,53 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  * a separate attribution implementation — this keeps all formats consistent.
  */
 
+/** Completed analyses kept for reuse; bounded because a long-lived host (the desktop app) walks many files. */
+const ANALYSIS_MEMO_LIMIT = 1000;
+const analysisMemo = new Map<string, Promise<{ analysis: SessionUsageAnalysis; failed: boolean }>>();
+
+/**
+ * analyzeSessionUsage() for one file version, shared by every caller in this process.
+ *
+ * The view enrichment (processSessionFileForViews) and calculateUsageAnalysisStats() both need
+ * the full analysis of recent sessions, and `cli all` / the desktop Efficiency build run them
+ * together. The session cache only stores the slim enriched data, so without this each recent
+ * session would be analyzed twice. Keyed by path + mtime + size, so a changed file is analyzed
+ * afresh; concurrent callers share one in-flight pass. Completed results are kept only while
+ * the session cache is enabled (`--no-cache` means uncached), and a failed analysis is never
+ * kept, so the next caller retries it.
+ */
+function analyzeSessionUsageShared(
+	filePath: string,
+	version: { mtimeMs: number; size: number } | undefined,
+	content?: string,
+): Promise<{ analysis: SessionUsageAnalysis; failed: boolean }> {
+	const key = version ? `${filePath}\0${version.mtimeMs}\0${version.size}` : undefined;
+	const hit = key ? analysisMemo.get(key) : undefined;
+	if (key && hit) {
+		// Refresh its recency so the bound evicts the least recently used entry.
+		analysisMemo.delete(key);
+		analysisMemo.set(key, hit);
+		return hit;
+	}
+	let failed = false;
+	const run = analyzeSessionUsage(
+		{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
+		filePath,
+		content,
+	).then(analysis => ({ analysis, failed }));
+	if (key) {
+		analysisMemo.set(key, run);
+		while (analysisMemo.size > ANALYSIS_MEMO_LIMIT) {
+			const oldest = analysisMemo.keys().next().value;
+			if (oldest === undefined) { break; }
+			analysisMemo.delete(oldest);
+		}
+		const forget = () => { if (analysisMemo.get(key) === run) { analysisMemo.delete(key); } };
+		run.then(r => { if (r.failed || !getCacheStats().enabled) { forget(); } }, forget);
+	}
+	return run;
+}
+
 /**
  * The per-session fields the Chart and Efficiency views split by (repository, task category,
  * lines of code, efficiency signals), derived through the same shared helpers the extension's
@@ -326,20 +373,15 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  * Likewise a repository that could not be resolved (unreadable file) is a failure, while a
  * session that names no repository resolves to `''` and is recorded as "Unknown".
  */
-async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'repository' | 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
-	let failed = false;
+async function sessionViewAttributes(filePath: string, version: { mtimeMs: number; size: number } | undefined): Promise<Pick<SessionData, 'repository' | 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
 	try {
 		// Read a file-based session once and hand the content to both passes; ecosystem
 		// (DB-backed) sessions are read through their adapter instead. A failed read throws
 		// here and is reported as a failure below.
 		const ecosystems = getEcosystems();
 		const content = ecosystems.some(e => e.handles(filePath)) ? undefined : await fs.promises.readFile(filePath, 'utf-8');
-		const [analysis, repository] = await Promise.all([
-			analyzeSessionUsage(
-				{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems },
-				filePath,
-				content,
-			),
+		const [{ analysis, failed }, repository] = await Promise.all([
+			analyzeSessionUsageShared(filePath, version, content),
 			resolveSessionRepository(ecosystems, filePath, content),
 		]);
 		if (failed || repository === undefined) { return null; }
@@ -380,7 +422,7 @@ export async function processSessionFileForViews(filePath: string, verbose = fal
 	try { before = await statSessionFile(filePath); } catch { /* processSessionFile reports the failure */ }
 	const data = await processSessionFile(filePath, verbose);
 	if (!data || data.viewAttributesResolved) { return data; }
-	const attributes = await sessionViewAttributes(filePath);
+	const attributes = await sessionViewAttributes(filePath, before);
 	if (!attributes) { return data; }
 	const enriched: SessionData = { ...data, ...attributes, viewAttributesResolved: true };
 	try {
@@ -660,14 +702,6 @@ export interface UsageAnalysisOptions {
  * This is a simplified version that uses the shared usageAnalysis module.
  */
 export async function calculateUsageAnalysisStats(sessionFiles: string[], options: UsageAnalysisOptions = {}): Promise<UsageAnalysisStats> {
-	const deps = {
-		warn,
-		tokenEstimators,
-		modelPricing,
-		toolNameMap,
-		ecosystems: getEcosystems(),
-	};
-
 	const now = new Date();
 	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 	const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
@@ -699,7 +733,9 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 				if (!isActiveSince(modified, await activity.lastActivity(), cutoffStart)) { continue; }
 			}
 
-			const analysis = await analyzeSessionUsage(deps, file);
+			// Shared with the view enrichment, so `cli all` and the desktop Efficiency build do not
+			// analyze each recent session twice.
+			const { analysis } = await analyzeSessionUsageShared(file, stats);
 			if (options.includeRepeatedTasks) {
 				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
 			}

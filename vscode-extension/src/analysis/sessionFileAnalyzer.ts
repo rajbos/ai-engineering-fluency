@@ -69,6 +69,7 @@ export interface SessionAnalyzerDeps {
 }
 
 type DebugLogTokens = NonNullable<ReturnType<typeof extractAllTokensFromDebugLog>>;
+type SessionTaskAttribution = ReturnType<typeof resolveSessionTaskAttribution>;
 type DailyRollups = { [dayKey: string]: DailyRollupEntry };
 type SessionMeta = {
 	title: string | undefined;
@@ -588,11 +589,14 @@ function computeDailyRollups(
 	tokenResult: TokenResult,
 	modelUsage: ModelUsage,
 	interactions: number,
-	usageAnalysis: SessionUsageAnalysis,
+	taskAttribution: SessionTaskAttribution,
 ): { dailyRollups: DailyRollups; totalInteractions: number } {
 	const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
-	const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares as TaskCategoryBreakdown | undefined;
-	const primaryTaskCategory = usageAnalysis.taskClassification?.primaryCategory as TaskCategory | undefined;
+	// The same resolved attribution the session entry stores (see analyzeSessionFile), so an
+	// empty placeholder classification cannot put "Conversation" on the rollups while the
+	// session itself carries the tool-heuristic category.
+	const taskCategoryShares = taskAttribution.taskCategoryShares;
+	const primaryTaskCategory = taskAttribution.taskCategory;
 
 	// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
 	// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
@@ -776,15 +780,13 @@ function buildSessionDataObject(
 	finalCacheReadTokens: number | undefined,
 	debugLogTokens: DebugLogTokens | null | undefined,
 	dailyRollups: DailyRollups,
+	taskAttribution: SessionTaskAttribution,
 	existingCache?: Pick<SessionFileCache, 'repository'>,
 ): SessionFileCache {
 	const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 	const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
 	const optionals = buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
-	// Classified once per session (not per-render) using tool names from usageAnalysis and the
-	// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
-	// Shared with the CLI so both hosts attribute a session to the same task (#2316).
-	const { taskCategory, taskCategoryShares } = resolveSessionTaskAttribution(usageAnalysis, sessionMeta.title);
+	const { taskCategory, taskCategoryShares } = taskAttribution;
 	// Counted once per session from the same tool-name data as the task classification;
 	// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
 	// MCP tools are included because some ecosystems spawn sub-agents via MCP
@@ -862,11 +864,16 @@ export async function analyzeSessionFile(
 	// `||` (not `??`): actualTokens is 0 — never undefined — when no exact usage exists,
 	// so `??` would target 0 and silently skip reconciliation for estimated sessions.
 	const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens || tokenResult.tokens);
-	const { dailyRollups } = computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions, usageAnalysis);
+	// Classified once per session (not per-render) using tool names from usageAnalysis and the
+	// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
+	// Resolved before the rollups so they and the session entry agree, and shared with the CLI so
+	// both hosts attribute a session to the same task (#2316).
+	const taskAttribution = resolveSessionTaskAttribution(usageAnalysis, sessionMeta.title);
+	const { dailyRollups } = computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions, taskAttribution);
 	const debugLogTokens = await readTokensFromDebugLog(sessionFilePath);
 	const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups);
 
 	await applyWindsurfBreakdown(deps.windsurf, sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, existing);
+	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, taskAttribution, existing);
 }

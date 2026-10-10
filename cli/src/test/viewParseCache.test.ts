@@ -13,7 +13,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { calculateDailyStats, calculateEfficiencySessionInputs, calculateViewStats, processSessionFileForViews } from '../helpers';
+import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, calculateViewStats, processSessionFileForViews } from '../helpers';
 import { getCached } from '../cliCache';
 
 type MockOptions = { changeDuringAnalysis?: boolean; failAnalysisRead?: boolean; content?: string };
@@ -95,4 +95,15 @@ test('a non-fatal analysis warning does not discard the enriched view parse', as
 	assert.equal(data.viewAttributesResolved, true, 'a warning alone must not be treated as a failed analysis');
 	const size = (await fs.promises.stat(filePath)).size;
 	assert.equal(getCached(filePath, mtimes[0], size)?.viewAttributesResolved, true);
+});
+
+test('the view walk and Usage Analysis share one analysis per file version', async t => {
+	// `cli all` and the desktop Efficiency build need both; the session cache only keeps the
+	// slim enriched data, so without the shared analysis each recent session was analyzed twice.
+	const { filePath, reads } = mockSession(t, '88888888-8888-4888-8888-888888888888', false);
+	await calculateViewStats([filePath]);
+	assert.equal(reads(), 2, 'one base parse and one read shared by analysis and repository');
+	const usage = await calculateUsageAnalysisStats([filePath]);
+	assert.equal(reads(), 2, 'Usage Analysis must reuse the analysis instead of reading the session again');
+	assert.equal(usage.last30Days.sessions, 1);
 });

@@ -1104,7 +1104,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// showing an estimate in Today/month/30-day totals until their file changed.
 	// v76: Add per-session autonomyUsage (autopilot/auto vs supervised) to usageAnalysis: cache hits
 	// skip re-analysis, so existing entries would lack the metric until their file changed.
-	private static readonly CACHE_VERSION = 78;
+	// v79: Task attribution falls back to the tool heuristic when the analysis' classification is
+	// the empty placeholder, and the per-day rollups use the same resolved attribution (#2316):
+	// cache hits skip re-analysis, so existing entries would keep "Conversation" until they changed.
+	private static readonly CACHE_VERSION = 79;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
