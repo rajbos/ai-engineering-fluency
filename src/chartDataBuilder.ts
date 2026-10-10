@@ -3,6 +3,7 @@ import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
 import { mergeDailyModelEfficiency } from './modelEfficiency';
 import { getModelDisplayName, getCustomProviderGroup, getModelLookupCandidates } from './webview/shared/modelUtils';
 import { TASK_CATEGORIES, type TaskCategory } from './taskClassification';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 // Re-exported for existing consumers; the set lives in statsHelpers so the
 // period accumulator can use it without a circular import.
@@ -118,6 +119,9 @@ function mergeUsageGroup(
 	src: Record<string, { tokens: number; sessions: number; linesAdded?: number; linesRemoved?: number }>
 ): void {
 	for (const [k, u] of Object.entries(src)) {
+		// Keys are editor, repository and task names, and daily stats can come back from a
+		// JSON cache, where JSON.parse creates an own "__proto__" key — see protoGuard.ts.
+		if (isUnsafeObjectKey(k)) { continue; }
 		if (!target[k]) { target[k] = { tokens: 0, sessions: 0 }; }
 		target[k].tokens += u.tokens;
 		target[k].sessions += u.sessions;
@@ -674,6 +678,7 @@ function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilde
 	const editorTotalsMap: Record<string, number> = {};
 	dailyBuckets.forEach(b => {
 		Object.entries(b.stats.editorUsage).forEach(([editor, usage]) => {
+			if (isUnsafeObjectKey(editor)) { return; }
 			editorTotalsMap[editor] = (editorTotalsMap[editor] || 0) + usage.tokens;
 		});
 	});
@@ -681,6 +686,8 @@ function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilde
 	dailyBuckets.forEach(b => {
 		Object.entries(b.stats.repositoryUsage).filter(([repo]) => repo !== 'Unknown').forEach(([repo, usage]) => {
 			const displayName = deps.getRepoDisplayName(repo);
+			// A display name is derived from the repository string (e.g. "host:__proto__").
+			if (isUnsafeObjectKey(displayName)) { return; }
 			repositoryTotalsMap[displayName] = (repositoryTotalsMap[displayName] || 0) + usage.tokens;
 		});
 	});
