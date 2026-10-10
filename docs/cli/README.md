@@ -421,7 +421,7 @@ The CLI writes two files under `~/.copilot-token-tracker/` (the folder name pred
 | `cli-cache.json` | Parsed per-file results, keyed on file path and modification time, so unchanged files are not re-parsed. Holds at most 2,000 entries. | Until the file changes. Discarded automatically when a new CLI version changes the cache format. |
 | `omp-segment-cache.json` | Last `segment` output. | `--ttl` minutes (default 5). |
 
-To bypass the parse cache for one run, use `--no-cache`. To reset everything, delete the folder — it is rebuilt on the next run.
+To bypass the parse cache for one run, use `--no-cache`. To reset everything, delete the folder — it is rebuilt on the next run. The [library entry point](#programmatic-use) keeps its cache in memory and never touches these files.
 
 ---
 
@@ -466,6 +466,49 @@ Run `ai-engineering-fluency diagnostics` to see exactly which of these locations
 - Token counts are plain numbers; the `…Formatted` fields in `segment --json` are display strings.
 - `stats --json`, `segment --json` and `memory-files --json` have small, documented shapes (above) that are intended for scripts. The integration payloads (`chart`, `usage-analysis`, `all`, and the `usage` / `fluency` payloads) mirror the extension's views and can change between releases — pin the package version if you depend on them.
 - Exit code is `0` on success, including when no sessions are found (the JSON is then an empty object or empty payload), and when a `memory-files --json --server` read fails (see `serverMemories.error`). It is `1` when `memory-files --promote` cannot read the server memories, and on any unexpected error, which is printed to stderr.
+
+---
+
+## Programmatic use
+
+Since 0.7.0 the package also works as a Node library. The `@rajbos/ai-engineering-fluency/session` entry point returns token usage and cost for one session file, so another app can show per-session cost without running the CLI. It works with `require()` and `import`, ships its own TypeScript types, and contains none of the CLI code.
+
+```bash
+npm install @rajbos/ai-engineering-fluency
+```
+
+```js
+const { analyzeSessionFile, analyzeSessionFiles } = require('@rajbos/ai-engineering-fluency/session');
+
+const usage = await analyzeSessionFile('/home/me/.copilot/session-state/<id>/events.jsonl');
+if (usage) {
+  console.log(usage.editorSource, usage.totalTokens, usage.estimatedCostUsd.provider);
+  if (usage.copilotCredits !== null) {
+    console.log(`${usage.copilotCredits} AI credits billed`);
+  }
+}
+
+// Several files at once. The Map only holds the files that parsed.
+const byPath = await analyzeSessionFiles([claudeSessionPath, copilotEventsPath]);
+```
+
+`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown or unparsable file. It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
+
+| Field | Meaning |
+|---|---|
+| `filePath` | The path you passed in. |
+| `editorSource` | Friendly tool name, the same one the CLI shows: `Claude Code`, `Copilot CLI`, `VS Code`, and so on. |
+| `interactions` | Number of user turns. |
+| `models` / `modelUsage` | Model ids, and per model: `inputTokens` (including cache reads and writes), `outputTokens`, `cachedReadTokens`, `cacheCreationTokens`, and so on. |
+| `totalTokens` | Session total. Exact where the tool records it, otherwise estimated (see [Data Sources](#data-sources)). |
+| `copilotNanoAiu` | Exact GitHub Copilot billed amount, in nano-AI-units, from the latest Copilot CLI `session.usage_checkpoint` or `session.shutdown` event, the Copilot CLI billing store, or a Copilot Chat debug log. `0` when not available. |
+| `copilotCredits` | `copilotNanoAiu / 1e9` (1 AI credit = $0.01), or `null` when not available. |
+| `estimatedCostUsd` | `{ provider, copilot }`: an estimate from the per-model token counts, at provider API rates and at Copilot rates, using the same pricing table as the CLI. |
+| `lastModified` | File modification time, ISO 8601. |
+
+**Polling.** Results are cached in memory, per path, and reused while the file's modification time and size stay the same. A repeated call on an unchanged file is just a `stat`. A Claude Code or Copilot CLI log that is still being appended to is re-parsed on the next call after it changes. Concurrent calls on the same file share one parse. Pass `{ cache: false }` to always re-parse. Returned objects are frozen, and repeated calls may hand back the same object.
+
+The library does not read or write the CLI's `cli-cache.json`, so it is safe to use while the CLI is running. Like the CLI, it does not read session files located in the OS temp directory.
 
 ---
 
