@@ -49,6 +49,8 @@ export interface SessionData {
 	 *  - Ecosystem adapters: mtime fallback (until adapter implements getDailyFractions)
 	 */
 	dailyFractions: Record<string, number>;
+	/** Repository the session worked in, via the shared resolveSessionRepository(); absent when none. */
+	repository?: string;
 	/** Task attribution, via the shared resolveSessionTaskAttribution(). */
 	taskCategory?: TaskCategory;
 	taskCategoryShares?: TaskCategoryBreakdown;

@@ -22,6 +22,7 @@ import type { DailyTokenStats, DetailedStats, ModelUsage, UsageAnalysisStats, Wo
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { preserveAutoRouting, reconcileModelUsageToActualTokens, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
+import { resolveSessionRepository } from '../../src/sessionRepository';
 import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
 import { EFFICIENCY_BEHAVIOR_WEEKS, toEfficiencySessionInput } from '../../src/efficiencyViewBuilder';
 import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
@@ -313,24 +314,37 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  */
 
 /**
- * The per-session fields the Chart and Efficiency views split by (task category, lines of code,
- * efficiency signals), derived through the same shared helpers the extension's session analyzer uses.
+ * The per-session fields the Chart and Efficiency views split by (repository, task category,
+ * lines of code, efficiency signals), derived through the same shared helpers the extension's
+ * session analyzer and details pass use.
  *
  * Returns `null` when the analysis failed. analyzeSessionUsage() swallows read, parser and
  * adapter errors and returns an empty analysis, signalling them through `deps.onAnalysisError`.
  * An empty result from a failed read must not be marked resolved and cached, or the session
  * would show no task/LOC/efficiency data until it changes. Plain `deps.warn` notices (a
  * sub-step that failed, an unexpected format) leave a valid analysis and are not failures.
+ * Likewise a repository that could not be resolved (unreadable file) is a failure, while a
+ * session that names no repository resolves to `''` and is recorded as "Unknown".
  */
-async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
+async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'repository' | 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
 	let failed = false;
 	try {
-		const analysis = await analyzeSessionUsage(
-			{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
-			filePath,
-		);
-		if (failed) { return null; }
+		// Read a file-based session once and hand the content to both passes; ecosystem
+		// (DB-backed) sessions are read through their adapter instead. A failed read throws
+		// here and is reported as a failure below.
+		const ecosystems = getEcosystems();
+		const content = ecosystems.some(e => e.handles(filePath)) ? undefined : await fs.promises.readFile(filePath, 'utf-8');
+		const [analysis, repository] = await Promise.all([
+			analyzeSessionUsage(
+				{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems },
+				filePath,
+				content,
+			),
+			resolveSessionRepository(ecosystems, filePath, content),
+		]);
+		if (failed || repository === undefined) { return null; }
 		return {
+			...(repository ? { repository } : {}),
 			...resolveSessionTaskAttribution(analysis),
 			...sessionLocFromUsageAnalysis(analysis),
 			usageAnalysis: {
@@ -881,6 +895,7 @@ function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>)
 		if (!data || data.tokens === 0 || data.interactions === 0) { continue; }
 		addSessionToDailyStats(dailyStatsMap, {
 			editorType: data.editorSource,
+			repository: data.repository,
 			tokens: effectiveTokens(data),
 			interactions: data.interactions,
 			modelUsage: data.modelUsage,
