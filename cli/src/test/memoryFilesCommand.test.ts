@@ -100,6 +100,6 @@ test('buildPromoteOutput never suggests a target the local probe rejected', () =
 
 test('buildPromoteOutput explains a stale-only store instead of calling it documented', () => {
 	const output = buildPromoteOutput(promoteAnalysis({ fileExists: () => false, promotionTargetStatus: () => 'absent' }, '/home/dev/repo'));
-	assert.match(output.stdout, /1 cite only files that no longer exist/);
+	assert.match(output.stdout, /1 cites only files that no longer exist/);
 	assert.ok(!output.stdout.includes('every stored memory already cites'));
 });

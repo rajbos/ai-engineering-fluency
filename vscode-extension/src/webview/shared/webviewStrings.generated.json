@@ -322,6 +322,8 @@
   "serverMemories.summary": "{0} memories · {1} subjects",
   "serverMemories.documentedSummary": "{0} already cite an instruction file",
   "serverMemories.staleSummary": "{0} cite only files that no longer exist",
+  "serverMemories.documentedSummaryOne": "{0} already cites an instruction file",
+  "serverMemories.staleSummaryOne": "{0} cites only files that no longer exist",
   "serverMemories.promoteHeading": "Worth adding to AGENTS.md",
   "serverMemories.promoteHint": "The agent learned these from code alone, so it re-derives them every run. Writing them into an instruction file makes them free.",
   "serverMemories.repeatBadge": "re-learned {0}×",

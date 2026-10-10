@@ -964,7 +964,16 @@ export interface PromotionTargetProbeDeps extends RepoFileExistsDeps {
  */
 export function createPromotionTargetProbe(repoRoot: string, deps?: PromotionTargetProbeDeps): PromotionTargetProbe {
 	const io: PromotionTargetProbeDeps = deps ?? defaultPromotionTargetProbeDeps();
-	const realRoot = resolveRealRoot(io, repoRoot);
+	// Fail closed. resolveRealRoot()'s lexical fallback is fine for reporting whether a cited
+	// file exists, but this probe *authorizes* editing or creating a file: with a deleted or
+	// inaccessible checkout every candidate would read as `absent`, and the prompt would ask
+	// an agent to create AGENTS.md at a path nothing verified. No resolvable root, no target.
+	let realRoot: string;
+	try {
+		realRoot = io.realpathSync(io.resolve(repoRoot));
+	} catch {
+		return () => 'unsafe';
+	}
 
 	return (relativePath: string): PromotionTargetStatus => {
 		if (!isSafeRepoRelativePath(relativePath)) { return 'unsafe'; }
@@ -1147,13 +1156,22 @@ export function describeNoPromotionCandidates(analysis: ServerMemoriesAnalysis):
 	if (analysis.totalMemories > 0 && analysis.documentedCount === analysis.totalMemories) {
 		return 'No promotion candidates: every stored memory already cites an instruction file.';
 	}
+	// Each verb agrees with its own count: "1 cites" / "2 cite".
 	const reasons = [
-		analysis.documentedCount > 0 ? `${analysis.documentedCount} already cite an instruction file` : '',
-		analysis.unverifiableCount > 0 ? `${analysis.unverifiableCount} have no verifiable file citation` : '',
-		analysis.fullyStaleCount > 0 ? `${analysis.fullyStaleCount} cite only files that no longer exist` : '',
+		analysis.documentedCount > 0 ? `${analysis.documentedCount} already ${inflect(analysis.documentedCount, 'cites', 'cite')} an instruction file` : '',
+		analysis.unverifiableCount > 0 ? `${analysis.unverifiableCount} ${inflect(analysis.unverifiableCount, 'has', 'have')} no verifiable file citation` : '',
+		analysis.fullyStaleCount > 0 ? `${analysis.fullyStaleCount} ${inflect(analysis.fullyStaleCount, 'cites', 'cite')} only files that no longer exist` : '',
 	].filter(Boolean);
 	const breakdown = reasons.length > 0 ? ` (${reasons.join(', ')})` : '';
-	return `No promotion candidates: none of the ${analysis.totalMemories} stored memories is both undocumented and backed by a file that still exists in this checkout${breakdown}.`;
+	const subject = analysis.totalMemories === 1
+		? 'the one stored memory is not'
+		: `none of the ${analysis.totalMemories} stored memories is`;
+	return `No promotion candidates: ${subject} both undocumented and backed by a file that still exists in this checkout${breakdown}.`;
+}
+
+/** The singular form for a count of exactly one, else the plural. */
+function inflect(count: number, singular: string, plural: string): string {
+	return count === 1 ? singular : plural;
 }
 
 /**

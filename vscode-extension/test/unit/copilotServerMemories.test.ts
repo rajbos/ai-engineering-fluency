@@ -1522,7 +1522,7 @@ test('describeNoPromotionCandidates does not call a stale-only store "all docume
 			memory({ id: '2', subject: 'told', citations: ['User input: tabs'] }),
 		],
 	}, alwaysExists);
-	assert.match(describeNoPromotionCandidates(mixed), /1 already cite an instruction file, 1 have no verifiable file citation/);
+	assert.match(describeNoPromotionCandidates(mixed), /1 already cites an instruction file, 1 has no verifiable file citation/);
 
 	const documented = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1', citations: ['AGENTS.md:1'] })] }, alwaysExists);
 	assert.equal(describeNoPromotionCandidates(documented), 'No promotion candidates: every stored memory already cites an instruction file.');
@@ -1577,4 +1577,43 @@ test('buildPromotionPromptForSubject rebuilds at click time and refuses an unsaf
 	assert.match(ok.prompt, /`\.github\/copilot-instructions\.md`/, 'uses the target probed now, not the cached one');
 	assert.deepEqual(buildPromotionPromptForSubject(analysis, subject, targets({ 'AGENTS.md': 'unsafe' })), { reason: 'no-safe-target', blockedPath: 'AGENTS.md' });
 	assert.deepEqual(buildPromotionPromptForSubject(analysis, 'nope', () => 'exists'), { reason: 'unknown-subject' });
+});
+
+// ---------------------------------------------------------------------------
+// Review round 5 (#2373): fail closed on an unresolvable root; singular counts
+// ---------------------------------------------------------------------------
+
+test('createPromotionTargetProbe fails closed when the checkout root cannot be resolved', () => {
+	// A deleted or inaccessible checkout: every candidate would otherwise read as absent and
+	// the prompt would ask to create AGENTS.md at an unverified path.
+	const deps = fakeProbeDeps({});
+	const probe = createPromotionTargetProbe('/repo', {
+		...deps,
+		realpathSync: (target: string) => { if (target === '/repo') { throw new Error('ENOENT'); } return deps.realpathSync(target); },
+	});
+	assert.equal(probe('AGENTS.md'), 'unsafe');
+	assert.equal(probe('.github/copilot-instructions.md'), 'unsafe');
+	assert.deepEqual(resolvePromotionTarget(probe), { blockedPath: 'AGENTS.md' });
+	// On a real filesystem too.
+	const os = require('os') as typeof import('os');
+	const path = require('path') as typeof import('path');
+	assert.equal(createPromotionTargetProbe(path.join(os.tmpdir(), 'srvmem-does-not-exist-' + process.pid))('AGENTS.md'), 'unsafe');
+});
+
+test('describeNoPromotionCandidates agrees each verb with its count', () => {
+	const single = analyzeServerMemories({ repo: 'o/n', enabled: true, memories: [memory({ id: '1', citations: ['src/gone.ts:1'] })] },
+		{ fileExists: () => false });
+	assert.equal(describeNoPromotionCandidates(single),
+		'No promotion candidates: the one stored memory is not both undocumented and backed by a file that still exists in this checkout (1 cites only files that no longer exist).');
+	const plural = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', subject: 'a', citations: ['AGENTS.md:1'] }),
+			memory({ id: '2', subject: 'b', citations: ['docs/x.md:1'] }),
+			memory({ id: '3', subject: 'c', citations: ['User input: x'] }),
+			memory({ id: '4', subject: 'd', citations: ['User input: y'] }),
+		],
+	}, alwaysExists);
+	assert.match(describeNoPromotionCandidates(plural), /none of the 4 stored memories is both .* \(2 already cite an instruction file, 2 have no verifiable file citation\)\.$/);
 });

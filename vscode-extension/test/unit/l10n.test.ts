@@ -1288,6 +1288,19 @@ test('l10n: Copilot Repository Memories scope, action and documented-list string
 	}
 });
 
+test('l10n: server-memory summary counts agree with their verb in English, and resolve in zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('serverMemories.documentedSummaryOne', '1'), '1 already cites an instruction file');
+	assert.equal(t('serverMemories.staleSummaryOne', '1'), '1 cites only files that no longer exist');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('serverMemories.documentedSummaryOne', '1'), '1 条已引用指令文件');
+		assert.equal(t('serverMemories.staleSummaryOne', '1'), '1 条仅引用了已不存在的文件');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: server-memory draft refusals resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	assert.equal(t('serverMemories.draftBlocked', 'AGENTS.md'), 'Not drafting a prompt: AGENTS.md is not a regular file inside this checkout.');
