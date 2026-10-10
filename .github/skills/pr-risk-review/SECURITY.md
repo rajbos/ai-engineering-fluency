@@ -37,9 +37,13 @@ not persist credentials, so no token is left in `.git/config` for the model to r
   PR's own version of `pr-risk-review.yml`. A same-repository PR that edits it can change
   any step, including the base checkout, and run with the job's write-scoped
   `GITHUB_TOKEN` and `GH_PAT` (see Known gaps).
-- The scripts, `risk-signals.json`, the prompt and `package.json` are taken from the PR's
-  **base** commit, so a PR that changes those files, but not the workflow, is judged by
-  the reviewed versions rather than its own.
+- The scripts, `risk-signals.json` and the prompt are taken from the PR's **base** commit,
+  so a PR that changes those files, but not the workflow, is judged by the reviewed
+  versions rather than its own.
+- The Copilot CLI is not taken from the checkout: the workflow runs it with `npx` from the
+  npm registry at the exact version in `COPILOT_CLI_VERSION`. There is no root
+  `package.json` or lockfile, so npm verifies it only against the registry's own
+  integrity hash (see Known gaps).
 - Fork PRs are not reviewed: the workflow runs on `pull_request`, and its gate admits
   known contributors only (see the header comment of the workflow).
 
@@ -107,6 +111,12 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
 
 ## Known gaps
 
+- **The Copilot CLI is pinned by version, not by hash.** `npx` fetches
+  `@github/copilot@<COPILOT_CLI_VERSION>` from the npm registry on every run. A
+  compromised registry or package publish at that version would run with `GH_PAT`;
+  pinning to a lockfile hash would need a `package.json` and lockfile this repository
+  does not have at its root.
+
 - **The workflow file is PR-controlled.** `pull_request` runs the workflow as it exists
   in the PR, so the base checkout protects the judging scripts, not the job: a
   same-repository PR that edits `.github/workflows/pr-risk-review.yml` can replace any
@@ -122,8 +132,10 @@ rejected (`refArg`, lines 103-110), and the workflow passes commit SHAs.
 - The tool restriction and the single-file write scope are enforced by the Copilot CLI
   itself; they are only as strong as its tool filtering and permission matching. The
   built-in tool names passed to `--available-tools` are taken from the CLI's bundled agent
-  definitions (version 1.0.94), not from a documented list, so a renamed tool would
-  silently drop out and the review would fall back to the mechanical baseline. The staged copy of the
-  renderer in `$RUNNER_TEMP` is the second layer for the code that runs afterwards.
+  definitions (read from an installed 1.0.56), not from a documented list; the flags were
+  checked against the help of the pinned `COPILOT_CLI_VERSION` (1.0.94). A tool renamed
+  in that version would silently drop out and the review would fall back to the
+  mechanical baseline. The staged copy of the renderer in `$RUNNER_TEMP` is the second
+  layer for the code that runs afterwards.
 - The contributor gate remains the control on who can get a model run against a diff at
   all; the diff and file contents reach the model unfiltered by design.
