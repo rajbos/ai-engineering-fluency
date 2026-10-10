@@ -186,9 +186,12 @@ export function repositoryIdentity(remote: string | undefined): string | undefin
 	const trimmed = remote?.trim();
 	if (!trimmed || isLocalRemote(trimmed)) { return undefined; }
 	const split = splitRemote(trimmed);
-	const rawParts = split.path.replace(/[?#].*$/, '').split('/').filter(p => p.length > 0 && p !== '_git');
+	const rawParts = split.path.replace(/[?#].*$/, '').split('/').filter(p => p.length > 0);
 	if (rawParts.length > 0) { rawParts[rawParts.length - 1] = rawParts[rawParts.length - 1].replace(/\.git$/i, ''); }
-	const { host, parts } = normalizeAzureDevOps(split.host?.toLowerCase(), rawParts);
+	const normalized = normalizeAzureDevOps(split.host?.toLowerCase(), rawParts);
+	const host = normalized.host;
+	// `_git` is Azure DevOps URL syntax only; elsewhere (a GitLab subgroup) it is a real namespace.
+	const parts = host === 'dev.azure.com' ? normalized.parts.filter(p => p !== '_git') : normalized.parts;
 	if (!host && parts.length !== 2) { return undefined; }
 	if (parts.length < 2 || parts.some(p => !p)) { return undefined; }
 	return `${host ?? DEFAULT_REMOTE_HOST}/${parts.join('/')}`.toLowerCase();
@@ -517,7 +520,7 @@ function inputNode(
  * so a worktree reporting a different remote than its main checkout is vetoed, not merged.
  * Returns input index → anchor index.
  */
-function addAnchors(list: NodeList, platform: string): Map<number, number> {
+function addAnchors(list: NodeList, platform: string, probes: WorkspaceGroupingProbes): Map<number, number> {
 	const anchorOf = new Map<number, number>();
 	const inputCount = list.nodes.length;
 	for (let i = 0; i < inputCount; i++) {
@@ -526,7 +529,10 @@ function addAnchors(list: NodeList, platform: string): Map<number, number> {
 		if (!anchorPath || samePathKey(anchorPath, platform) === samePathKey(n.path, platform)) { continue; }
 		const isCheckoutAnchor = n.mainWorktreePath !== undefined || n.convention?.anchorIsCheckout === true;
 		const anchor: Node = { path: anchorPath, sessionCount: 0, interactionCount: 0, isInput: false, isCheckoutAnchor, remote: isRemotePath(anchorPath, platform) };
-		anchorOf.set(i, list.add(anchor, undefined));
+		// A synthetic anchor never borrows the worktree's identity, but an existing checkout carries
+		// its own probed remote, so a worktree of another repository is vetoed rather than merged.
+		const anchorGit = !anchor.remote && probes.pathExists?.(anchorPath) ? probes.readGitInfo?.(anchorPath) : undefined;
+		anchorOf.set(i, list.add(anchor, repositoryIdentity(anchorGit?.remote)));
 	}
 	return anchorOf;
 }
@@ -602,7 +608,7 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 		const { node, repoId } = inputNode(entry, probes, pathExists, isWorkspace);
 		list.add(node, repoId);
 	}
-	const anchorOf = addAnchors(list, platform);
+	const anchorOf = addAnchors(list, platform, probes);
 	const { nodes } = list;
 	const groups = new Groups(list.repoIds);
 

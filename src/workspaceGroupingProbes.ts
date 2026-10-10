@@ -81,8 +81,11 @@ export async function prefetchWorkspaceGroupingProbes(
 	};
 	const paths = workspaceProbePaths(entries, platform, homeDirectory);
 	await forEachLimited(paths, check);
-	const inputs = new Set(entries.map(e => e.path));
-	await forEachLimited(paths.filter(p => inputs.has(p) && exists.get(p)), async p => {
+	// Git facts for every existing folder the grouping may consult: the inputs and the checkout
+	// anchors their worktree layouts point at (an anchor's own remote feeds the veto). The
+	// `<repo>/.git` paths are only existence checks.
+	const folders = paths.filter(p => exists.get(p) && path.basename(p).toLowerCase() !== '.git');
+	await forEachLimited(folders, async p => {
 		const info = await readWorkspaceGitInfo(p);
 		if (!info) { return; }
 		gitInfo.set(p, info);

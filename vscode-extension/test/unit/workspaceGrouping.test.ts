@@ -628,6 +628,26 @@ test('repositoryIdentity keeps hosts and namespaces apart', () => {
 	assert.notEqual(repositoryIdentity('https://dev.azure.com/other-org/Project/_git/Repo'), ado);
 });
 
+test('repositoryIdentity strips _git only for Azure DevOps', () => {
+	assert.equal(repositoryIdentity('https://gitlab.com/group/_git/widget'), 'gitlab.com/group/_git/widget');
+	assert.notEqual(repositoryIdentity('https://gitlab.com/group/_git/widget'), repositoryIdentity('https://gitlab.com/group/widget'));
+	assert.equal(repositoryIdentity('https://dev.azure.com/org/Project/_git/Repo'), 'dev.azure.com/org/project/repo');
+	assert.equal(repositoryIdentity('https://org.visualstudio.com/Project/_git/Repo'), 'dev.azure.com/org/project/repo');
+});
+
+test('an existing checkout anchor with its own remote vetoes a worktree of another repository', () => {
+	const repos = 'C:\\u\\.copilot\\repos\\api';
+	const wt = 'C:\\u\\.copilot\\copilot-worktrees\\api\\fix-1'; // deleted, session recorded B
+	const p = probes('win32', [repos], { [repos]: { remote: 'https://github.com/acme/api' } });
+	const groups = groupWorkspaces([entry(wt, 2, 2, 'https://github.com/other/api')], p);
+	assert.equal(groups.length, 1);
+	assert.equal(groups[0].canonicalPath, wt, 'not merged into, nor represented by, repository A\'s checkout');
+	assert.equal(groups[0].repositoryId, 'github.com/other/api');
+	// Same remote (or none recorded): the worktree still folds into the checkout.
+	assert.equal(groupWorkspaces([entry(wt, 2, 2, 'acme/api')], p)[0].canonicalPath, repos);
+	assert.equal(groupWorkspaces([entry(wt, 2, 2)], p)[0].canonicalPath, repos);
+});
+
 test('same owner/name on two hosts stays two groups', () => {
 	const groups = groupWorkspaces([
 		entry('C:\\a\\widget', 1, 1, 'https://github.com/acme/widget'),
@@ -907,6 +927,23 @@ test('prefetchWorkspaceGroupingProbes answers from async checks, including a mai
 		assert.equal(p.pathExists!(path.join(root, 'never-asked')), false, 'unknown paths read as missing');
 		assert.deepEqual(p.readGitInfo!(wt), { remote: 'git@github.com:acme/gadget.git', mainWorktreePath: main });
 		assert.equal(p.readGitInfo!(gone), undefined);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('prefetchWorkspaceGroupingProbes also reads the git remote of an existing checkout anchor', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-grouping-'));
+	try {
+		const repos = path.join(root, '.copilot', 'repos', 'api');
+		fs.mkdirSync(path.join(repos, '.git'), { recursive: true });
+		fs.writeFileSync(path.join(repos, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/api.git\n');
+		const wt = path.join(root, '.copilot', 'copilot-worktrees', 'api', 'fix-1'); // deleted worktree
+		const entries = [entry(wt, 1, 1, 'https://github.com/other/api')];
+		const p = await prefetchWorkspaceGroupingProbes(entries);
+		assert.deepEqual(p.readGitInfo!(repos), { remote: 'https://github.com/acme/api.git' });
+		const groups = groupWorkspaces(entries, p);
+		assert.equal(groups[0].canonicalPath, wt, 'the other repository\'s checkout does not absorb it');
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
