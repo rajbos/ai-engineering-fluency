@@ -7,9 +7,8 @@ import {
     discoverSessionFiles,
     effectiveTokens,
     calculateDetailedStats,
-    calculateDailyStats,
     calculateUsageAnalysisStats,
-    calculateEfficiencySessionInputs,
+    calculateViewStats,
     buildChartPayload,
     buildEfficiencyPayload,
     getDiagnosticPaths,
@@ -22,6 +21,7 @@ import {
 } from '../../cli/src/helpers';
 import { getEditorSourceFromPath, runWithConcurrency } from '../../cli/src/analysis';
 import type { DailyTokenStats, DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
@@ -79,8 +79,8 @@ let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
 let cachedChartPayload: object | null = null;
-// Full-history daily stats behind both the Chart and Efficiency payloads: one session walk, two views.
-let cachedDailyStats: DailyTokenStats[] | null = null;
+// Session-derived inputs behind both the Chart and Efficiency payloads, from one session walk.
+let cachedViewStats: ViewStats | null = null;
 let cachedEfficiencyPayload: object | null = null;
 // Local day the cached stats, usage and chart data were computed for. All three
 // have "today" / "this month" windows baked in, so a tray app left running
@@ -435,33 +435,39 @@ async function loadChartPayload(): Promise<object> {
         // Inputs are read inside the computation, so a refresh that lands meanwhile
         // fails its generation check and the payload is rebuilt from the new data.
         await computeForCurrentFiles(
-            async () => buildChartPayload(await getDailyStats()),
+            async () => buildChartPayload((await getViewStats()).dailyStats),
             (payload) => { cachedChartPayload ??= payload; },
         );
     }
     return cachedChartPayload;
 }
 
-/** Daily stats over the whole history, shared by the Chart and Efficiency payloads. */
-function getDailyStats(): Promise<DailyTokenStats[]> {
-    return shareInFlight('dailyStats', loadDailyStats);
+type ViewStats = { dailyStats: DailyTokenStats[]; efficiencySessionInputs: EfficiencySessionInput[] };
+
+/**
+ * Full-history daily stats plus the Efficiency session inputs, built in one walk over the
+ * session files and shared by the Chart and Efficiency payloads, so a cold Efficiency open
+ * does not parse and analyze every session twice.
+ */
+function getViewStats(): Promise<ViewStats> {
+    return shareInFlight('viewStats', loadViewStats);
 }
 
-async function loadDailyStats(): Promise<DailyTokenStats[]> {
+async function loadViewStats(): Promise<ViewStats> {
     expireCachesOnDateChange();
-    while (!cachedDailyStats) {
+    while (!cachedViewStats) {
         await computeForCurrentFiles(
-            files => calculateDailyStats(files),
-            (dailyStats) => { cachedDailyStats ??= dailyStats; },
+            files => calculateViewStats(files),
+            (viewStats) => { cachedViewStats ??= viewStats; },
         );
     }
-    return cachedDailyStats;
+    return cachedViewStats;
 }
 
 /**
  * Efficiency payload, built by the same shared builder as the extension's
- * (src/efficiencyViewBuilder.ts). Its inputs reuse the cached daily stats, usage
- * analysis and session parse, so after the startup walk it does not re-parse files.
+ * (src/efficiencyViewBuilder.ts). Its session inputs come from the same walk as the
+ * Chart's daily stats; the usage analysis (a separate, recent-files pass) runs alongside.
  */
 function getEfficiencyPayload(): Promise<object> {
     return shareInFlight('efficiency', loadEfficiencyPayload);
@@ -471,11 +477,9 @@ async function loadEfficiencyPayload(): Promise<object> {
     expireCachesOnDateChange();
     while (!cachedEfficiencyPayload) {
         await computeForCurrentFiles(
-            async (files) => {
-                const [dailyStats, usage, sessionInputs] = await Promise.all([
-                    getDailyStats(), getUsageStats(), calculateEfficiencySessionInputs(files),
-                ]);
-                return buildEfficiencyPayload({ dailyStats, usage, sessionInputs });
+            async () => {
+                const [viewStats, usage] = await Promise.all([getViewStats(), getUsageStats()]);
+                return buildEfficiencyPayload({ dailyStats: viewStats.dailyStats, usage, sessionInputs: viewStats.efficiencySessionInputs });
             },
             (payload) => { cachedEfficiencyPayload ??= payload; },
         );
@@ -495,7 +499,7 @@ function expireCachesOnDateChange(): void {
         cachedStats = null;
         cachedUsageStats = null;
         cachedChartPayload = null;
-        cachedDailyStats = null;
+        cachedViewStats = null;
         cachedEfficiencyPayload = null;
         // A calculation that started yesterday must not cache yesterday's
         // totals under today's day: make its generation check fail so it retries.
@@ -566,7 +570,7 @@ async function refreshStats(): Promise<void> {
         cachedDataDay = toLocalDayKey(stats.lastUpdated);
         cachedUsageStats = null; // reset so it recomputes on next access
         cachedChartPayload = null;
-        cachedDailyStats = null;
+        cachedViewStats = null;
         cachedEfficiencyPayload = null;
         await saveCache();
     } finally {

@@ -315,14 +315,20 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
 /**
  * The per-session fields the Chart and Efficiency views split by (task category, lines of code,
  * efficiency signals), derived through the same shared helpers the extension's session analyzer uses.
- * Best-effort: a failed analysis leaves them out rather than dropping the session.
+ *
+ * Returns `null` when the analysis failed. analyzeSessionUsage() swallows read, parser and
+ * adapter errors and returns an empty analysis, reporting them only through `deps.warn` — so a
+ * warning is the failure signal here. An empty result from a failed read must not be marked
+ * resolved and cached, or the session would show no task/LOC/efficiency data until it changes.
  */
-async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'>> {
+async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
+	let failed = false;
 	try {
 		const analysis = await analyzeSessionUsage(
-			{ warn, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
+			{ warn: (msg: string) => { failed = true; warn(msg); }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
 			filePath,
 		);
+		if (failed) { return null; }
 		return {
 			...resolveSessionTaskAttribution(analysis),
 			...sessionLocFromUsageAnalysis(analysis),
@@ -334,7 +340,7 @@ async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData
 			},
 		};
 	} catch {
-		return {};
+		return null;
 	}
 }
 
@@ -350,14 +356,17 @@ async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData
  * Like every other cache write here, the entry is keyed by the stat taken *before* reading the
  * file. The base parse and the analysis are two reads, so the file is stat'ed again afterwards
  * and the entry is only cached when nothing changed in between — otherwise an actively-written
- * session would store data parsed from an older version under the newer mtime.
+ * session would store data parsed from an older version under the newer mtime. A failed
+ * analysis is neither marked resolved nor cached, so the next run retries it.
  */
 export async function processSessionFileForViews(filePath: string, verbose = false): Promise<SessionData | null> {
 	let before: fs.Stats | undefined;
 	try { before = await statSessionFile(filePath); } catch { /* processSessionFile reports the failure */ }
 	const data = await processSessionFile(filePath, verbose);
 	if (!data || data.viewAttributesResolved) { return data; }
-	const enriched: SessionData = { ...data, ...(await sessionViewAttributes(filePath)), viewAttributesResolved: true };
+	const attributes = await sessionViewAttributes(filePath);
+	if (!attributes) { return data; }
+	const enriched: SessionData = { ...data, ...attributes, viewAttributesResolved: true };
 	try {
 		const after = await statSessionFile(filePath);
 		if (before && after.mtimeMs === before.mtimeMs && after.size === before.size) {
@@ -837,14 +846,36 @@ export function repeatedTaskActivityMs(source: Pick<RepeatedTaskSessionSource, '
 }
 
 /**
+ * The Chart and Efficiency views' session-derived inputs, from **one** walk over the files.
+ *
+ * Both need every session's enriched parse (processSessionFileForViews). Walking twice would
+ * parse and analyze each cold session twice — the session cache cannot be relied on to absorb
+ * that, since it holds a bounded number of entries and has no in-flight de-duplication.
+ */
+export async function calculateViewStats(sessionFiles: string[], verbose = false, weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<{
+	dailyStats: DailyTokenStats[];
+	efficiencySessionInputs: EfficiencySessionInput[];
+}> {
+	const sessions = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose));
+	return {
+		dailyStats: dailyStatsFromSessions(sessions),
+		efficiencySessionInputs: efficiencyInputsFromSessions(sessions, weeksBack),
+	};
+}
+
+/**
  * Process session files into per-day stats over the whole history, in the
  * `DailyTokenStats[]` shape the shared `buildChartData()` takes. Aggregation goes through
  * the shared `addSessionToDailyStats()` — see AGENTS.md, "CLI Must Reuse Shared Functions".
+ * Use {@link calculateViewStats} when the Efficiency inputs are needed too.
  */
 export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<DailyTokenStats[]> {
+	return dailyStatsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose)));
+}
+
+function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>): DailyTokenStats[] {
 	const dailyStatsMap = new Map<string, DailyTokenStats>();
-	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose));
-	for (const data of sessionResults) {
+	for (const data of sessions) {
 		if (!data || data.tokens === 0 || data.interactions === 0) { continue; }
 		addSessionToDailyStats(dailyStatsMap, {
 			editorType: data.editorSource,
@@ -873,15 +904,18 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 /**
  * Per-session inputs for the Efficiency view's behaviour trends over the trailing
  * `weeksBack` weeks — the Node-side counterpart of the extension's
- * collectEfficiencySessionInputs(). Reads the cached, enriched session parse, so after the
- * daily-stats walk it does not re-analyze files.
+ * collectEfficiencySessionInputs(). Use {@link calculateViewStats} when the daily stats are
+ * needed too, so the files are walked once.
  */
 export async function calculateEfficiencySessionInputs(sessionFiles: string[], weeksBack = EFFICIENCY_BEHAVIOR_WEEKS): Promise<EfficiencySessionInput[]> {
+	return efficiencyInputsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file)), weeksBack);
+}
+
+function efficiencyInputsFromSessions(sessions: Array<SessionData | null | undefined>, weeksBack: number): EfficiencySessionInput[] {
 	const now = new Date();
 	const cutoffKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7));
-	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file));
 	const inputs: EfficiencySessionInput[] = [];
-	for (const data of sessionResults) {
+	for (const data of sessions) {
 		if (!data || data.interactions === 0) { continue; }
 		// The session's last active day, as the extension derives it from its daily rollups.
 		const dayKey = Object.keys(data.dailyFractions).sort().pop() ?? toLocalDayKey(data.lastModified);
