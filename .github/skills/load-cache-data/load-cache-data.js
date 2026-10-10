@@ -195,6 +195,9 @@ const SAFE_CACHE_ENTRY_FIELDS = new Set([
     // extensionless files (Dockerfile, .env, private file names)
 ]);
 
+// usageAnalysis fields whose maps are keyed by session-supplied names
+const NAME_KEYED_USAGE_FIELDS = ['toolCalls', 'mcpTools', 'skillCalls'];
+
 function sanitizeCacheEntry(cacheEntry) {
     if (!cacheEntry || typeof cacheEntry !== 'object' || Array.isArray(cacheEntry)) {
         return {};
@@ -220,6 +223,17 @@ function sanitizeCacheEntry(cacheEntry) {
             const safeEditScope = { ...editScope };
             delete safeEditScope.languageUsage;
             safeUsageAnalysis.editScope = safeEditScope;
+        }
+        // Tool, MCP server/tool and skill names come straight from the session (an MCP server
+        // or skill can carry a private project or customer name). Keep each usage object's
+        // scalar totals; drop its name-keyed maps (byTool, byServer, byName, latencyBy*, ...).
+        for (const field of NAME_KEYED_USAGE_FIELDS) {
+            const usage = safeUsageAnalysis[field];
+            if (isPlainObject(usage)) {
+                safeUsageAnalysis[field] = Object.fromEntries(
+                    Object.entries(usage).filter(([, value]) => value === null || typeof value !== 'object')
+                );
+            }
         }
         if (Array.isArray(safeUsageAnalysis.correctionMoments)) {
             safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments.map(moment => {

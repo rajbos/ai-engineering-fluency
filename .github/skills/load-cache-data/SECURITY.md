@@ -33,7 +33,7 @@ None. It reads `APPDATA` and `XDG_CONFIG_HOME` only to build candidate paths.
   (`getCacheFilePaths`, line 139). These are in the user's own profile directory.
 - The OS temp directory and the current working directory are no longer candidates, so a
   file planted there is not read.
-- The content is `JSON.parse`d (`parseCacheEntries`, line 277) and filtered before printing;
+- The content is `JSON.parse`d (`parseCacheEntries`, line 291) and filtered before printing;
   nothing in it is executed. A snapshot must be an envelope with a numeric `schemaVersion` and
   an `entries` object, and a legacy export must be an object.
 
@@ -46,14 +46,18 @@ Nothing on disk. Stdout is one JSON line.
   (`SAFE_CACHE_ENTRY_FIELDS`, line 186): token and interaction counts, per-model usage,
   timestamps, task categories, daily rollups and `usageAnalysis`. Inside `usageAnalysis`,
   `firstUserPrompt`, `contextReferences.byPath`, `editScope.languageUsage` and each correction
-  moment's `snippet` and `file` are removed (`sanitizeCacheEntry`, line 198). `title`, `repository`,
+  moment's `snippet` and `file` are removed (`sanitizeCacheEntry`, line 201). `toolCalls`,
+  `mcpTools` and `skillCalls` keep only their scalar totals; their maps keyed by tool, MCP
+  server or skill name (`byTool`, `byServer`, `byName`, `latencyBy*`, ...) are dropped
+  (`NAME_KEYED_USAGE_FIELDS`, line 199), because those names come from the session and can
+  carry a private project or customer name. `title`, `repository`,
   `workspaceFolderPath`, top-level `languageUsage` (keyed by file extension, or by the whole
   basename for extensionless files), any unrecognized top-level field and the cache file path
   are omitted.
 - **`--include-sensitive`:** the cache file path (`cacheFile`), session file paths as entry
   keys, and full entries including `title`, `workspaceFolderPath` and `repository`. URL
   userinfo (`user:token@`) is stripped from `repository` even in this mode
-  (`stripUrlUserinfo`, line 245).
+  (`stripUrlUserinfo`, line 259).
 
 ## External programs run
 
@@ -78,7 +82,8 @@ None.
   also triggers on `src/types.ts` changes). It parses `SessionFileCache` and
   `SessionUsageAnalysis` from `src/types.ts` and fails when a field has not been classified
   as printed, filtered or omitted. It also checks that a fully populated entry prints exactly
-  the printed fields and none of the omitted sentinels. Separate tests cover the cache-source
+  the printed fields and none of the omitted sentinels, including sentinel keys inside the
+  tool, MCP and skill name-keyed maps. Separate tests cover the cache-source
   rules: which files are read and in what order, envelope unwrapping, temp/cwd files ignored,
   and symlinks refused (POSIX only).
 
@@ -86,8 +91,9 @@ None.
 
 - The classification test reads field names, not their contents. A field that is already
   classified as printed and later starts carrying free text or paths (for example a new
-  sub-field inside `toolCalls`) is not caught. Map keys such as MCP server, tool and skill
-  names are printed as-is.
+  map added to `modelEfficiency`) is not caught. Maps that stay in the default output are
+  keyed by model ids, effort levels and fixed reference-kind or category names, and those
+  keys are printed as-is.
 - With `--include-sensitive`, session titles (which can echo a prompt), first user prompts,
   correction snippets and local paths are printed unfiltered by design.
 - On Windows `O_NOFOLLOW` does not exist, so a symlink at a candidate path is followed to its

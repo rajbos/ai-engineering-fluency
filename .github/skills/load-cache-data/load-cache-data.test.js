@@ -315,14 +315,17 @@ const TOP_LEVEL_PRINTED = [
 // Omitted by default: session text, local paths, remote URLs, basename-keyed maps.
 const TOP_LEVEL_OMITTED = ['title', 'repository', 'workspaceFolderPath', 'languageUsage'];
 
-// usageAnalysis fields printed unchanged (counts and tool/model/server names).
+// usageAnalysis fields printed unchanged: counts, plus maps keyed only by model ids,
+// effort levels or fixed category names.
 const USAGE_ANALYSIS_PRINTED = [
-    'toolCalls', 'modeUsage', 'autonomyUsage', 'mcpTools', 'skillCalls', 'cacheBreakage',
+    'modeUsage', 'autonomyUsage', 'cacheBreakage',
     'taskClassification', 'modelSwitching', 'thinkingEffort', 'applyUsage', 'sessionDuration',
     'conversationPatterns', 'agentTypes', 'modelEfficiency', 'correctionCounts'
 ];
-// usageAnalysis fields printed with a path/text sub-field removed.
-const USAGE_ANALYSIS_FILTERED = ['contextReferences', 'editScope', 'correctionMoments'];
+// usageAnalysis fields printed with a path/text sub-field or session-name-keyed maps removed.
+const USAGE_ANALYSIS_FILTERED = [
+    'contextReferences', 'editScope', 'correctionMoments', 'toolCalls', 'mcpTools', 'skillCalls'
+];
 // usageAnalysis fields omitted entirely.
 const USAGE_ANALYSIS_OMITTED = ['firstUserPrompt'];
 
@@ -345,6 +348,24 @@ test('default output prints exactly the classified fields of a fully populated e
     entry.usageAnalysis.contextReferences = { file: 1, byPath: { 'ua-byPath-sentinel': 1 } };
     entry.usageAnalysis.editScope = { singleFileEdits: 1, languageUsage: { 'ua-editScope-languageUsage-sentinel': {} } };
     entry.usageAnalysis.correctionMoments = [{ type: 'user-correction', snippet: 'ua-snippet-sentinel', file: 'ua-file-sentinel' }];
+    const latency = { count: 1, sumMs: 5, buckets: [1] };
+    entry.usageAnalysis.toolCalls = {
+        total: 3,
+        byTool: { 'mcp_private-tool-sentinel_query': 3 },
+        outputTokensByTool: { 'output-tool-sentinel': 10 },
+        completedByTool: { 'completed-tool-sentinel': 2 },
+        failuresByTool: { 'failed-tool-sentinel': 1 },
+        latencyByTool: { 'latency-tool-sentinel': latency }
+    };
+    entry.usageAnalysis.mcpTools = {
+        total: 2,
+        byServer: { 'private-server-sentinel': 2 },
+        byTool: { 'private-mcp-tool-sentinel': 2 },
+        completedByServer: { 'completed-server-sentinel': 1 },
+        failuresByServer: { 'failed-server-sentinel': 1 },
+        latencyByServer: { 'latency-server-sentinel': latency }
+    };
+    entry.usageAnalysis.skillCalls = { total: 1, byName: { 'customer-skill-sentinel': 1 } };
     fs.writeFileSync(path.join(fixture.storage, 'cache_prod.snapshot.json'), JSON.stringify({
         schemaVersion: 1, cacheVersion: 1, cacheId: 'prod', generatedAt: 1, entryCount: 1,
         entries: { [path.join(fixture.home, 'session-path-sentinel.jsonl')]: entry }
@@ -361,12 +382,19 @@ test('default output prints exactly the classified fields of a fully populated e
     assert.deepEqual(printed.usageAnalysis.contextReferences, { file: 1 });
     assert.deepEqual(printed.usageAnalysis.editScope, { singleFileEdits: 1 });
     assert.deepEqual(printed.usageAnalysis.correctionMoments, [{ type: 'user-correction' }]);
+    assert.deepEqual(printed.usageAnalysis.toolCalls, { total: 3 });
+    assert.deepEqual(printed.usageAnalysis.mcpTools, { total: 2 });
+    assert.deepEqual(printed.usageAnalysis.skillCalls, { total: 1 });
 
     const leaked = [
         ...TOP_LEVEL_OMITTED.map(field => `top-${field}-sentinel`),
         ...USAGE_ANALYSIS_OMITTED.map(field => `ua-${field}-sentinel`),
         'ua-byPath-sentinel', 'ua-editScope-languageUsage-sentinel', 'ua-snippet-sentinel',
-        'ua-file-sentinel', 'session-path-sentinel', 'cache_prod.snapshot.json'
+        'ua-file-sentinel', 'session-path-sentinel', 'cache_prod.snapshot.json',
+        'private-tool-sentinel', 'output-tool-sentinel', 'completed-tool-sentinel',
+        'failed-tool-sentinel', 'latency-tool-sentinel', 'private-server-sentinel',
+        'private-mcp-tool-sentinel', 'completed-server-sentinel', 'failed-server-sentinel',
+        'latency-server-sentinel', 'customer-skill-sentinel'
     ].filter(sentinel => result.stdout.includes(sentinel));
     assert.deepEqual(leaked, []);
 });
