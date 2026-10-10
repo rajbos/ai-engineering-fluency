@@ -17,15 +17,16 @@
  * VS Code but not yet wired into the host), and which are ORPHAN (listed by
  * the host but no longer produced by VS Code).
  *
- * Neither host commits webview content to git any more (see
+ * No host commits webview content to git any more (see
  * docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md): Visual Studio's `webview/*.js`
  * and `*.json` are esbuild output copied fresh from `vscode-extension/dist/webview`
  * by the `.csproj`'s `CopyWebviewBundles` MSBuild target, exactly like
- * JetBrains' `prepareBundledAssets` Gradle task always did. There is
+ * JetBrains' `prepareBundledAssets` Gradle task always did and the desktop
+ * app's `copyStaticAssets` (desktop/esbuild.js) does. There is
  * therefore nothing left for this script to compare a committed copy
  * against, or to `--refresh` — this script only tracks view-LIST drift
  * (which named bundles each host's build config references), not bundle
- * CONTENT freshness, for both hosts equally.
+ * CONTENT freshness, for every host equally.
  *
  * Dependency-free. Node >= 16.
  *

@@ -10,14 +10,15 @@ Studio extension, the JetBrains plugin and the desktop app are thin hosts that
 load a **subset** of the same compiled webview bundles inside a WebView2 / JCEF /
 Electron browser.
 
-Neither host commits webview content to git any more (see
-`docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md`): both copy the bundles fresh from
+No host commits webview content to git any more (see
+`docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md`): all three copy the bundles fresh from
 `vscode-extension/dist/webview` at build time — Visual Studio via the
 `.csproj`'s `CopyWebviewBundles` MSBuild target, JetBrains via
-`prepareBundledAssets` in `build.gradle.kts`. So there is nothing left for this
+`prepareBundledAssets` in `build.gradle.kts`, the desktop app via
+`copyStaticAssets` in `desktop/esbuild.js`. So there is nothing left for this
 skill to refresh or flag as stale; it only tracks **view-LIST drift** — which
-named bundles each host's build config references — the same way for both
-hosts:
+named bundles each host's build config references — the same way for every
+host:
 
 - 🛑 **Never** silently add a new VS Code view to a host. New views are detected
   and **handed to the user to decide**.
@@ -44,22 +45,28 @@ Run the script (see below) for the current per-host view counts and coverage —
 this drifts every time a view is added or a host picks one up. Views a host
 doesn't ship are intentionally excluded, not missing.
 
-### Why nothing is committed for either host
+### Why nothing is committed for any host
 
-Neither host commits webview bundle content to git. Both copy the compiled
-bundles fresh from `vscode-extension/dist/webview` at their own build time:
+No host commits webview bundle content to git. Each copies the compiled
+bundles fresh from `vscode-extension/dist/webview` at its own build time:
 
 - **Visual Studio** does it via the `CopyWebviewBundles` MSBuild target in
   `AIEngineeringFluency.csproj` (`BeforeTargets="Build"`), and the CI/local build
   scripts (`visualstudio-build.yml`, `visualstudio-publish.yml`, `release.yml`,
   `build.ps1`) additionally do a wholesale directory copy before MSBuild runs.
 - **JetBrains** does it via `prepareBundledAssets` in `build.gradle.kts`.
+- **Desktop app** does it via `copyStaticAssets` in `desktop/esbuild.js`, which
+  copies each `WEBVIEW_BUNDLES` entry into `desktop/dist/webview`. On its own it
+  builds the extension bundles only when they are missing, so the CI and local
+  build paths (`desktop-build.yml`, `desktop-publish.yml`,
+  `build.ps1 -Project desktop`) rebuild them first — in production mode for
+  anything that is packaged.
 
 This used to differ — Visual Studio committed its copies to the repo as a
 "possibly stale" fallback, which drifted out of sync in practice (see
 `docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md`). That fallback has been removed:
-both hosts now work exactly like JetBrains always did, so there is nothing left
-for this skill to refresh or check for staleness — only the two hosts'
+every host now works exactly like JetBrains always did, so there is nothing left
+for this skill to refresh or check for staleness — only the hosts'
 **include lists** (which named views each ships) can still drift from the
 canonical VS Code set, and that's all this script tracks.
 
@@ -114,7 +121,7 @@ cd vscode-extension && npm run package
 2. **If exit 3 (NEW views):** do **NOT** add them automatically. Ask the user, one
    view at a time, whether each new VS Code screen should be added to Visual Studio
    and/or JetBrains. Example question: *"VS Code added a `logviewer` screen that
-   neither host ships. Add it to Visual Studio, JetBrains, both, or skip?"*
+   no host ships. Add it to Visual Studio, JetBrains, the desktop app, several, or skip?"*
    Only after the user opts in:
    - **Visual Studio:** add `<_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\<name>.js" />`
      to the `CopyWebviewBundles` target **and** a matching `<VSIXSourceItem>` entry

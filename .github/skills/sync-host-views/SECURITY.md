@@ -28,7 +28,7 @@ have `permissions: contents: read`.
 - The text of the five files above and the directory listing of `dist/webview`. In a
   local run this is the operator's own checkout. In `ci.yml` and `desktop-build.yml` it is
   the content of the pull request, including pull requests from forks.
-- The files are only matched with regexes (lines 88, 122, 139-155, 172-184). Nothing read from them
+- The files are only matched with regexes (lines 89, 123, 140-156, 173-185). Nothing read from them
   is evaluated, required or used to build a path.
 
 ## What it writes and where
@@ -41,14 +41,14 @@ None. The script does not use `child_process`.
 
 ## Mitigations in the code
 
-- Every value taken from the parsed files is captured with `[\w-]+` (lines 88, 122, 155, 176, 184),
+- Every value taken from the parsed files is captured with `[\w-]+` (lines 89, 123, 156, 177, 185),
   so the view names echoed into the report and the CI log contain only word characters and
   hyphens.
-- The paths it reads are fixed relative to the script's own location (lines 49-61); no
+- The paths it reads are fixed relative to the script's own location (lines 50-62); no
   argument or parsed value changes them.
 - `dist/webview` entries are used as names only; the bundles are never opened.
 - A missing or unreadable source file ends the run with exit code 2 and a message
-  (lines 72-78, 302-306).
+  (lines 73-79, 303-307).
 
 ## Known gaps
 
@@ -59,5 +59,5 @@ Recorded, not fixed here.
   and test the pull request's code with read-only permissions, so this adds no access
   beyond what those jobs have.
 - The regexes run over pull-request-controlled text with no size or time limit.
-- The `ConfigError` message includes the underlying `fs` error text (line 76), which is
+- The `ConfigError` message includes the underlying `fs` error text (line 77), which is
   printed to the log.

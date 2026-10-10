@@ -120,7 +120,9 @@ jobs:
 
       - name: Build extension webview bundles
         working-directory: vscode-extension
-        run: node esbuild.js
+        # Production (minified), as desktop-publish.yml does: build:production
+        # below copies these bundles into the app as they are.
+        run: node esbuild.js --production
 
       - name: Build desktop app
         working-directory: desktop
