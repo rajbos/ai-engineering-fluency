@@ -19,6 +19,7 @@ type UtcDateRanges,
 	preferActualTokens,
 	addSessionToDailyStats,
 	sortedDailyStats,
+	repositoryKey,
 	sessionLocFromUsageAnalysis,
 } from '../../../src/statsHelpers';
 import type { DailyTokenStats } from '../../../src/types';
@@ -1810,4 +1811,26 @@ test('addSessionToDailyStats lands LOC on the session\'s own last active day, no
 	});
 	assert.equal(map.get('2026-05-01')!.linesAdded, 9);
 	assert.equal(map.get('2026-05-03')!.linesAdded, undefined, 'a day this session had no share of must not get its LOC');
+});
+
+test('repositoryKey falls back to Unknown for a missing or unsafe repository name', () => {
+	assert.equal(repositoryKey(undefined), 'Unknown');
+	assert.equal(repositoryKey(''), 'Unknown');
+	for (const unsafe of ['__proto__', 'constructor', 'prototype']) {
+		assert.equal(repositoryKey(unsafe), 'Unknown', `${unsafe} must not become an object key`);
+	}
+	assert.equal(repositoryKey('https://github.com/o/r.git'), 'https://github.com/o/r.git');
+});
+
+test('addSessionToDailyStats records a __proto__ repository as Unknown without polluting Object.prototype', () => {
+	const map = new Map<string, DailyTokenStats>();
+	addSessionToDailyStats(map, {
+		editorType: 'VS Code', repository: '__proto__', tokens: 50, interactions: 1, modelUsage: {},
+		dailyFractions: { '2026-05-01': 1 }, linesAdded: 3, linesRemoved: 0,
+	});
+	const day = map.get('2026-05-01')!;
+	assert.equal(day.repositoryUsage.Unknown.tokens, 50);
+	assert.equal(day.repositoryUsage.Unknown.linesAdded, 3);
+	assert.equal(Object.prototype.hasOwnProperty.call(day.repositoryUsage, '__proto__'), false);
+	assert.equal(({} as Record<string, unknown>).tokens, undefined, 'Object.prototype must not gain a tokens field');
 });

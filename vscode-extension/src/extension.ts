@@ -358,7 +358,7 @@ import { countDelegationToolCalls } from '../../src/taskClassification';
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
-import { preferActualTokens, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
+import { preferActualTokens, repositoryKey, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -6719,7 +6719,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const { sessionFile, sessionData, mtime } = r;
 				try {
 					const editorType = this.getEditorTypeFromPath(sessionFile);
-					const repository = sessionData.repository || 'Unknown';
+					const repository = repositoryKey(sessionData.repository);
 					if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
 						this.accumulateDailyRollups(dailyStatsMap, sessionData, editorType, repository, cutoffStartKey);
 					} else {

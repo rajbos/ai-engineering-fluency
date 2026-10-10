@@ -353,6 +353,16 @@ export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): 
 	}
 }
 
+/**
+ * The `repositoryUsage` key for a session's repository: "Unknown" when there is none, and also
+ * when the name is an unsafe object key. Repository names come from session metadata and
+ * workspace folder names, so `__proto__` would otherwise index Object.prototype and pollute
+ * every plain object in the process — see protoGuard.ts. Every daily-stats path uses this.
+ */
+export function repositoryKey(repository: string | undefined | null): string {
+	return repository && !isUnsafeObjectKey(repository) ? repository : 'Unknown';
+}
+
 function updateLocUsage(usage: { linesAdded?: number; linesRemoved?: number }, linesAdded: number, linesRemoved: number): void {
 	usage.linesAdded = (usage.linesAdded ?? 0) + linesAdded;
 	usage.linesRemoved = (usage.linesRemoved ?? 0) + linesRemoved;
@@ -552,7 +562,7 @@ function _apsProcessRollupDay(dayKey: string, dr: DailyRollupEntry, ranges: UtcD
 
 function _apsProcessRollupSession(sessionInput: SessionAggregateInput, ranges: UtcDateRanges, accs: ApsRollupAccs): { addedToLast30Days: boolean; addedToLastMonth: boolean } {
 	const { editorType, sessionData } = sessionInput;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const flags: ApsSessionFlags = { last30Days: false, month: false, lastMonth: false, today: false };
 	for (const [dayKey, dr] of Object.entries(sessionData.dailyRollups!)) {
 		_apsProcessRollupDay(dayKey, dr, ranges, accs, editorType, repository, flags);
@@ -609,7 +619,7 @@ function _apsProcessFallbackPeriods(lastActivityUtcKey: string, ranges: UtcDateR
 
 function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges: UtcDateRanges, accs: ApsRollupAccs): boolean {
 	const { editorType, sessionData, mtime, lastInteraction } = sessionInput;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const lastActivity = lastInteraction ? new Date(lastInteraction) : new Date(mtime);
 	const lastActivityUtcKey = toLocalDayKey(lastActivity);
 	const inLast30Days = lastActivityUtcKey >= ranges.last30DaysUtcStartKey;
@@ -837,7 +847,7 @@ export function activeSessionDays(dailyFractions: Record<string, number>): Array
 }
 
 export function addSessionToDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, session: DailyStatsSessionContribution): void {
-	const repository = session.repository || 'Unknown';
+	const repository = repositoryKey(session.repository);
 	const activeDays = activeSessionDays(session.dailyFractions);
 	// Same per-day interaction split as the extension's fraction-based rollups
 	// (computeRollupsFromFractions in vscode-extension/src/analysis/sessionFileAnalyzer.ts).
@@ -944,7 +954,7 @@ function bumpSubAgentSessions(sessionData: SessionFileCache, acc: PeriodAccumula
 
 function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData } = input;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
 	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
 		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository, sessionData.taskCategory);
@@ -966,7 +976,7 @@ function subAgentFlagsForFallback(lastActivityUtcKey: string, dates: UtcDateRang
 
 function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData, mtime, lastInteraction } = input;
-	const repository = sessionData.repository || 'Unknown';
+	const repository = repositoryKey(sessionData.repository);
 	const estimatedTokens = sessionData.tokens;
 	const actualTokens = sessionData.actualTokens || 0;
 	const tokens = actualTokens > 0 ? actualTokens : estimatedTokens;
