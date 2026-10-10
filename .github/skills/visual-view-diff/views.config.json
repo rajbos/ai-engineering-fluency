@@ -114,7 +114,7 @@
             { "click": ".tab-button[data-tab=\"tools\"]" },
             { "click": "#builtin-tools-details > summary" }
           ],
-          "expect": "#data-table-root-builtin"
+          "expect": "#builtin-tools-details[open] #data-table-root-builtin"
         },
         {
           "id": "tools-skill-suggestions-expanded",
@@ -124,7 +124,7 @@
             { "click": ".tab-button[data-tab=\"tools\"]" },
             { "click": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details > summary" }
           ],
-          "expect": "#data-table-root-skill-sessions-0"
+          "expect": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details[open] #data-table-root-skill-sessions-0"
         },
         {
           "id": "health",

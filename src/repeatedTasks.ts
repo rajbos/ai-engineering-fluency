@@ -318,13 +318,24 @@ function quoteForChat(text: string): string {
 	return JSON.stringify(text.replace(/\s+/g, ' ').trim()).replace(/`/g, "'");
 }
 
-/** Short kebab-case skill name suggestion derived from the shared keywords. */
-function suggestSkillName(cluster: Pick<RepeatedTaskCluster, 'sharedKeywords'>): string {
+/** Agent Skills spec: a skill `name` (and its folder) is at most 64 characters. */
+export const MAX_SKILL_NAME_LENGTH = 64;
+
+/**
+ * Short kebab-case skill name suggestion derived from the shared keywords,
+ * valid per the Agent Skills naming rules: lowercase letters, digits and
+ * single hyphens, at most MAX_SKILL_NAME_LENGTH characters, and no leading or
+ * trailing hyphen. A keyword can be as long as the prompt itself, so the name
+ * is truncated, and a hyphen left at the cut is dropped.
+ */
+export function suggestSkillName(cluster: Pick<RepeatedTaskCluster, 'sharedKeywords'>): string {
 	const name = cluster.sharedKeywords
 		.map(k => k.toLowerCase().replace(/[^a-z0-9]/g, ''))
 		.filter(Boolean)
 		.slice(0, 3)
-		.join('-');
+		.join('-')
+		.slice(0, MAX_SKILL_NAME_LENGTH)
+		.replace(/-+$/, '');
 	return name || 'repeated-task';
 }
 

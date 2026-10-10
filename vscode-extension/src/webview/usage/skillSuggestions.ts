@@ -11,7 +11,7 @@
  * `buildSkillCreationPrompt()` in `src/repeatedTasks.ts`.
  */
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml } from '../shared/formatUtils';
+import { escapeHtml, formatAbsoluteDate } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 import { buildSkillCreationPrompt, resolveSkillTarget } from '../../../../src/repeatedTasks';
 import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../../src/types';
@@ -112,7 +112,7 @@ function sessionTimestamp(session: RepeatedTaskSessionRef): number | null {
 
 function sessionDateLabel(session: RepeatedTaskSessionRef): string {
 	const time = sessionTimestamp(session);
-	return time === null ? '' : new Date(time).toLocaleDateString();
+	return time === null ? '' : formatAbsoluteDate(time);
 }
 
 // Built per render: the localized labels are only available after the host's dictionary loads.
