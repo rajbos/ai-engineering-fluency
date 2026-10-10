@@ -422,12 +422,13 @@ async function runScenario(page, view, scenario) {
 
 async function smokeView({ browser, view, defaults, handledCommands, isolate }) {
   // Registry paths are contained the same way render-views.js contains them:
-  // no absolute paths, `../` or symlinks out of the dist or fixtures directory.
+  // no absolute paths, `../` or symlinks out of the dist or fixtures directory,
+  // and no link between the repo root and either of those directories.
   let bundlePath;
   let fixturePath;
   try {
-    bundlePath = resolveInside(DIST_DIR, `${view.bundle}.js`, 'bundle');
-    fixturePath = resolveInside(path.join(SKILL_DIR, 'fixtures'), view.fixture, 'fixture');
+    bundlePath = resolveInside(DIST_DIR, `${view.bundle}.js`, 'bundle', REPO_ROOT);
+    fixturePath = resolveInside(path.join(SKILL_DIR, 'fixtures'), view.fixture, 'fixture', REPO_ROOT);
   } catch (error) {
     return { view: view.id, status: 'error', error: String(error && error.message || error), controls: [], findings: [] };
   }

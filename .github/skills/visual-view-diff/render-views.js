@@ -47,6 +47,7 @@ const {
 	REPO_ROOT,
 	buildPageHtml,
 	loadFixture,
+	anchorFor,
 	resolveInside,
 } = require('./lib/harness');
 const { blockNetwork, loadChromium } = require('./lib/browser');
@@ -99,7 +100,9 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 	const id = state ? `${view.id}--${state.id}` : view.id;
 	let bundlePath;
 	try {
-		bundlePath = resolveInside(distDir, `${view.bundle}.js`, 'bundle');
+		// The checkout being rendered (the baseline worktree or the working
+		// tree) is the trusted anchor; nothing below it may be a link.
+		bundlePath = resolveInside(distDir, `${view.bundle}.js`, 'bundle', anchorFor(distDir, [repoRoot, REPO_ROOT]));
 	} catch (error) {
 		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: String(error && error.message || error) };
 	}
@@ -119,7 +122,8 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 	// commit's fixture even when the current tree renamed or deleted it.
 	let fixturePath;
 	try {
-		fixturePath = resolveInside(view.fixtureDir || path.join(__dirname, 'fixtures'), view.fixture, 'fixture');
+		const fixtureDir = view.fixtureDir || path.join(__dirname, 'fixtures');
+		fixturePath = resolveInside(fixtureDir, view.fixture, 'fixture', anchorFor(fixtureDir, [repoRoot, REPO_ROOT]));
 	} catch (error) {
 		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: String(error && error.message || error) };
 	}

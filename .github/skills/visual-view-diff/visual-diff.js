@@ -51,7 +51,8 @@ function run(command, args, cwd, env) {
  * Environment variables the bundle build may see. `esbuild.js` and the
  * dependency tree it loads belong to the code under review (both the base
  * commit and the working tree), so it gets only what Node and esbuild need to
- * run — never the caller's tokens. Matched case-insensitively for Windows.
+ * run — never the caller's tokens. Names are matched exactly, except on
+ * Windows, where environment variable names are case-insensitive (`Path`).
  */
 const BUILD_ENV_ALLOWLIST = new Set([
 	'PATH', 'PATHEXT', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC',
@@ -59,9 +60,10 @@ const BUILD_ENV_ALLOWLIST = new Set([
 	'LANG', 'LC_ALL', 'TZ', 'CI', 'ESBUILD_BINARY_PATH',
 ]);
 
-function buildEnv(source = process.env) {
+function buildEnv(source = process.env, platform = process.platform) {
+	const key = platform === 'win32' ? (name) => name.toUpperCase() : (name) => name;
 	return Object.fromEntries(Object.entries(source)
-		.filter(([name, value]) => value !== undefined && BUILD_ENV_ALLOWLIST.has(name.toUpperCase())));
+		.filter(([name, value]) => value !== undefined && BUILD_ENV_ALLOWLIST.has(key(name))));
 }
 
 /**

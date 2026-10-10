@@ -83,7 +83,7 @@ interface HarnessLib {
 	pathToFileUrl(file: string): string;
 	buildPageHtml(args: { globalName: string; fixture: unknown; theme: string; bundlePath: string; repoRoot: string }): string;
 	loadFixture(fixturePath: string, repoRoot: string): unknown;
-	resolveInside(root: string, relativePath: unknown, label: string): string;
+	resolveInside(root: string, relativePath: unknown, label: string, anchor?: string): string;
 }
 
 function requireSkill<T>(relative: string): T {
@@ -194,8 +194,8 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 
 			// Contained like the other harnesses: a registry entry cannot load a
 			// bundle or fixture from outside the dist and fixtures directories.
-			const bundlePath = harness.resolveInside(harness.WEBVIEW_DIST, `${view.bundle}.js`, `bundle for ${view.id}`);
-			const fixturePath = harness.resolveInside(path.join(SKILL_DIR, 'fixtures'), view.fixture, `fixture for ${view.id}`);
+			const bundlePath = harness.resolveInside(harness.WEBVIEW_DIST, `${view.bundle}.js`, `bundle for ${view.id}`, harness.REPO_ROOT);
+			const fixturePath = harness.resolveInside(path.join(SKILL_DIR, 'fixtures'), view.fixture, `fixture for ${view.id}`, harness.REPO_ROOT);
 			const stateDefinition = target.state
 				? (view.states ?? []).find((candidate) => candidate.id === target.state) ?? implicitState(target.state)
 				: null;

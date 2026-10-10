@@ -26,7 +26,8 @@ classification" in the repository `AGENTS.md`).
 
 None are read or sent by the scripts. The bundle build (`node esbuild.js` in both
 checkouts) runs with a minimal environment allowlist (`BUILD_ENV_ALLOWLIST` in
-visual-diff.js: path, system, home/temp, locale, `CI` and `ESBUILD_BINARY_PATH`), so
+visual-diff.js: path, system, home/temp, locale, `CI` and `ESBUILD_BINARY_PATH`; names
+match exactly, case-insensitively only on Windows), so
 tokens in the operator's shell are not visible to the build scripts under review.
 `render-views.js` and `diff-screenshots.js` are the skill's own code and inherit the
 caller's environment; the bundles they load run in Chromium, which has no access to it.
@@ -109,7 +110,13 @@ render processes run concurrently; each is awaited before the worktree is remove
   `loadFixture`). The registry value is passed as is, so a relative path that stays
   inside its root (for example `sub/../x.json`) is accepted. Absolute paths, paths that
   leave the root lexically (`../`), the root itself, and existing paths whose real path
-  (symlinks resolved) is outside the root are refused.
+  (symlinks resolved) is outside the root are refused. The root is not trusted on its
+  own either: each caller passes the checkout it belongs to as an anchor (the repo root,
+  or the baseline worktree for baseline renders; `anchorFor` in `lib/harness.js`), and a
+  root with a symlink anywhere between that anchor and itself (a committed `fixtures/`
+  or `dist/` link, say) is refused. The anchor is the only directory trusted as given;
+  a `--dist` or `--config` fixture directory outside both checkouts is the operator's
+  choice and is its own anchor.
 - `fixtureDir` (the fixtures directory for a view) is dropped by `readConfig` when it
   reads the skill's own `views.config.json`, so a committed registry cannot choose it.
   It is kept only for a registry passed explicitly with `--config`, which is how

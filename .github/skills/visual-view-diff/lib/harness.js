@@ -47,27 +47,64 @@ const JSON_CONFIG_GLOBALS = {
  * an entry pull any readable file on disk into that screenshot, so the resolved
  * path must stay under the root it was given.
  *
+ * The root itself comes from the tree under review too (`fixtures/` or
+ * `dist/` can be committed as a symlink to `/`), so it is only trusted as far
+ * as `anchor`, the checkout it belongs to: every directory from the anchor
+ * down to the root must be a real directory, not a link. The anchor itself —
+ * a checkout root the harness was pointed at — is trusted as given.
+ *
  * @param {string} root
  * @param {string} relativePath
  * @param {string} label  what the path is, for the error message
+ * @param {string} [anchor]  trusted directory containing `root` (default: `root`)
  */
-function resolveInside(root, relativePath, label) {
+function resolveInside(root, relativePath, label, anchor = root) {
 	if (typeof relativePath !== 'string' || relativePath === '' || path.isAbsolute(relativePath)) {
 		throw new Error(`${label} must be a relative path, got ${JSON.stringify(relativePath)}`);
 	}
 	const base = path.resolve(root);
+	const trusted = path.resolve(anchor);
 	const resolved = path.resolve(base, relativePath);
 	const outside = (from, to) => {
 		const rel = path.relative(from, to);
-		return rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+		return rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
 	};
+	if (outside(trusted, base)) {
+		throw new Error(`${label} root ${base} is not inside ${trusted}`);
+	}
+	if (fs.existsSync(base) && !samePath(fs.realpathSync(base), path.join(fs.realpathSync(trusted), path.relative(trusted, base)))) {
+		throw new Error(`${label} root ${base} goes through a symbolic link below ${trusted}`);
+	}
 	// The lexical check catches `../` and absolute paths; the real-path check
-	// catches a committed symlink that points out of the root.
-	if (outside(base, resolved)
+	// catches a committed symlink inside the root that points out of it.
+	if (path.relative(base, resolved) === '' || outside(base, resolved)
 		|| (fs.existsSync(resolved) && outside(fs.realpathSync(base), fs.realpathSync(resolved)))) {
 		throw new Error(`${label} ${JSON.stringify(relativePath)} resolves outside ${base}`);
 	}
 	return resolved;
+}
+
+/** Path equality, ignoring case where the file system does (Windows). */
+function samePath(a, b) {
+	return process.platform === 'win32'
+		? path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase()
+		: path.normalize(a) === path.normalize(b);
+}
+
+/**
+ * The checkout a harness directory belongs to: the first of `anchors` that
+ * contains it. A directory outside every checkout was chosen by the operator
+ * (`--dist`, `--config`) and is its own anchor.
+ */
+function anchorFor(dir, anchors) {
+	const target = path.resolve(dir);
+	for (const anchor of anchors) {
+		const rel = path.relative(path.resolve(anchor), target);
+		if (rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))) {
+			return anchor;
+		}
+	}
+	return target;
 }
 
 /**
@@ -214,6 +251,7 @@ module.exports = {
 	WEBVIEW_DIST,
 	buildPageHtml,
 	loadFixture,
+	anchorFor,
 	pathToFileUrl,
 	resolveInside,
 	toScriptJson,

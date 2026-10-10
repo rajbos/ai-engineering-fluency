@@ -24,13 +24,14 @@ function findRepoRoot(): string {
 const SKILL_DIR = path.join(findRepoRoot(), '.github', 'skills', 'visual-view-diff');
 
 const harness = requireFromHere(path.join(SKILL_DIR, 'lib', 'harness.js')) as {
-	resolveInside: (root: string, relativePath: unknown, label: string) => string;
+	resolveInside: (root: string, relativePath: unknown, label: string, anchor?: string) => string;
+	anchorFor: (dir: string, anchors: string[]) => string;
 	loadFixture: (fixturePath: string, repoRoot: string) => unknown;
 	buildPageHtml: (options: { globalName: string; fixture: unknown; theme: string; bundlePath: string; repoRoot: string }) => string;
 };
 
 const visualDiff = requireFromHere(path.join(SKILL_DIR, 'visual-diff.js')) as {
-	buildEnv: (source: Record<string, string | undefined>) => Record<string, string>;
+	buildEnv: (source: Record<string, string | undefined>, platform?: string) => Record<string, string>;
 	prepareOutRoot: (outRoot: string, defaultOutRoot: string) => void;
 	requireOptionValues: (args: Record<string, string | boolean>) => Record<string, string | boolean>;
 	resolveBaseRef: (requested?: unknown) => { ref: string; sha: string };
@@ -138,7 +139,7 @@ test('loadFixture resolves $fromRepoJson inside the repo and refuses to embed fi
 });
 
 test('the bundle build sees an allowlisted environment, never the caller\'s tokens', () => {
-	const env = visualDiff.buildEnv({
+	const source = {
 		PATH: '/bin',
 		Path: 'C:\\bin',
 		SystemRoot: 'C:\\Windows',
@@ -148,8 +149,15 @@ test('the bundle build sees an allowlisted environment, never the caller\'s toke
 		NODE_OPTIONS: '--require /evil.js',
 		AZURE_STORAGE_KEY: 'k',
 		UNSET: undefined,
-	});
-	assert.deepEqual(Object.keys(env).sort(), ['HOME', 'PATH', 'Path', 'SystemRoot']);
+		home: '/elsewhere',
+	};
+	// Windows environment names are case-insensitive, so `Path` and `SystemRoot`
+	// are the allowlisted variables there.
+	assert.deepEqual(Object.keys(visualDiff.buildEnv(source, 'win32')).sort(), ['HOME', 'PATH', 'Path', 'SystemRoot', 'home']);
+	// Elsewhere case variants are distinct variables and are not forwarded.
+	for (const platform of ['linux', 'darwin']) {
+		assert.deepEqual(Object.keys(visualDiff.buildEnv(source, platform)).sort(), ['HOME', 'PATH'], platform);
+	}
 });
 
 test('--base refuses a value git would read as an option', () => {
@@ -384,4 +392,62 @@ test('blockNetwork closes every WebSocket', async () => {
 test('blockNetwork fails closed when Playwright cannot route WebSockets', async () => {
 	const { page } = fakeContext(false);
 	await assert.rejects(browserLib.blockNetwork(page), /cannot block WebSockets/);
+});
+
+test('resolveInside refuses a containment root that is itself a symlink out of its checkout', (t) => {
+	const { root, parent } = fakeRepo();
+	try {
+		const fixtures = path.join(root, 'fixtures');
+		try {
+			// The reviewed tree replaces `fixtures/` with a link to the directory holding the secret.
+			fs.symlinkSync(parent, fixtures, 'junction');
+		} catch {
+			t.skip('symlinks are not permitted on this machine');
+			return;
+		}
+		assert.throws(() => harness.resolveInside(fixtures, 'secret.json', 'fixture', root), /goes through a symbolic link/);
+		// Without the anchor the link's target becomes the root, which is exactly the hole.
+		assert.equal(harness.resolveInside(fixtures, 'secret.json', 'fixture'), path.join(fixtures, 'secret.json'), 'documents why callers must pass the anchor');
+	} finally {
+		fs.rmSync(parent, { recursive: true, force: true });
+	}
+});
+
+test('resolveInside refuses a containment root reached through a symlinked parent', (t) => {
+	const { root, parent } = fakeRepo();
+	const elsewhere = tempDir();
+	try {
+		fs.mkdirSync(path.join(elsewhere, 'fixtures'));
+		fs.writeFileSync(path.join(elsewhere, 'fixtures', 'x.json'), '{}');
+		try {
+			fs.symlinkSync(elsewhere, path.join(root, 'skill'), 'junction');
+		} catch {
+			t.skip('symlinks are not permitted on this machine');
+			return;
+		}
+		assert.throws(() => harness.resolveInside(path.join(root, 'skill', 'fixtures'), 'x.json', 'fixture', root), /goes through a symbolic link/);
+	} finally {
+		fs.rmSync(parent, { recursive: true, force: true });
+		fs.rmSync(elsewhere, { recursive: true, force: true });
+	}
+});
+
+test('resolveInside accepts a real root under its anchor and refuses one outside it', () => {
+	const { root, parent } = fakeRepo();
+	try {
+		assert.equal(harness.resolveInside(path.join(root, 'src'), 'data.json', 'fixture', root), path.join(root, 'src', 'data.json'));
+		assert.throws(() => harness.resolveInside(parent, 'secret.json', 'fixture', root), /is not inside/);
+	} finally {
+		fs.rmSync(parent, { recursive: true, force: true });
+	}
+});
+
+test('anchorFor picks the checkout a directory belongs to', () => {
+	const repo = path.resolve('/r');
+	const worktree = path.join(repo, 'visual-output', '.baseline-worktree');
+	assert.equal(harness.anchorFor(path.join(worktree, 'fixtures'), [worktree, repo]), worktree, 'the baseline worktree, not the repo it sits in');
+	assert.equal(harness.anchorFor(path.join(repo, 'fixtures'), [worktree, repo]), repo);
+	assert.equal(harness.anchorFor(repo, [worktree, repo]), repo);
+	assert.equal(harness.anchorFor(path.resolve('/other/dist'), [worktree, repo]), path.resolve('/other/dist'), 'an operator-chosen directory is its own anchor');
+	assert.equal(harness.anchorFor(path.resolve('/r..x/dist'), [repo]), path.resolve('/r..x/dist'), 'a sibling whose name starts with the anchor is not inside it');
 });
