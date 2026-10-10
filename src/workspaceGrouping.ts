@@ -411,7 +411,7 @@ class NodeList {
 		const existing = this.indexByPath.get(node.path);
 		if (existing === undefined) {
 			this.nodes.push(node);
-			this.repoIds.push(repoId);
+			this.repoIds.push(node.conflictingRemotes ? undefined : repoId);
 			this.indexByPath.set(node.path, this.nodes.length - 1);
 			return this.nodes.length - 1;
 		}
@@ -420,6 +420,11 @@ class NodeList {
 		n.interactionCount += node.interactionCount;
 		n.isInput = n.isInput || node.isInput;
 		n.isCheckoutAnchor = n.isCheckoutAnchor || node.isCheckoutAnchor;
+		if (node.conflictingRemotes) {
+			// An observation that already disagreed with itself makes the whole folder conflicting.
+			n.conflictingRemotes = true;
+			this.repoIds[existing] = undefined;
+		}
 		this.mergeRepoId(existing, repoId);
 		return existing;
 	}
@@ -446,6 +451,11 @@ function inputNode(
 ): { node: Node; repoId?: string } {
 	const remote = isRemotePath(entry.path, probes.platform);
 	const git = !remote && pathExists(entry.path) ? probes.readGitInfo?.(entry.path) : undefined;
+	// The session's recorded remote and the folder's current `.git/config` are two observations
+	// of the same folder: when they disagree (the folder was reused), neither identity is kept.
+	const sessionId = repositoryIdentity(entry.repository);
+	const gitId = repositoryIdentity(git?.remote);
+	const conflictingRemotes = sessionId !== undefined && gitId !== undefined && sessionId !== gitId;
 	return {
 		node: {
 			path: entry.path,
@@ -457,8 +467,9 @@ function inputNode(
 			// Layout rules need no disk access, so they also apply to WSL / remote paths; only the
 			// existence checks are skipped there, since the local probes cannot see that filesystem.
 			convention: matchWorktreeConvention(entry.path, remote ? undefined : pathExists, isWorkspace),
+			...(conflictingRemotes ? { conflictingRemotes } : {}),
 		},
-		repoId: repositoryIdentity(entry.repository) ?? repositoryIdentity(git?.remote),
+		repoId: conflictingRemotes ? undefined : sessionId ?? gitId,
 	};
 }
 

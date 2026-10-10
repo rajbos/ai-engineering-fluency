@@ -364,6 +364,28 @@ test('a conflicted path is not merged by name even when only one same-named repo
 	}
 });
 
+test('a session remote that disagrees with the folder\'s current .git remote makes the folder conflicting', () => {
+	const reused = 'C:\\reused\\tools';
+	const p = probes('win32', [reused], { [reused]: { remote: 'https://github.com/other/two' } });
+	const acme = entry('D:\\acme\\tools', 1, 1, 'https://github.com/acme/one');
+	for (const order of permutations([entry(reused, 2, 2, 'https://github.com/acme/one'), acme])) {
+		const groups = groupWorkspaces(order, p);
+		const group = groups.find(g => g.canonicalPath === reused)!;
+		assert.deepEqual(group.memberPaths, [reused], 'not merged with acme/one by name');
+		assert.equal(group.repositoryId, undefined);
+	}
+	// The flag survives folding duplicate paths, whichever observation comes first.
+	for (const order of permutations([entry(reused, 1, 1, 'https://github.com/acme/one'), entry(reused, 1, 1), acme])) {
+		const group = groupWorkspaces(order, p).find(g => g.canonicalPath === reused)!;
+		assert.deepEqual(group.memberPaths, [reused]);
+		assert.equal(group.sessionCount, 2);
+	}
+	// Agreeing observations are one identity, not a conflict.
+	const agree = probes('win32', [reused], { [reused]: { remote: 'git@github.com:acme/one.git' } });
+	const [joined] = groupWorkspaces([entry(reused, 1, 1, 'acme/one'), acme], agree);
+	assert.equal(joined.memberPaths.length, 2);
+});
+
 test('a worktree whose remote differs from its existing main checkout is not merged into it', () => {
 	const main = 'C:\\code\\gadget';
 	const wt = 'C:\\wt\\feature';
