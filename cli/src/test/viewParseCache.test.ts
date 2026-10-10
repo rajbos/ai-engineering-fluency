@@ -16,12 +16,12 @@ import * as path from 'path';
 import { calculateDailyStats, calculateEfficiencySessionInputs, calculateViewStats, processSessionFileForViews } from '../helpers';
 import { getCached } from '../cliCache';
 
-type MockOptions = { changeDuringAnalysis?: boolean; failAnalysisRead?: boolean };
+type MockOptions = { changeDuringAnalysis?: boolean; failAnalysisRead?: boolean; content?: string };
 
 function mockSession(t: TestContext, id: string, changeDuringAnalysis: boolean | MockOptions): { filePath: string; mtimes: number[]; reads: () => number } {
 	const opts: MockOptions = typeof changeDuringAnalysis === 'boolean' ? { changeDuringAnalysis } : changeDuringAnalysis;
 	const filePath = path.join(__dirname, 'workspaceStorage', 'synthetic', 'chatSessions', `${id}.json`);
-	const content = JSON.stringify({ requests: [{
+	const content = opts.content ?? JSON.stringify({ requests: [{
 		requestId: 'r1', timestamp: Date.now(), modelId: 'copilot/gpt-4o',
 		message: { text: 'Write a test', parts: [{ text: 'Write a test' }] },
 		response: [], result: { promptTokens: 100, outputTokens: 20 },
@@ -84,4 +84,15 @@ test('calculateViewStats walks the files once and matches the single-purpose col
 	assert.deepEqual(viewStats.efficiencySessionInputs, await calculateEfficiencySessionInputs([filePath]));
 	assert.equal(reads(), 2, 'the collectors reuse the cached enriched parse');
 	assert.equal(viewStats.efficiencySessionInputs.length, 1);
+});
+
+test('a non-fatal analysis warning does not discard the enriched view parse', async t => {
+	// analyzeSessionUsage() also uses deps.warn for notices that leave a valid analysis (here an
+	// unexpected session format). Only its dedicated onAnalysisError signal marks a failure.
+	const { filePath, mtimes } = mockSession(t, '66666666-6666-4666-8666-666666666666', { content: JSON.stringify({ requests: 'not-an-array' }) });
+	const data = await processSessionFileForViews(filePath);
+	assert.ok(data);
+	assert.equal(data.viewAttributesResolved, true, 'a warning alone must not be treated as a failed analysis');
+	const size = (await fs.promises.stat(filePath)).size;
+	assert.equal(getCached(filePath, mtimes[0], size)?.viewAttributesResolved, true);
 });

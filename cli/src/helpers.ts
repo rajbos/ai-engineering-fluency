@@ -317,15 +317,16 @@ export async function readDebugLogTokensForSession(sessionFilePath: string, verb
  * efficiency signals), derived through the same shared helpers the extension's session analyzer uses.
  *
  * Returns `null` when the analysis failed. analyzeSessionUsage() swallows read, parser and
- * adapter errors and returns an empty analysis, reporting them only through `deps.warn` — so a
- * warning is the failure signal here. An empty result from a failed read must not be marked
- * resolved and cached, or the session would show no task/LOC/efficiency data until it changes.
+ * adapter errors and returns an empty analysis, signalling them through `deps.onAnalysisError`.
+ * An empty result from a failed read must not be marked resolved and cached, or the session
+ * would show no task/LOC/efficiency data until it changes. Plain `deps.warn` notices (a
+ * sub-step that failed, an unexpected format) leave a valid analysis and are not failures.
  */
 async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData, 'taskCategory' | 'taskCategoryShares' | 'linesAdded' | 'linesRemoved' | 'languageUsage' | 'usageAnalysis'> | null> {
 	let failed = false;
 	try {
 		const analysis = await analyzeSessionUsage(
-			{ warn: (msg: string) => { failed = true; warn(msg); }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
+			{ warn, onAnalysisError: () => { failed = true; }, tokenEstimators, modelPricing, toolNameMap, ecosystems: getEcosystems() },
 			filePath,
 		);
 		if (failed) { return null; }
