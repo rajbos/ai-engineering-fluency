@@ -132,7 +132,7 @@ If you find yourself adding a fallback like "if modelUsage is empty, call X" in 
 
 When running as the GitHub Copilot Coding Agent (bootstrapped via `.github/workflows/copilot-setup-steps.yml`), additional data files may be available in the workspace root. They are fetched during the agent's setup phase (the first two from Azure Storage, the third from the GitHub API) and are **not** present in local development.
 
-- **`./session-logs/`**: Raw Copilot Chat session log files (last 7 days) from Azure Blob Storage.
+- **`./session-logs/`**: Raw session log files from every uploading editor (last 7 days) from Azure Blob Storage, as both `.json` and `.jsonl` (mostly `.jsonl`); `.editor-types.json` maps each file to its editor.
 - **`./usage-data/usage-agg-daily.json`**: Aggregated daily token usage data (last 30 days) from Azure Table Storage.
 - **`./usage-data/agent-sessions.json`**: Copilot cloud-agent session statistics for this repository, fetched from the **GitHub API** (not Azure Storage) by `scripts/fetch-agent-sessions.js` using the workflow's `GITHUB_TOKEN`; it is therefore present even when `COPILOT_STORAGE_ACCOUNT` is not configured.
 

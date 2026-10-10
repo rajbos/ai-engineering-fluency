@@ -272,103 +272,150 @@ jobs:
           AZURE_STORAGE_ACCOUNT: ${{ vars.COPILOT_STORAGE_ACCOUNT }}
           AZURE_STORAGE_CONTAINER: ${{ vars.COPILOT_STORAGE_CONTAINER || 'copilot-session-logs' }}
           AZURE_DATASET_ID: ${{ vars.COPILOT_DATASET_ID || 'default' }}
+          # `az storage` reads AZURE_STORAGE_KEY from the environment under
+          # `--auth-mode key`, so the key never appears on a command line.
+          AZURE_STORAGE_KEY: ${{ secrets.COPILOT_STORAGE_KEY }}
         run: |
           echo "📦 Downloading session logs from Azure Blob Storage..."
           
           # Create directory for session logs
           mkdir -p ./session-logs
           
-          # Calculate date range (last 7 days)
+          # Calculate date range: the last 7 UTC calendar dates including today
+          # (today and the 6 before it - an inclusive range starting 7 days ago
+          # would cover 8 dates)
           # Use GNU date if available, otherwise BSD date (macOS)
           if date --version >/dev/null 2>&1; then
             # GNU date (Linux)
             END_DATE=$(date -u +%Y-%m-%d)
-            START_DATE=$(date -u -d '7 days ago' +%Y-%m-%d)
+            START_DATE=$(date -u -d '6 days ago' +%Y-%m-%d)
           else
             # BSD date (macOS)
             END_DATE=$(date -u +%Y-%m-%d)
-            START_DATE=$(date -u -v-7d +%Y-%m-%d)
+            START_DATE=$(date -u -v-6d +%Y-%m-%d)
           fi
           
           echo "Date range: $START_DATE to $END_DATE"
           
           # Check if Azure CLI is available
           if ! command -v az &> /dev/null; then
-            echo "⚠️ Azure CLI not installed, skipping session log download"
+            echo "::warning::Azure CLI not installed - skipping session log download, ./session-logs will be empty"
             exit 0
           fi
-          
-          # Check if authenticated (will be true if using Entra ID via azure/login action)
-          if ! az account show &> /dev/null; then
-            echo "⚠️ Not authenticated with Azure, skipping session log download"
-            echo "💡 To enable: configure Azure authentication in the copilot environment"
+
+          # Authenticate with the storage account key (the same secret the Table
+          # Storage step uses), falling back to an Entra ID login only if an
+          # earlier step ran azure/login - nothing in this job does today.
+          # Skips are workflow warnings, not plain echoes: a quiet skip here let
+          # every agent run go green with zero session logs for months.
+          if [ -n "$AZURE_STORAGE_KEY" ]; then
+            AUTH_MODE=key
+          elif az account show &> /dev/null; then
+            AUTH_MODE=login
+          else
+            echo "::warning::No COPILOT_STORAGE_KEY secret and no Azure login - skipping session log download, ./session-logs will be empty"
             exit 0
           fi
-          
-          # Download blobs from the dataset path
-          echo "Downloading from container: $AZURE_STORAGE_CONTAINER, dataset: $AZURE_DATASET_ID"
-          
-          # Download all blobs matching the dataset path pattern
-          # This downloads: {dataset}/{machine-id}/{date}/session-*.json.gz
-          az storage blob download-batch \
+          echo "Using --auth-mode $AUTH_MODE"
+
+          echo "Listing blobs in container: $AZURE_STORAGE_CONTAINER, dataset: $AZURE_DATASET_ID"
+
+          # Blob layout: {dataset}/{machine-id}/{date}/{session}.{json,jsonl}[.gz]
+          # (newer uploads are .jsonl; `.gz` is omitted when the uploader's
+          # blobCompressFiles setting is off, so both forms are accepted).
+          # List once (with metadata, for the editor-type manifest) so only the
+          # date folders inside the window are downloaded, not the whole history.
+          if ! az storage blob list \
             --account-name "$AZURE_STORAGE_ACCOUNT" \
-            --source "$AZURE_STORAGE_CONTAINER" \
-            --destination ./session-logs \
-            --pattern "${AZURE_DATASET_ID}/*/*/*.json.gz" \
-            --auth-mode login \
-            --no-progress || {
-              echo "⚠️ Failed to download session logs, continuing without them"
-              exit 0
+            --container-name "$AZURE_STORAGE_CONTAINER" \
+            --prefix "${AZURE_DATASET_ID}/" \
+            --include m \
+            --num-results '*' \
+            --auth-mode "$AUTH_MODE" \
+            --only-show-errors \
+            --output json > "$RUNNER_TEMP/session-blobs.json"; then
+            echo "::warning::Failed to list session log blobs in $AZURE_STORAGE_ACCOUNT/$AZURE_STORAGE_CONTAINER - continuing without them"
+            exit 0
+          fi
+
+          # Writes the dates that have blobs in the window, and the editor-type
+          # manifest: download-batch does not preserve blob metadata, so map each
+          # decompressed local path to the editor that uploaded it.
+          DATES=$(START_DATE="$START_DATE" END_DATE="$END_DATE" node -e "
+            const fs = require('fs');
+            const blobs = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/session-blobs.json', 'utf8'));
+            const { START_DATE, END_DATE } = process.env;
+            const selected = blobs.filter(b => {
+              const parts = b.name.split('/');
+              return parts.length === 4 && /\.jsonl?(\.gz)?$/.test(b.name) && parts[2] >= START_DATE && parts[2] <= END_DATE;
+            });
+            const manifest = {};
+            for (const b of selected) {
+              if (b.metadata?.editorType) manifest[b.name.replace(/\.gz$/, '')] = b.metadata.editorType;
             }
-          
-          # Count downloaded files
-          FILE_COUNT=$(find ./session-logs -name "*.json.gz" | wc -l)
-          echo "✅ Downloaded $FILE_COUNT session log files"
-          
-          # Decompress all files
-          if [ "$FILE_COUNT" -gt 0 ]; then
-            echo "📂 Decompressing session logs..."
-            find ./session-logs -name "*.gz" -exec gunzip {} \;
-            echo "✅ Session logs ready in ./session-logs"
-          fi
-          
-          # Build editor-type manifest from blob metadata
-          # The upload stores editorType as blob metadata; download-batch does not
-          # preserve it, so we fetch it separately and write a JSON manifest that
-          # maps each session file's relative path to its source editor.
-          if [ "$FILE_COUNT" -gt 0 ]; then
-            echo "🏷️ Building editor-type manifest from blob metadata..."
-            az storage blob list \
+            fs.writeFileSync('./session-logs/.editor-types.json', JSON.stringify(manifest, null, 2));
+            console.error('Found ' + blobs.length + ' blobs for dataset, ' + selected.length + ' in date range, ' + Object.keys(manifest).length + ' with editorType');
+            console.log([...new Set(selected.map(b => b.name.split('/')[2]))].sort().join(' '));
+          ") || {
+            echo "::warning::Failed to parse the session log blob listing - continuing without session logs"
+            exit 0
+          }
+
+          for DAY in $DATES; do
+            az storage blob download-batch \
               --account-name "$AZURE_STORAGE_ACCOUNT" \
-              --container-name "$AZURE_STORAGE_CONTAINER" \
-              --prefix "${AZURE_DATASET_ID}/" \
-              --include metadata \
-              --auth-mode login \
-              --output json 2>/dev/null | \
-              node -e "
-                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-                const manifest = {};
-                for (const blob of data) {
-                  const editorType = blob.metadata?.editorType;
-                  if (!editorType) continue;
-                  // Strip .gz to match the decompressed local path
-                  const localPath = blob.name.replace(/\\.gz$/, '');
-                  manifest[localPath] = editorType;
-                }
-                require('fs').writeFileSync('./session-logs/.editor-types.json', JSON.stringify(manifest, null, 2));
-                const count = Object.keys(manifest).length;
-                console.log(count > 0
-                  ? '✅ Editor-type manifest written: ' + count + ' entries'
-                  : '⚠️ No editorType metadata found on blobs (older uploads predate this feature)');
-              " || echo "⚠️ Failed to build editor-type manifest, continuing without it"
+              --source "$AZURE_STORAGE_CONTAINER" \
+              --destination ./session-logs \
+              --pattern "${AZURE_DATASET_ID}/*/${DAY}/*.json*" \
+              --auth-mode "$AUTH_MODE" \
+              --no-progress --only-show-errors > /dev/null || \
+              echo "::warning::Failed to download session logs for $DAY, continuing"
+          done
+
+          # Count downloaded files, compressed or not
+          FILE_COUNT=$(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)
+          echo "✅ Downloaded $FILE_COUNT session log files"
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "::warning::No session logs downloaded for dataset '$AZURE_DATASET_ID' between $START_DATE and $END_DATE - check COPILOT_DATASET_ID and the download warnings above"
           fi
+
+          # Decompress the gzipped files. `find -exec ... \;` exits 0 even when
+          # gunzip fails, so check what is left: a .gz still on disk afterwards
+          # failed to decompress. Remove it rather than hand an agent a corrupt
+          # archive; its manifest entry is pruned below.
+          GZ_COUNT=$(find ./session-logs -name "*.gz" | wc -l)
+          if [ "$GZ_COUNT" -gt 0 ]; then
+            echo "📂 Decompressing $GZ_COUNT gzipped session logs..."
+            find ./session-logs -name "*.gz" -exec gunzip {} \; 2>&1 || true
+            FAILED_GZ=$(find ./session-logs -name "*.gz" | wc -l)
+            if [ "$FAILED_GZ" -gt 0 ]; then
+              echo "::warning::$FAILED_GZ of $GZ_COUNT session logs failed to decompress and were removed"
+              find ./session-logs -name "*.gz" -delete
+            fi
+          fi
+          READY_COUNT=$(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)
+          echo "✅ $READY_COUNT session logs ready in ./session-logs"
+
+          # The manifest was built from the listing, before downloading. Drop
+          # entries whose (decompressed) file is not on disk (a failed day, a
+          # partial batch, a file gunzip rejected) so it only describes files
+          # an agent can actually open.
+          node -e "
+            const fs = require('fs');
+            const file = './session-logs/.editor-types.json';
+            const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const kept = Object.fromEntries(Object.entries(manifest).filter(([p]) => fs.existsSync('./session-logs/' + p)));
+            fs.writeFileSync(file, JSON.stringify(kept, null, 2));
+            const dropped = Object.keys(manifest).length - Object.keys(kept).length;
+            if (dropped > 0) console.log('::warning::Dropped ' + dropped + ' editor-type manifest entries for files that were not downloaded');
+          " || echo "::warning::Failed to reconcile the editor-type manifest with the downloaded files"
 
       - name: Display session log summary
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}
         run: |
           if [ -d ./session-logs ]; then
             echo "📊 Session log summary:"
-            echo "Total files: $(find ./session-logs -name "*.json" ! -name ".editor-types.json" | wc -l)"
+            echo "Total files: $(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)"
             if [ -f ./session-logs/.editor-types.json ]; then
               echo "Editor types: $(node -e "const m=require('./session-logs/.editor-types.json'); const counts={}; for(const v of Object.values(m)) counts[v]=(counts[v]||0)+1; console.log(Object.entries(counts).map(([k,v])=>k+': '+v).join(', '))")"
             fi
@@ -401,7 +448,9 @@ jobs:
 
           # Calculate date range
           END_DATE=$(date -u +%Y-%m-%d)
-          START_DATE=$(date -u -d "${AZURE_TABLE_DATA_DAYS} days ago" +%Y-%m-%d)
+          # N calendar dates including today, so start N-1 days back (starting N
+          # days back would fetch N+1 dates).
+          START_DATE=$(date -u -d "$((AZURE_TABLE_DATA_DAYS - 1)) days ago" +%Y-%m-%d)
           echo "Date range: $START_DATE to $END_DATE"
 
           # Build command arguments
@@ -410,13 +459,13 @@ jobs:
           ARGS+=(--datasetId "$AZURE_DATASET_ID")
           ARGS+=(--startDate "$START_DATE")
           ARGS+=(--endDate "$END_DATE")
+          # --output keeps the per-row dataset (user, machine and workspace
+          # identifiers) out of the Actions log; only counts go to stderr.
           ARGS+=(--output ./usage-data/usage-agg-daily.json)
 
-          # Use shared key if available, otherwise rely on Entra ID (DefaultAzureCredential)
-          if [ -n "$AZURE_STORAGE_KEY" ]; then
-            ARGS+=(--sharedKey "$AZURE_STORAGE_KEY")
-          fi
-
+          # The loader reads the shared key from AZURE_STORAGE_KEY (set in env
+          # above) so it never appears on the command line. When it is empty the
+          # loader falls back to Entra ID (DefaultAzureCredential).
           node .github/skills/azure-storage-loader/load-table-data.js "${ARGS[@]}" || {
             echo "⚠️ Failed to download aggregated usage data, continuing without it"
             exit 0
