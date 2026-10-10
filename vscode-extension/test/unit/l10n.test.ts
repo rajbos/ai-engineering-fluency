@@ -59,26 +59,64 @@ test('l10n: missing-instructions insight is tool-neutral in English and zh-cn', 
 });
 
 test('l10n: paged curation table controls resolve in English and zh-cn', () => {
-	assert.equal(t('usage.pagedTable.previous'), 'Previous');
-	assert.equal(t('usage.pagedTable.next'), 'Next');
-	assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), 'Page 2 of 3 · Showing 11–20 of 25');
-	assert.equal(t('usage.pagedTable.showing', 1, 10, 10), 'Showing 1–10 of 10');
-	assert.equal(t('usage.pagedTable.sortBy', 'Server'), 'Sort by Server');
-	assert.equal(t('usage.pagedTable.sortedAscending'), 'Sorted ascending');
-	assert.equal(t('usage.pagedTable.sortedDescending'), 'Sorted descending');
-	assert.equal(t('usage.pagedTable.announcement.sort', 'Server', 'Sorted ascending'), 'Server: Sorted ascending');
-	assert.equal(t('usage.pagedTable.noRows'), 'No rows to display.');
+	assert.equal(t('dataTable.previous'), 'Previous');
+	assert.equal(t('dataTable.next'), 'Next');
+	assert.equal(t('dataTable.page', 2, 3, 11, 20, 25), 'Page 2 of 3 · Showing 11–20 of 25');
+	assert.equal(t('dataTable.showing', 1, 10, 10), 'Showing 1–10 of 10');
+	assert.equal(t('dataTable.sortBy', 'Server'), 'Sort by Server');
+	assert.equal(t('dataTable.sortedAscending'), 'Sorted ascending');
+	assert.equal(t('dataTable.sortedDescending'), 'Sorted descending');
+	assert.equal(t('dataTable.announcement.sort', 'Server', 'Sorted ascending'), 'Server: Sorted ascending');
+	assert.equal(t('dataTable.noRows'), 'No rows to display.');
 	mock.setLanguage('zh-cn');
 	try {
-		assert.equal(t('usage.pagedTable.previous'), '上一页');
-		assert.equal(t('usage.pagedTable.next'), '下一页');
-		assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
-		assert.equal(t('usage.pagedTable.showing', 1, 10, 10), '显示 1–10 条，共 10 条');
-		assert.equal(t('usage.pagedTable.sortBy', 'Server'), '按Server排序');
-		assert.equal(t('usage.pagedTable.sortedAscending'), '当前按升序排列');
-		assert.equal(t('usage.pagedTable.sortedDescending'), '当前按降序排列');
-		assert.equal(t('usage.pagedTable.announcement.sort', '服务器', '当前按升序排列'), '服务器：当前按升序排列');
-		assert.equal(t('usage.pagedTable.noRows'), '没有可显示的行。');
+		assert.equal(t('dataTable.previous'), '上一页');
+		assert.equal(t('dataTable.next'), '下一页');
+		assert.equal(t('dataTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
+		assert.equal(t('dataTable.showing', 1, 10, 10), '显示 1–10 条，共 10 条');
+		assert.equal(t('dataTable.sortBy', 'Server'), '按Server排序');
+		assert.equal(t('dataTable.sortedAscending'), '当前按升序排列');
+		assert.equal(t('dataTable.sortedDescending'), '当前按降序排列');
+		assert.equal(t('dataTable.announcement.sort', '服务器', '当前按升序排列'), '服务器：当前按升序排列');
+		assert.equal(t('dataTable.noRows'), '没有可显示的行。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: customization files table controls resolve in English and zh-cn', () => {
+	const translations: Array<[string, string, string]> = [
+		['usage.customization.column.workspace', '📂 Workspace', '📂 工作区'],
+		['usage.customization.column.sessions', 'Sessions', '会话'],
+		['usage.customization.column.interactions', 'Interactions', '交互'],
+		['usage.customization.aria.table', 'Copilot customization files by workspace', '按工作区列出的 Copilot 自定义文件'],
+		['usage.customization.filter.noCustomizationOnly', 'Only workspaces without customization files', '仅显示没有自定义文件的工作区'],
+		['usage.customization.status.fresh', "Present and fresh", "存在且最新"],
+		['usage.customization.status.stale', "Present but stale", "存在但已过时"],
+		['usage.customization.status.missing', "Missing", "缺失"],
+		['usage.customization.status.unknown', "Status unknown", "状态未知"],
+		['usage.customization.status.error', "Error", "错误"],
+		['usage.customization.badge.noCustomization', "No customization files", "没有自定义文件"],
+		['usage.customization.legend.fresh', "= Present & Fresh", "= 存在且最新"],
+		['usage.customization.legend.stale', "= Present but Stale", "= 存在但已过时"],
+		['usage.customization.legend.missing', "= Missing", "= 缺失"],
+		['usage.customization.title', "Copilot Customization Files", "Copilot 自定义文件"],
+		['usage.customization.emptySubtitle', "Showing workspace customization status for active workspaces", "显示活跃工作区的自定义状态"],
+		['usage.customization.empty', "No workspaces with customization files detected in the last 30 days.", "过去 30 天内未检测到包含自定义文件的工作区。"],
+		['usage.customization.summary.allGood', "All workspaces have up-to-date customizations.", "所有工作区的自定义文件均为最新。"],
+	];
+	for (const [key, english] of translations) {
+		assert.equal(t(key), english);
+	}
+	assert.equal(t('usage.customization.summary', 26), 'Showing 26 workspace(s) with Copilot activity in the last 30 days.');
+	assert.equal(t('usage.customization.summary.issues', 6), '6 workspace(s) have no customization files.');
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, , chinese] of translations) {
+			assert.equal(t(key), chinese);
+		}
+		assert.equal(t('usage.customization.summary', 26), '显示过去 30 天内有 Copilot 活动的 26 个工作区。');
+		assert.equal(t('usage.customization.summary.issues', 6), '6 个工作区没有自定义文件。');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -1757,6 +1795,26 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 	assert.equal(t('whatsNew.release.0.19.1.headline'), 'The Tools & Integrations tab now shows how reliable and how slow each tool is, which MCP servers fail, and a cost-vs-speed map of your built-in, subagent and skill tools.');
 	assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), 'Tool reliability, latency and MCP health');
 	assert.ok(t('whatsNew.feature.usage.tool-execution-stats.description').includes('cost-vs-speed map'));
+	assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), 'View index');
+	assert.equal(t('whatsNew.logviewerHint'), 'Open a session from this list to see it in the Session Log Viewer.');
+	assert.equal(t('viewIndex.navigationFailed', 'boom'), 'Could not open that view: boom');
+	assert.ok(t('whatsNew.feature.whatsnew.view-index.description').startsWith('A searchable map of every view, tab and section'));
+	assert.equal(t('whatsNew.footer', '0.19.1'), 'Running version 0.19.1. The full changelog, including fixes, ships with the extension.');
+	assert.equal(t('viewIndex.summary', '97', '10'), '97 entries across 10 views');
+	assert.equal(t('viewIndex.matchMany', '3'), '3 matches');
+	assert.equal(t('viewIndex.noMatchStatus', 'xyz'), 'Nothing matches “xyz”. Try fewer or shorter words.');
+	assert.equal(t('viewIndex.searchPlaceholder'), 'Search views, tabs and sections…');
+	assert.equal(t('viewIndex.searchLabel'), 'Search the view index');
+	assert.equal(t('viewIndex.treeLabel'), 'View index');
+	assert.equal(t('viewIndex.expand', 'Usage'), 'Expand Usage');
+	assert.equal(t('viewIndex.collapse', 'Usage'), 'Collapse Usage');
+	assert.equal(t('viewIndex.open', 'Usage › Tools'), 'Open Usage › Tools');
+	assert.equal(t('viewIndex.matchOne'), '1 match');
+	assert.equal(t('viewIndex.noMatch'), 'No matching views, tabs or sections.');
+	assert.ok(t('viewIndex.intro').startsWith('Every view you can open, with its tabs and sections.'));
+	assert.equal(t('whatsNew.tabs.label'), "What's New sections");
+	assert.equal(t('whatsNew.tab.releases'), '📣 Releases');
+	assert.equal(t('whatsNew.tab.index'), '🧭 View index');
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View：成功 30 次，失败 10 次');
@@ -1764,6 +1822,26 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		assert.equal(t('usage.toolExec.col.completed'), '已完成调用');
 		assert.equal(t('usage.toolExec.empty.latency'), '暂无工具延迟数据。该数据来自 Copilot CLI、JetBrains、Claude Code 和 Claude Desktop 会话。');
 		assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), '工具可靠性、延迟与 MCP 健康度');
+		assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), '视图索引');
+		assert.equal(t('whatsNew.logviewerHint'), '从此列表中打开一个会话，即可在会话日志查看器中查看。');
+		assert.equal(t('viewIndex.navigationFailed', 'boom'), '无法打开该视图：boom');
+		assert.ok(t('whatsNew.feature.whatsnew.view-index.description').startsWith('“新增功能”中的一个新标签页'));
+		assert.equal(t('viewIndex.summary', '97', '10'), '10 个视图中共 97 个条目');
+		assert.equal(t('viewIndex.matchMany', '3'), '3 个匹配项');
+		assert.equal(t('whatsNew.tab.index'), '🧭 视图索引');
+		assert.equal(t('whatsNew.tab.releases'), '📣 版本');
+		assert.equal(t('whatsNew.tabs.label'), '新增功能分区');
+		assert.equal(t('whatsNew.footer', '0.19.1'), '当前运行版本 0.19.1。包含修复内容的完整更新日志随扩展一起提供。');
+		assert.equal(t('viewIndex.searchPlaceholder'), '搜索视图、标签页和部分…');
+		assert.equal(t('viewIndex.searchLabel'), '搜索视图索引');
+		assert.equal(t('viewIndex.treeLabel'), '视图索引');
+		assert.equal(t('viewIndex.expand', 'X'), '展开 X');
+		assert.equal(t('viewIndex.collapse', 'X'), '折叠 X');
+		assert.equal(t('viewIndex.open', 'X'), '打开 X');
+		assert.equal(t('viewIndex.matchOne'), '1 个匹配项');
+		assert.equal(t('viewIndex.noMatchStatus', 'xyz'), '没有与“xyz”匹配的内容。请尝试更少或更短的词。');
+		assert.equal(t('viewIndex.noMatch'), '没有匹配的视图、标签页或部分。');
+		assert.ok(t('viewIndex.intro').startsWith('你可以打开的每个视图及其标签页和部分。'));
 		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
 	} finally {
 		mock.setLanguage('en');

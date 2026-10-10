@@ -4,7 +4,10 @@
  * Renders the repeated-task clusters as a paged list of cards. Each card has a
  * "Create skill with Copilot" action that drafts (never submits) a Copilot Chat
  * prompt, a "Copy prompt" action, and a paged sessions table whose rows open
- * the session viewer. The prompt itself is built by the shared, pure
+ * the session viewer. The card list and the sessions tables are shared data
+ * tables (`../shared/dataTable`), which own paging, sorting, focus and
+ * announcements; this module only wires the card buttons. The prompt itself
+ * is built by the shared, pure
  * `buildSkillCreationPrompt()` in `src/repeatedTasks.ts`.
  */
 import { setHtml } from '../shared/domUtils';
@@ -13,18 +16,13 @@ import { localize, localizeFormat } from '../shared/localization';
 import { buildSkillCreationPrompt, resolveSkillTarget } from '../../../../src/repeatedTasks';
 import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../../src/types';
 import {
-	getPagedTablePage,
-	getPagedTableAnnouncement,
-	getPagedTableFocusTarget,
-	getPagedTableState,
-	renderPagedTable,
-	renderPagedTablePager,
-	restorePagedTableFocus,
-	setPagedTablePage,
-	setPagedTableSort,
-	type PagedTableColumn,
-	type PagedTablePage,
-} from './pagedTable';
+	getDataTablePage,
+	getDataTableState,
+	renderDataTable,
+	setDataTableState,
+	type DataTableColumn,
+	type DataTablePage,
+} from '../shared/dataTable';
 
 export type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef };
 
@@ -82,56 +80,50 @@ export function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null 
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
-/** The page of suggestions to show; clamps a stale page after the list shrinks. */
-const SESSIONS_INITIAL_SORT = { column: 'date', direction: 'desc' } as const;
+const SESSIONS_INITIAL_SORT = { columnId: 'date', direction: 'desc' } as const;
 
-// setPagedTablePage() only updates state that already exists, so these setters
-// create it first: a page change must not depend on a render having happened.
+// setDataTableState() applies before or after the first render (and keeps a
+// table's initialSort), so these work without depending on a prior render.
 
 /** Move the suggestion list to a page (clamped on the next render). */
 export function setSkillSuggestionsPage(page: number): void {
-	getPagedTableState(SKILL_SUGGESTIONS_LIST_ID, '', 'asc');
-	setPagedTablePage(SKILL_SUGGESTIONS_LIST_ID, page);
-}
-
-function ensureSessionsTableState(tableId: string): void {
-	getPagedTableState(tableId, SESSIONS_INITIAL_SORT.column, SESSIONS_INITIAL_SORT.direction);
+	setDataTableState(SKILL_SUGGESTIONS_LIST_ID, { page: Math.max(1, Math.floor(page)) });
 }
 
 /** Move one suggestion's sessions table to a page (clamped on the next render). */
 export function setSkillSessionsPage(clusterIndex: number, page: number): void {
-	const tableId = sessionsTableId(clusterIndex);
-	ensureSessionsTableState(tableId);
-	setPagedTablePage(tableId, page);
+	setDataTableState(sessionsTableId(clusterIndex), { page: Math.max(1, Math.floor(page)) });
 }
 
-export function getSkillSuggestionsPage(clusters: readonly RepeatedTaskCluster[]): PagedTablePage<RepeatedTaskCluster> {
-	const state = getPagedTableState(SKILL_SUGGESTIONS_LIST_ID, '', 'asc');
-	const page = getPagedTablePage(clusters, [], state, undefined, SKILL_SUGGESTIONS_PAGE_SIZE);
-	if (page.page !== state.page) { setPagedTablePage(SKILL_SUGGESTIONS_LIST_ID, page.page); }
-	return page;
+/** The page of suggestions the list would show for the current state. */
+export function getSkillSuggestionsPage(clusters: readonly RepeatedTaskCluster[]): DataTablePage<RepeatedTaskCluster> {
+	const state = getDataTableState(SKILL_SUGGESTIONS_LIST_ID);
+	return getDataTablePage(clusters, [], state, { pageSize: SKILL_SUGGESTIONS_PAGE_SIZE });
 }
 
 function sessionTitle(session: RepeatedTaskSessionRef): string {
 	return session.title || session.file.split(/[\\/]/).pop() || session.file;
 }
 
+function sessionTimestamp(session: RepeatedTaskSessionRef): number | null {
+	const time = session.lastInteraction ? Date.parse(session.lastInteraction) : NaN;
+	return Number.isNaN(time) ? null : time;
+}
+
 function sessionDateLabel(session: RepeatedTaskSessionRef): string {
-	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
-	return date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const time = sessionTimestamp(session);
+	return time === null ? '' : new Date(time).toLocaleDateString();
 }
 
 // Built per render: the localized labels are only available after the host's dictionary loads.
-function sessionColumns(): PagedTableColumn<RepeatedTaskSessionRef>[] {
+function sessionColumns(): DataTableColumn<RepeatedTaskSessionRef>[] {
 	return [
-		{ id: 'session', label: localize('usage.skillSuggestions.column.session'), sortValue: sessionTitle, render: sessionTitle },
-		{ id: 'date', label: localize('usage.skillSuggestions.column.date'), sortValue: s => s.lastInteraction ?? null, render: sessionDateLabel },
+		{ id: 'session', label: localize('usage.skillSuggestions.column.session'), className: 'data-table-wrap-anywhere', sortValue: sessionTitle, render: sessionTitle },
+		{ id: 'date', label: localize('usage.skillSuggestions.column.date'), sortValue: sessionTimestamp, firstSortDirection: 'desc', render: sessionDateLabel },
 		{ id: 'repository', label: localize('usage.skillSuggestions.column.repository'), sortValue: s => s.repository ?? null, render: s => s.repository ?? '' },
 		{
 			id: 'actions',
 			label: localize('usage.skillSuggestions.column.actions'),
-			sortable: false,
-			sortValue: () => null,
 			render: s => ({
 				html: `<button type="button" class="skill-suggestion-open-session" data-file="${escapeHtml(s.file)}" title="${escapeHtml(localize('usage.skillSuggestions.openSessionTooltip'))}" style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid var(--border-color); background:var(--button-secondary-bg); color:var(--button-secondary-fg); cursor:pointer;">${escapeHtml(localize('usage.skillSuggestions.openSession'))}</button>`,
 			}),
@@ -139,16 +131,15 @@ function sessionColumns(): PagedTableColumn<RepeatedTaskSessionRef>[] {
 	];
 }
 
-/** Paged sessions table (title, date, repository, open button) for one suggestion. */
+/** Paged, sortable sessions table (title, date, repository, open button) for one suggestion. */
 export function renderSkillSessionsTable(cluster: RepeatedTaskCluster, clusterIndex: number): string {
-	return renderPagedTable({
+	return renderDataTable({
 		tableId: sessionsTableId(clusterIndex),
 		ariaLabel: localize('usage.skillSuggestions.sessionsTableLabel'),
 		rows: cluster.sessions,
 		columns: sessionColumns(),
-		initialSortColumn: SESSIONS_INITIAL_SORT.column,
-		initialSortDirection: SESSIONS_INITIAL_SORT.direction,
-		emptyMessage: localize('usage.pagedTable.noRows'),
+		initialSort: SESSIONS_INITIAL_SORT,
+		className: 'data-table--compact',
 	});
 }
 
@@ -164,7 +155,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 		? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map(k => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k)}</span>`).join('')}</div>`
 		: '';
 	return `
-		<div class="skill-suggestion-card" data-cluster-index="${clusterIndex}" style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
+		<div class="skill-suggestion-card" data-cluster-index="${clusterIndex}" style="padding:4px 2px;">
 			<div style="display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap;">
 				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${escapeHtml(localizeFormat('usage.skillSuggestions.repeated', cluster.sessionCount))}</span>
 				<div style="flex:1; min-width:200px; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;"><q>${escapeHtml(cluster.representativePrompt)}</q></div>
@@ -172,7 +163,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 					<button type="button" class="skill-suggestion-create" data-cluster-index="${clusterIndex}" title="${escapeHtml(localize('usage.skillSuggestions.createSkillTooltip'))}"
 						style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid var(--vscode-focusBorder); background:var(--vscode-button-secondaryBackground); color:var(--text-primary); cursor:pointer;">${escapeHtml(localize('usage.skillSuggestions.createSkill'))}</button>
 					<button type="button" class="skill-suggestion-copy" data-cluster-index="${clusterIndex}" title="${escapeHtml(localize('usage.skillSuggestions.copyPromptTooltip'))}"
-						style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid transparent; background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">${escapeHtml(localize('usage.skillSuggestions.copyPrompt'))}</button>
+						style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid transparent; background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer;">${escapeHtml(localize('usage.skillSuggestions.copyPrompt'))}</button>
 				</div>
 			</div>
 			${keywords}
@@ -185,27 +176,38 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 		</div>`;
 }
 
-/** Inner HTML of the section: title, subtitle, current page of cards, pager. */
+/**
+ * The suggestion list: a one-column, headerless data table of cards, five per
+ * page; the pager is left out entirely when everything fits on one page. Rows
+ * keep the report's order (largest first), so a row's index is its cluster index.
+ */
+function renderSuggestionList(report: RepeatedTaskReport): string {
+	return renderDataTable({
+		tableId: SKILL_SUGGESTIONS_LIST_ID,
+		ariaLabel: localize('usage.skillSuggestions.pagerLabel'),
+		rows: report.clusters,
+		columns: [{ id: 'suggestion', label: localize('usage.skillSuggestions.pagerLabel'), render: (cluster, index) => ({ html: buildClusterCardHtml(cluster, index) }) }],
+		showHeader: false,
+		pageSize: report.clusters.length > SKILL_SUGGESTIONS_PAGE_SIZE ? SKILL_SUGGESTIONS_PAGE_SIZE : false,
+		rootClassName: 'skill-suggestions-list',
+	});
+}
+
+/** Inner HTML of the section: title, subtitle and the paged card list. */
 export function buildSkillSuggestionsBodyHtml(report: RepeatedTaskReport): string {
-	const page = getSkillSuggestionsPage(report.clusters);
-	const firstIndex = page.firstRow - 1;
-	const pager = page.pageCount > 1
-		? renderPagedTablePager(SKILL_SUGGESTIONS_LIST_ID, localize('usage.skillSuggestions.pagerLabel'), page, SKILL_SUGGESTIONS_PAGE_SIZE)
-		: '';
 	return `
 		<div class="section-title"><span>🧩</span><span>${escapeHtml(localizeFormat('usage.skillSuggestions.title', report.clusters.length))}</span></div>
 		<div class="section-subtitle">${escapeHtml(localizeFormat('usage.skillSuggestions.subtitle', report.sessionsScanned))}</div>
-		${page.rows.map((cluster, i) => buildClusterCardHtml(cluster, firstIndex + i)).join('')}
-		${pager}`;
+		${renderSuggestionList(report)}`;
 }
 
 /** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
 export function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
 	if (!report || report.clusters.length === 0) { return ''; }
-	// The status region sits outside the body so it survives page re-renders and can announce them.
+	// Announces copy feedback; paging and sorting are announced by each data table's own region.
 	return `<div class="section" id="${SKILL_SUGGESTIONS_SECTION_ID}">
-		<span class="paged-table-status skill-suggestions-status" role="status" aria-live="polite" aria-atomic="true"></span>
-		<div class="skill-suggestions-body">${buildSkillSuggestionsBodyHtml(report)}</div>
+		<span class="data-table-status skill-suggestions-status" role="status" aria-live="polite" aria-atomic="true"></span>
+		${buildSkillSuggestionsBodyHtml(report)}
 	</div>`;
 }
 
@@ -260,13 +262,6 @@ function announce(section: HTMLElement, text: string): void {
 	if (status) { status.textContent = text; }
 }
 
-/** The "Page X of Y · Showing …" text of one list's or table's pager. */
-function pagerStatusText(root: HTMLElement, tableId: string): string {
-	const button = Array.from(root.querySelectorAll<HTMLElement>('[data-paged-direction]'))
-		.find(b => b.getAttribute('data-paged-table') === tableId);
-	return button?.closest('.paged-table-pager')?.querySelector('span')?.textContent?.trim() ?? '';
-}
-
 function copyWithFeedback(section: HTMLElement, button: HTMLButtonElement, text: string): void {
 	// Guarded and wrapped: a missing clipboard API, or a writeText that throws
 	// synchronously, would otherwise escape the promise .catch() below.
@@ -298,75 +293,7 @@ function showOpenRepoNotice(section: HTMLElement, button: Element, action: Extra
 		</div>`);
 }
 
-function rerenderSection(section: HTMLElement, wiring: SkillSuggestionsWiring, focus?: { tableId: string; direction: string }): void {
-	const report = wiring.getReport();
-	if (!report) { return; }
-	const body = section.querySelector<HTMLElement>('.skill-suggestions-body');
-	if (!body) { return; }
-	setHtml(body, buildSkillSuggestionsBodyHtml(report));
-	if (focus) {
-		focusPagerButton(body, focus.tableId, focus.direction);
-		announce(section, pagerStatusText(body, focus.tableId));
-	}
-}
-
-/** Re-render one sessions table after a page or sort change, keeping focus and announcing it. */
-function rerenderSessionsTable(section: HTMLElement, wiring: SkillSuggestionsWiring, tableId: string, sorted: boolean): void {
-	const index = Number(tableId.slice(SESSIONS_TABLE_PREFIX.length));
-	const cluster = wiring.getReport()?.clusters[index];
-	const root = section.querySelector<HTMLElement>(`#paged-table-root-${tableId}`);
-	if (!cluster || !root) { return; }
-	const focusTarget = getPagedTableFocusTarget(root, document.activeElement);
-	const staging = document.createElement('div');
-	setHtml(staging, renderSkillSessionsTable(cluster, index));
-	const replacement = staging.firstElementChild;
-	if (replacement instanceof HTMLElement) {
-		root.replaceWith(replacement);
-		restorePagedTableFocus(replacement, focusTarget);
-		announce(section, getPagedTableAnnouncement(replacement, sorted));
-	}
-}
-
-/** Keep keyboard focus on the pager after a re-render (falls back to the other, enabled button). */
-function focusPagerButton(root: HTMLElement, tableId: string, direction: string): void {
-	const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-paged-direction]'))
-		.filter(b => b.getAttribute('data-paged-table') === tableId && !b.disabled);
-	(buttons.find(b => b.getAttribute('data-paged-direction') === direction) ?? buttons[0])?.focus();
-}
-
-function handlePagerClick(section: HTMLElement, wiring: SkillSuggestionsWiring, target: Element): boolean {
-	const button = target.closest<HTMLButtonElement>('[data-paged-page]');
-	if (!button) { return false; }
-	const tableId = button.getAttribute('data-paged-table') ?? '';
-	const page = Number(button.getAttribute('data-paged-page'));
-	const direction = button.getAttribute('data-paged-direction') ?? 'next';
-	if (!Number.isFinite(page)) { return true; }
-	if (tableId === SKILL_SUGGESTIONS_LIST_ID) {
-		setSkillSuggestionsPage(page);
-		rerenderSection(section, wiring, { tableId, direction });
-	} else if (tableId.startsWith(SESSIONS_TABLE_PREFIX)) {
-		ensureSessionsTableState(tableId);
-		setPagedTablePage(tableId, page);
-		rerenderSessionsTable(section, wiring, tableId, false);
-	}
-	return true;
-}
-
-function handleSortClick(section: HTMLElement, wiring: SkillSuggestionsWiring, target: Element): boolean {
-	const button = target.closest<HTMLButtonElement>('[data-paged-sort]');
-	if (!button) { return false; }
-	const tableId = button.getAttribute('data-paged-table') ?? '';
-	const columnId = button.getAttribute('data-paged-sort');
-	if (tableId.startsWith(SESSIONS_TABLE_PREFIX) && columnId) {
-		ensureSessionsTableState(tableId);
-		setPagedTableSort(tableId, columnId);
-		rerenderSessionsTable(section, wiring, tableId, true);
-	}
-	return true;
-}
-
 function handleSectionClick(section: HTMLElement, wiring: SkillSuggestionsWiring, target: Element): void {
-	if (handlePagerClick(section, wiring, target) || handleSortClick(section, wiring, target)) { return; }
 	const openButton = target.closest<HTMLButtonElement>('button.skill-suggestion-open-session');
 	if (openButton) {
 		const file = openButton.getAttribute('data-file');

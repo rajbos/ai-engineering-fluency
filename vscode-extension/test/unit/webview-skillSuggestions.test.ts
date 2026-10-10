@@ -2,6 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
+import { bindDataTables } from '../../src/webview/shared/dataTable';
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 import {
 	SKILL_SUGGESTIONS_LIST_ID,
@@ -71,8 +72,8 @@ for (const [count, expectedCards, pagerShown] of [[1, 1, false], [5, 5, false], 
 		resetPages();
 		const doc = render(makeReport(count));
 		assert.equal(doc.querySelectorAll('.skill-suggestion-card').length, expectedCards);
-		const pager = Array.from(doc.querySelectorAll('[data-paged-table]'))
-			.filter(el => el.getAttribute('data-paged-table') === SKILL_SUGGESTIONS_LIST_ID);
+		const pager = Array.from(doc.querySelectorAll('[data-table-id]'))
+			.filter(el => el.getAttribute('data-table-id') === SKILL_SUGGESTIONS_LIST_ID);
 		assert.equal(pager.length > 0, pagerShown);
 	});
 }
@@ -87,7 +88,7 @@ test('skillSuggestions: page slicing keeps global cluster indexes and the last p
 	const doc = render({ minClusterSize: 2, sessionsScanned: 1, clusters });
 	const indexes = Array.from(doc.querySelectorAll('.skill-suggestion-card')).map(c => c.getAttribute('data-cluster-index'));
 	assert.deepEqual(indexes, ['10', '11']);
-	assert.match(doc.querySelector('.paged-table-pager')!.textContent!, /Page 3 of 3/);
+	assert.match(doc.querySelector('#data-table-root-skill-suggestions > .data-table-content > .data-table-pager')!.textContent!, /Page 3 of 3/);
 });
 
 test('skillSuggestions: a stale page is clamped when the list shrinks after a refresh', () => {
@@ -111,11 +112,11 @@ test('skillSuggestions: sessions table has one open button per session with the 
 	assert.equal(buttons.length, 2);
 	assert.equal(buttons[0].getAttribute('data-file'), 'C:\\logs\\"evil"<b>.jsonl');
 	assert.equal(buttons[1].getAttribute('data-file'), 'C:\\logs\\cluster-0-session-1.jsonl');
-	const headers = Array.from(doc.querySelectorAll('.paged-table th')).map(th => th.textContent!.trim());
-	assert.deepEqual(headers, ['Session', 'Date ↓', 'Repository', 'Actions']);
-	const dateHeader = Array.from(doc.querySelectorAll('.paged-table th')).find(th => th.textContent!.includes('Date'))!;
+	const headers = Array.from(doc.querySelectorAll('#data-table-root-skill-sessions-0 thead th')).map(th => th.textContent!.trim());
+	assert.deepEqual(headers, ['Session', 'Date↓', 'Repository', 'Actions']);
+	const dateHeader = Array.from(doc.querySelectorAll('#data-table-root-skill-sessions-0 thead th')).find(th => th.textContent!.includes('Date'))!;
 	assert.equal(dateHeader.getAttribute('aria-sort'), 'descending', 'the applied sort is exposed on the header');
-	assert.match(doc.querySelector('.paged-table tbody tr')!.textContent!, /<img src=x onerror=alert\(1\)>/);
+	assert.match(doc.querySelector('#data-table-root-skill-sessions-0 tbody tr')!.textContent!, /<img src=x onerror=alert\(1\)>/);
 });
 
 test('skillSuggestions: representative prompt and keywords are HTML-escaped', () => {
@@ -132,12 +133,13 @@ test('skillSuggestions: a sessions table pages only above 10 sessions', () => {
 	resetPages();
 	const small = render({ minClusterSize: 2, sessionsScanned: 10, clusters: [makeCluster(0, 10)] });
 	assert.equal(small.querySelectorAll('.skill-suggestion-open-session').length, 10);
-	assert.equal(small.querySelector('.paged-table-pager'), null);
+	assert.equal(small.querySelector('#data-table-root-skill-sessions-0 .data-table-pager'), null);
 
 	const large = render({ minClusterSize: 2, sessionsScanned: 12, clusters: [makeCluster(0, 12)] });
 	assert.equal(large.querySelectorAll('.skill-suggestion-open-session').length, 10);
-	const pagerButtons = Array.from(large.querySelectorAll('.paged-table-pager button'));
-	assert.ok(pagerButtons.every(b => b.getAttribute('data-paged-table') === sessionsTableId(0)));
+	const pagerButtons = Array.from(large.querySelectorAll('#data-table-root-skill-sessions-0 .data-table-pager button'));
+	assert.equal(pagerButtons.length, 2);
+	assert.ok(pagerButtons.every(b => b.getAttribute('data-table-id') === sessionsTableId(0)));
 });
 
 test('isRepositoryOpen: matches the repository name against open workspace folder names', () => {
@@ -173,6 +175,7 @@ test('wireSkillSuggestions: delegated clicks post messages, page the list, and s
 	const posted: SkillSuggestionsMessage[] = [];
 	try {
 		const wiring = { getReport: () => report, getWorkspacePaths: () => ['/src/elsewhere'], postMessage: (m: SkillSuggestionsMessage) => posted.push(m) };
+		bindDataTables(dom.window.document);
 		wireSkillSuggestions(wiring);
 		wireSkillSuggestions(wiring); // idempotent: a second call must not double-post
 		const doc = dom.window.document;
@@ -197,10 +200,10 @@ test('wireSkillSuggestions: delegated clicks post messages, page the list, and s
 		assert.match(notice.querySelector('pre')!.textContent!, /\.github\/skills\//);
 
 		// Next page re-renders the section; the same listener keeps handling clicks.
-		click(doc.querySelector(`[data-paged-table="${SKILL_SUGGESTIONS_LIST_ID}"][data-paged-direction="next"]`));
+		click(doc.querySelector(`[data-table-id="${SKILL_SUGGESTIONS_LIST_ID}"][data-table-direction="next"]`));
 		const indexes = Array.from(doc.querySelectorAll('.skill-suggestion-card') as NodeListOf<Element>).map(c => c.getAttribute('data-cluster-index'));
 		assert.deepEqual(indexes, ['5', '6']);
-		const status = doc.querySelector('.skill-suggestions-status')!;
+		const status = doc.querySelector('#data-table-root-skill-suggestions > .data-table-status')!;
 		assert.equal(status.getAttribute('role'), 'status');
 		assert.match(status.textContent!, /Page 2 of 2/, 'page change is announced');
 		click(doc.querySelector('button.skill-suggestion-open-session'));
@@ -242,14 +245,15 @@ test('wireSkillSuggestions: sorting a sessions table by date toggles order and i
 	const previous = { document: globals.document, Element: globals.Element, HTMLElement: globals.HTMLElement };
 	Object.assign(globals, { document: dom.window.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement });
 	try {
+		bindDataTables(dom.window.document);
 		wireSkillSuggestions({ getReport: () => report, getWorkspacePaths: () => [], postMessage: () => undefined });
 		const doc = dom.window.document;
 		const files = () => Array.from(doc.querySelectorAll('.skill-suggestion-open-session') as NodeListOf<Element>).map(b => b.getAttribute('data-file')!.split(/[\\/]/).pop());
 		assert.deepEqual(files(), ['cluster-0-session-0.jsonl', 'cluster-0-session-1.jsonl']);
-		(doc.querySelector('[data-paged-sort="date"]') as HTMLElement).click();
+		(doc.querySelector('[data-table-sort="date"]') as HTMLElement).click();
 		assert.deepEqual(files(), ['cluster-0-session-1.jsonl', 'cluster-0-session-0.jsonl'], 'oldest first after toggling');
-		assert.match(doc.querySelector('.skill-suggestions-status')!.textContent!, /Sorted ascending/);
-		(doc.querySelector('[data-paged-sort="date"]') as HTMLElement).click(); // restore the default for other tests
+		assert.match(doc.querySelector('#data-table-root-skill-sessions-0 > .data-table-status')!.textContent!, /Sorted ascending/);
+		(doc.querySelector('[data-table-sort="date"]') as HTMLElement).click(); // restore the default for other tests
 		assert.deepEqual(files(), ['cluster-0-session-0.jsonl', 'cluster-0-session-1.jsonl']);
 	} finally {
 		Object.assign(globals, previous);
