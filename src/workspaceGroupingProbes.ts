@@ -8,6 +8,7 @@
  * (docs/adr/ANALYSIS-WORKER.md).
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { parseGitRemoteUrl } from './workspaceHelpers';
 import {
@@ -71,13 +72,14 @@ export async function readWorkspaceGitInfo(folderPath: string): Promise<Workspac
 export async function prefetchWorkspaceGroupingProbes(
 	entries: WorkspaceUsageEntry[],
 	platform: string = process.platform,
+	homeDirectory: string = os.homedir(),
 ): Promise<WorkspaceGroupingProbes> {
 	const exists = new Map<string, boolean>();
 	const gitInfo = new Map<string, WorkspaceGitInfo>();
 	const check = async (p: string): Promise<void> => {
 		if (!exists.has(p)) { exists.set(p, await pathExistsAsync(p)); }
 	};
-	const paths = workspaceProbePaths(entries, platform);
+	const paths = workspaceProbePaths(entries, platform, homeDirectory);
 	await forEachLimited(paths, check);
 	const inputs = new Set(entries.map(e => e.path));
 	await forEachLimited(paths.filter(p => inputs.has(p) && exists.get(p)), async p => {
@@ -88,6 +90,7 @@ export async function prefetchWorkspaceGroupingProbes(
 	});
 	return {
 		platform,
+		homeDirectory,
 		pathExists: p => exists.get(p) ?? false,
 		readGitInfo: p => gitInfo.get(p),
 	};

@@ -606,6 +606,9 @@ test('repositoryIdentity normalises remote URL forms', () => {
 	assert.equal(repositoryIdentity(''), undefined);
 	assert.equal(repositoryIdentity(undefined), undefined);
 	assert.equal(repositoryIdentity('C:/repos/widget.git'), undefined, 'a local path is not an scp-style remote');
+	for (const local of ['/srv/repo.git', '../repo.git', './repo', '~/repos/repo.git', 'C:\\repos\\repo.git', 'file:///srv/repo.git', 'repos\\repo']) {
+		assert.equal(repositoryIdentity(local), undefined, `local remote ${local} names no hosted repository`);
+	}
 	assert.equal(repositoryIdentity('(unknown)'), undefined);
 });
 
@@ -714,7 +717,7 @@ test('matchWorktreeConvention reads the three layouts', () => {
 	assert.deepEqual(matchWorktreeConvention('/home/u/.claude/worktrees/repo/name'), { repoName: 'repo', anchorPath: '/home/u/.claude/worktrees/repo', anchorIsCheckout: false });
 	assert.deepEqual(matchWorktreeConvention('/src/repo/.claude/worktrees/name'), { repoName: 'repo', anchorPath: '/src/repo', anchorIsCheckout: true });
 	assert.deepEqual(
-		matchWorktreeConvention('/src/repo/.claude/worktrees/name/sub', p => p === '/src/repo/.git'),
+		matchWorktreeConvention('/src/repo/.claude/worktrees/name/sub', { pathExists: p => p === '/src/repo/.git' }),
 		{ repoName: 'repo', anchorPath: '/src/repo', anchorIsCheckout: true },
 		'an existing .git next to .claude means the in-repo layout, even with a sub-folder',
 	);
@@ -727,7 +730,7 @@ test('matchWorktreeConvention: an in-repo worktree sub-folder is read without di
 	const inRepo = { repoName: 'widget', anchorPath: '/src/widget', anchorIsCheckout: true };
 	// No probes at all (deleted checkout, WSL path): the folder above .claude is not a home directory.
 	assert.deepEqual(matchWorktreeConvention('/src/widget/.claude/worktrees/agent/server'), inRepo);
-	assert.deepEqual(matchWorktreeConvention('/src/widget/.claude/worktrees/agent/server', () => false), inRepo, 'deleted checkout');
+	assert.deepEqual(matchWorktreeConvention('/src/widget/.claude/worktrees/agent/server', { pathExists: () => false }), inRepo, 'deleted checkout');
 	assert.deepEqual(matchWorktreeConvention('/home/dev/widget/.claude/worktrees/agent/a/b'), { ...inRepo, anchorPath: '/home/dev/widget' });
 	assert.deepEqual(
 		matchWorktreeConvention('C:\\code\\widget\\.claude\\worktrees\\agent\\server'),
@@ -747,8 +750,8 @@ test('matchWorktreeConvention: the desktop layout is recognised by its home-dire
 test('matchWorktreeConvention: a home directory that is itself a known workspace or checkout is the repository', () => {
 	const wt = '/home/dev/.claude/worktrees/agent/server';
 	const expected = { repoName: 'dev', anchorPath: '/home/dev', anchorIsCheckout: true };
-	assert.deepEqual(matchWorktreeConvention(wt, undefined, p => p === '/home/dev'), expected);
-	assert.deepEqual(matchWorktreeConvention(wt, p => p === '/home/dev/.git'), expected);
+	assert.deepEqual(matchWorktreeConvention(wt, { isWorkspace: p => p === '/home/dev' }), expected);
+	assert.deepEqual(matchWorktreeConvention(wt, { pathExists: p => p === '/home/dev/.git' }), expected);
 });
 
 test('in-repo worktree sub-folders group with their repository when the checkout is gone or the path is WSL', () => {
@@ -768,6 +771,23 @@ test('in-repo worktree sub-folders group with their repository when the checkout
 		assert.equal(alone.displayName, 'widget');
 		assert.deepEqual(detectArtefactWorkspaceNames([alone]), []);
 	}
+});
+
+test('matchWorktreeConvention: a redirected home directory from the probes is the desktop layout', () => {
+	const home = 'D:\\Profiles\\dev';
+	const wt = 'D:\\Profiles\\dev\\.claude\\worktrees\\repo-a\\goofy-wozniak-42f712';
+	assert.equal(matchWorktreeConvention(wt)?.repoName, 'dev', 'without the real home it reads as in-repo');
+	assert.deepEqual(matchWorktreeConvention(wt, { homeDirectory: home }), {
+		repoName: 'repo-a', anchorPath: 'D:\\Profiles\\dev\\.claude\\worktrees\\repo-a', anchorIsCheckout: false,
+	});
+	assert.equal(matchWorktreeConvention(wt, { homeDirectory: 'd:/profiles/dev/' })?.repoName, 'repo-a', 'separators, case and trailing slash do not matter');
+	// Unrelated worktrees under that home stay apart, each named after its repository.
+	const groups = groupWorkspaces([
+		entry(wt, 1, 1),
+		entry('D:\\Profiles\\dev\\.claude\\worktrees\\repo-b\\brave-curie-0a1b2c', 1, 1),
+	], { platform: 'win32', homeDirectory: home });
+	assert.deepEqual(groups.map(g => g.displayName).sort(), ['repo-a', 'repo-b']);
+	assert.ok(workspaceProbePaths([entry(wt)], 'win32', home).includes('D:\\Profiles\\dev\\.claude\\worktrees\\repo-a'));
 });
 
 test('a dotfiles home repository in the list claims its own .claude/worktrees sub-folders', () => {

@@ -50,6 +50,12 @@ export interface WorkspaceGroupingProbes {
 	pathExists?: (folderPath: string) => boolean;
 	/** Git facts for a folder that still exists. Return undefined when unknown. */
 	readGitInfo?: (folderPath: string) => WorkspaceGitInfo | undefined;
+	/**
+	 * The user's real home directory. `<home>/.claude/worktrees/<repo>/<name>` is the Claude
+	 * desktop layout even when home is redirected (`D:\Profiles\dev`); without it only the
+	 * conventional home shapes (`/home/<u>`, `C:\Users\<u>`, …) are recognised.
+	 */
+	homeDirectory?: string;
 }
 
 /** One group of workspace folders that belong to the same repository. */
@@ -140,6 +146,15 @@ function splitRemote(remote: string): { host?: string; path: string } {
 	return { path: remote };
 }
 
+/**
+ * A remote on the local filesystem (`/srv/repo.git`, `../repo.git`, `~/repo`, `C:\repos\x`,
+ * `file://…`). It names no hosted repository, and read as a bare `owner/name` it could collide
+ * with a real GitHub repository or with another folder's same relative remote.
+ */
+function isLocalRemote(remote: string): boolean {
+	return /^(?:file:|[/\\~.]|[a-z]:[/\\])/i.test(remote) || (!remote.includes(':') && remote.includes('\\'));
+}
+
 /** Azure DevOps ssh and legacy `<org>.visualstudio.com` remotes, as `dev.azure.com/<org>/…`. */
 function normalizeAzureDevOps(host: string | undefined, parts: string[]): { host: string | undefined; parts: string[] } {
 	if (host === 'ssh.dev.azure.com' || host === 'vs-ssh.visualstudio.com') {
@@ -161,7 +176,7 @@ function normalizeAzureDevOps(host: string | undefined, parts: string[]): { host
  */
 export function repositoryIdentity(remote: string | undefined): string | undefined {
 	const trimmed = remote?.trim();
-	if (!trimmed) { return undefined; }
+	if (!trimmed || isLocalRemote(trimmed)) { return undefined; }
 	const split = splitRemote(trimmed);
 	const rawParts = split.path.replace(/[?#].*$/, '').split('/').filter(p => p.length > 0 && p !== '_git');
 	if (rawParts.length > 0) { rawParts[rawParts.length - 1] = rawParts[rawParts.length - 1].replace(/\.git$/i, ''); }
@@ -250,14 +265,25 @@ interface ConventionMatch {
  * (`isWorkspace`) or holds a `.git`, the desktop layout when it is a home directory, and the
  * repository otherwise — so the call works without disk access (deleted folders, WSL paths).
  */
-export function matchWorktreeConvention(
-	folderPath: string,
-	pathExists?: (p: string) => boolean,
-	isWorkspace?: (p: string) => boolean,
-): ConventionMatch | undefined {
+/** What `matchWorktreeConvention()` may consult; every field is optional and disk-free by default. */
+export interface WorktreeConventionContext {
+	pathExists?: (p: string) => boolean;
+	/** True for a folder that is itself in the workspace list. */
+	isWorkspace?: (p: string) => boolean;
+	/** The user's real home directory (see WorkspaceGroupingProbes.homeDirectory). */
+	homeDirectory?: string;
+}
+
+export function matchWorktreeConvention(folderPath: string, context: WorktreeConventionContext = {}): ConventionMatch | undefined {
 	const segments = splitSegments(folderPath);
 	const sep = separatorOf(folderPath);
-	return matchCopilotWorktree(segments, sep, pathExists) ?? matchClaudeWorktree(segments, sep, pathExists, isWorkspace);
+	return matchCopilotWorktree(segments, sep, context.pathExists) ?? matchClaudeWorktree(segments, sep, context);
+}
+
+/** Same folder, ignoring separator style, trailing separators and case (home matching only). */
+function sameFolder(a: string, b: string): boolean {
+	const key = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+	return key(a) === key(b);
 }
 
 /** `<root>/copilot-worktrees/<repo>/<name>[/…]`. */
@@ -272,10 +298,8 @@ function matchCopilotWorktree(segments: string[], sep: string, pathExists?: (p: 
 }
 
 /** `<home>/.claude/worktrees/<repo>/<name>[/…]` or `<repo>/.claude/worktrees/<name>[/…]`. */
-function matchClaudeWorktree(
-	segments: string[], sep: string,
-	pathExists?: (p: string) => boolean, isWorkspace?: (p: string) => boolean,
-): ConventionMatch | undefined {
+function matchClaudeWorktree(segments: string[], sep: string, context: WorktreeConventionContext): ConventionMatch | undefined {
+	const { pathExists, isWorkspace, homeDirectory } = context;
 	const lower = segments.map(s => s.toLowerCase());
 	let i = lower.length - 2;
 	while (i >= 1 && !(lower[i] === '.claude' && lower[i + 1] === 'worktrees')) { i--; }
@@ -284,7 +308,8 @@ function matchClaudeWorktree(
 	if (after.length === 0) { return undefined; }
 	const repoRoot = joinSegments(segments.slice(0, i), sep);
 	const repoRootIsRepository = (isWorkspace?.(repoRoot) ?? false) || (pathExists?.(`${repoRoot}${sep}.git`) ?? false);
-	if (!repoRootIsRepository && looksLikeHomeDirectory(segments.slice(0, i))) {
+	const isHome = homeDirectory ? sameFolder(repoRoot, homeDirectory) : false;
+	if (!repoRootIsRepository && (isHome || looksLikeHomeDirectory(segments.slice(0, i)))) {
 		// Desktop layout: `<home>/.claude/worktrees/<repo>/<name>`.
 		return { repoName: after[0], anchorPath: joinSegments(segments.slice(0, i + 3), sep), anchorIsCheckout: false };
 	}
@@ -298,12 +323,12 @@ function matchClaudeWorktree(
  * Main checkouts reported by `readGitInfo` come on top. Lets a host check them all
  * asynchronously up front (prefetchWorkspaceGroupingProbes) instead of blocking on sync I/O.
  */
-export function workspaceProbePaths(entries: WorkspaceUsageEntry[], platform: string): string[] {
+export function workspaceProbePaths(entries: WorkspaceUsageEntry[], platform: string, homeDirectory?: string): string[] {
 	const paths = new Set<string>();
 	for (const entry of entries) {
 		if (isUnresolved(entry.path) || isRemotePath(entry.path, platform)) { continue; }
 		paths.add(entry.path);
-		const match = matchWorktreeConvention(entry.path, p => { paths.add(p); return false; });
+		const match = matchWorktreeConvention(entry.path, { pathExists: p => { paths.add(p); return false; }, homeDirectory });
 		if (match) { paths.add(match.anchorPath); }
 	}
 	return [...paths];
@@ -466,7 +491,11 @@ function inputNode(
 			mainWorktreePath: git?.mainWorktreePath,
 			// Layout rules need no disk access, so they also apply to WSL / remote paths; only the
 			// existence checks are skipped there, since the local probes cannot see that filesystem.
-			convention: matchWorktreeConvention(entry.path, remote ? undefined : pathExists, isWorkspace),
+			convention: matchWorktreeConvention(entry.path, {
+				pathExists: remote ? undefined : pathExists,
+				isWorkspace,
+				homeDirectory: probes.homeDirectory,
+			}),
 			...(conflictingRemotes ? { conflictingRemotes } : {}),
 		},
 		repoId: conflictingRemotes ? undefined : sessionId ?? gitId,

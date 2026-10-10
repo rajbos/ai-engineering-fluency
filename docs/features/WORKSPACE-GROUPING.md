@@ -32,10 +32,12 @@ the CLI's Customization evidence counts repositories, not folders.
    forms of one repository match while the same `owner/name` on another host (GitHub vs GitLab,
    GitHub Enterprise) or Azure DevOps organisation stays apart; a bare `owner/name` is GitHub,
    and Azure DevOps https, ssh and `visualstudio.com` remotes all read as
-   `dev.azure.com/<org>/<project>/<repo>`. A folder seen with two different remotes (reused for
-   another repository) is *conflicting*: it is never merged by name, and a worktree whose remote
-   differs from its main checkout stays apart from it. The group is displayed as the repository
-   name.
+   `dev.azure.com/<org>/<project>/<repo>`. Local filesystem remotes (`/srv/repo.git`,
+   `../repo.git`, `~/…`, `C:\…`, `file://…`) name no hosted repository and give no identity. A
+   folder seen with two different remotes (reused for another repository, or a session remote
+   that disagrees with the folder's current `.git`) is *conflicting*: it is kept out of every
+   weaker rule, and a worktree whose remote differs from its main checkout stays apart from it.
+   The group is displayed as the repository name.
 2. **Worktree pointer** — an existing linked worktree's `.git` file
    (`gitdir: <main>/.git/worktrees/<name>`) leads to its main checkout, which becomes the group's
    canonical folder even when it had no sessions of its own.
@@ -47,8 +49,9 @@ the CLI's Customization evidence counts repositories, not folders.
      already deleted and for WSL / remote paths. The two Claude layouts look alike when the
      session cwd is a sub-folder of a worktree; the folder above `.claude` decides: it is the
      repository when it is itself in the workspace list or has a `.git`, the desktop layout when
-     it is a home directory (`/home/<user>`, `/Users/<user>`, `C:\Users\<user>`, `/root`,
-     `/mnt/<drive>/Users/<user>`), and the repository otherwise.
+     it is the user's real home directory (passed in by the probes, so a redirected home such as
+     `D:\Profiles\<user>` works) or has a home-directory shape (`/home/<user>`, `/Users/<user>`,
+     `C:\Users\<user>`, `/root`, `/mnt/<drive>/Users/<user>`), and the repository otherwise.
    - Case-only differences on Windows and macOS.
    - A WSL / SSH path seen on Windows (`/home/…`, or `\home\…` after normalisation) that has the
      same folder name as a local checkout. UNC network shares (`\\server\share\…`) are local.

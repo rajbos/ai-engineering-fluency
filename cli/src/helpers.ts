@@ -8,7 +8,7 @@ import * as os from 'os';
 import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
-import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { findWorkspacePathForDiscoveredPath, type IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths, resolveExactWorkspacePath } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
@@ -149,7 +149,10 @@ export function sessionActiveSince(fileMtime: Date, ownLastActivity: Date | null
 async function resolveSessionWorkspace(activity: SessionActivityLookup, claudeBasePath: string): Promise<{ path: string; repository?: string } | undefined> {
 	const meta = await activity.meta();
 	if (meta?.workspacePath) { return { path: meta.workspacePath, repository: meta.repository }; }
-	const workspacePath = await resolveSessionWorkspacePath(activity.file, claudeBasePath);
+	// Copilot CLI events.jsonl: discovered by its adapter but not handled by it, so getMeta()
+	// knows nothing; the adapter still reads the adjacent workspace.yaml through this hook.
+	const workspacePath = await findWorkspacePathForDiscoveredPath(getEcosystems(), activity.file)
+		?? await resolveSessionWorkspacePath(activity.file, claudeBasePath);
 	if (!workspacePath) { return undefined; }
 	// No adapter covers VS Code chatSessions files, so take the remote from the files the
 	// session referenced, the same shared derivation the extension's session details use.

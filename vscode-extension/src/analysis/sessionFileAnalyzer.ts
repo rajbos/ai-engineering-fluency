@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 
 import type { IEcosystemAdapter } from '../../../src/ecosystemAdapter';
+import { findWorkspacePathForDiscoveredPath as _findWorkspacePathForDiscoveredPath } from '../../../src/ecosystemAdapter';
 import type {
 	DailyRollupEntry,
 	ModelPricing,
@@ -191,15 +192,7 @@ async function extractWindsurfSessionMetadata(windsurf: WindsurfSessionSource, s
  * Copilot CLI events.jsonl that are discovered by an adapter but parsed generically.
  */
 export async function findWorkspacePathForDiscoveredPath(deps: SessionAnalyzerDeps, sessionFile: string): Promise<string | undefined> {
-	for (const eco of deps.ecosystems) {
-		if (eco.handles(sessionFile)) { continue; }
-		if (typeof eco.getWorkspacePathForDiscoveredPath !== 'function') { continue; }
-		try {
-			const cwd = await eco.getWorkspacePathForDiscoveredPath(sessionFile);
-			if (cwd) { return cwd; }
-		} catch { /* adapter failed; try next */ }
-	}
-	return undefined;
+	return _findWorkspacePathForDiscoveredPath(deps.ecosystems, sessionFile);
 }
 
 function metadataFromUserMessage(event: any, timestamps: number[], requestTimestamps: number[]): string | undefined {
