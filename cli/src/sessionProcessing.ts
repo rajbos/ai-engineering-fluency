@@ -8,12 +8,13 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
-import { extractCopilotCliSessionId, getCopilotCliExactUsage } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelDir } from '../../src/copilotCliOtel';
 import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
@@ -86,6 +87,36 @@ export async function statSessionFile(filePath: string): Promise<fs.Stats> {
 	const eco = getEcosystems().find(e => e.handles(filePath));
 	if (eco) { return eco.stat(filePath); }
 	return fs.promises.stat(filePath);
+}
+
+/**
+ * Fingerprint (path + mtime + size) of the inputs processSessionFile reads besides the
+ * session file itself, so a cache keyed on the session file can tell when one of them changed:
+ *  - Copilot Chat debug logs next to a VS Code chat session (they replace its token counts)
+ *  - for Copilot CLI sessions, ~/.copilot/session-store.db (exact billing rows) and the
+ *    OTel export files under ~/.copilot/otel (the fallback when the store has no rows)
+ * Returns '' for sessions that read nothing else. Keep in step with processSessionFile.
+ */
+export async function getAuxiliarySourcesFingerprint(filePath: string): Promise<string> {
+	const sources = [...(resolveDebugLogCandidatePaths(filePath) ?? [])];
+	if (extractCopilotCliSessionId(filePath)) {
+		sources.push(path.join(os.homedir(), '.copilot', 'session-store.db'));
+		const otelDir = getCopilotCliOtelDir();
+		try {
+			const names = (await fs.promises.readdir(otelDir)).filter(name => name.endsWith('.jsonl')).sort();
+			sources.push(...names.map(name => path.join(otelDir, name)));
+		} catch { /* no OTel export */ }
+	}
+	if (sources.length === 0) { return ''; }
+	const parts = await Promise.all(sources.map(async source => {
+		try {
+			const stats = await fs.promises.stat(source);
+			return `${source}:${stats.mtimeMs}:${stats.size}`;
+		} catch {
+			return `${source}:-`;
+		}
+	}));
+	return parts.join('|');
 }
 
 /**

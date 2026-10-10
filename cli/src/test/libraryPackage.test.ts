@@ -44,31 +44,62 @@ test('require() of the package subpath loads the built CommonJS library', async 
 	assert.equal(await lib.analyzeSessionFile(path.join(fakeHome, 'missing.jsonl')), null);
 });
 
-test('Copilot CLI DB-only sessions (session-store.db#<id>) carry exact billing', async () => {
+const STORE_PATH = path.join(fakeHome, '.copilot', 'session-store.db');
+
+/** Write ~/.copilot/session-store.db with the given billing rows: [sessionId, outputTokens, nanoAiu]. */
+async function writeSessionStore(rows: Array<[string, number, number]>): Promise<void> {
 	const SQL = await initSqlJs({ wasmBinary: fs.readFileSync(path.join(CLI_ROOT, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')).buffer as ArrayBuffer });
 	const db = new SQL.Database();
-	const sessionId = '88888888-8888-4888-8888-888888888888';
 	db.run(`CREATE TABLE sessions (id TEXT, cwd TEXT, repository TEXT, branch TEXT, summary TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE turns (session_id TEXT, turn_index INTEGER, user_message TEXT, assistant_response TEXT, timestamp TEXT);
 		CREATE TABLE assistant_usage_events (session_id TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER,
 			cache_read_tokens INTEGER, cache_write_tokens INTEGER, total_nano_aiu INTEGER);`);
-	db.run('INSERT INTO sessions VALUES (?, ?, NULL, NULL, NULL, ?, ?)', [sessionId, '/work/demo', '2026-10-01T09:00:00Z', '2026-10-01T09:05:00Z']);
-	db.run('INSERT INTO turns VALUES (?, 0, ?, ?, ?)', [sessionId, 'hi', 'hello', '2026-10-01T09:00:00Z']);
-	db.run('INSERT INTO assistant_usage_events VALUES (?, ?, 1000, 200, 600, 0, 2000000000)', [sessionId, 'claude-sonnet-4.5']);
-	db.run('INSERT INTO assistant_usage_events VALUES (?, ?, 500, 100, 0, 0, 500000000)', [sessionId, 'claude-sonnet-4.5']);
-	const dbPath = path.join(fakeHome, '.copilot', 'session-store.db');
-	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-	fs.writeFileSync(dbPath, Buffer.from(db.export()));
+	for (const sessionId of new Set(rows.map(([id]) => id))) {
+		db.run('INSERT INTO sessions VALUES (?, ?, NULL, NULL, NULL, ?, ?)', [sessionId, '/work/demo', '2026-10-01T09:00:00Z', '2026-10-01T09:05:00Z']);
+		db.run('INSERT INTO turns VALUES (?, 0, ?, ?, ?)', [sessionId, 'hi', 'hello', '2026-10-01T09:00:00Z']);
+	}
+	for (const [sessionId, outputTokens, nanoAiu] of rows) {
+		db.run('INSERT INTO assistant_usage_events VALUES (?, ?, 1000, ?, 0, 0, ?)', [sessionId, 'claude-sonnet-4.5', outputTokens, nanoAiu]);
+	}
+	fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
+	fs.writeFileSync(STORE_PATH, Buffer.from(db.export()));
 	db.close();
+}
+
+test('Copilot CLI DB-only sessions (session-store.db#<id>) carry exact billing', async () => {
+	const sessionId = '88888888-8888-4888-8888-888888888888';
+	await writeSessionStore([[sessionId, 200, 2_000_000_000], [sessionId, 100, 500_000_000]]);
 
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const lib = require(PKG);
-	const usage = await lib.analyzeSessionFile(`${dbPath}#${sessionId}`);
+	const usage = await lib.analyzeSessionFile(`${STORE_PATH}#${sessionId}`);
 	assert.ok(usage, 'expected a result for a DB-only Copilot CLI session');
 	assert.equal(usage.editorSource, 'Copilot CLI');
 	assert.equal(usage.copilotNanoAiu, 2_500_000_000);
 	assert.equal(usage.copilotCredits, 2.5);
 	assert.equal(usage.modelUsage['claude-sonnet-4.5'].outputTokens, 300);
+});
+
+test('cache: billing rows landing in session-store.db are picked up without the events.jsonl changing', async () => {
+	const sessionId = '99999999-9999-4999-8999-999999999999';
+	const events = path.join(fakeHome, '.copilot', 'session-state', sessionId, 'events.jsonl');
+	fs.mkdirSync(path.dirname(events), { recursive: true });
+	fs.copyFileSync(path.join(FIXTURES, 'copilot-cli-events.jsonl'), events);
+	const before = fs.statSync(events);
+
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const lib = require(PKG);
+	const first = await lib.analyzeSessionFile(events);
+	assert.equal(first.copilotNanoAiu, 3_750_000_000, 'no store rows yet: billing from the latest usage_checkpoint');
+	assert.equal(await lib.analyzeSessionFile(events), first, 'unchanged sources: cache hit');
+
+	await writeSessionStore([[sessionId, 400, 9_000_000_000]]);
+	const second = await lib.analyzeSessionFile(events);
+	const after = fs.statSync(events);
+	assert.equal(after.mtimeMs, before.mtimeMs);
+	assert.equal(after.size, before.size);
+	assert.equal(second.copilotNanoAiu, 9_000_000_000, 'store rows win over the event log');
+	assert.equal(second.copilotCredits, 9);
 });
 
 test('import() of the package subpath shares the CommonJS module instance', async () => {

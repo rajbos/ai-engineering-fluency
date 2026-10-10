@@ -118,6 +118,31 @@ test('cache: an unchanged file is not re-parsed; appending to it is', async () =
 	assert.equal(await analyzeSessionFile(file), third);
 });
 
+test('cache: a Copilot Chat debug log changing is picked up without the session file changing', async () => {
+	const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+	const hashDir = path.join(fakeHome, 'Code', 'User', 'workspaceStorage', 'abc123hash');
+	const sessionFile = path.join(hashDir, 'chatSessions', `${sessionId}.jsonl`);
+	fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+	fs.copyFileSync(path.join(FIXTURES, 'vscode-delta-session.jsonl'), sessionFile);
+	const debugLog = path.join(hashDir, 'GitHub.copilot-chat', 'debug-logs', sessionId, 'main.jsonl');
+	fs.mkdirSync(path.dirname(debugLog), { recursive: true });
+	const llmRequest = (inputTokens: number, outputTokens: number) =>
+		JSON.stringify({ type: 'llm_request', attrs: { model: 'gpt-4o', inputTokens, outputTokens, cachedTokens: 0 } }) + '\n';
+	fs.writeFileSync(debugLog, llmRequest(100, 20));
+	const before = fs.statSync(sessionFile);
+
+	const first = await analyzeSessionFile(sessionFile);
+	assert.ok(first);
+	assert.equal(first.totalTokens, 120, 'debug-log totals replace the session file estimate');
+	assert.equal(await analyzeSessionFile(sessionFile), first, 'unchanged sources: cache hit');
+
+	fs.appendFileSync(debugLog, llmRequest(200, 30));
+	const second = await analyzeSessionFile(sessionFile);
+	assert.ok(second);
+	assert.equal(fs.statSync(sessionFile).mtimeMs, before.mtimeMs);
+	assert.equal(second.totalTokens, 350);
+});
+
 test('cache: { cache: false } always re-parses', async () => {
 	const file = claudeSession();
 	const a = await analyzeSessionFile(file, { cache: false });

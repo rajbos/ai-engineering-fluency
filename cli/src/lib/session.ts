@@ -12,7 +12,7 @@
  * Every exported type is declared in this file, so the emitted session.d.ts is
  * self-contained and does not leak internal module paths.
  */
-import { processSessionFile, statSessionFile, modelPricing } from '../sessionProcessing';
+import { processSessionFile, statSessionFile, getAuxiliarySourcesFingerprint, modelPricing } from '../sessionProcessing';
 import { effectiveTokens, runWithConcurrency, type SessionData } from '../analysis';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 import { CliCachePolicy } from '../../../src/cachePolicy';
@@ -66,7 +66,9 @@ export interface SessionUsage {
 export interface AnalyzeSessionOptions {
 	/**
 	 * Use the in-memory cache (default true). Results are cached per path and reused while
-	 * the file's mtime and size are unchanged, so polling an unchanged file is just a stat.
+	 * the file's mtime and size, and those of the side files it draws on (Copilot CLI billing
+	 * store and OTel export, Copilot Chat debug logs), are unchanged, so polling an unchanged
+	 * session costs a few stats.
 	 * The library never reads or writes the CLI's on-disk cache.
 	 */
 	cache?: boolean;
@@ -81,6 +83,8 @@ const MAX_CACHE_ENTRIES = 2000;
 interface CacheEntry {
 	mtime: number;
 	size: number;
+	/** Fingerprint of the debug logs / billing store / OTel export the parse also read. */
+	auxiliary: string;
 	/** null records "not a session we can parse", so unknown files stay cheap too. */
 	usage: SessionUsage | null;
 }
@@ -148,22 +152,24 @@ export async function analyzeSessionFile(filePath: string, options: AnalyzeSessi
 	try {
 		if (options.cache === false) { return await parse(filePath); }
 
-		const stats = await statSessionFile(filePath);
+		const [stats, auxiliary] = await Promise.all([statSessionFile(filePath), getAuxiliarySourcesFingerprint(filePath)]);
 		const mtime = stats.mtimeMs;
 		const size = stats.size;
 		const cached = cache.get(filePath);
-		if (cached && cachePolicy.isValid(cached, mtime, size)) { return cached.usage; }
+		// The session file alone is not enough: Copilot CLI billing (session-store.db, OTel)
+		// and Copilot Chat debug logs change without touching it.
+		if (cached && cachePolicy.isValid(cached, mtime, size) && cached.auxiliary === auxiliary) { return cached.usage; }
 
-		const key = `${filePath}\0${mtime}\0${size}`;
+		const key = `${filePath}\0${mtime}\0${size}\0${auxiliary}`;
 		let pending = inFlight.get(key);
 		if (!pending) {
 			pending = parse(filePath).finally(() => inFlight.delete(key));
 			inFlight.set(key, pending);
 		}
 		const usage = await pending;
-		// Keyed by the pre-parse stat: if the file grew mid-parse, the next call sees a new
-		// mtime/size and re-parses, so a stale entry never outlives the file change.
-		cache.set(filePath, { mtime, size, usage });
+		// Keyed by the pre-parse stats: if a source changed mid-parse, the next call sees a new
+		// mtime/size or fingerprint and re-parses, so a stale entry never outlives the change.
+		cache.set(filePath, { mtime, size, auxiliary, usage });
 		cachePolicy.evict(cache);
 		return usage;
 	} catch {
