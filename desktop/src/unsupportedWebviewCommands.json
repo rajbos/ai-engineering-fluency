@@ -135,6 +135,8 @@
     "setTimeWindowPreference": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
     "setViewPreference": { "status": "no-op", "reason": "Preference the extension persists; the desktop keeps it in the view's own setState storage." },
     "saveSessionColumnSettings": { "status": "no-op", "reason": "Preference the extension persists; the column choice is not kept across desktop restarts." },
+    "surfaceNavReady": { "status": "no-op", "reason": "Readiness handshake for What's New \"Take me there\" reveals; the desktop has no What's New and never queues a reveal." },
+    "surfaceRevealHandled": { "status": "no-op", "reason": "Acknowledges a What's New reveal request, which the desktop never sends." },
     "viewTabOpened": { "status": "no-op", "reason": "Feeds the extension's What's New announcer, which the desktop does not have." },
     "usageWebviewReady": { "status": "no-op", "reason": "Handshake for GitHub activity data, which the desktop does not provide." },
     "usageWebviewTrace": { "status": "no-op", "reason": "Debug trace for the extension's output channel." },

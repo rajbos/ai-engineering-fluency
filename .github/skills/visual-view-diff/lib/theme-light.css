@@ -23,6 +23,7 @@
 	--vscode-widget-border: #e5e5e5;
 	--vscode-focusBorder: #005fb8;
 	--vscode-contrastBorder: transparent;
+	--vscode-contrastActiveBorder: transparent;
 
 	--vscode-button-background: #005fb8;
 	--vscode-button-foreground: #ffffff;
