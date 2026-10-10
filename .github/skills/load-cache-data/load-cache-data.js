@@ -198,6 +198,11 @@ const SAFE_CACHE_ENTRY_FIELDS = new Set([
 // usageAnalysis fields whose maps are keyed by session-supplied names
 const NAME_KEYED_USAGE_FIELDS = ['toolCalls', 'mcpTools', 'skillCalls'];
 
+// CorrectionMoment fields that are counts, flags, timestamps or this repo's own labels
+const SAFE_CORRECTION_MOMENT_FIELDS = new Set([
+    'type', 'turnNumber', 'timestamp', 'retried', 'matchedPattern', 'intensity', 'escalated', 'corroboratedBy'
+]);
+
 function sanitizeCacheEntry(cacheEntry) {
     if (!cacheEntry || typeof cacheEntry !== 'object' || Array.isArray(cacheEntry)) {
         return {};
@@ -236,15 +241,13 @@ function sanitizeCacheEntry(cacheEntry) {
             }
         }
         if (Array.isArray(safeUsageAnalysis.correctionMoments)) {
-            safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments.map(moment => {
-                if (!moment || typeof moment !== 'object' || Array.isArray(moment)) {
-                    return moment;
-                }
-                const safeMoment = { ...moment };
-                delete safeMoment.snippet;
-                delete safeMoment.file;
-                return safeMoment;
-            });
+            // Allowlist: snippet (message text), tool (session tool name) and file (local path)
+            // and any future field are dropped
+            safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments
+                .filter(isPlainObject)
+                .map(moment => Object.fromEntries(
+                    Object.entries(moment).filter(([key]) => SAFE_CORRECTION_MOMENT_FIELDS.has(key))
+                ));
         }
         safeEntry.usageAnalysis = safeUsageAnalysis;
     }

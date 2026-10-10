@@ -341,6 +341,102 @@ test('every SessionUsageAnalysis field is classified', () => {
     assert.deepEqual(unclassified, [], 'classify these new SessionUsageAnalysis fields in load-cache-data.js and this test');
 });
 
+// CorrectionMoment fields printed by default (the script's SAFE_CORRECTION_MOMENT_FIELDS):
+// counts, flags, timestamps and this repo's own pattern labels.
+const CORRECTION_MOMENT_PRINTED = [
+    'type', 'turnNumber', 'timestamp', 'retried', 'matchedPattern', 'intensity', 'escalated', 'corroboratedBy'
+];
+// Omitted: message excerpt, session tool name, local file path.
+const CORRECTION_MOMENT_OMITTED = ['snippet', 'tool', 'file'];
+
+test('every CorrectionMoment field is classified and only the printed ones are emitted', (t) => {
+    const fields = interfaceFields('CorrectionMoment');
+    const classified = new Set([...CORRECTION_MOMENT_PRINTED, ...CORRECTION_MOMENT_OMITTED]);
+    assert.deepEqual(fields.filter(field => !classified.has(field)), [],
+        'classify these new CorrectionMoment fields in load-cache-data.js and this test');
+
+    const fixture = createFixture(t);
+    const moment = Object.fromEntries(fields.map(field => [field, `moment-${field}-sentinel`]));
+    fs.writeFileSync(path.join(fixture.storage, 'cache_prod.snapshot.json'), JSON.stringify(snapshotEnvelope({
+        s: { tokens: 1, usageAnalysis: { correctionMoments: [moment, 'not-an-object-sentinel'] } }
+    })));
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const [printed, ...rest] = JSON.parse(result.stdout).entries['session-1'].usageAnalysis.correctionMoments;
+    assert.deepEqual(rest, []);
+    assert.deepEqual(Object.keys(printed).sort(), fields.filter(field => CORRECTION_MOMENT_PRINTED.includes(field)).sort());
+    for (const field of CORRECTION_MOMENT_OMITTED) {
+        assert.equal(result.stdout.includes(`moment-${field}-sentinel`), false, `leaked correction moment ${field}`);
+    }
+    assert.equal(result.stdout.includes('not-an-object-sentinel'), false);
+});
+
+function collectStrings(value, out = []) {
+    if (typeof value === 'string') {
+        out.push(value);
+    } else if (Array.isArray(value)) {
+        value.forEach(item => collectStrings(item, out));
+    } else if (value && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) {
+            out.push(key);
+            collectStrings(item, out);
+        }
+    }
+    return out;
+}
+
+test('no seeded session-derived string survives anywhere in a realistic default output', (t) => {
+    // Every string that comes from session content is seeded with "leak"; strings this repo
+    // deliberately prints by default (model ids, effort levels, fixed kind/category labels,
+    // this repo's own pattern labels) are marked "-ok".
+    const fixture = createFixture(t);
+    const latency = { count: 1, sumMs: 1, buckets: [1] };
+    const entry = {
+        tokens: 10, interactions: 2, mtime: 5, size: 100,
+        modelUsage: { 'model-ok': { inputTokens: 1, outputTokens: 2 } },
+        title: 'leak-title', repository: 'https://user:leak-token@host/leak-org/leak-repo.git',
+        workspaceFolderPath: '/home/leak-user/leak-project',
+        languageUsage: { 'leak-Dockerfile': { linesAdded: 1, linesRemoved: 0 } },
+        linesAdded: 1, linesRemoved: 0, contextTier: 'tier-ok',
+        dailyRollups: { '2026-10-10': { tokens: 10, actualTokens: 0, thinkingTokens: 0, interactions: 2, modelUsage: { 'model-ok': { inputTokens: 1, outputTokens: 2 } } } },
+        futureField: 'leak-future-field',
+        usageAnalysis: {
+            firstUserPrompt: 'leak-prompt',
+            toolCalls: { total: 2, byTool: { 'leak-tool': 2 }, outputTokensByTool: { 'leak-tool-out': 1 }, completedByTool: { 'leak-tool-done': 1 }, failuresByTool: { 'leak-tool-fail': 1 }, latencyByTool: { 'leak-tool-latency': latency } },
+            mcpTools: { total: 1, byServer: { 'leak-server': 1 }, byTool: { 'leak-mcp-tool': 1 }, completedByServer: { 'leak-server-done': 1 }, failuresByServer: { 'leak-server-fail': 1 }, latencyByServer: { 'leak-server-latency': latency } },
+            skillCalls: { total: 1, byName: { 'leak-skill': 1 } },
+            contextReferences: { file: 1, byKind: { 'kind-ok': 1 }, byPath: { '/home/leak-user/leak-file.ts': 1 } },
+            editScope: { singleFileEdits: 1, languageUsage: { 'leak-env': { linesAdded: 1, linesRemoved: 0 } } },
+            correctionMoments: [
+                { type: 'tool-error', turnNumber: 1, timestamp: null, snippet: 'Tool failed: leak-failing-tool', tool: 'leak-failing-tool', retried: true },
+                { type: 'edit-retry', turnNumber: 2, timestamp: null, snippet: 'leak-snippet', file: '/home/leak-user/leak-edited.ts' },
+                { type: 'user-correction', turnNumber: 3, timestamp: null, snippet: 'leak-user-text', matchedPattern: 'pattern-ok', intensity: 'strong', escalated: true }
+            ],
+            modelSwitching: { uniqueModels: ['model-ok'], modelCount: 1, switchCount: 0, tiers: { standard: ['model-ok'], premium: [], unknown: [] } },
+            thinkingEffort: { byEffort: { 'effort-ok': 1 }, switchCount: 0, defaultEffort: 'effort-ok' },
+            modelEfficiency: { 'model-ok': { turns: 1 } },
+            cacheBreakage: { breaks: [{ turnIndex: 1, cause: 'ttl-expiry', model: 'model-ok', tokensRewritten: 1, gapMs: 1, ttlMs: 1 }], tokensWritten: 1, peakContextTokens: 1, rewriteFactor: 1 }
+        }
+    };
+    fs.writeFileSync(path.join(fixture.storage, 'cache_prod.snapshot.json'), JSON.stringify(snapshotEnvelope({
+        '/home/leak-user/.copilot/session-state/leak-session.jsonl': entry
+    })));
+
+    const result = fixture.run(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const strings = collectStrings(JSON.parse(result.stdout));
+    assert.deepEqual(strings.filter(value => /leak/i.test(value)), []);
+    // The sweep is only meaningful if the safe strings did make it through.
+    for (const kept of ['model-ok', 'kind-ok', 'pattern-ok', 'effort-ok', 'tier-ok']) {
+        assert.ok(strings.includes(kept), `expected ${kept} in the default output`);
+    }
+    // And with the opt-in flag the seeded strings are reachable (except URL credentials).
+    const sensitive = fixture.run(['--include-sensitive', '--json']);
+    assert.equal(sensitive.status, 0, sensitive.stderr);
+    assert.ok(sensitive.stdout.includes('leak-failing-tool'));
+    assert.equal(sensitive.stdout.includes('leak-token'), false);
+});
+
 test('default output prints exactly the classified fields of a fully populated entry', (t) => {
     const fixture = createFixture(t);
     const entry = Object.fromEntries(interfaceFields('SessionFileCache').map(field => [field, `top-${field}-sentinel`]));
