@@ -303,6 +303,42 @@ test('renders repository PR results delivered after the layout exists', async ()
 	);
 });
 
+test('a host refresh of the Repository PRs panel keeps a pending or answered CCR check', async () => {
+	const harness = await bootWebview(buildStats());
+	const payload = (): Record<string, unknown> => {
+		const data = repoPrPayload();
+		(data.repos as Array<Record<string, unknown>>)[0].aiDetails = [
+			{ number: 42, title: 'Add tables', url: 'https://github.com/rajbos/ai-engineering-fluency/pull/42', aiType: 'copilot', role: 'reviewer-requested' },
+		];
+		return data;
+	};
+	harness.post({ command: 'repoPrStatsLoaded', data: payload() });
+	const doc = harness.window.document;
+	const button = (): any => doc.querySelector('.btn-check-ccr[data-pr="42"]');
+	const result = (): string => doc.querySelector('[data-ccr-result="rajbos/ai-engineering-fluency#42"]')?.textContent ?? '';
+	assert.ok(button(), 'expects a CCR check button for the reviewer-requested Copilot PR');
+
+	button().click();
+	const requests = (): number => harness.posted.filter((m) => m.command === 'checkCcrActivity').length;
+	assert.equal(requests(), 1);
+	const checking = result();
+	assert.ok(checking.length > 0, 'shows a checking state while the lookup runs');
+
+	// Host refresh while the lookup is pending: the rebuilt button stays disabled.
+	harness.post({ command: 'repoPrStatsLoaded', data: payload() });
+	assert.equal(button().hasAttribute('disabled'), true, 'a pending check must not be submittable twice');
+	assert.equal(result(), checking);
+
+	harness.post({ command: 'ccrActivityResult', owner: 'rajbos', repo: 'ai-engineering-fluency', prNumber: 42, reviews: [], requests: [] });
+	const answered = result();
+	assert.ok(answered.length > 0 && answered !== checking);
+
+	// Host refresh after the answer: the result is still shown.
+	harness.post({ command: 'repoPrStatsLoaded', data: payload() });
+	assert.equal(result(), answered);
+	assert.equal(button().hasAttribute('disabled'), false);
+});
+
 test('repository PR results delivered before any layout exists still reach the panel', async () => {
 	// The webview announces readiness at module-evaluation time, so the host replays buffered
 	// state into a DOM that has no `#repos-pr-content` yet. Without a re-announce + restore

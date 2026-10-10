@@ -2776,6 +2776,9 @@ function updateReposPrPanel(data: RepoPrStatsResult): boolean {
 		</div>
 		${renderReposPrContent(data)}
 	`);
+	// A host refresh rebuilds the buttons; put back pending/answered CCR lookups so an answer does
+	// not vanish and a pending check cannot be submitted twice.
+	replayCcrActivityResults();
 	return true;
 }
 
