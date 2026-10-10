@@ -798,7 +798,7 @@ export interface RepeatedTaskCluster {
 /** Repeated-task candidates across all scanned sessions. */
 export interface RepeatedTaskReport {
   minClusterSize: number;
-  /** Sessions that carried a usable first user prompt. */
+  /** Sessions whose first user prompt survived normalization and was clustered (see normalizePromptTokens). */
   sessionsScanned: number;
   clusters: RepeatedTaskCluster[];
 }

@@ -30,6 +30,7 @@ Requires **Node.js 22.14 or later**.
 | `diagnostics` | Every location searched and what was found — start here if something is missing |
 | `curation` | MCP servers and skills you load but never use, with their prompt overhead |
 | `memory-files` | Copilot agent memory-file hygiene; `--server` for the repository's server-side memories |
+| `skill-suggestions` | Tasks you keep prompting for by hand — candidates for a reusable skill or prompt file |
 | `segment` | Cached one-line summary for shell prompts (oh-my-posh) |
 | `chart`, `usage-analysis`, `all` | JSON payloads for integrations |
 

@@ -105,9 +105,8 @@ import {
 
 // --- Repeated-task detection (skill candidates from recurring prompts) ---
 import {
-  detectRepeatedTasks as _detectRepeatedTasks,
-  MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
-  type RepeatedTaskInput as _RepeatedTaskInput,
+  buildRepeatedTaskReport as _buildRepeatedTaskReport,
+  repoDisplayName as _repoDisplayName,
 } from '../../src/repeatedTasks';
 
 // --- Tool curation ---
@@ -7874,12 +7873,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Maximum number of sessions with detected correction moments listed per repository. */
 	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
 
-	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
-	private repoDisplayName(repository: string): string {
-		const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
-		return m ? m[1] : repository;
-	}
-
 	/**
 	 * Build the correction-moment report from already-parsed session results:
 	 * sessions are first filtered to those carrying detected correction moments,
@@ -7895,7 +7888,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const r of results) {
 			const moments = r?.sessionData.usageAnalysis?.correctionMoments;
 			if (!r || !moments || moments.length === 0) { continue; }
-			const repo = this.repoDisplayName(r.sessionData.repository || '(unknown)');
+			const repo = _repoDisplayName(r.sessionData.repository || '(unknown)');
 			if (!byRepo.has(repo)) { byRepo.set(repo, []); }
 			byRepo.get(repo)!.push(r);
 		}
@@ -7946,23 +7939,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private buildRepeatedTaskReport(
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
 	): RepeatedTaskReport | undefined {
-		const inputs: _RepeatedTaskInput[] = [];
-		for (const r of results) {
-			const prompt = r?.sessionData.usageAnalysis?.firstUserPrompt;
-			if (!r || !prompt) { continue; }
-			inputs.push({
-				prompt,
-				session: {
-					file: r.sessionFile,
-					title: r.sessionData.title ?? null,
-					lastInteraction: r.sessionData.lastInteraction ?? new Date(r.mtime).toISOString(),
-					repository: r.sessionData.repository ? this.repoDisplayName(r.sessionData.repository) : undefined,
-				},
-			});
-		}
-		const clusters = _detectRepeatedTasks(inputs);
-		if (clusters.length === 0) { return undefined; }
-		return { minClusterSize: _MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
+		return _buildRepeatedTaskReport(results
+			.filter((r): r is NonNullable<typeof r> => !!r)
+			.map(r => ({
+				file: r.sessionFile,
+				firstUserPrompt: r.sessionData.usageAnalysis?.firstUserPrompt,
+				title: r.sessionData.title,
+				lastInteraction: r.sessionData.lastInteraction,
+				mtime: r.mtime,
+				repository: r.sessionData.repository,
+			})));
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {

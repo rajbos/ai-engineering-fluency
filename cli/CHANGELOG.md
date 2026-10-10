@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Features
+- New `skill-suggestions` command: finds tasks you keep prompting for by hand (similar first prompts across sessions) as candidates for a reusable skill or prompt file — the same report as the VS Code extension's Skill Suggestions section, built by the same shared code. `--json` leaves prompt text, prompt-derived keywords and session titles out unless `--include-prompts` is passed. `usage-analysis --json --repeated-tasks` adds the report to the usage-analysis payload (#2288)
+
 ### Bug Fixes
 - The Customization category of `fluency` (and of `all --json`) now counts worktrees, scratch clones and case/WSL spellings of one repository as one workspace, with the same shared rules as the VS Code extension, instead of counting every folder separately, so its workspace counts match the extension's. The matrix behind it now carries the grouped workspace rows (display name, session count, merged `memberPaths`) instead of an empty list (#2290)
 
