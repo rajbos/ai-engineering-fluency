@@ -1,9 +1,10 @@
 # Security model: visual-view-diff
 
 Lightweight model derived from reading `visual-diff.js`, `render-views.js`,
-`diff-screenshots.js` and `lib/*.js`. Update it in the same PR as any change that adds or
-alters a trigger surface (see "Skill security classification" in the repository
-`AGENTS.md`).
+`diff-screenshots.js` and `lib/*.js`, plus the two other consumers of the view registry
+and `lib/`: `scripts/interaction-smoke.js` and `release-video/src/shots.ts`. Update it in
+the same PR as any change that adds or alters a trigger surface (see "Skill security
+classification" in the repository `AGENTS.md`).
 
 ## What the scripts do and talk to
 
@@ -53,12 +54,19 @@ caller's environment; the bundles they load run in Chromium, which has no access
   `.baseline-worktree` under that directory are deleted first, but only when the
   directory is the default `visual-output/` or carries the `.visual-view-diff-output`
   marker a previous run wrote; otherwise the run refuses to start
-  (`prepareOutRoot` in visual-diff.js). Nothing there is followed through a symlink:
-  a symlinked output root, or a marker that is not a regular file, is refused; the
-  marker is a directory claimed atomically with `mkdir` (no check-then-write; unlike
-  `O_EXCL` on Windows, `mkdir` never creates through a dangling link) and removed again
-  when the directory is refused; and a symlinked entry is removed as a link,
-  never through it.
+  (`prepareOutRoot` in visual-diff.js). How that marker is handled:
+  - A missing marker is created as a **directory** with a single `mkdirSync`, which
+    fails on anything already at the path and never follows a link. There is no
+    check-then-write. (`openSync(..., 'wx')` is not used because on Windows `O_EXCL`
+    creates the target of a dangling symlink.) A marker the run just created is
+    removed again when the directory is refused.
+  - An existing marker is only inspected with `lstat`, never written. It is accepted
+    when it is a real **directory** (written by this version) or a **regular file**
+    (written by an earlier one). Anything else, such as a symlink, including a dangling
+    one, is refused, also in the default `visual-output/`.
+  - A symlinked output root is refused, including the default one. A symlinked entry in
+    the list above is removed as a link, never through it, before anything is written
+    to that path.
 - A temporary git worktree at `<out>/.baseline-worktree` containing the baseline build
   output; its `vscode-extension/node_modules` is a symlink to the working tree's
   (`buildWebviews` in visual-diff.js). The worktree is removed in a `finally` block.
@@ -82,20 +90,26 @@ render processes run concurrently; each is awaited before the worktree is remove
 - The baseline is built in a detached worktree, so the working tree is never checked out
   over or stashed.
 - View and state ids must match a strict allowlist, so ids cannot carry path separators
-  into screenshot or temp file names (`lib/config.js` `ID_PATTERN`). The fixture file name
-  is reduced with `path.basename` (render-views.js `renderView`).
-- Every registry-derived path (`view.bundle`, `view.fixture` and `$fromRepoJson`) is
-  resolved with `resolveInside` (`lib/harness.js`) in all three consumers of the registry
-  (`render-views.js`, `scripts/interaction-smoke.js`, `release-video/src/shots.ts`):
-  absolute paths, `../` segments and symlinks that resolve outside the dist directory,
-  the fixtures directory or the repo root are refused. `fixtureDir` is accepted only from
-  the registry `visual-diff.js` generates; `readConfig` strips it from a committed
-  `views.config.json`.
+  into screenshot or temp file names (`lib/config.js` `ID_PATTERN`).
+- Every registry-derived path is resolved with `resolveInside` (`lib/harness.js`) in all
+  three consumers of the registry (`render-views.js`, `scripts/interaction-smoke.js`,
+  `release-video/src/shots.ts`): `view.bundle` against the dist directory, `view.fixture`
+  against the fixtures directory, and `$fromRepoJson` against the repo root (inside
+  `loadFixture`). The registry value is passed as is, so a relative path that stays
+  inside its root (for example `sub/../x.json`) is accepted. Absolute paths, paths that
+  leave the root lexically (`../`), the root itself, and existing paths whose real path
+  (symlinks resolved) is outside the root are refused.
+- `fixtureDir` (the fixtures directory for a view) is dropped by `readConfig` when it
+  reads the skill's own `views.config.json`, so a committed registry cannot choose it.
+  It is kept only for a registry passed explicitly with `--config`, which is how
+  `visual-diff.js` hands `render-views.js` the registry `baselineRegistry` generates.
+  That function always sets `fixtureDir` itself.
 - Chromium pages (render and interaction smoke) route every request through
   `blockNetwork`: only `file:`, `data:` and `blob:` URLs load; http(s) is aborted and
   WebSockets are closed, at the context level so popups are covered too. A Playwright
   too old to route WebSockets fails the render instead of skipping that block.
-- The bundle build gets an allowlisted environment, not the caller's.
+- The bundle build gets an allowlisted environment, not the caller's (`buildEnv` in
+  visual-diff.js).
 - Embedded JSON has every `<` escaped as `\u003c`, so a payload cannot close the
   script tag (`toScriptJson` and `readJsonConfigGlobals` in `lib/harness.js`).
 - The page gets a stub `acquireVsCodeApi` that only records messages in memory; nothing is
@@ -114,4 +128,7 @@ Recorded, not fixed here.
   locally; it must not be pointed at an unreviewed fork without isolation.
 - The network block covers what Playwright routes (HTTP(S) and WebSockets). Channels it
   does not intercept, such as WebRTC, are not blocked. The build step has no network
-  restriction at all.
+  restriction at all, and `release-video/src/shots.ts` does not call `blockNetwork`.
+- `resolveInside` checks a path's real path and the caller reads it afterwards, so a
+  symlink swapped in between the two is not caught. Exploiting that needs a concurrent
+  local writer in the checkout.
