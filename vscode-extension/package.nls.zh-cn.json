@@ -532,6 +532,7 @@
   "serverMemories.showingOf": "显示 {1} 条中的 {0} 条",
   "serverMemories.draftBlocked": "未起草提示：{0} 不是此检出中的常规文件。",
   "serverMemories.draftNoTarget": "未起草提示：在此检出中未找到安全的指令文件。",
+  "serverMemories.draftContextChanged": "未起草提示：工作区现在指向的仓库与读取这些记忆时的仓库不同。该板块将刷新。",
 
   "insight.shared.listSeparator": "、",
   "insight.shared.and": "，并且",

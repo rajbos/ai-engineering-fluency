@@ -656,6 +656,21 @@ export interface ServerMemoriesRefreshInputs {
  *    start a new request is a separate question from whether what we are showing is still
  *    the right repository's.
  */
+/**
+ * Whether a cached server-memories analysis still belongs to the repository the workspace
+ * resolves to *now*. The panel can stay open while workspace folders change, so a promote
+ * button rendered for one repository must not draft a prompt — carrying that repository's
+ * fact — that tells an agent to edit a repo-relative file in another. Both the slug and the
+ * checkout root must match: two worktrees of one repository share a slug but not a tree.
+ */
+export function serverMemoriesDraftContextMatches(
+	cached: { repo: string | undefined; repoRoot: string | undefined },
+	current: { repo: string; repoRoot: string } | undefined,
+): boolean {
+	return Boolean(current && cached.repo && cached.repoRoot
+		&& current.repo === cached.repo && current.repoRoot === cached.repoRoot);
+}
+
 export function decideServerMemoriesRefresh(input: ServerMemoriesRefreshInputs): { clearCache: boolean; startFetch: boolean } {
 	// Switching the feature off must hide what was already fetched, not merely stop fetching.
 	if (!input.enabled) { return { clearCache: true, startFetch: false }; }
@@ -3218,6 +3233,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private setupConfigurationListener(context: vscode.ExtensionContext): void {
+		// The repository-memory cache is keyed by the workspace's repository and checkout root.
+		// Adding, removing or reordering folders (or granting trust) can change which repository
+		// that is, so drop the cached analysis rather than keep showing the previous one.
+		context.subscriptions.push(
+			vscode.workspace.onDidChangeWorkspaceFolders(() => this.invalidateServerMemoriesCache()),
+			vscode.workspace.onDidGrantWorkspaceTrust(() => this.invalidateServerMemoriesCache()),
+		);
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('aiEngineeringFluency.display')) { this.refreshOpenPanelsForSettingChange(); }
@@ -7446,6 +7468,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const analysis = this._serverMemoriesAnalysis;
 		const repoRoot = this._serverMemoriesRepoRoot;
 		if (!analysis || !repoRoot) { return; }
+		// Re-resolve the workspace's repository now, not just the target file: the button may
+		// have been rendered before the workspace folders (or their trust) changed.
+		if (!serverMemoriesDraftContextMatches({ repo: this._serverMemoriesRepo, repoRoot }, this.resolveWorkspaceRepoSlug())) {
+			void vscode.window.showWarningMessage(l10n.t('serverMemories.draftContextChanged'));
+			// Drops the stale analysis and re-renders, so the old buttons disappear.
+			this.invalidateServerMemoriesCache();
+			return;
+		}
 		const result = _buildPromotionPromptForSubject(analysis, subject, _createPromotionTargetProbe(repoRoot));
 		if ('prompt' in result) {
 			await vscode.commands.executeCommand('workbench.action.chat.open', { query: result.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' });

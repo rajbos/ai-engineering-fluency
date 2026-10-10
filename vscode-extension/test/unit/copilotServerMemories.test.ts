@@ -30,7 +30,7 @@ import {
 	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 } from '../../../src/copilotServerMemories';
-import { decideServerMemoriesRefresh } from '../../src/extension';
+import { decideServerMemoriesRefresh, serverMemoriesDraftContextMatches } from '../../src/extension';
 import type { ServerMemory } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
@@ -1616,4 +1616,17 @@ test('describeNoPromotionCandidates agrees each verb with its count', () => {
 		],
 	}, alwaysExists);
 	assert.match(describeNoPromotionCandidates(plural), /none of the 4 stored memories is both .* \(2 already cite an instruction file, 2 have no verifiable file citation\)\.$/);
+});
+
+test('serverMemoriesDraftContextMatches refuses a draft once the workspace points elsewhere', () => {
+	const cached = { repo: 'o/a', repoRoot: '/w/a' };
+	assert.equal(serverMemoriesDraftContextMatches(cached, { repo: 'o/a', repoRoot: '/w/a' }), true);
+	// Folders changed to another repository: the button's fact belongs to o/a.
+	assert.equal(serverMemoriesDraftContextMatches(cached, { repo: 'o/b', repoRoot: '/w/b' }), false);
+	// Same repository, different worktree: a repo-relative AGENTS.md is a different file.
+	assert.equal(serverMemoriesDraftContextMatches(cached, { repo: 'o/a', repoRoot: '/w/a-worktree-2' }), false);
+	// Workspace no longer resolves to a GitHub repository (closed, untrusted, non-GitHub).
+	assert.equal(serverMemoriesDraftContextMatches(cached, undefined), false);
+	// Nothing cached to compare against.
+	assert.equal(serverMemoriesDraftContextMatches({ repo: undefined, repoRoot: '/w/a' }, { repo: 'o/a', repoRoot: '/w/a' }), false);
 });

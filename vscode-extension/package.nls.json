@@ -495,6 +495,7 @@
   "serverMemories.showingOf": "showing {0} of {1}",
   "serverMemories.draftBlocked": "Not drafting a prompt: {0} is not a regular file inside this checkout.",
   "serverMemories.draftNoTarget": "Not drafting a prompt: no safe instruction file was found in this checkout.",
+  "serverMemories.draftContextChanged": "Not drafting a prompt: the workspace now points at a different repository than these memories were read for. The section will refresh.",
 
   "insight.shared.listSeparator": ", ",
   "insight.shared.and": " and ",
