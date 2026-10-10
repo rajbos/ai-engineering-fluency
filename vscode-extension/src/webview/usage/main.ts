@@ -291,6 +291,7 @@ interface WorkspaceCustomizationRow {
 	sessionCount: number;
 	interactionCount: number;
 	typeStatuses: { [typeId: string]: CustomizationTypeStatus };
+	memberPaths?: string[];
 }
 
 interface WorkspaceCustomizationMatrix {
@@ -298,6 +299,7 @@ interface WorkspaceCustomizationMatrix {
 	workspaces: WorkspaceCustomizationRow[];
 	totalWorkspaces: number;
 	workspacesWithIssues: number;
+	ungroupedWorkspaceNames?: string[];
 }
 
 interface MissedPotentialWorkspace {
