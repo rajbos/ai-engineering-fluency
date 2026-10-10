@@ -117,10 +117,13 @@ The CLI (`cli/`) is a thin consumer of the shared TypeScript modules in the repo
 | Chart webview payload | `buildChartData()` | `chartDataBuilder.ts` |
 | Efficiency webview payload | `buildEfficiencyViewData()` | `efficiencyViewBuilder.ts` |
 
-Webview payloads follow the same rule: exactly one function in `src/` builds each
-payload and every host (extension, CLI, desktop) calls it, differing only in how it
-gathers inputs and in host settings. Never keep a host-side copy of a payload
-builder — a field a view starts requiring then reaches one host and not the others.
+Webview payloads follow the same rule: one function in `src/` builds a payload and
+every host (extension, CLI, desktop) calls it, differing only in how it gathers inputs
+and in host settings. The Chart and Efficiency payloads (table above) do this today;
+the Usage Analysis and Diagnostics payloads are still partly assembled per host and
+are being moved over (#2316, step 4). Never add a host-side copy of a payload builder,
+and move a payload's assembly to `src/` when you change it — otherwise a field a view
+starts requiring reaches one host and not the others.
 
 **Critical rule**: `estimateTokensFromJsonlSession().modelUsage` must **not** be used as the primary source for model attribution. It returns `{}` for delta-format sessions (VS Code Chat JSONL), causing $0 cost for those sessions. Always call `getModelUsageFromSession()` separately for model attribution — it handles all formats through a single code path.
 

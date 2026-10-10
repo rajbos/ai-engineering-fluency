@@ -27,7 +27,8 @@ function makeRepoWithFile(): string {
 
 test('repositoryFromEcosystemMeta prefers the adapter id, else derives one from the workspace', () => {
 	assert.equal(repositoryFromEcosystemMeta({ repository: 'octo/widgets', workspacePath: '/src/widgets' }), 'octo/widgets');
-	assert.equal(repositoryFromEcosystemMeta({}), undefined, 'no workspace means no repository');
+	assert.equal(repositoryFromEcosystemMeta({ repository: 'octo/widgets' }), 'octo/widgets', 'a recorded repository needs no workspace');
+	assert.equal(repositoryFromEcosystemMeta({}), undefined, 'neither field means no repository');
 	assert.ok(repositoryFromEcosystemMeta({ workspacePath: '/src/widgets' }), 'a workspace path yields a derived name');
 });
 

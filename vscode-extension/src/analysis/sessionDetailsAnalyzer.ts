@@ -63,12 +63,12 @@ async function processEcosystemSessionDetails(eco: IEcosystemAdapter, sessionFil
 	details.interactions = interactionCount;
 	details.editorRoot = eco.getEditorRoot(sessionFile);
 	details.editorName = getEcosystemDisplayName(eco, sessionFile);
-	if (meta.workspacePath) {
-		// Shared with the CLI (src/sessionRepository.ts): the ecosystem's own repository id,
-		// else a worktree-aware name derived from the workspace path.
-		details.repository = repositoryFromEcosystemMeta(meta);
-		details.workspacePath = meta.workspacePath;
-	}
+	// Shared with the CLI (src/sessionRepository.ts): the ecosystem's own repository id, which
+	// an adapter can record without a workspace, else a worktree-aware name derived from the
+	// workspace path. Only the workspace path itself depends on there being one.
+	const repository = repositoryFromEcosystemMeta(meta);
+	if (repository) { details.repository = repository; }
+	if (meta.workspacePath) { details.workspacePath = meta.workspacePath; }
 	return { details, cacheUpdate: { tokenResult, modelUsage } };
 }
 

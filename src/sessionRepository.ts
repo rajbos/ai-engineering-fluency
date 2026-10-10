@@ -20,13 +20,14 @@ export type SessionContentReference = Parameters<typeof extractRepositoryFromCon
 
 /**
  * An ecosystem's repository for a session: its own authoritative id (e.g. Copilot CLI's DB
- * "owner/repo" column) when it records one, else a worktree-aware name derived from the
- * workspace path, so app-store worktree paths resolve to the repo folder rather than the
- * transient worktree name. Undefined when the session has no workspace.
+ * "owner/repo" column) whenever it records one — with or without a workspace, since the
+ * adapter contract defines the two fields independently — else a worktree-aware name derived
+ * from the workspace path, so app-store worktree paths resolve to the repo folder rather than
+ * the transient worktree name. Undefined when the session has neither.
  */
 export function repositoryFromEcosystemMeta(meta: { repository?: string; workspacePath?: string }): string | undefined {
-	if (!meta.workspacePath) { return undefined; }
-	return meta.repository || getRepoNameFromWorkspacePath(meta.workspacePath);
+	if (meta.repository) { return meta.repository; }
+	return meta.workspacePath ? getRepoNameFromWorkspacePath(meta.workspacePath) : undefined;
 }
 
 /** The content references one chat request carries (VS Code JSON and delta-JSONL sessions). */
