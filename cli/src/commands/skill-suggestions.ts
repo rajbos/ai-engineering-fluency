@@ -15,6 +15,7 @@
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
+import { sanitizeForDisplay } from '../../../src/copilotServerMemories';
 import type { RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../src/types';
 
 /** A session in the redacted payload: no title. */
@@ -63,7 +64,12 @@ export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undef
 	};
 }
 
-/** Human-readable report for the terminal. */
+/**
+ * Human-readable report for the terminal. Every session-derived value (prompt,
+ * keywords, repositories, timestamps) goes through sanitizeForDisplay(): it is
+ * free text, and a newline or ESC/OSC/CSI sequence printed verbatim could forge
+ * report lines or reprogram the reader's terminal.
+ */
 export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefined): string {
 	const lines: string[] = ['', 'Skill Suggestions — repeated tasks', '='.repeat(50), ''];
 	if (!report) {
@@ -76,12 +82,12 @@ export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefi
 		'',
 	);
 	report.clusters.forEach((cluster, i) => {
-		lines.push(`${i + 1}. "${cluster.representativePrompt}"`);
+		lines.push(`${i + 1}. "${sanitizeForDisplay(cluster.representativePrompt)}"`);
 		lines.push(`   Sessions:     ${cluster.sessionCount}`);
-		if (cluster.sharedKeywords.length > 0) { lines.push(`   Keywords:     ${cluster.sharedKeywords.join(', ')}`); }
-		if (cluster.repositories.length > 0) { lines.push(`   Repositories: ${cluster.repositories.join(', ')}`); }
+		if (cluster.sharedKeywords.length > 0) { lines.push(`   Keywords:     ${cluster.sharedKeywords.map(sanitizeForDisplay).join(', ')}`); }
+		if (cluster.repositories.length > 0) { lines.push(`   Repositories: ${cluster.repositories.map(sanitizeForDisplay).join(', ')}`); }
 		const last = cluster.sessions[0]?.lastInteraction;
-		if (last) { lines.push(`   Last seen:    ${last.slice(0, 10)}`); }
+		if (last) { lines.push(`   Last seen:    ${sanitizeForDisplay(last).slice(0, 10)}`); }
 		lines.push('');
 	});
 	lines.push('Consider turning these into a reusable skill, prompt file or custom agent.', '');

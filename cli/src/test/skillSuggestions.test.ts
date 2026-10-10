@@ -183,3 +183,22 @@ test('skill-suggestions text report lists each repeated task', () => {
 	assert.match(text, /Last seen:\s+2026-08-02/);
 	assert.match(formatSkillSuggestionsReport(undefined), /No repeated tasks found/);
 });
+
+test('skill-suggestions text report strips newlines and terminal control sequences from session data', () => {
+	const hostile: RepeatedTaskReport = {
+		...REPORT,
+		clusters: [{
+			...REPORT.clusters[0],
+			representativePrompt: 'fix tests\n2. "forged line"\u001b]0;pwned\u0007\u001b[2J\u009b31m',
+			sharedKeywords: ['tests\u001b[31m'],
+			repositories: ['o/r\r\nRepositories: forged'],
+			sessions: [{ file: 'a.jsonl', lastInteraction: '\u001b[2J2026-08-02T10:00:00Z', repository: 'o/r' }],
+		}],
+	};
+	const text = formatSkillSuggestionsReport(hostile);
+	// Only the report's own line breaks may remain.
+	assert.ok(!/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/.test(text), 'control characters reached the terminal output');
+	assert.ok(!text.includes('\n2. "forged line"'), 'a prompt newline forged a report line');
+	assert.equal(text.split('\n').filter(line => line.startsWith('   Repositories:')).length, 1);
+	assert.ok(text.includes('1. "fix tests 2. "forged line" ]0;pwned [2J 31m"'));
+});
