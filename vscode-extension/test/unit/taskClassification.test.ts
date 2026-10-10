@@ -9,6 +9,7 @@ buildClassificationInputFromUsageAnalysis,
 buildClassificationInputFromChatTurns,
 countDelegationToolCalls,
 resolveSessionTaskAttribution,
+createEmptyTaskClassificationResult,
 } from '../../../src/taskClassification';
 import type { ChatTurn, ContextReferenceUsage, SessionUsageAnalysis } from '../../../src/types';
 
@@ -234,17 +235,22 @@ test('countDelegationToolCalls: does not match tool names merely containing "tas
 	assert.equal(countDelegationToolCalls({ task_create: 1, todo_write: 1, manage_agents_config: 1 }), 0);
 });
 
-test('resolveSessionTaskAttribution prefers the analysis classification, else the tool heuristic', () => {
-	const classified = resolveSessionTaskAttribution({
-		toolCalls: { total: 0, byTool: {} },
-		taskClassification: { primaryCategory: 'Testing', categoryShares: { Testing: 1 } },
-	} as unknown as Parameters<typeof resolveSessionTaskAttribution>[0]);
-	assert.equal(classified.taskCategory, 'Testing');
-	assert.deepEqual(classified.taskCategoryShares, { Testing: 1 });
+test('resolveSessionTaskAttribution uses a classification that covered turns', () => {
+	const classification = classifySessionTurns([
+		{ messageText: 'run tests', toolNames: ['bash'], shellCommands: ['npm test'] },
+	]);
+	assert.ok(classification.turnCount > 0);
+	const result = resolveSessionTaskAttribution({ toolCalls: { total: 0, byTool: {} }, taskClassification: classification });
+	assert.equal(result.taskCategory, classification.primaryCategory);
+	assert.deepEqual(result.taskCategoryShares, classification.categoryShares);
+});
 
-	const heuristic = resolveSessionTaskAttribution({
-		toolCalls: { total: 1, byTool: { run_tests: 1 } },
-	} as unknown as Parameters<typeof resolveSessionTaskAttribution>[0]);
-	assert.equal(heuristic.taskCategory, classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 1, byTool: { run_tests: 1 } } } as never)));
-	assert.equal('taskCategoryShares' in heuristic, false);
+test('resolveSessionTaskAttribution falls back to the tool heuristic for an empty classification', () => {
+	// analyzeSessionUsage() and the adapters always set taskClassification, to the empty
+	// "Conversation" placeholder when nothing was classified; that must not mask tool calls.
+	const toolCalls = { total: 1, byTool: { edit: 1 } };
+	const result = resolveSessionTaskAttribution({ toolCalls, taskClassification: createEmptyTaskClassificationResult() });
+	assert.equal(result.taskCategory, classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls })));
+	assert.notEqual(result.taskCategory, 'Conversation', 'the placeholder category must not win over the tools');
+	assert.equal('taskCategoryShares' in result, false, 'the placeholder shares must not be carried over');
 });

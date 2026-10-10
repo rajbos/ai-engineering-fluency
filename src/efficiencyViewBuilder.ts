@@ -45,8 +45,12 @@ import {
  */
 export const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
-/** The slice of a session's usage analysis the Efficiency view reads. */
-export type EfficiencySessionAnalysis = Pick<SessionUsageAnalysis, 'modelEfficiency' | 'sessionDuration' | 'applyUsage' | 'skillCalls'>;
+/**
+ * The slice of a session's usage analysis the Efficiency view reads. `editScope` is the
+ * lines-of-code fallback buildSessionEfficiencyAttribution() uses for deletion-only sessions,
+ * which carry no top-level LOC (see sessionLocFromUsageAnalysis).
+ */
+export type EfficiencySessionAnalysis = Pick<SessionUsageAnalysis, 'modelEfficiency' | 'sessionDuration' | 'applyUsage' | 'skillCalls' | 'editScope'>;
 
 /** The session fields {@link toEfficiencySessionInput} reads; a `SessionFileCache` satisfies it. */
 export type EfficiencySessionSource = Pick<SessionFileCache, 'interactions' | 'tokens' | 'actualTokens'> & {

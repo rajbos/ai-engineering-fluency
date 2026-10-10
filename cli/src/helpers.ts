@@ -338,6 +338,7 @@ async function sessionViewAttributes(filePath: string): Promise<Pick<SessionData
 				...(analysis.sessionDuration ? { sessionDuration: analysis.sessionDuration } : {}),
 				...(analysis.applyUsage ? { applyUsage: analysis.applyUsage } : {}),
 				...(analysis.skillCalls ? { skillCalls: analysis.skillCalls } : {}),
+				...(analysis.editScope ? { editScope: analysis.editScope } : {}),
 			},
 		};
 	} catch {

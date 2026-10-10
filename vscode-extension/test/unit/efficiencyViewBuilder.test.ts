@@ -2,7 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { toEfficiencySessionInput } from '../../../src/efficiencyViewBuilder';
-import { addSessionEfficiencyToDailyStats } from '../../../src/modelEfficiency';
+import { addSessionEfficiencyToDailyStats, buildSessionEfficiencyAttribution } from '../../../src/modelEfficiency';
 import { addSessionToDailyStats, sortedDailyStats } from '../../../src/statsHelpers';
 import type { DailyTokenStats, ModelEfficiencyCounters } from '../../../src/types';
 
@@ -46,4 +46,15 @@ test('addSessionEfficiencyToDailyStats splits tokens by day and lands counters o
 	assert.equal(last.modelEfficiency?.['gpt-4o'].editTurns, 2);
 	// The per-editor slice mirrors the day total (the editor filter relies on it).
 	assert.deepEqual(last.editorModelEfficiency?.['Copilot CLI'], last.modelEfficiency);
+});
+
+test('buildSessionEfficiencyAttribution keeps deletion-only LOC from editScope', () => {
+	// Deletion-only sessions carry no top-level LOC (sessionLocFromUsageAnalysis keeps LOC only
+	// when lines were added), so the cached editScope is the only source of their removals.
+	const attribution = buildSessionEfficiencyAttribution({
+		modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 10, sessions: 0 } },
+		usageAnalysis: { editScope: { singleFileEdits: 1, multiFileEdits: 0, totalEditedFiles: 1, avgFilesPerSession: 1, linesAdded: 0, linesRemoved: 7 } },
+	});
+	assert.equal(attribution.linesRemoved, 7);
+	assert.equal(attribution.linesAdded, 0);
 });

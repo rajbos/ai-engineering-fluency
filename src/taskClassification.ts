@@ -289,10 +289,16 @@ export function resolveSessionTaskAttribution(
 	usageAnalysis: Pick<SessionUsageAnalysis, 'toolCalls' | 'taskClassification'> & Partial<Pick<SessionUsageAnalysis, 'mcpTools'>>,
 	title?: string | null,
 ): { taskCategory: TaskCategory; taskCategoryShares?: TaskCategoryBreakdown } {
-	const taskCategory = usageAnalysis.taskClassification?.primaryCategory
-		?? classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, title));
-	const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares;
-	return taskCategoryShares ? { taskCategory, taskCategoryShares } : { taskCategory };
+	// analyzeSessionUsage() and the ecosystem adapters always set `taskClassification`, using
+	// createEmptyTaskClassificationResult() (a "Conversation" placeholder with no turns) when
+	// nothing was classified. Only a classification that actually covered turns is
+	// authoritative; otherwise fall back to the tool/title heuristic, so an adapter that
+	// reports tool calls but no turn classification is not filed under "Conversation".
+	const classification = usageAnalysis.taskClassification;
+	if (classification && classification.turnCount > 0) {
+		return { taskCategory: classification.primaryCategory, taskCategoryShares: classification.categoryShares };
+	}
+	return { taskCategory: classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, title)) };
 }
 
 export function buildClassificationInputFromChatTurns(turns: ChatTurn[]): TaskClassificationInput {
