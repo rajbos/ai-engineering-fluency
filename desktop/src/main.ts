@@ -1059,9 +1059,22 @@ function createWindow(): BrowserWindow {
 function showPanel(panel: PanelId): void {
     currentPanel = panel;
     if (!mainWindow) { return; }
+    mainWindow.show();
+    mainWindow.focus();
+    navigateToPanel(panel);
+}
+
+/**
+ * Loads a panel, putting the loading screen up first when its data still has to be
+ * computed. Every navigation goes through here — including the reload after a refresh
+ * or the startup warm-up, which clear or have not yet built the caches — because a
+ * cache miss can mean a multi-minute walk on this main process (the Chart/Efficiency
+ * enrichment), and loading `app://panel/...` directly would block on it with the old
+ * page, or nothing, on screen.
+ */
+function navigateToPanel(panel: PanelId): void {
+    if (!mainWindow || mainWindow.isDestroyed()) { return; }
     const win = mainWindow;
-    win.show();
-    win.focus();
     if (isPanelDataReady(panel)) {
         win.loadURL(`app://panel/${panel}`);
         return;
@@ -1135,7 +1148,7 @@ function updateTrayMenu(t: Tray): void {
             click: async () => {
                 await refreshStats();
                 if (mainWindow?.isVisible()) {
-                    mainWindow.loadURL(`app://panel/${currentPanel}`);
+                    navigateToPanel(currentPanel);
                 }
             },
         },
@@ -1173,7 +1186,7 @@ function registerIpcHandlers(): void {
         switch (message.command) {
             case 'refresh':
                 await refreshStats();
-                mainWindow?.loadURL(`app://panel/${currentPanel}`);
+                navigateToPanel(currentPanel);
                 break;
 
             case 'showDetails':
@@ -1356,9 +1369,7 @@ app.whenReady().then(async () => {
     // already showing, that would freeze the visible window; on demand it runs
     // behind the loading screen showPanel() puts up first.
     getStats().then(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.loadURL(`app://panel/${currentPanel}`);
-        }
+        navigateToPanel(currentPanel);
         return getUsageStats();
     }).catch(() => { /* surfaced per-panel via the error page */ });
 
@@ -1372,7 +1383,7 @@ app.whenReady().then(async () => {
     // Listen for system theme changes and reload the current panel
     nativeTheme.on('updated', () => {
         if (mainWindow?.isVisible()) {
-            mainWindow.loadURL(`app://panel/${currentPanel}`);
+            navigateToPanel(currentPanel);
         }
     });
 });
