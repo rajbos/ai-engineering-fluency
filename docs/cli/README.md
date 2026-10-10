@@ -492,7 +492,7 @@ if (usage) {
 const byPath = await analyzeSessionFiles([claudeSessionPath, copilotEventsPath]);
 ```
 
-`analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown or unparsable file, a session file over 100 MB, and a session with no activity recorded yet (no turns, tokens, models or billing). Database-backed sessions (`…/state.db#<id>`, `session-store.db#<id>`, …) are not size-capped, because one database holds every session. It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
+Pass absolute paths (for example built with `os.homedir()`). Node does not expand `~`. `analyzeSessionFile(filePath, { cache? })` resolves to a `SessionUsage`, or to `null` for a missing, unknown or unparsable file, a session file over 100 MB, and a session with no activity recorded yet (no turns, tokens, models or billing). Database-backed sessions (`…/state.db#<id>`, `session-store.db#<id>`, …) are not size-capped, because one database holds every session. It never throws for a bad file, never writes to the console and never exits the process. Each `SessionUsage` has these fields:
 
 | Field | Meaning |
 |---|---|
