@@ -8,6 +8,7 @@ import {
 	discoverSessionFiles,
 	calculateDetailedStats,
 	calculateDailyStats,
+	recentAnalysisCutoff,
 	buildChartPayload,
 	calculateUsageAnalysisStats,
 	buildCustomizationMatrix,
@@ -62,7 +63,10 @@ export const allCommand = new Command('all')
 		// though all three functions iterate the same session file list.
 		const [detailedStats, dailyStats, usageStats] = await Promise.all([
 			calculateDetailedStats(files),
-			calculateDailyStats(files),
+			// Enrichment only for the recent window Usage Analysis analyzes anyway: hosts such as
+			// Visual Studio wait on this command with a timeout, and a full-history enrichment
+			// walk would repeat on every run of a large history (the session cache is bounded).
+			calculateDailyStats(files, false, { enrichSince: recentAnalysisCutoff() }),
 			calculateUsageAnalysisStats(files),
 		]);
 

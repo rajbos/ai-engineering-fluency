@@ -13,7 +13,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, calculateViewStats, processSessionFileForViews } from '../helpers';
+import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, calculateViewStats, processSessionFileForViews, recentAnalysisCutoff } from '../helpers';
 import { getCached } from '../cliCache';
 import { buildClassificationInputFromUsageAnalysis, classifySessionTask } from '../../../src/taskClassification';
 
@@ -119,4 +119,22 @@ test('the view parse passes the session title to the task fallback, as the exten
 	const expected = classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 0, byTool: {} } }, title));
 	assert.equal(data.taskCategory, expected);
 	assert.notEqual(classifySessionTask(buildClassificationInputFromUsageAnalysis({ toolCalls: { total: 0, byTool: {} } })), expected, 'the fixture title must change the category, or this test proves nothing');
+});
+
+test('recentAnalysisCutoff is the earlier of the start of last month and 30 days ago', () => {
+	assert.deepEqual(recentAnalysisCutoff(new Date(2026, 2, 31, 12)), new Date(2026, 1, 1), 'last month starts first');
+	assert.deepEqual(recentAnalysisCutoff(new Date(2026, 2, 1, 12)), new Date(2026, 0, 30), '30 days ago starts first');
+});
+
+test('calculateDailyStats enriches only sessions modified since enrichSince', async t => {
+	// `all --json` (awaited by the Visual Studio host under a timeout) bounds the enrichment to
+	// the recent window; older sessions keep the lean parse, so nothing analyzes the whole history.
+	const lean = mockSession(t, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', false);
+	const leanDays = await calculateDailyStats([lean.filePath], false, { enrichSince: new Date(Date.now() + 86_400_000) });
+	assert.equal(lean.reads(), 1, 'an older session must not get the analysis read');
+	assert.equal(leanDays.reduce((sum, d) => sum + d.tokens, 0) > 0, true, 'its tokens still count');
+	t.mock.restoreAll();
+	const recent = mockSession(t, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', false);
+	await calculateDailyStats([recent.filePath], false, { enrichSince: new Date(Date.now() - 86_400_000) });
+	assert.equal(recent.reads(), 2, 'a recent session is enriched');
 });

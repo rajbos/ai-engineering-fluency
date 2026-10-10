@@ -3,7 +3,7 @@
  */
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { discoverSessionFiles, calculateDailyStats, buildChartPayload, fmt } from '../helpers';
+import { discoverSessionFiles, calculateDailyStats, recentAnalysisCutoff, buildChartPayload, fmt } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
 import { createEmptyChartPayload } from './payloads';
 
@@ -23,7 +23,9 @@ export const chartCommand = new Command('chart')
 		}
 
 		const verbose = options.verbose === true;
-		const payload = buildChartPayload(await calculateDailyStats(files, verbose));
+		// Bounded like `all`: hosts call this too, and enriching the whole history on every run
+		// is the slow path. See DailyStatsOptions.enrichSince.
+		const payload = buildChartPayload(await calculateDailyStats(files, verbose, { enrichSince: recentAnalysisCutoff() }));
 
 		if (shouldOutputJson(options)) {
 			process.stdout.write(JSON.stringify(payload));

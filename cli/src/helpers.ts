@@ -710,8 +710,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
 	const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 	const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-	// Cutoff includes last month — which may start before the 30-day window
-	const cutoffStart = lastMonthStart < last30DaysStart ? lastMonthStart : last30DaysStart;
+	const cutoffStart = recentAnalysisCutoff(now);
 
 	const todayPeriod = createEmptyUsageAnalysisPeriod();
 	const last30DaysPeriod = createEmptyUsageAnalysisPeriod();
@@ -919,13 +918,48 @@ export async function calculateViewStats(sessionFiles: string[], verbose = false
 }
 
 /**
+ * Start of the window Usage Analysis analyzes: the start of last month or 30 days ago,
+ * whichever is earlier.
+ */
+export function recentAnalysisCutoff(now: Date = new Date()): Date {
+	const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+	const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+	return lastMonthStart < last30DaysStart ? lastMonthStart : last30DaysStart;
+}
+
+export interface DailyStatsOptions {
+	/**
+	 * Only sessions modified since this date get the view enrichment (repository, task
+	 * category, lines of code, efficiency signals); older ones use the lean parse, whose
+	 * tokens, models and editors are still exact. Omit it to enrich the whole history.
+	 *
+	 * The enrichment costs a usage-analysis pass and a repository lookup per session, and
+	 * the session cache is bounded, so on a large history a full walk repeats on every new
+	 * process. Hosts that wait on a CLI command with a timeout (`all --json` for Visual
+	 * Studio) pass {@link recentAnalysisCutoff}: those sessions are analyzed for Usage
+	 * Analysis anyway, and the analysis is shared, so the extra cost is bounded.
+	 */
+	enrichSince?: Date;
+}
+
+/**
  * Process session files into per-day stats over the whole history, in the
  * `DailyTokenStats[]` shape the shared `buildChartData()` takes. Aggregation goes through
  * the shared `addSessionToDailyStats()` — see AGENTS.md, "CLI Must Reuse Shared Functions".
  * Use {@link calculateViewStats} when the Efficiency inputs are needed too.
  */
-export async function calculateDailyStats(sessionFiles: string[], verbose = false): Promise<DailyTokenStats[]> {
-	return dailyStatsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileForViews(file, verbose)));
+export async function calculateDailyStats(sessionFiles: string[], verbose = false, options: DailyStatsOptions = {}): Promise<DailyTokenStats[]> {
+	return dailyStatsFromSessions(await runWithConcurrency(sessionFiles, async (file) => processSessionFileWithinWindow(file, verbose, options.enrichSince)));
+}
+
+/** The view parse for a session modified since `enrichSince` (or always, without it), else the lean parse. */
+async function processSessionFileWithinWindow(filePath: string, verbose: boolean, enrichSince: Date | undefined): Promise<SessionData | null> {
+	if (enrichSince) {
+		let modified: Date | undefined;
+		try { modified = (await statSessionFile(filePath)).mtime; } catch { /* processSessionFile reports it */ }
+		if (!modified || modified < enrichSince) { return processSessionFile(filePath, verbose); }
+	}
+	return processSessionFileForViews(filePath, verbose);
 }
 
 function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>): DailyTokenStats[] {
