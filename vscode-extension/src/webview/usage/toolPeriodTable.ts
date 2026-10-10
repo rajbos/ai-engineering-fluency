@@ -1,9 +1,10 @@
 /**
  * Tools & Integrations: one tool × period table (rows = tools, columns = Today /
- * Last 30 Days / Previous Month) with a pinned total row, replacing the three
- * side-by-side ranked cards. Pure string building so the row selection, sort and
- * escaping are unit-testable without a DOM.
+ * Last 30 Days / Previous Month) with the period totals in the footer, replacing
+ * the three side-by-side ranked cards. Row selection and default order live here;
+ * markup, sorting and paging come from the shared `renderDataTable`.
  */
+import { renderDataTable, type DataTableCell, type DataTableColumn } from '../shared/dataTable';
 import { escapeHtml, formatNumber } from '../shared/formatUtils';
 import { localize, type WebviewKey } from '../shared/localization';
 
@@ -27,6 +28,9 @@ export interface ToolPeriodRow {
 }
 
 export interface ToolPeriodTableOptions {
+	/** Unique per document; keys the table's remembered sort and page. */
+	tableId: string;
+	ariaLabelKey: WebviewKey;
 	/** Each period contributes its top N ids; the table shows the union. */
 	limitPerPeriod: number;
 	nameResolver: (id: string) => string;
@@ -85,13 +89,11 @@ export function selectToolPeriodRows(
 			|| a.id.localeCompare(b.id));
 }
 
-function countCell(value: number): string {
-	return value > 0
-		? `<td class="tool-period-num">${formatNumber(value)}</td>`
-		: '<td class="tool-period-num tool-period-zero">–</td>';
+function countCell(value: number): DataTableCell {
+	return value > 0 ? formatNumber(value) : { html: '<span class="data-table-muted">–</span>' };
 }
 
-function nameCell(row: ToolPeriodRow, duplicateNames: ReadonlySet<string>, autoIds?: ReadonlySet<string>): string {
+function nameCell(row: ToolPeriodRow, duplicateNames: ReadonlySet<string>, autoIds?: ReadonlySet<string>): DataTableCell {
 	const idEscaped = escapeHtml(row.id);
 	const autoBadge = autoIds?.has(row.id.toLowerCase())
 		? `<span class="auto-badge" title="${escapeHtml(localize('usage.toolPeriod.autoBadgeTitle'))}">${escapeHtml(localize('usage.toolPeriod.autoBadge'))}</span>`
@@ -99,9 +101,9 @@ function nameCell(row: ToolPeriodRow, duplicateNames: ReadonlySet<string>, autoI
 	// Different raw ids can resolve to the same friendly name; keep them as separate
 	// rows and show the raw id so they stay distinguishable.
 	const hint = duplicateNames.has(row.name) && row.name !== row.id
-		? `<span class="tool-period-id">${idEscaped}</span>`
+		? `<span class="tool-period-id data-table-muted">${idEscaped}</span>`
 		: '';
-	return `<td class="tool-period-name"><strong title="${idEscaped}">${escapeHtml(row.name)}</strong>${autoBadge}${hint}</td>`;
+	return { html: `<strong title="${idEscaped}">${escapeHtml(row.name)}</strong>${autoBadge}${hint}` };
 }
 
 export function buildToolPeriodTableHtml(counts: ToolPeriodCounts, totals: ToolPeriodTotals, options: ToolPeriodTableOptions): string {
@@ -113,21 +115,46 @@ export function buildToolPeriodTableHtml(counts: ToolPeriodCounts, totals: ToolP
 		seen.add(row.name);
 	}
 
-	const head = `<th class="tool-period-name">${escapeHtml(localize(options.firstColumnKey))}</th>`
-		+ TOOL_PERIODS.map(p => `<th class="tool-period-num">${escapeHtml(localize(PERIOD_COLUMN_KEYS[p]))}</th>`).join('');
-	const totalRow = `<tr class="tool-period-total"><td class="tool-period-name">${escapeHtml(localize(options.totalLabelKey))}</td>`
-		+ TOOL_PERIODS.map(p => `<td class="tool-period-num">${formatNumber(totals[p])}</td>`).join('') + '</tr>';
+	const columns: DataTableColumn<ToolPeriodRow>[] = [
+		{
+			id: 'name',
+			label: localize(options.firstColumnKey),
+			className: 'data-table-wrap-anywhere',
+			sortValue: row => row.name,
+			render: row => nameCell(row, duplicateNames, options.autoIds),
+		},
+		...TOOL_PERIODS.map((period): DataTableColumn<ToolPeriodRow> => ({
+			id: period,
+			label: localize(PERIOD_COLUMN_KEYS[period]),
+			align: 'right',
+			width: '120px',
+			sortValue: row => row.counts[period],
+			render: row => countCell(row.counts[period]),
+		})),
+	];
 
-	let body: string;
-	if (rows.length > 0) {
-		body = rows.map(row => `<tr>${nameCell(row, duplicateNames, options.autoIds)}${TOOL_PERIODS.map(p => countCell(row.counts[p])).join('')}</tr>`).join('');
-	} else {
-		const anyHidden = !!options.hiddenIds && TOOL_PERIODS.some(p => Object.keys(counts[p]).some(id => countOf(counts[p], id) > 0));
-		const emptyKey = anyHidden && options.emptyHiddenKey ? options.emptyHiddenKey : options.emptyKey;
-		body = `<tr class="tool-period-empty"><td colspan="${TOOL_PERIODS.length + 1}">${escapeHtml(localize(emptyKey))}</td></tr>`;
-	}
+	const anyHidden = !!options.hiddenIds && TOOL_PERIODS.some(p => Object.keys(counts[p]).some(id => countOf(counts[p], id) > 0));
+	const emptyKey = anyHidden && options.emptyHiddenKey ? options.emptyHiddenKey : options.emptyKey;
 
-	return `<table class="tool-period-table"><thead><tr>${head}</tr></thead><tbody>${totalRow}${body}</tbody></table>`;
+	// Rows arrive in the default order (Last 30 Days, then Today, then name); the table's
+	// sort is stable, so its initial Last 30 Days sort keeps those tie-breakers.
+	return renderDataTable({
+		tableId: options.tableId,
+		ariaLabel: localize(options.ariaLabelKey),
+		rows,
+		columns,
+		initialSort: { columnId: 'last30Days', direction: 'desc' },
+		emptyMessage: localize(emptyKey),
+		className: 'data-table--fixed',
+		footerRows: [{
+			cells: {
+				name: localize(options.totalLabelKey),
+				today: formatNumber(totals.today),
+				last30Days: formatNumber(totals.last30Days),
+				lastMonth: formatNumber(totals.lastMonth),
+			},
+		}],
+	});
 }
 
 export type McpPeriodView = 'server' | 'tool';
@@ -154,6 +181,8 @@ export function buildMcpPeriodTablesHtml(input: McpPeriodTablesInput): string {
 		return `<button type="button" class="tool-period-toggle-btn${active ? ' active' : ''}" data-mcp-view="${view}" aria-pressed="${active}">${escapeHtml(localize(key))}</button>`;
 	};
 	const serverTable = buildToolPeriodTableHtml(input.byServer, input.totals, {
+		tableId: 'mcp-period-servers',
+		ariaLabelKey: 'usage.toolPeriod.ariaMcpServers',
 		limitPerPeriod: 200,
 		nameResolver: input.serverNameResolver,
 		firstColumnKey: 'usage.toolPeriod.colServer',
@@ -161,6 +190,8 @@ export function buildMcpPeriodTablesHtml(input: McpPeriodTablesInput): string {
 		emptyKey: 'usage.toolPeriod.emptyMcp',
 	});
 	const toolTable = buildToolPeriodTableHtml(input.byTool, input.totals, {
+		tableId: 'mcp-period-tools',
+		ariaLabelKey: 'usage.toolPeriod.ariaMcpTools',
 		limitPerPeriod: 10,
 		nameResolver: input.nameResolver,
 		firstColumnKey: 'usage.toolPeriod.colTool',

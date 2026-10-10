@@ -649,61 +649,10 @@ body {
 	flex: 1;
 }
 
-/* Tools & Integrations: one tool × period table (toolPeriodTable.ts) */
-.tool-period-table {
-	width: 100%;
-	border-collapse: collapse;
-	table-layout: fixed;
-	font-size: 13px;
-	background: var(--list-hover-bg);
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-}
-
-.tool-period-table th {
-	padding: 8px 12px;
-	color: var(--text-secondary);
-	font-size: 12px;
-	font-weight: 600;
-	text-align: left;
-	border-bottom: 1px solid var(--border-color);
-}
-
-.tool-period-table td {
-	padding: 6px 12px;
-	border-bottom: 1px solid var(--border-subtle);
-}
-
-.tool-period-table .tool-period-name {
-	word-break: break-word;
-	overflow-wrap: break-word;
-}
-
-.tool-period-table .tool-period-num {
-	text-align: right;
-	width: 120px;
-	white-space: nowrap;
-	font-variant-numeric: tabular-nums;
-}
-
-.tool-period-table .tool-period-zero {
-	color: var(--text-muted);
-}
-
-.tool-period-table .tool-period-total td {
-	font-weight: 700;
-	color: var(--text-primary);
-	border-bottom: 2px solid var(--border-color);
-}
-
-.tool-period-table .tool-period-empty td {
-	color: var(--text-muted);
-}
-
+/* Tools & Integrations: tool × period tables (toolPeriodTable.ts); the tables themselves are .data-table */
 .tool-period-id {
 	margin-left: 6px;
 	font-size: 11px;
-	color: var(--text-muted);
 	font-family: var(--vscode-editor-font-family, monospace);
 }
 

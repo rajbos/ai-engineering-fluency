@@ -14,6 +14,8 @@ const identity = (id: string): string => id;
 
 function options(overrides: Partial<ToolPeriodTableOptions> = {}): ToolPeriodTableOptions {
     return {
+        tableId: 'tp-default',
+        ariaLabelKey: 'usage.toolPeriod.ariaToolUsage',
         limitPerPeriod: 10,
         nameResolver: identity,
         firstColumnKey: 'usage.toolPeriod.colTool',
@@ -26,10 +28,14 @@ function options(overrides: Partial<ToolPeriodTableOptions> = {}): ToolPeriodTab
 
 const totals = { today: 7, last30Days: 9999, lastMonth: 42 };
 
-/** Body rows (not header, not the pinned total row) in document order. */
+/** The table body markup (rows only, no header or totals footer). */
+function tbody(html: string): string {
+    return html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+}
+
+/** Body rows in document order. */
 function bodyRows(html: string): string[] {
-    const tbody = html.slice(html.indexOf('<tbody>'));
-    return [...tbody.matchAll(/<tr(?: class="[^"]*")?>([\s\S]*?)<\/tr>/g)].map(m => m[0]).filter(r => !r.includes('tool-period-total'));
+    return [...tbody(html).matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/g)].map(m => m[0]);
 }
 
 test('selectToolPeriodRows: rows are the union of each period top N, with counts for every period', () => {
@@ -86,45 +92,63 @@ test('selectToolPeriodRows: zero and non-numeric counts never create rows', () =
     assert.deepEqual(selectToolPeriodRows(counts, 10, identity), []);
 });
 
-test('buildToolPeriodTableHtml: total row is first and uses the period total, not the sum of rows', () => {
+test('buildToolPeriodTableHtml: renders through the shared data table, sorted by Last 30 Days', () => {
     const html = buildToolPeriodTableHtml(
         { today: { a: 1 }, last30Days: { a: 2 }, lastMonth: { a: 3 } },
         totals,
-        options(),
+        options({ tableId: 'tp-shared' }),
     );
-    const tbody = html.slice(html.indexOf('<tbody>'));
-    assert.ok(tbody.startsWith('<tbody><tr class="tool-period-total">'), 'total row must be pinned first');
-    assert.ok(tbody.includes('Total tool calls'));
-    assert.ok(tbody.includes(`<td class="tool-period-num">${formatNumber(9999)}</td>`));
-    assert.ok(html.includes('<th class="tool-period-num">Today</th><th class="tool-period-num">Last 30 Days</th><th class="tool-period-num">Previous Month</th>'));
+    assert.ok(html.includes('id="data-table-root-tp-shared"'), 'uses renderDataTable');
+    assert.ok(html.includes('<table class="data-table data-table--fixed" aria-label="Tool usage by period">'));
+    for (const header of ['Today', 'Last 30 Days', 'Previous Month']) {
+        assert.ok(html.includes(header), header);
+    }
+    assert.match(html, /<th[^>]*aria-sort="descending"[^>]*>[\s\S]*?Last 30 Days/, 'Last 30 Days is the initial sort');
+});
+
+test('buildToolPeriodTableHtml: the totals row is a footer and uses the period total, not the sum of rows', () => {
+    const html = buildToolPeriodTableHtml(
+        { today: { a: 1 }, last30Days: { a: 2 }, lastMonth: { a: 3 } },
+        totals,
+        options({ tableId: 'tp-total' }),
+    );
+    const footer = html.slice(html.indexOf('<tfoot>'), html.indexOf('</tfoot>'));
+    assert.ok(footer.includes('Total tool calls'));
+    assert.ok(footer.includes(formatNumber(9999)));
+    assert.ok(footer.includes('>7<') && footer.includes('>42<'));
+    assert.ok(!tbody(html).includes('Total tool calls'), 'the total is not a sortable body row');
 });
 
 test('buildToolPeriodTableHtml: zero counts render as a muted dash', () => {
-    const html = buildToolPeriodTableHtml({ today: {}, last30Days: { a: 2 }, lastMonth: {} }, totals, options());
+    const html = buildToolPeriodTableHtml({ today: {}, last30Days: { a: 2 }, lastMonth: {} }, totals, options({ tableId: 'tp-zero' }));
     const [row] = bodyRows(html);
-    assert.equal((row.match(/tool-period-zero/g) ?? []).length, 2);
+    assert.equal((row.match(/<span class="data-table-muted">–<\/span>/g) ?? []).length, 2);
 });
 
 test('buildToolPeriodTableHtml: auto filter removes automatic tools; auto badge still marks unfiltered ones', () => {
     const counts: ToolPeriodCounts = { today: {}, last30Days: { auto_tool: 9, real: 3 }, lastMonth: {} };
     const auto = new Set(['auto_tool']);
-    const filtered = buildToolPeriodTableHtml(counts, totals, options({ hiddenIds: auto, autoIds: auto }));
+    const filtered = buildToolPeriodTableHtml(counts, totals, options({ tableId: 'tp-auto-1', hiddenIds: auto, autoIds: auto }));
     assert.ok(!filtered.includes('auto_tool'));
     assert.ok(filtered.includes('real'));
 
-    const unfiltered = buildToolPeriodTableHtml(counts, totals, options({ autoIds: auto }));
+    const unfiltered = buildToolPeriodTableHtml(counts, totals, options({ tableId: 'tp-auto-2', autoIds: auto }));
     assert.ok(unfiltered.includes('<strong title="auto_tool">auto_tool</strong><span class="auto-badge"'));
 });
 
-test('buildToolPeriodTableHtml: empty states', () => {
-    const empty = buildToolPeriodTableHtml({ today: {}, last30Days: {}, lastMonth: {} }, { today: 0, last30Days: 0, lastMonth: 0 }, options());
-    assert.ok(empty.includes('No tools used yet'));
-    assert.ok(empty.includes('tool-period-total'), 'total row stays visible when empty');
+test('buildToolPeriodTableHtml: empty states keep the totals footer', () => {
+    const empty = buildToolPeriodTableHtml(
+        { today: {}, last30Days: {}, lastMonth: {} },
+        { today: 0, last30Days: 0, lastMonth: 0 },
+        options({ tableId: 'tp-empty-1' }),
+    );
+    assert.ok(tbody(empty).includes('No tools used yet'));
+    assert.ok(empty.includes('<tfoot>'), 'totals footer stays visible when empty');
 
     const allHidden = buildToolPeriodTableHtml(
         { today: {}, last30Days: { auto_tool: 4 }, lastMonth: {} },
         totals,
-        options({ hiddenIds: new Set(['auto_tool']) }),
+        options({ tableId: 'tp-empty-2', hiddenIds: new Set(['auto_tool']) }),
     );
     assert.ok(allHidden.includes('No purposeful tools used yet (automatic tool calls are hidden)'));
 });
@@ -133,7 +157,7 @@ test('buildToolPeriodTableHtml: names and ids are HTML-escaped', () => {
     const html = buildToolPeriodTableHtml(
         { today: {}, last30Days: { '<img src=x>': 1 }, lastMonth: {} },
         totals,
-        options({ nameResolver: () => '<b>"x"</b>' }),
+        options({ tableId: 'tp-escape', nameResolver: () => '<b>"x"</b>' }),
     );
     assert.ok(!html.includes('<img'));
     assert.ok(!html.includes('<b>'));
@@ -144,12 +168,12 @@ test('buildToolPeriodTableHtml: ids sharing a friendly name stay separate rows w
     const html = buildToolPeriodTableHtml(
         { today: {}, last30Days: { run_in_terminal: 5, powershell: 3, read_file: 2 }, lastMonth: {} },
         totals,
-        options({ nameResolver: id => (id === 'read_file' ? 'Read' : 'PowerShell') }),
+        options({ tableId: 'tp-dupes', nameResolver: id => (id === 'read_file' ? 'Read' : 'PowerShell') }),
     );
     const rows = bodyRows(html);
     assert.equal(rows.length, 3);
-    assert.ok(rows[0].includes('<span class="tool-period-id">run_in_terminal</span>'));
-    assert.ok(rows[1].includes('<span class="tool-period-id">powershell</span>'));
+    assert.ok(rows[0].includes('<span class="tool-period-id data-table-muted">run_in_terminal</span>'));
+    assert.ok(rows[1].includes('<span class="tool-period-id data-table-muted">powershell</span>'));
     assert.ok(!rows[2].includes('tool-period-id'), 'unique names get no hint');
 });
 
@@ -166,10 +190,13 @@ test('buildMcpPeriodTablesHtml: By Server is default with server names resolved,
     assert.ok(html.includes('data-mcp-view="tool" aria-pressed="false"'));
     assert.ok(html.includes('<div id="mcp-period-server" class="tool-period-view">'));
     assert.ok(html.includes('<div id="mcp-period-tool" class="tool-period-view" hidden>'));
+    assert.ok(html.includes('id="data-table-root-mcp-period-servers"'));
+    assert.ok(html.includes('id="data-table-root-mcp-period-tools"'));
     assert.ok(html.includes('Friendly github/create_issue'));
     assert.ok(html.includes('<strong title="github">GitHub MCP</strong>'), 'server ids go through the server resolver');
     assert.ok(html.includes('<strong title="playwright">playwright</strong>'));
-    assert.ok(html.includes('<th class="tool-period-name">Server</th>'));
+    assert.ok(html.includes('aria-label="MCP calls by server and period"'));
+    assert.ok(html.includes('aria-label="MCP calls by tool and period"'));
     assert.equal((html.match(/Total MCP calls/g) ?? []).length, 2);
 });
 
@@ -187,7 +214,7 @@ test('buildMcpPeriodTablesHtml: By Tool view shows the tool table and the server
     assert.equal((html.match(/No MCP tools used yet/g) ?? []).length, 2);
 });
 
-test('buildMcpPeriodTablesHtml: By Server lists every server, By Tool caps at top 10 per period', () => {
+test('buildMcpPeriodTablesHtml: By Server keeps every server (paged), By Tool caps at top 10 per period', () => {
     const many: Record<string, number> = {};
     for (let i = 0; i < 15; i++) { many[`s${i}`] = i + 1; }
     const html = buildMcpPeriodTablesHtml({
@@ -198,10 +225,10 @@ test('buildMcpPeriodTablesHtml: By Server lists every server, By Tool caps at to
         serverNameResolver: identity,
         view: 'server',
     });
-    const server = html.slice(html.indexOf('mcp-period-server'), html.indexOf('mcp-period-tool'));
-    const tool = html.slice(html.indexOf('mcp-period-tool'));
-    assert.equal(bodyRows(server).length, 15);
-    assert.equal(bodyRows(tool).length, 10);
+    const server = html.slice(html.indexOf('id="mcp-period-server"'), html.indexOf('id="mcp-period-tool"'));
+    const tool = html.slice(html.indexOf('id="mcp-period-tool"'));
+    assert.ok(server.includes('Page 1 of 2 · Showing 1–10 of 15'), 'all 15 servers are kept, paged by the shared table');
+    assert.ok(tool.includes('Showing 1–10 of 10'));
 });
 
 test('isMcpPeriodView guards persisted state', () => {

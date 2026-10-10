@@ -5283,6 +5283,8 @@ function buildToolsTabPanelHtml(
 					{ today: stats.today.toolCalls.byTool, last30Days: stats.last30Days.toolCalls.byTool, lastMonth: stats.lastMonth.toolCalls.byTool },
 					{ today: stats.today.toolCalls.total, last30Days: stats.last30Days.toolCalls.total, lastMonth: stats.lastMonth.toolCalls.total },
 					{
+						tableId: 'tool-usage-periods',
+						ariaLabelKey: 'usage.toolPeriod.ariaToolUsage',
 						limitPerPeriod: 10,
 						nameResolver: lookupToolName,
 						hiddenIds: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined,

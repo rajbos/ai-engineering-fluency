@@ -298,9 +298,9 @@
           "expect": "#tab-panel-tools",
           "steps": [
             { "click": ".group-tab[data-group=\"workspace\"]" },
-            { "click": ".tab-button[data-tab=\"tools\"]" },
-            { "click": "button[data-mcp-view=\"tool\"]" },
-            { "click": "button[data-mcp-view=\"server\"]" }
+            { "click": ".tab-button[data-tab=\"tools\"]", "expect": "#mcp-period-server", "expectHidden": "#mcp-period-tool" },
+            { "click": "button[data-mcp-view=\"tool\"]", "expect": "#mcp-period-tool", "expectHidden": "#mcp-period-server" },
+            { "click": "button[data-mcp-view=\"server\"]", "expect": "#mcp-period-server", "expectHidden": "#mcp-period-tool" }
           ]
         }
       ]
