@@ -17,6 +17,7 @@ import * as fs from 'fs';
 
 import type { IEcosystemAdapter } from '../../../src/ecosystemAdapter';
 import { findWorkspacePathForDiscoveredPath as _findWorkspacePathForDiscoveredPath } from '../../../src/ecosystemAdapter';
+import { extractRepositoryFromSessionContent } from '../../../src/sessionRepository';
 import type {
 	DailyRollupEntry,
 	ModelPricing,
@@ -77,6 +78,8 @@ type SessionMeta = {
 	dailyInteractions: { [localDayKey: string]: number };
 	dailyFractions?: Record<string, number>;
 	workspacePath?: string;
+	/** Git remote the owning adapter recorded (e.g. Copilot CLI's session-store "owner/repo"). */
+	repository?: string;
 };
 type TokenResult = {
 	tokens: number; thinkingTokens?: number; actualTokens?: number; cacheReadTokens?: number; copilotNanoAiu?: number;
@@ -797,8 +800,8 @@ function buildSessionDataObject(
 		// Persist workspace attribution from the adapter so the Recent Sessions list can
 		// show it without requiring a separate getSessionFileDetails() parse pass.
 		...(sessionMeta.workspacePath ? { workspaceFolderPath: sessionMeta.workspacePath } : {}),
-		// Repository is discovered separately by getSessionFileDetails() (via content-reference
-		// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
+		// Repository is resolved by analyzeSessionFile() (adapter metadata, else content-reference
+		// git-root lookup — the same derivation as getSessionFileDetails()). Without preserving it, every cache-miss
 		// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
 		// would silently wipe out a previously-known repository, making it fall back to
 		// "Unknown" and disappear from all "By Repository" charts — most noticeably for the
@@ -864,5 +867,30 @@ export async function analyzeSessionFile(
 
 	await applyWindsurfBreakdown(deps.windsurf, sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, existing);
+	const repository = await resolveSessionRepository(sessionMeta, existing, preloadedContent, preloadedParsedJson);
+	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups,
+		repository !== undefined ? { repository } : undefined);
+}
+
+/**
+ * The session's git remote, resolved during the normal analysis — on the worker thread — so
+ * workspace grouping has its strongest signal on a cold cache too, not only after the Details
+ * view happened to run. Precedence: the owning adapter's recorded remote; a previously known
+ * one; otherwise the remote of the files the session referenced (the same shared derivation as
+ * the details pass), stored as '' when there is none so it is not looked up again.
+ */
+async function resolveSessionRepository(
+	sessionMeta: SessionMeta,
+	existing: Pick<SessionFileCache, 'repository'> | undefined,
+	content: string | undefined,
+	parsedJson: unknown,
+): Promise<string | undefined> {
+	if (sessionMeta.repository) { return sessionMeta.repository; }
+	if (existing?.repository !== undefined) { return existing.repository; }
+	if (content === undefined) { return undefined; }
+	try {
+		return (await extractRepositoryFromSessionContent(content, parsedJson)) ?? '';
+	} catch {
+		return undefined;
+	}
 }

@@ -16,10 +16,21 @@ import { buildCustomizationMatrix } from '../helpers';
  * A VS Code chat session with one request: the matrix only counts sessions with interactions
  * in the last 30 days, like the extension, so an empty `{}` file would be skipped.
  */
-const ONE_REQUEST_SESSION = JSON.stringify({
-	version: 3,
-	requests: [{ requestId: 'r1', timestamp: Date.now(), message: { text: 'hello' }, response: [{ value: 'hi' }] }],
-});
+const ONE_REQUEST_SESSION = sessionWithRequestAt(new Date());
+
+/** A one-request VS Code chat session whose request happened at `when`. */
+function sessionWithRequestAt(when: Date): string {
+	return JSON.stringify({
+		version: 3,
+		requests: [{ requestId: 'r1', timestamp: when.getTime(), message: { text: 'hello' }, response: [{ value: 'hi' }] }],
+	});
+}
+
+/** Write an old session: both its request and its file date are `when`. */
+function backdate(sessionFile: string, when: Date): void {
+	fs.writeFileSync(sessionFile, sessionWithRequestAt(when));
+	fs.utimesSync(sessionFile, when, when);
+}
 
 /** Build a VS Code-style session file whose workspace.json points at a temp workspace. */
 function makeWorkspace(files: string[]): { root: string; sessionFile: string } {
@@ -154,7 +165,7 @@ test('buildCustomizationMatrix: only sessions with interactions in the last 30 d
 		for (const dir of [active, old, empty]) { fs.mkdirSync(dir, { recursive: true }); }
 		const [activeSession, oldSession, emptySession] = makeSessions(root, [active, old, empty]);
 		const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-		fs.utimesSync(oldSession, sixtyDaysAgo, sixtyDaysAgo);
+		backdate(oldSession, sixtyDaysAgo);
 		fs.writeFileSync(emptySession, '{}');
 		assert.ok(activeSession);
 
@@ -198,8 +209,8 @@ test('buildCustomizationMatrix: the 30-day window is the extension\'s (30 calend
 		const [firstSession, beforeSession] = makeSessions(root, [first, before]);
 		const firstDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 12);
 		const dayBefore = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 12);
-		fs.utimesSync(firstSession, firstDay, firstDay);
-		fs.utimesSync(beforeSession, dayBefore, dayBefore);
+		backdate(firstSession, firstDay);
+		backdate(beforeSession, dayBefore);
 		const matrix = await buildCustomizationMatrix([firstSession, beforeSession], undefined, now);
 		assert.deepEqual(matrix?.workspaces.map(w => w.workspaceName), ['first-day']);
 	} finally {
@@ -237,4 +248,25 @@ test('buildCustomizationMatrix: VS Code sessions are grouped by the remote of th
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test('buildCustomizationMatrix: a recently copied log of old requests does not count (last activity day, not file mtime)', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const copied = path.join(root, 'code', 'copied-repo');
+		fs.mkdirSync(copied, { recursive: true });
+		const [session] = makeSessions(root, [copied]);
+		// Requests from 60 days ago, but the file was just written (copied / touched).
+		fs.writeFileSync(session, sessionWithRequestAt(new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)));
+		assert.equal(await buildCustomizationMatrix([session]), undefined);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('sessionLastActivityDay: the last daily-fraction day, else the fallback date\'s day', async () => {
+	const { sessionLastActivityDay } = await import('../helpers');
+	assert.equal(sessionLastActivityDay({ '2026-08-01': 0.5, '2026-09-03': 0.5, '2026-08-20': 0 }, new Date()), '2026-09-03');
+	assert.equal(sessionLastActivityDay({}, new Date(2026, 9, 1, 12)), '2026-10-01');
+	assert.equal(sessionLastActivityDay(undefined, new Date(2026, 9, 1, 12)), '2026-10-01');
 });

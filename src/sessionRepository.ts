@@ -43,7 +43,7 @@ function cliEventReferences(line: string): ContentReferences {
 }
 
 /** Every content reference in a session file's content: VS Code JSON, VS Code delta JSONL or Copilot CLI JSONL. */
-export async function collectSessionContentReferences(content: string): Promise<ContentReferences> {
+export async function collectSessionContentReferences(content: string, parsedJson?: unknown): Promise<ContentReferences> {
 	if (isUuidPointerFile(content)) { return []; }
 	if (isJsonlContent(content)) {
 		const lines = content.trim().split('\n').filter(l => l.trim());
@@ -54,7 +54,7 @@ export async function collectSessionContentReferences(content: string): Promise<
 		return (sessionState?.requests ?? []).flatMap(requestContentReferences);
 	}
 	try {
-		const requests = JSON.parse(content)?.requests;
+		const requests = (parsedJson as { requests?: unknown } | undefined ?? JSON.parse(content))?.requests;
 		return Array.isArray(requests) ? requests.flatMap(requestContentReferences) : [];
 	} catch {
 		return [];
@@ -65,30 +65,7 @@ export async function collectSessionContentReferences(content: string): Promise<
  * The remote URL of the repository a session's referenced files live in, or undefined.
  * Reads `.git/config` (or a worktree's main config) next to those files, like the extension.
  */
-export async function extractRepositoryFromSessionContent(content: string): Promise<string | undefined> {
-	const refs = await collectSessionContentReferences(content);
+export async function extractRepositoryFromSessionContent(content: string, parsedJson?: unknown): Promise<string | undefined> {
+	const refs = await collectSessionContentReferences(content, parsedJson);
 	return refs.length > 0 ? extractRepositoryFromContentReferences(refs) : undefined;
-}
-
-/**
- * Recover the remote of workspace folders whose sessions never had their repository computed,
- * by reading up to the given session files per folder (first remote found wins). Folders for
- * which `skip()` is true are left alone — e.g. ones that still exist, whose `.git` already
- * answers. Unreadable files (virtual DB paths, deleted logs) are skipped silently.
- */
-export async function recoverWorkspaceRemotes(
-	sessionFilesByFolder: ReadonlyMap<string, readonly string[]>,
-	skip: (folder: string) => boolean,
-	readSessionFile: (file: string) => Promise<string>,
-): Promise<Map<string, string>> {
-	const found = new Map<string, string>();
-	await Promise.all([...sessionFilesByFolder].map(async ([folder, files]) => {
-		if (skip(folder)) { return; }
-		for (const file of files) {
-			let remote: string | undefined;
-			try { remote = await extractRepositoryFromSessionContent(await readSessionFile(file)); } catch { /* unreadable */ }
-			if (remote) { found.set(folder, remote); return; }
-		}
-	}));
-	return found;
 }

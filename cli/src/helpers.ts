@@ -125,10 +125,20 @@ async function recentSessionInteractions(activity: SessionActivityLookup, cutoff
 		const stats = await statSessionFile(activity.file);
 		if (!sessionActiveSince(stats.mtime, own, cutoff, isVirtual)) { return 0; }
 		const data = await processSessionFile(activity.file);
-		return data && sessionActiveSince(data.lastModified, own, cutoff, isVirtual) ? data.interactions : 0;
+		if (!data) { return 0; }
+		if (isVirtual) { return sessionActiveSince(data.lastModified, own, cutoff, true) ? data.interactions : 0; }
+		// A regular file is placed by its last day of real activity, like the extension's
+		// computeLastActivityKey(): a recently copied or touched log of old requests does not count.
+		return sessionLastActivityDay(data.dailyFractions, data.lastModified) >= toLocalDayKey(cutoff) ? data.interactions : 0;
 	} catch {
 		return 0;
 	}
+}
+
+/** The latest day a session had activity on: its last daily-fraction day, else its file mtime's day. */
+export function sessionLastActivityDay(dailyFractions: Record<string, number> | undefined, fallback: Date): string {
+	const days = Object.keys(dailyFractions ?? {}).sort();
+	return days.length > 0 ? days[days.length - 1] : toLocalDayKey(fallback);
 }
 
 /**

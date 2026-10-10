@@ -21,6 +21,10 @@ the CLI's Customization evidence counts repositories, not folders.
   with at least one interaction in the last 30 days (the shared `getTimeWindowStartDate('last30')`
   window: 30 calendar dates including today), judged by a database-backed session's own last
   activity rather than its shared database file's mtime.
+- Session remotes: the extension resolves each session's remote during the normal (worker)
+  analysis — the owning adapter's recorded remote, else the remote of the files it referenced
+  (`extractRepositoryFromSessionContent()`), cached as `''` when there is none — so every
+  session carries its own remote and a reused folder reaches the grouping as conflicting.
 - Tests: [`vscode-extension/test/unit/workspaceGrouping.test.ts`](../../vscode-extension/test/unit/workspaceGrouping.test.ts)
   and the parity tests in `cli/src/test/customizationMatrix.test.ts`.
 

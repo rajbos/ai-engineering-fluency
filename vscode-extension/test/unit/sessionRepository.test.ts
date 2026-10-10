@@ -7,7 +7,6 @@ import * as path from 'node:path';
 import {
 	collectSessionContentReferences,
 	extractRepositoryFromSessionContent,
-	recoverWorkspaceRemotes,
 	requestContentReferences,
 	toolArgumentPathReferences,
 } from '../../../src/sessionRepository';
@@ -64,35 +63,6 @@ test('extractRepositoryFromSessionContent finds the remote of the referenced fil
 		const content = JSON.stringify({ requests: [{ contentReferences: [ref(file)] }] });
 		assert.equal(await extractRepositoryFromSessionContent(content), 'https://github.com/acme/widget.git');
 		assert.equal(await extractRepositoryFromSessionContent(JSON.stringify({ requests: [] })), undefined);
-	} finally {
-		fs.rmSync(root, { recursive: true, force: true });
-	}
-});
-
-test('recoverWorkspaceRemotes: cold-cache recovery reads session files only for folders that need it', async () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-repo-'));
-	try {
-		const repo = path.join(root, 'widget');
-		fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
-		fs.writeFileSync(path.join(repo, '.git', 'config'), '[remote "origin"]\n\turl = git@github.com:acme/widget.git\n');
-		const touched = path.join(repo, 'a.ts');
-		fs.writeFileSync(touched, '');
-		const withRef = JSON.stringify({ requests: [{ contentReferences: [ref(touched)] }] });
-		const files: Record<string, string> = { empty: JSON.stringify({ requests: [] }), withRef };
-		const reads: string[] = [];
-		const read = async (f: string): Promise<string> => {
-			reads.push(f);
-			if (!(f in files)) { throw new Error('ENOENT'); }
-			return files[f];
-		};
-		const found = await recoverWorkspaceRemotes(new Map([
-			['/gone/a', ['missing', 'empty', 'withRef', 'never-read']],
-			['/gone/b', ['empty']],
-			['/still/here', ['withRef']],
-		]), folder => folder === '/still/here', read);
-		assert.deepEqual([...found], [['/gone/a', 'git@github.com:acme/widget.git']]);
-		assert.ok(!reads.includes('never-read'), 'stops at the first remote found');
-		assert.equal(reads.filter(f => f === 'withRef').length, 1, 'skipped folders are not read');
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
