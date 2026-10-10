@@ -354,7 +354,7 @@ import {
   normalizeToRepoRoot as _normalizeToRepoRoot,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
-import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, type WorkspaceGroup } from '../../src/workspaceGrouping';
+import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
@@ -1581,8 +1581,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// backfill descriptions for skills whose repo isn't the one currently open (see
 	// findSkillDescriptionInWorkspaces).
 	private _skillWorkspacePathsAccum: Map<string, Set<string>> = new Map();
-	// Git remote seen per workspace folder (last 30 days), the strongest grouping signal.
-	private _workspaceRepositoryAccum: Map<string, string> = new Map();
+	// Every git remote seen per workspace folder (last 30 days), the strongest grouping signal.
+	// All of them are kept: a folder reused for another repository must reach the grouping as
+	// conflicting, not as whichever remote the session loop happened to see first.
+	private _workspaceRepositoryAccum: Map<string, Set<string>> = new Map();
 	// Workspace groups from the last grouping pass, keyed by canonical path (src/workspaceGrouping.ts).
 	private _workspaceGroups: Map<string, WorkspaceGroup> = new Map();
 
@@ -8064,7 +8066,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const norm = path.normalize(workspaceFolder);
 				sessionCounts.set(norm, (sessionCounts.get(norm) || 0) + 1);
 				interactionCounts.set(norm, (interactionCounts.get(norm) || 0) + interactions);
-				if (repository && !this._workspaceRepositoryAccum.has(norm)) { this._workspaceRepositoryAccum.set(norm, repository); }
+				if (repository) {
+					const remotes = this._workspaceRepositoryAccum.get(norm) ?? new Set<string>();
+					remotes.add(repository);
+					this._workspaceRepositoryAccum.set(norm, remotes);
+				}
 				this.ensureWorkspaceCustomizationCached(norm);
 			} else if (workspaceId) {
 				unresolvedIds.add(workspaceId);
@@ -8296,12 +8302,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): Promise<void> {
 		const paths = new Set([...sessionCounts.keys(), ...interactionCounts.keys()]);
-		const entries = [...paths].map(p => ({
-			path: p,
-			sessionCount: sessionCounts.get(p) || 0,
-			interactionCount: interactionCounts.get(p) || 0,
-			repository: this._workspaceRepositoryAccum.get(p),
-		}));
+		const entries = [...paths].flatMap(p => _workspaceEntriesWithRemotes(
+			p, sessionCounts.get(p) || 0, interactionCounts.get(p) || 0, this._workspaceRepositoryAccum.get(p),
+		));
 		// Disk checks run asynchronously before the (pure, synchronous) grouping, so a slow or
 		// network-mounted workspace cannot block the extension host.
 		const groups = _groupWorkspaces(entries, await _prefetchWorkspaceGroupingProbes(entries));

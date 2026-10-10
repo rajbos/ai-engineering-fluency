@@ -280,6 +280,22 @@ export function workspaceProbePaths(entries: WorkspaceUsageEntry[], platform: st
 	return [...paths];
 }
 
+/**
+ * Usage entries for one folder that carry every git remote its sessions recorded: the counts go
+ * on the first entry and each further remote adds an empty entry for the same path, so
+ * `groupWorkspaces()` sees a folder reused for another repository as conflicting instead of
+ * taking whichever remote a caller kept first.
+ */
+export function workspaceEntriesWithRemotes(
+	folderPath: string, sessionCount: number, interactionCount: number, remotes: Iterable<string> = [],
+): WorkspaceUsageEntry[] {
+	const [first, ...rest] = [...new Set(remotes)];
+	return [
+		{ path: folderPath, sessionCount, interactionCount, ...(first ? { repository: first } : {}) },
+		...rest.map(repository => ({ path: folderPath, sessionCount: 0, interactionCount: 0, repository })),
+	];
+}
+
 // ── Union-find with a "different repositories" veto ───────────────────────────
 
 class Groups {
@@ -338,6 +354,12 @@ interface Node {
 	remote: boolean;
 	mainWorktreePath?: string;
 	convention?: ConventionMatch;
+	/**
+	 * Seen with two different remotes (a folder reused for another repository, or sessions
+	 * disagreeing). Unlike a folder with no remote, it must not be attributed to either
+	 * repository by name, so name-based rules leave its group alone.
+	 */
+	conflictingRemotes?: boolean;
 }
 
 function unionByKey(nodes: Node[], groups: Groups, keyOf: (n: Node, i: number) => string | undefined): void {
@@ -355,8 +377,6 @@ class NodeList {
 	readonly nodes: Node[] = [];
 	readonly repoIds: Array<string | undefined> = [];
 	private readonly indexByPath = new Map<string, number>();
-	/** Paths seen with two different remotes; their identity is unknown from then on. */
-	private readonly conflictingIds = new Set<number>();
 
 	add(node: Node, repoId: string | undefined): number {
 		const existing = this.indexByPath.get(node.path);
@@ -381,12 +401,12 @@ class NodeList {
 	 * would hide the conflict from the veto and allow a wrong merge.
 	 */
 	private mergeRepoId(idx: number, repoId: string | undefined): void {
-		if (!repoId || this.conflictingIds.has(idx)) { return; }
+		if (!repoId || this.nodes[idx].conflictingRemotes) { return; }
 		const current = this.repoIds[idx];
 		if (current === undefined) { this.repoIds[idx] = repoId; return; }
 		if (current !== repoId) {
 			this.repoIds[idx] = undefined;
-			this.conflictingIds.add(idx);
+			this.nodes[idx].conflictingRemotes = true;
 		}
 	}
 }
@@ -416,6 +436,8 @@ function inputNode(
 /**
  * Anchors: a worktree's main checkout, and a convention's repository folder. They join the
  * node list (with zero counts) so a group can be represented by the real checkout.
+ * An anchor starts without a repository identity: when it is also an input it keeps its own,
+ * so a worktree reporting a different remote than its main checkout is vetoed, not merged.
  * Returns input index → anchor index.
  */
 function addAnchors(list: NodeList, platform: string): Map<number, number> {
@@ -427,7 +449,7 @@ function addAnchors(list: NodeList, platform: string): Map<number, number> {
 		if (!anchorPath || samePathKey(anchorPath, platform) === samePathKey(n.path, platform)) { continue; }
 		const isCheckoutAnchor = n.mainWorktreePath !== undefined || n.convention?.anchorIsCheckout === true;
 		const anchor: Node = { path: anchorPath, sessionCount: 0, interactionCount: 0, isInput: false, isCheckoutAnchor, remote: isRemotePath(anchorPath, platform) };
-		anchorOf.set(i, list.add(anchor, list.repoIds[i]));
+		anchorOf.set(i, list.add(anchor, undefined));
 	}
 	return anchorOf;
 }
@@ -448,12 +470,17 @@ function nodeName(n: Node): string {
 function unionByName(nodes: Node[], groups: Groups): void {
 	const idsBefore = nodes.map((_n, i) => [...groups.repositoryIds(i)]);
 	const componentIds = (indexes: number[]): Set<string> => new Set(indexes.flatMap(i => idsBefore[i]));
+	// A group holding a folder with conflicting remotes takes no part in name-based merging.
+	const conflictedRoots = new Set(nodes.flatMap((n, i) => (n.conflictingRemotes ? [groups.find(i)] : [])));
 	const byName = new Map<string, number[]>();
-	nodes.forEach((n, i) => { byName.set(nodeName(n), [...(byName.get(nodeName(n)) ?? []), i]); });
+	nodes.forEach((n, i) => {
+		if (conflictedRoots.has(groups.find(i))) { return; }
+		byName.set(nodeName(n), [...(byName.get(nodeName(n)) ?? []), i]);
+	});
 
 	// 4. Sibling artefact folders: the most specific stem that names local workspaces decides.
 	nodes.forEach((n, i) => {
-		if (n.remote || n.convention) { return; }
+		if (n.remote || n.convention || conflictedRoots.has(groups.find(i))) { return; }
 		const target = artefactStems(workspaceBasename(n.path))
 			.map(stem => (byName.get(stem.toLowerCase()) ?? []).filter(c => c !== i && !nodes[c].remote))
 			.find(list => list.length > 0);

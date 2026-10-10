@@ -13,6 +13,7 @@ import {
 	workspaceBasename,
 	mergeGroupCustomizationFiles,
 	workspaceProbePaths,
+	workspaceEntriesWithRemotes,
 	type WorkspaceUsageEntry,
 	type WorkspaceGroupingProbes,
 	type WorkspaceGitInfo,
@@ -323,6 +324,86 @@ test('a path seen with two different remotes has no identity, so neither remote 
 	// The same remote twice is not a conflict.
 	const [same] = groupWorkspaces([entry('C:\\r', 1, 1, 'acme/r'), entry('C:\\r', 1, 1, 'https://github.com/acme/r.git')], probes('win32'));
 	assert.equal(same.repositoryId, 'acme/r');
+});
+
+test('a conflicted path is not merged by name even when only one same-named repository is a candidate', () => {
+	const cases: Array<[string, WorkspaceUsageEntry[]]> = [
+		['basename', [
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/other/tools'),
+			entry('D:\\acme\\tools', 1, 1, 'https://github.com/acme/tools'),
+		]],
+		['stem', [
+			entry('C:\\reused\\tools-wt', 1, 1, 'https://github.com/acme/tools'),
+			entry('C:\\reused\\tools-wt', 1, 1, 'https://github.com/other/tools'),
+			entry('D:\\acme\\tools', 1, 1, 'https://github.com/acme/tools'),
+		]],
+		['stem target', [
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/other/tools'),
+			entry('D:\\code\\tools-wt', 1, 1),
+		]],
+		['remote path', [
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/other/tools'),
+			entry('/home/dev/tools', 1, 1),
+		]],
+		['remote-less same name', [
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+			entry('C:\\reused\\tools', 1, 1, 'https://github.com/other/tools'),
+			entry('D:\\plain\\tools', 1, 1),
+		]],
+	];
+	for (const [name, entries] of cases) {
+		for (const order of permutations(entries)) {
+			const groups = groupWorkspaces(order, probes('win32'));
+			const reused = groups.find(g => g.memberPaths.some(m => m.startsWith('C:\\reused')))!;
+			assert.equal(reused.memberPaths.length, 1, name);
+			assert.equal(reused.sessionCount, 2, name);
+		}
+	}
+});
+
+test('a worktree whose remote differs from its existing main checkout is not merged into it', () => {
+	const main = 'C:\\code\\gadget';
+	const wt = 'C:\\wt\\feature';
+	const p = probes('win32', [main, wt], { [wt]: { mainWorktreePath: main } });
+	for (const order of permutations([entry(main, 1, 1, 'https://github.com/acme/gadget'), entry(wt, 1, 1, 'https://github.com/fork/other')])) {
+		const groups = groupWorkspaces(order, p);
+		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [[main], [wt]]);
+		assert.deepEqual(groups.map(g => g.repositoryId).sort(), ['acme/gadget', 'fork/other']);
+	}
+	// Same remote (or none on the main checkout): the pointer still merges them.
+	assert.equal(groupWorkspaces([entry(main, 1, 1, 'acme/gadget'), entry(wt, 1, 1, 'https://github.com/acme/gadget')], p).length, 1);
+	assert.equal(groupWorkspaces([entry(main, 1, 1), entry(wt, 1, 1, 'https://github.com/acme/gadget')], p).length, 1);
+});
+
+test('two worktrees with different remotes pointing at one synthetic anchor do not merge with each other', () => {
+	const anchor = 'C:\\code\\gadget';
+	const a = 'C:\\wt\\a';
+	const b = 'C:\\wt\\b';
+	const p = probes('win32', [anchor, a, b], { [a]: { mainWorktreePath: anchor }, [b]: { mainWorktreePath: anchor } });
+	for (const order of permutations([entry(a, 1, 1, 'acme/one'), entry(b, 1, 1, 'acme/two')])) {
+		assert.equal(groupWorkspaces(order, p).length, 2);
+	}
+});
+
+test('workspaceEntriesWithRemotes keeps every remote of a folder so a reused folder reaches the grouping as conflicting', () => {
+	assert.deepEqual(workspaceEntriesWithRemotes('C:\\r', 3, 9), [{ path: 'C:\\r', sessionCount: 3, interactionCount: 9 }]);
+	assert.deepEqual(workspaceEntriesWithRemotes('C:\\r', 3, 9, new Set(['a/x', 'b/y', 'a/x'])), [
+		{ path: 'C:\\r', sessionCount: 3, interactionCount: 9, repository: 'a/x' },
+		{ path: 'C:\\r', sessionCount: 0, interactionCount: 0, repository: 'b/y' },
+	]);
+	const entries = [
+		...workspaceEntriesWithRemotes('C:\\reused\\tools', 2, 5, ['https://github.com/acme/tools', 'https://github.com/other/tools']),
+		...workspaceEntriesWithRemotes('D:\\acme\\tools', 1, 1, ['https://github.com/acme/tools']),
+	];
+	const groups = groupWorkspaces(entries, probes('win32'));
+	assert.equal(groups.length, 2);
+	const reused = groups.find(g => g.canonicalPath === 'C:\\reused\\tools')!;
+	assert.equal(reused.sessionCount, 2);
+	assert.equal(reused.interactionCount, 5);
+	assert.equal(reused.repositoryId, undefined);
 });
 
 test('a remote path joins the single local repository it names even when that repository has a remote', () => {
