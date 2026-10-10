@@ -177,7 +177,8 @@ async function resolveSessionWorkspace(activity: SessionActivityLookup, claudeBa
 	// No adapter covers VS Code chatSessions files, so take the remote from the files the
 	// session referenced, the same shared derivation the extension's session details use.
 	const repository = meta?.repository ?? await withErrorRecovery(
-		async () => extractRepositoryFromSessionContent(await fs.promises.readFile(activity.file, 'utf-8')),
+		// Only files inside this workspace count, so a cross-repository reference is not its remote.
+		async () => extractRepositoryFromSessionContent(await fs.promises.readFile(activity.file, 'utf-8'), undefined, workspacePath),
 		undefined,
 		`buildCustomizationMatrix repository(${activity.file})`
 	);

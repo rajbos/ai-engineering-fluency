@@ -53,7 +53,7 @@ import {
 	type UsageAnalysisDeps,
 } from '../../../src/usageAnalysis';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage } from '../../../src/copilotCliOtel';
-import { resolveDebugLogCandidatePaths } from '../../../src/workspaceHelpers';
+import { resolveDebugLogCandidatePaths, resolveWorkspaceFolderWithFallback } from '../../../src/workspaceHelpers';
 import { toLocalDayKey } from '../../../src/utils/dayKeys';
 
 /** The slice of Windsurf the pipeline needs; Windsurf itself imports `vscode`, so it is host-only. */
@@ -879,7 +879,7 @@ export async function analyzeSessionFile(
 
 	await applyWindsurfBreakdown(deps.windsurf, sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-	const resolution = await resolveSessionRepository(sessionMeta, existing, preloadedContent, preloadedParsedJson);
+	const resolution = await resolveSessionRepository(sessionMeta, existing, preloadedContent, preloadedParsedJson, sessionFilePath);
 	return buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups,
 		resolution);
 }
@@ -902,13 +902,17 @@ async function resolveSessionRepository(
 	existing: Pick<SessionFileCache, 'repository'> | undefined,
 	content: string | undefined,
 	parsedJson: unknown,
+	sessionFilePath: string,
 ): Promise<Pick<SessionFileCache, 'repository' | 'repositoryResolved'>> {
 	if (sessionMeta.repository) { return { repository: sessionMeta.repository, repositoryResolved: true }; }
 	if (existing?.repository) { return { repository: existing.repository, repositoryResolved: true }; }
 	// Adapter-handled sessions have no file content to scan: their metadata is the whole answer.
 	if (content === undefined) { return { repositoryResolved: true }; }
 	try {
-		return { repository: (await extractRepositoryFromSessionContent(content, parsedJson)) ?? '', repositoryResolved: true };
+		// Only references inside the session's own workspace count: a session in repo A that also
+		// looked at repo B must not be attributed to B (the remote is a strong grouping identity).
+		const workspace = resolveWorkspaceFolderWithFallback(sessionFilePath, new Map(), sessionMeta.workspacePath);
+		return { repository: (await extractRepositoryFromSessionContent(content, parsedJson, workspace)) ?? '', repositoryResolved: true };
 	} catch {
 		return {};
 	}

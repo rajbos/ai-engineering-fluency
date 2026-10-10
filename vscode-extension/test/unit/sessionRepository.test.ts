@@ -7,6 +7,8 @@ import * as path from 'node:path';
 import {
 	collectSessionContentReferences,
 	extractRepositoryFromSessionContent,
+	extractWorkspaceRepository,
+	referencesWithinWorkspace,
 	requestContentReferences,
 	toolArgumentPathReferences,
 } from '../../../src/sessionRepository';
@@ -63,6 +65,45 @@ test('extractRepositoryFromSessionContent finds the remote of the referenced fil
 		const content = JSON.stringify({ requests: [{ contentReferences: [ref(file)] }] });
 		assert.equal(await extractRepositoryFromSessionContent(content), 'https://github.com/acme/widget.git');
 		assert.equal(await extractRepositoryFromSessionContent(JSON.stringify({ requests: [] })), undefined);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('referencesWithinWorkspace keeps only files inside the workspace folder', () => {
+	const refs = [
+		ref('C:\\code\\app\\src\\a.ts'),
+		ref('/c:/code/app/b.ts'), // URI-style path of the same folder
+		ref('C:\\code\\app-other\\c.ts'), // shares the prefix, not the folder
+		ref('C:\\code\\lib\\d.ts'),
+		{ kind: 'reference', inlineReference: { path: 'c:/CODE/App/e.ts' } },
+		{ kind: 'reference' },
+	];
+	assert.deepEqual(
+		referencesWithinWorkspace(refs, 'C:\\code\\app\\').map(r => (r.reference ?? r.inlineReference)?.fsPath ?? (r.reference ?? r.inlineReference)?.path),
+		['C:\\code\\app\\src\\a.ts', '/c:/code/app/b.ts', 'c:/CODE/App/e.ts'],
+	);
+	assert.equal(referencesWithinWorkspace([ref('/home/u/app')], '/home/u/app').length, 1, 'the folder itself counts');
+});
+
+test('extractWorkspaceRepository ignores a repository the session only referenced from outside its workspace', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-repo-'));
+	try {
+		const makeRepo = (name: string) => {
+			const repo = path.join(root, name);
+			fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+			fs.writeFileSync(path.join(repo, '.git', 'config'), `[remote "origin"]\n\turl = https://github.com/acme/${name}.git\n`);
+			const file = path.join(repo, 'index.ts');
+			fs.writeFileSync(file, '');
+			return { repo, file };
+		};
+		const a = makeRepo('app');
+		const b = makeRepo('lib');
+		// The session's workspace is repo A; it looked at repo B first.
+		const refs = [ref(b.file), ref(a.file)];
+		assert.equal(await extractWorkspaceRepository(refs, a.repo), 'https://github.com/acme/app.git');
+		assert.equal(await extractWorkspaceRepository([ref(b.file)], a.repo), undefined, 'only an outside reference: no remote');
+		assert.equal(await extractWorkspaceRepository([ref(b.file)]), 'https://github.com/acme/lib.git', 'no known workspace: every reference counts');
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

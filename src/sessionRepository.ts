@@ -65,7 +65,40 @@ export async function collectSessionContentReferences(content: string, parsedJso
  * The remote URL of the repository a session's referenced files live in, or undefined.
  * Reads `.git/config` (or a worktree's main config) next to those files, like the extension.
  */
-export async function extractRepositoryFromSessionContent(content: string, parsedJson?: unknown): Promise<string | undefined> {
-	const refs = await collectSessionContentReferences(content, parsedJson);
-	return refs.length > 0 ? extractRepositoryFromContentReferences(refs) : undefined;
+export async function extractRepositoryFromSessionContent(content: string, parsedJson?: unknown, workspacePath?: string): Promise<string | undefined> {
+	return extractWorkspaceRepository(await collectSessionContentReferences(content, parsedJson), workspacePath);
+}
+
+/** Comparable form of a path: forward slashes, no `/C:` URI prefix, no trailing slash, lower case. */
+function comparablePath(p: string): string {
+	return p.replace(/\\/g, '/').replace(/^\/(?=[a-z]:)/i, '').replace(/\/+$/, '').toLowerCase();
+}
+
+/** The file path a content reference points at, if any. */
+function referencePath(ref: ContentReferences[number]): string | undefined {
+	const data = ref.reference ?? ref.inlineReference;
+	const p = data?.fsPath ?? data?.path;
+	return typeof p === 'string' && p.length > 0 ? p : undefined;
+}
+
+/** References to files inside `workspacePath` (the folder itself or below it). */
+export function referencesWithinWorkspace(refs: ContentReferences, workspacePath: string): ContentReferences {
+	const root = comparablePath(workspacePath);
+	return refs.filter(ref => {
+		const p = referencePath(ref);
+		if (!p) { return false; }
+		const candidate = comparablePath(p);
+		return candidate === root || candidate.startsWith(`${root}/`);
+	});
+}
+
+/**
+ * The remote of the repository a session worked in. Attachments and symbols can come from other
+ * repositories, so when the session's workspace folder is known only references inside it count:
+ * a repo-A session that also looked at repo B is never attributed to B. Without a known
+ * workspace every reference counts (the session is not attributed to a workspace then).
+ */
+export async function extractWorkspaceRepository(refs: ContentReferences, workspacePath?: string): Promise<string | undefined> {
+	const scoped = workspacePath ? referencesWithinWorkspace(refs, workspacePath) : refs;
+	return scoped.length > 0 ? extractRepositoryFromContentReferences(scoped) : undefined;
 }

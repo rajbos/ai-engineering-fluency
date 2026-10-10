@@ -67,3 +67,34 @@ test('analyzeSessionFile records the remote of the files a VS Code session refer
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test('analyzeSessionFile scopes the remote to the session\'s workspace folder (workspaceStorage)', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-repo-'));
+	try {
+		const makeRepo = (name: string) => {
+			const repo = path.join(root, name);
+			fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+			fs.writeFileSync(path.join(repo, '.git', 'config'), `[remote "origin"]\n\turl = https://github.com/acme/${name}.git\n`);
+			const file = path.join(repo, 'index.ts');
+			fs.writeFileSync(file, '');
+			return { repo, file };
+		};
+		const app = makeRepo('app');
+		const lib = makeRepo('lib');
+		// A VS Code session whose workspace (workspace.json) is repo "app".
+		const hashDir = path.join(root, 'workspaceStorage', 'abc123');
+		fs.mkdirSync(path.join(hashDir, 'chatSessions'), { recursive: true });
+		fs.writeFileSync(path.join(hashDir, 'workspace.json'), JSON.stringify({ folder: 'file:///' + app.repo.replace(/\\/g, '/') }));
+		const sessionFile = path.join(hashDir, 'chatSessions', 's1.json');
+
+		// It first looked at repo "lib", then at its own repo: the remote is still "app".
+		fs.writeFileSync(sessionFile, session([lib.file, app.file]));
+		assert.equal((await analyze(sessionFile)).repository, 'https://github.com/acme/app.git');
+
+		// Only an outside reference: no remote rather than "lib".
+		fs.writeFileSync(sessionFile, session([lib.file]));
+		assert.equal((await analyze(sessionFile)).repository, '');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});

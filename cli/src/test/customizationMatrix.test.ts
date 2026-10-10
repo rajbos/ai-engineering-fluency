@@ -221,23 +221,19 @@ test('buildCustomizationMatrix: the 30-day window is the extension\'s (30 calend
 test('buildCustomizationMatrix: VS Code sessions are grouped by the remote of the files they referenced (parity)', async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
 	try {
-		// The repository both sessions touched; the workspace folders themselves are gone.
+		// Two workspace folders inside one repository (a monorepo opened per package): neither
+		// folder has its own .git, so only the files the sessions referenced lead to the remote.
 		const repo = path.join(root, 'repos', 'widget-main');
 		fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
-		fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
 		fs.writeFileSync(path.join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/widget.git\n');
-		const touched = path.join(repo, 'src', 'index.ts');
-		fs.writeFileSync(touched, '');
-		const folders = [path.join(root, 'wt', 'checkout-a'), path.join(root, 'scratch', 'groups-dashboard-layout-85ed99')];
+		const folders = [path.join(repo, 'packages', 'checkout-a'), path.join(repo, 'packages', 'groups-dashboard-layout-85ed99')];
 		const sessions = makeSessions(root, folders);
-		const withReference = JSON.stringify({
-			version: 3,
-			requests: [{
-				requestId: 'r1', timestamp: Date.now(), message: { text: 'look at this' }, response: [{ value: 'ok' }],
-				contentReferences: [{ kind: 'reference', reference: { fsPath: touched } }],
-			}],
+		folders.forEach((folder, i) => {
+			fs.mkdirSync(folder, { recursive: true });
+			const touched = path.join(folder, 'index.ts');
+			fs.writeFileSync(touched, '');
+			fs.writeFileSync(sessions[i], sessionReferencing(touched));
 		});
-		for (const s of sessions) { fs.writeFileSync(s, withReference); }
 
 		const matrix = await buildCustomizationMatrix(sessions);
 		assert.ok(matrix);
@@ -280,4 +276,37 @@ test('sessionLastActivityDay: a valid adapter lastInteraction wins over synthesi
 	// Missing or invalid metadata falls back to the daily fractions.
 	assert.equal(sessionLastActivityDay(synthesised, new Date(), null), '2026-10-10');
 	assert.equal(sessionLastActivityDay(synthesised, new Date(), 'not a date'), '2026-10-10');
+});
+
+/** A one-request VS Code chat session that referenced `file`. */
+function sessionReferencing(file: string): string {
+	return JSON.stringify({
+		version: 3,
+		requests: [{
+			requestId: 'r1', timestamp: Date.now(), message: { text: 'look at this' }, response: [{ value: 'ok' }],
+			contentReferences: [{ kind: 'reference', reference: { fsPath: file } }],
+		}],
+	});
+}
+
+test('buildCustomizationMatrix: a file referenced from another repository is not the workspace\'s remote', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const other = path.join(root, 'repos', 'other-lib');
+		fs.mkdirSync(path.join(other, '.git'), { recursive: true });
+		fs.writeFileSync(path.join(other, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/other-lib.git\n');
+		const otherFile = path.join(other, 'lib.ts');
+		fs.writeFileSync(otherFile, '');
+		// Two unrelated workspaces that both happened to look at other-lib.
+		const folders = [path.join(root, 'code', 'app-one'), path.join(root, 'code', 'app-two')];
+		for (const f of folders) { fs.mkdirSync(f, { recursive: true }); }
+		const sessions = makeSessions(root, folders);
+		for (const s of sessions) { fs.writeFileSync(s, sessionReferencing(otherFile)); }
+
+		const matrix = await buildCustomizationMatrix(sessions);
+		assert.ok(matrix);
+		assert.deepEqual(matrix.workspaces.map(w => w.workspaceName).sort(), ['app-one', 'app-two'], 'not merged under other-lib');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
 });
