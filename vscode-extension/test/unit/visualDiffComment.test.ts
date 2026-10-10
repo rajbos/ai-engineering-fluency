@@ -224,7 +224,12 @@ test('renderBody survives a changed row with no pixel figures', () => {
 	const plan: Plan = { attachments: files, inline: new Map([['usage.dark', files]]) };
 	const summary = { changed: 1, unchanged: 0, added: 0, removed: 0 };
 	const body = publisher.renderBody({ summary, comparisons: [row] }, OPTS, new Map(), plan, { withImages: true });
-	assert.ok(body.includes('— changed'), 'a missing percentage renders as a dash, not a crash');
+	assert.ok(body.includes('| `usage` | initial | dark | 🎨 changed | — '), 'a missing percentage renders as a dash, not a crash');
+	const renderedRow = body.split('\n').find((line) => line.startsWith('| **usage**'));
+	assert.ok(renderedRow, 'the changed view still gets its image row');
+	for (const kind of ['Before', 'After', 'Diff']) {
+		assert.ok(renderedRow.includes(`![${kind}](visual-output/x/${kind}.png)`), `the ${kind} image is in the row`);
+	}
 });
 
 test('renderBody emits no image grid when no row has inline images', () => {
