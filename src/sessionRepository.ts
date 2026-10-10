@@ -69,3 +69,26 @@ export async function extractRepositoryFromSessionContent(content: string): Prom
 	const refs = await collectSessionContentReferences(content);
 	return refs.length > 0 ? extractRepositoryFromContentReferences(refs) : undefined;
 }
+
+/**
+ * Recover the remote of workspace folders whose sessions never had their repository computed,
+ * by reading up to the given session files per folder (first remote found wins). Folders for
+ * which `skip()` is true are left alone — e.g. ones that still exist, whose `.git` already
+ * answers. Unreadable files (virtual DB paths, deleted logs) are skipped silently.
+ */
+export async function recoverWorkspaceRemotes(
+	sessionFilesByFolder: ReadonlyMap<string, readonly string[]>,
+	skip: (folder: string) => boolean,
+	readSessionFile: (file: string) => Promise<string>,
+): Promise<Map<string, string>> {
+	const found = new Map<string, string>();
+	await Promise.all([...sessionFilesByFolder].map(async ([folder, files]) => {
+		if (skip(folder)) { return; }
+		for (const file of files) {
+			let remote: string | undefined;
+			try { remote = await extractRepositoryFromSessionContent(await readSessionFile(file)); } catch { /* unreadable */ }
+			if (remote) { found.set(folder, remote); return; }
+		}
+	}));
+	return found;
+}

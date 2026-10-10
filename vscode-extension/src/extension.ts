@@ -356,6 +356,7 @@ import {
 } from '../../src/workspaceHelpers';
 import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
+import { recoverWorkspaceRemotes as _recoverWorkspaceRemotes } from '../../src/sessionRepository';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
 // --- Chart building ---
@@ -1144,6 +1145,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly DEFERRED_PARSE_RESERVE_PERMITS = 10;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
+	/** Session files read per gone workspace folder to recover its remote on a cold cache. */
+	private static readonly REPO_LOOKUP_SESSIONS_PER_WORKSPACE = 3;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
 	private static readonly NOTIFIED_EDITORS_STATE_KEY = 'discovery.notifiedEditors';
 
@@ -1585,6 +1588,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// All of them are kept: a folder reused for another repository must reach the grouping as
 	// conflicting, not as whichever remote the session loop happened to see first.
 	private _workspaceRepositoryAccum: Map<string, Set<string>> = new Map();
+	// Up to a few session files per workspace folder whose repository was never computed (the
+	// normal preload skips the full details pass), so the grouping can derive it on a cold cache.
+	private _workspaceUnresolvedRepoSessions: Map<string, string[]> = new Map();
 	// Workspace groups from the last grouping pass, keyed by canonical path (src/workspaceGrouping.ts).
 	private _workspaceGroups: Map<string, WorkspaceGroup> = new Map();
 
@@ -6960,6 +6966,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._toolCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		this._workspaceRepositoryAccum = new Map();
+		this._workspaceUnresolvedRepoSessions = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
 		let correctionReport: CorrectionReport | undefined;
@@ -8070,6 +8077,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 					const remotes = this._workspaceRepositoryAccum.get(norm) ?? new Set<string>();
 					remotes.add(repository);
 					this._workspaceRepositoryAccum.set(norm, remotes);
+				} else if (repository === undefined) {
+					// '' means "checked, none found"; undefined means it was never computed.
+					const pending = this._workspaceUnresolvedRepoSessions.get(norm) ?? [];
+					if (pending.length < CopilotTokenTracker.REPO_LOOKUP_SESSIONS_PER_WORKSPACE) { pending.push(sessionFile); }
+					this._workspaceUnresolvedRepoSessions.set(norm, pending);
 				}
 				this.ensureWorkspaceCustomizationCached(norm);
 			} else if (workspaceId) {
@@ -8295,6 +8307,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Cold-cache parity for the strongest grouping rule: the normal preload skips the full session
+	 * details pass, so `sessionData.repository` is often unknown for new sessions. For folders with
+	 * no recorded remote that are gone from disk (existing folders get theirs from `.git` through
+	 * the probes), derive it from the session's content references with the shared
+	 * extractRepositoryFromSessionContent(), as the details pass would. Async file reads only.
+	 * Returns whether any remote was added.
+	 */
+	private async resolveMissingWorkspaceRepositories(paths: Set<string>, probes: { pathExists?: (p: string) => boolean }): Promise<boolean> {
+		const recovered = await _recoverWorkspaceRemotes(
+			this._workspaceUnresolvedRepoSessions,
+			folder => !paths.has(folder) || this._workspaceRepositoryAccum.has(folder) || (probes.pathExists?.(folder) ?? false),
+			file => fs.promises.readFile(file, 'utf8'),
+		);
+		for (const [folder, remote] of recovered) { this._workspaceRepositoryAccum.set(folder, new Set([remote])); }
+		return recovered.size > 0;
+	}
+
+	/**
 	 * Folds worktrees, clones, case variants and remote spellings of one repository into a single
 	 * workspace (rules and tests live in src/workspaceGrouping.ts). The count maps are rewritten
 	 * to be keyed by each group's canonical path, and a canonical path nobody has scanned yet (a
@@ -8302,12 +8332,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): Promise<void> {
 		const paths = new Set([...sessionCounts.keys(), ...interactionCounts.keys()]);
-		const entries = [...paths].flatMap(p => _workspaceEntriesWithRemotes(
+		let entries = [...paths].flatMap(p => _workspaceEntriesWithRemotes(
 			p, sessionCounts.get(p) || 0, interactionCounts.get(p) || 0, this._workspaceRepositoryAccum.get(p),
 		));
 		// Disk checks run asynchronously before the (pure, synchronous) grouping, so a slow or
 		// network-mounted workspace cannot block the extension host.
-		const groups = _groupWorkspaces(entries, await _prefetchWorkspaceGroupingProbes(entries));
+		let probes = await _prefetchWorkspaceGroupingProbes(entries);
+		if (await this.resolveMissingWorkspaceRepositories(paths, probes)) {
+			// New remotes were found: rebuild the entries so the grouping sees them.
+			entries = [...paths].flatMap(p => _workspaceEntriesWithRemotes(
+				p, sessionCounts.get(p) || 0, interactionCounts.get(p) || 0, this._workspaceRepositoryAccum.get(p),
+			));
+			probes = await _prefetchWorkspaceGroupingProbes(entries);
+		}
+		const groups = _groupWorkspaces(entries, probes);
 		sessionCounts.clear();
 		interactionCounts.clear();
 		this._workspaceGroups = new Map();
