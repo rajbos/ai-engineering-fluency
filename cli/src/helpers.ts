@@ -116,15 +116,27 @@ const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAU
  * extension only counts sessions with at least one interaction in its last-30-days window, so
  * old or empty sessions must not add CLI workspaces, remotes or session counts either.
  */
-async function recentSessionInteractions(sessionFile: string, cutoff: Date): Promise<number> {
+async function recentSessionInteractions(activity: SessionActivityLookup, cutoff: Date): Promise<number> {
 	try {
-		const stats = await statSessionFile(sessionFile);
-		if (stats.mtime < cutoff) { return 0; }
-		const data = await processSessionFile(sessionFile);
-		return data && data.lastModified >= cutoff ? data.interactions : 0;
+		const own = await activity.lastActivity();
+		const stats = await statSessionFile(activity.file);
+		if (!sessionActiveSince(stats.mtime, own, cutoff)) { return 0; }
+		const data = await processSessionFile(activity.file);
+		return data && sessionActiveSince(data.lastModified, own, cutoff) ? data.interactions : 0;
 	} catch {
 		return 0;
 	}
+}
+
+/**
+ * Whether a session's own activity is on or after `cutoff`. A DB-backed (virtual) session
+ * shares its database's mtime, which moves whenever any session in it changes, so its own
+ * last activity from the adapter decides; the file mtime is used only for regular files
+ * (`ownLastActivity` null). Unlike `isActiveSince()`, a recent database mtime alone never
+ * counts, or every historical session in an active database would.
+ */
+export function sessionActiveSince(fileMtime: Date, ownLastActivity: Date | null, cutoff: Date): boolean {
+	return (ownLastActivity ?? fileMtime) >= cutoff;
 }
 
 /**
@@ -132,10 +144,10 @@ async function recentSessionInteractions(sessionFile: string, cutoff: Date): Pro
  * (Copilot CLI, OpenCode, Crush and the other adapter-backed editors record both); the
  * format-specific fallbacks below cover Claude Code JSONL and VS Code chatSessions files.
  */
-async function resolveSessionWorkspace(sessionFile: string, claudeBasePath: string): Promise<{ path: string; repository?: string } | undefined> {
-	const meta = await getSessionMeta(sessionFile);
+async function resolveSessionWorkspace(activity: SessionActivityLookup, claudeBasePath: string): Promise<{ path: string; repository?: string } | undefined> {
+	const meta = await activity.meta();
 	if (meta?.workspacePath) { return { path: meta.workspacePath, repository: meta.repository }; }
-	const workspacePath = await resolveSessionWorkspacePath(sessionFile, claudeBasePath);
+	const workspacePath = await resolveSessionWorkspacePath(activity.file, claudeBasePath);
 	return workspacePath ? { path: workspacePath, repository: meta?.repository } : undefined;
 }
 
@@ -194,9 +206,11 @@ export async function buildCustomizationMatrix(
 	// One entry per session; the grouping sums sessions of the same folder.
 	const entries: WorkspaceUsageEntry[] = [];
 	for (const sessionFile of sessionFiles) {
-		const interactions = await recentSessionInteractions(sessionFile, cutoff);
+		// One memoized adapter lookup per session, shared by the activity check and the metadata read.
+		const activity = createSessionActivityLookup(sessionFile);
+		const interactions = await recentSessionInteractions(activity, cutoff);
 		if (interactions === 0) { continue; }
-		const workspace = await resolveSessionWorkspace(sessionFile, claudeBasePath);
+		const workspace = await resolveSessionWorkspace(activity, claudeBasePath);
 		if (!workspace) { continue; }
 		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
 		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });

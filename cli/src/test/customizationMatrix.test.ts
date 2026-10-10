@@ -168,3 +168,17 @@ test('buildCustomizationMatrix: only sessions with interactions in the last 30 d
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test('sessionActiveSince: a DB-backed session is placed by its own activity, never by the shared database mtime', async () => {
+	const { sessionActiveSince } = await import('../helpers');
+	const cutoff = new Date('2026-09-10T00:00:00Z');
+	const recent = new Date('2026-10-01T00:00:00Z');
+	const old = new Date('2026-06-01T00:00:00Z');
+	// Regular file (no per-session activity): the file mtime decides.
+	assert.equal(sessionActiveSince(recent, null, cutoff), true);
+	assert.equal(sessionActiveSince(old, null, cutoff), false);
+	// DB-backed: an old session in a recently-touched database does not count …
+	assert.equal(sessionActiveSince(recent, old, cutoff), false);
+	// … and a recent one counts even if the database file looks older.
+	assert.equal(sessionActiveSince(old, recent, cutoff), true);
+});

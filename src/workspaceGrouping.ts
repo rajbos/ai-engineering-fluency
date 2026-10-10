@@ -569,13 +569,20 @@ export function groupWorkspaces(entries: WorkspaceUsageEntry[], probes: Workspac
 	const { nodes } = list;
 	const groups = new Groups(list.repoIds);
 
-	// 1. Same repository identity.
+	// A folder with conflicting remotes has no identity left for the veto to compare, so it is
+	// kept out of every rule weaker than a remote match: it could otherwise carry one
+	// repository's sessions into another's group.
+	const conflicting = (i: number): boolean => nodes[i].conflictingRemotes === true;
+
+	// 1. Same repository identity (a conflicting folder has none, so it never matches).
 	unionByKey(nodes, groups, (_n, i) => list.repoIds[i]);
 	// 2 + 3. Worktree pointer and path conventions → their anchor.
-	for (const [i, anchorIdx] of anchorOf) { groups.union(anchorIdx, i); }
+	for (const [i, anchorIdx] of anchorOf) {
+		if (!conflicting(i) && !conflicting(anchorIdx)) { groups.union(anchorIdx, i); }
+	}
 	// 3. Case-only differences (same folder on a case-insensitive filesystem).
 	if (caseFolds(platform)) {
-		unionByKey(nodes, groups, n => samePathKey(n.path, platform));
+		unionByKey(nodes, groups, (n, i) => (conflicting(i) ? undefined : samePathKey(n.path, platform)));
 	}
 	// 3–5. Name-based rules, weakest last.
 	unionByName(nodes, groups);

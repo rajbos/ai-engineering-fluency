@@ -386,6 +386,43 @@ test('a session remote that disagrees with the folder\'s current .git remote mak
 	assert.equal(joined.memberPaths.length, 2);
 });
 
+test('a conflicting folder is kept out of the worktree-pointer and case-folding merges too', () => {
+	const main = 'C:\\code\\gadget';
+	const wt = 'C:\\wt\\feature';
+	const p = probes('win32', [main, wt], { [wt]: { mainWorktreePath: main } });
+	// A worktree path seen under two repositories does not join the main checkout of one of them.
+	const pointerEntries = [
+		entry(main, 1, 1, 'https://github.com/acme/gadget'),
+		entry(wt, 1, 1, 'https://github.com/acme/gadget'),
+		entry(wt, 1, 1, 'https://github.com/other/thing'),
+	];
+	for (const order of permutations(pointerEntries)) {
+		const groups = groupWorkspaces(order, p);
+		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [[main], [wt]]);
+	}
+	// A conflicting main checkout is not joined by its worktree either.
+	const conflictingMain = [
+		entry(main, 1, 1, 'https://github.com/acme/gadget'),
+		entry(main, 1, 1, 'https://github.com/other/thing'),
+		entry(wt, 1, 1, 'https://github.com/acme/gadget'),
+	];
+	for (const order of permutations(conflictingMain)) {
+		assert.deepEqual(groupWorkspaces(order, p).map(g => g.memberPaths).sort(), [[main], [wt]]);
+	}
+	// A case-only spelling of a conflicting folder is not folded into it.
+	const caseEntries = [
+		entry('C:\\Reused\\Tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('C:\\Reused\\Tools', 1, 1, 'https://github.com/other/tools'),
+		entry('c:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+	];
+	for (const order of permutations(caseEntries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		const conflicted = groups.find(g => g.memberPaths.includes('C:\\Reused\\Tools'))!;
+		assert.deepEqual(conflicted.memberPaths, ['C:\\Reused\\Tools']);
+		assert.equal(conflicted.sessionCount, 2);
+	}
+});
+
 test('a worktree whose remote differs from its existing main checkout is not merged into it', () => {
 	const main = 'C:\\code\\gadget';
 	const wt = 'C:\\wt\\feature';
