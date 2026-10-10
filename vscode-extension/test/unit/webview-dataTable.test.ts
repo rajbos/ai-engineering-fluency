@@ -359,6 +359,16 @@ test('dataTable: an outer table keeps focus and announcements on its own pager, 
 	dom.window.close();
 });
 
+test('dataTable: the scroll container is a labelled, keyboard-focusable region', () => {
+	const html = renderDataTable(options('test-scroll-region', { ariaLabel: 'Models <wide>' }));
+	const dom = new JSDOM(`<body>${html}</body>`);
+	const region = dom.window.document.querySelector('.data-table-scroll');
+	assert.equal(region?.getAttribute('role'), 'region');
+	assert.equal(region?.getAttribute('tabindex'), '0');
+	assert.equal(region?.getAttribute('aria-label'), 'Models <wide>');
+	dom.window.close();
+});
+
 test('dataTable: localized pager and sort strings come from the shared dataTable.* keys', () => {
 	initializeWebviewLocalization({ 'dataTable.next': '下一页', 'dataTable.sortBy': '按{0}排序' });
 	const html = renderDataTable(options('test-l10n', { initialSort: undefined }));

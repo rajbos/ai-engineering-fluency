@@ -89,6 +89,7 @@
 }
 
 .data-table-sort:focus-visible,
+.data-table-scroll:focus-visible,
 .data-table-page-button:focus-visible,
 .data-table-filter input:focus-visible {
 	outline: 1px solid var(--focus-border);

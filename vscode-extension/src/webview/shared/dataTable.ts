@@ -430,7 +430,8 @@ function renderDataTableContent<Row>(options: DataTableOptions<Row>): string {
 	const head = options.showHeader === false
 		? ''
 		: `<thead><tr>${columns.map(column => renderHeaderCell(column, state, options.tableId)).join('')}</tr></thead>`;
-	return `<div class="data-table-scroll">`
+	// A labelled, focusable region so keyboard users can scroll a table wider than the panel.
+	return `<div class="data-table-scroll" role="region" tabindex="0" aria-label="${escapeHtml(options.ariaLabel)}">`
 		+ `<table${classAttr('data-table', options.className)} aria-label="${escapeHtml(options.ariaLabel)}">`
 		+ renderColGroup(columns)
 		+ head

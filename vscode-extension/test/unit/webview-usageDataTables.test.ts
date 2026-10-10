@@ -1,5 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 import { resetDataTableState, setDataTableFilter, setDataTableSort } from '../../src/webview/shared/dataTable';
@@ -19,11 +20,14 @@ import type { ContextRefRow } from '../../src/webview/usage/contextRefRows';
 
 initializeWebviewLocalization({});
 
-/** Text of each body row's cells, tags stripped. */
+/**
+ * Text of each body row's cells in the first table, parsed by a real HTML parser. Escaped markup
+ * reads back as literal text (`<b>x</b>`); unescaped markup would become an element and lose its tags.
+ */
 function bodyRows(html: string): string[][] {
-	const body = html.match(/<tbody>(.*?)<\/tbody>/s)?.[1] ?? '';
-	return [...body.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)]
-		.map(row => [...row[1].matchAll(/<t[dh][^>]*>(.*?)<\/t[dh]>/gs)].map(cell => cell[1].replace(/<[^>]*>/g, '').trim()));
+	const doc = new JSDOM(html).window.document;
+	const rows = Array.from(doc.querySelector('tbody')?.children ?? []) as Element[];
+	return rows.map(row => (Array.from(row.children) as Element[]).map(cell => (cell.textContent ?? '').trim()));
 }
 
 const ref = (label: string, counts: Partial<ContextRefRow> = {}): ContextRefRow => ({ label, today: 0, month: 0, lastMonth: 0, last30: 0, ...counts });
@@ -71,7 +75,7 @@ test('tool counts: the # column ranks by calls and does not renumber when the ta
 		nameResolver: id => id === 'read_file' ? 'Read File' : id,
 		isAutomatic: id => id === 'read_file',
 	});
-	assert.deepEqual(bodyRows(html), [['1', 'Read Fileauto', '9'], ['2', '&lt;b&gt;x&lt;/b&gt;', '4']]);
+	assert.deepEqual(bodyRows(html), [['1', 'Read Fileauto', '9'], ['2', '<b>x</b>', '4']]);
 	assert.match(html, /<strong title="read_file">Read File<\/strong><span class="auto-badge"/);
 	assert.ok(!html.includes('<b>x</b>'), 'tool ids are escaped');
 	assert.match(html, /aria-sort="descending"[^>]*><button[^>]*data-table-sort="calls"/, 'sorted by calls by default');
@@ -89,7 +93,7 @@ test('agent plugins: plugins with usage are hidden by default and the toggle rev
 
 	setDataTableFilter(AGENT_PLUGINS_TABLE_ID, 'hideWithUsage', false);
 	const html = renderAgentPluginsTable(plugins, 'Agent Plugins');
-	assert.deepEqual(bodyRows(html).map(cells => cells[0]), ['unused', 'used &lt;one&gt;']);
+	assert.deepEqual(bodyRows(html).map(cells => cells[0]), ['unused', 'used <one>']);
 	assert.match(html, /data-command="openAgentPlugins" data-plugin-name="used &lt;one&gt;"/, 'the action button keeps its data attributes');
 });
 
@@ -120,7 +124,7 @@ test('server memories: promotion groups keep the host order and escape fact text
 	assert.match(html, new RegExp(`id="data-table-root-${SERVER_MEMORIES_TABLE_ID}"`));
 	const rows = bodyRows(html);
 	assert.deepEqual(rows.map(cells => cells[0].replace(/\s*\(.*\)$/, '')), ['zeta', 'alpha'], 'no re-sort of the host ranking');
-	assert.equal(rows[0][1], 'use &lt;pnpm&gt;');
+	assert.equal(rows[0][1], 'use <pnpm>');
 	assert.equal(rows[1][2], '5');
 });
 
@@ -132,7 +136,7 @@ test('repository hygiene list: host order by default, numeric score sort with un
 	});
 	const rows = [repo('busy', '—', 40), repo('<b>mid</b>', '85%', 20), repo('quiet', '9%', 10)];
 	const html = renderRepoHygieneListTable({ rows, other: { count: 3, sessions: 4, interactions: 40 } });
-	assert.deepEqual(bodyRows(html).map(r => r[0]), ['busy', '&lt;b&gt;mid&lt;/b&gt;', 'quiet']);
+	assert.deepEqual(bodyRows(html).map(r => r[0]), ['busy', '<b>mid</b>', 'quiet']);
 	assert.match(html, /title="\/repos\/busy"/);
 	assert.match(html, /class="btn-repo-action" data-action="analyze" data-workspace-path="\/repos\/busy"/);
 	assert.match(html, /<tfoot>.*Other \(3 repositories with low activity\).*id="btn-show-other-workspaces"/s);
