@@ -3823,7 +3823,9 @@ test('analyzeSessionUsage: onAnalysisError fires only when the session could not
 	assert.equal(errors.length, 0, 'a warning alone is not an analysis failure');
 
 	// A real failure: the file cannot be read, so the empty analysis stands in for one that failed.
-	const missing = path.join(os.tmpdir(), `missing-session-${process.pid}-${Date.now()}.json`);
+	// A path that does not exist next to this test, not one under os.tmpdir(): the OS temp dir
+	// is shared and attacker-writable, and nothing here needs it.
+	const missing = path.join(__dirname, 'no-such-dir', 'missing-session.json');
 	const result = await analyzeSessionUsage(deps, missing);
 	assert.equal(errors.length, 1, 'an unreadable session signals onAnalysisError');
 	assert.ok(result.taskClassification, 'callers still get a well-formed empty analysis');
