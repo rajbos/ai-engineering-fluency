@@ -117,8 +117,13 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 	// A registry from baselineRegistry() pins each view to the fixture directory
 	// of the commit that declared it, so a base view renders with the base
 	// commit's fixture even when the current tree renamed or deleted it.
-	const fixturePath = path.join(view.fixtureDir || path.join(__dirname, 'fixtures'), path.basename(String(view.fixture || '')));
-	if (!view.fixture || !fs.existsSync(fixturePath)) {
+	let fixturePath;
+	try {
+		fixturePath = resolveInside(view.fixtureDir || path.join(__dirname, 'fixtures'), view.fixture, 'fixture');
+	} catch (error) {
+		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: String(error && error.message || error) };
+	}
+	if (!fs.existsSync(fixturePath)) {
 		return { view: view.id, state: state ? state.id : null, theme, status: 'error', missing: true, error: `Missing fixture ${view.fixture}` };
 	}
 

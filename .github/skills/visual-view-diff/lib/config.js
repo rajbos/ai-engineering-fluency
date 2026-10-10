@@ -28,7 +28,13 @@ function parseArgs(argv) {
  */
 function readConfig(skillDir, configPath) {
 	const config = JSON.parse(fs.readFileSync(configPath || path.join(skillDir, 'views.config.json'), 'utf8'));
-	return validateRegistry({ defaults: config.defaults, views: config.views });
+	// `fixtureDir` is where a view's fixture is read from. Only the registry
+	// `baselineRegistry` generates may set it; a committed views.config.json
+	// that names one could point the harness at any directory on disk.
+	const views = configPath || !Array.isArray(config.views)
+		? config.views
+		: config.views.map(({ fixtureDir, ...view }) => view);
+	return validateRegistry({ defaults: config.defaults, views });
 }
 
 /**

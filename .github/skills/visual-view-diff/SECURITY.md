@@ -55,8 +55,10 @@ caller's environment; the bundles they load run in Chromium, which has no access
   marker a previous run wrote; otherwise the run refuses to start
   (`prepareOutRoot` in visual-diff.js). Nothing there is followed through a symlink:
   a symlinked output root, or a marker that is not a regular file, is refused; the
-  marker is created with `O_EXCL`; and a symlinked entry is removed as a link, never
-  through it.
+  marker is a directory claimed atomically with `mkdir` (no check-then-write; unlike
+  `O_EXCL` on Windows, `mkdir` never creates through a dangling link) and removed again
+  when the directory is refused; and a symlinked entry is removed as a link,
+  never through it.
 - A temporary git worktree at `<out>/.baseline-worktree` containing the baseline build
   output; its `vscode-extension/node_modules` is a symlink to the working tree's
   (`buildWebviews` in visual-diff.js). The worktree is removed in a `finally` block.
@@ -82,15 +84,19 @@ render processes run concurrently; each is awaited before the worktree is remove
 - View and state ids must match a strict allowlist, so ids cannot carry path separators
   into screenshot or temp file names (`lib/config.js` `ID_PATTERN`). The fixture file name
   is reduced with `path.basename` (render-views.js `renderView`).
-- `$fromRepoJson` and `view.bundle` are resolved with `resolveInside` (`lib/harness.js`):
-  absolute paths, `../` segments and symlinks that resolve outside the repo root or the
-  dist directory are refused.
+- Every registry-derived path (`view.bundle`, `view.fixture` and `$fromRepoJson`) is
+  resolved with `resolveInside` (`lib/harness.js`) in all three consumers of the registry
+  (`render-views.js`, `scripts/interaction-smoke.js`, `release-video/src/shots.ts`):
+  absolute paths, `../` segments and symlinks that resolve outside the dist directory,
+  the fixtures directory or the repo root are refused. `fixtureDir` is accepted only from
+  the registry `visual-diff.js` generates; `readConfig` strips it from a committed
+  `views.config.json`.
 - Chromium pages (render and interaction smoke) route every request through
   `blockNetwork`: only `file:`, `data:` and `blob:` URLs load; http(s) is aborted and
   WebSockets are closed, at the context level so popups are covered too. A Playwright
   too old to route WebSockets fails the render instead of skipping that block.
 - The bundle build gets an allowlisted environment, not the caller's.
-- Embedded JSON has every `<` escaped as `<`, so a payload cannot close the
+- Embedded JSON has every `<` escaped as `\u003c`, so a payload cannot close the
   script tag (`toScriptJson` and `readJsonConfigGlobals` in `lib/harness.js`).
 - The page gets a stub `acquireVsCodeApi` that only records messages in memory; nothing is
   posted anywhere. The harness never launches VS Code and the skill does not upload images.

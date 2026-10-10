@@ -291,24 +291,34 @@ function prepareOutRoot(outRoot, defaultOutRoot) {
 	if (isLink(outRoot)) {
 		throw new Error(`--out ${outRoot} is a symbolic link; refusing to delete into its target.`);
 	}
+	fs.mkdirSync(outRoot, { recursive: true });
 	const markerPath = path.join(outRoot, OUTPUT_MARKER);
-	const marker = fs.lstatSync(markerPath, { throwIfNoEntry: false });
-	if (marker && !marker.isFile()) {
-		throw new Error(`--out ${outRoot} has a ${OUTPUT_MARKER} that is not a regular file; refusing to treat it as ours.`);
+	// Claim the marker atomically instead of checking for it and then writing.
+	// It is a directory because `mkdir` fails on anything already at the path
+	// and never follows a link on any platform. A file opened with `wx` is not
+	// enough: on Windows, O_EXCL creates the target of a dangling symlink.
+	let created = false;
+	try {
+		fs.mkdirSync(markerPath);
+		created = true;
+	} catch (error) {
+		if (!error || error.code !== 'EEXIST') { throw error; }
 	}
-	const owned = outRoot === defaultOutRoot || Boolean(marker);
+	// An existing marker is only inspected, never written through, and must
+	// be an entry of its own: a symlink placed there does not make the root ours.
+	const existing = created ? null : fs.lstatSync(markerPath);
+	if (existing && !existing.isDirectory() && !existing.isFile()) {
+		throw new Error(`--out ${outRoot} has a ${OUTPUT_MARKER} that is a link or special file; refusing to treat it as ours.`);
+	}
+	const owned = outRoot === defaultOutRoot || !created;
 	const clashes = OUTPUT_ENTRIES.filter((name) => fs.lstatSync(path.join(outRoot, name), { throwIfNoEntry: false }));
 	if (!owned && clashes.length > 0) {
+		// Leave the directory as it was found, or a second run would treat it as ours.
+		fs.rmdirSync(markerPath);
 		throw new Error(
 			`--out ${outRoot} already contains ${clashes.join(', ')} and was not created by this skill; ` +
 			'refusing to delete them. Pick an empty or new directory.',
 		);
-	}
-	fs.mkdirSync(outRoot, { recursive: true });
-	if (!marker) {
-		// `wx` (O_CREAT|O_EXCL) never follows a link: it fails if anything,
-		// including a dangling symlink, already sits at the path.
-		fs.writeFileSync(markerPath, '', { flag: 'wx' });
 	}
 	// `rmSync` removes a symlinked entry itself, never its target, so the
 	// files written into these paths later are always fresh.

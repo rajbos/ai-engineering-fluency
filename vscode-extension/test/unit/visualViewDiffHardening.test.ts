@@ -35,6 +35,15 @@ const visualDiff = requireFromHere(path.join(SKILL_DIR, 'visual-diff.js')) as {
 	resolveBaseRef: (requested?: unknown) => { ref: string; sha: string };
 };
 
+const config = requireFromHere(path.join(SKILL_DIR, 'lib', 'config.js')) as {
+	readConfig: (skillDir: string, configPath?: string) => { views: Array<Record<string, unknown>> };
+};
+
+type RenderResult = { status: string; error?: string };
+const renderViews = requireFromHere(path.join(SKILL_DIR, 'render-views.js')) as {
+	renderView: (options: Record<string, unknown>) => Promise<RenderResult>;
+};
+
 function tempDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), 'vvd-hardening-'));
 }
@@ -203,19 +212,19 @@ test('--out never follows a symlinked marker or entry', (t) => {
 			return;
 		}
 		// A marker that is a link does not make the directory ours, and is not written through.
-		assert.throws(() => visualDiff.prepareOutRoot(out, path.join(dir, 'default')), /not a regular file/);
+		assert.throws(() => visualDiff.prepareOutRoot(out, path.join(dir, 'default')), /link or special file/);
 		assert.equal(fs.readFileSync(outside, 'utf8'), 'KEEP');
 		assert.ok(fs.existsSync(path.join(out, 'current')), 'nothing is deleted when the marker is refused');
 
 		// The same holds for the default root, and for a dangling link.
 		fs.rmSync(marker);
 		fs.symlinkSync(path.join(dir, 'missing.txt'), marker, 'file');
-		assert.throws(() => visualDiff.prepareOutRoot(out, out), /not a regular file/);
+		assert.throws(() => visualDiff.prepareOutRoot(out, out), /link or special file/);
 		assert.ok(!fs.existsSync(path.join(dir, 'missing.txt')), 'a dangling marker link is not created through');
 
 		// An entry the run overwrites later is removed as a link, never through it.
 		fs.rmSync(marker);
-		fs.writeFileSync(marker, '');
+		fs.mkdirSync(marker);
 		fs.symlinkSync(outside, path.join(out, '.baseline-registry.json'), 'file');
 		fs.symlinkSync(outside, path.join(out, 'timings.md'), 'file');
 		visualDiff.prepareOutRoot(out, path.join(dir, 'default'));
@@ -228,13 +237,66 @@ test('--out never follows a symlinked marker or entry', (t) => {
 	}
 });
 
-test('--out refuses a marker that is not a regular file', () => {
+test('--out claims its marker atomically and releases it when refusing', () => {
 	const dir = tempDir();
 	try {
-		const out = path.join(dir, 'out');
-		fs.mkdirSync(path.join(out, '.visual-view-diff-output'), { recursive: true });
-		assert.throws(() => visualDiff.prepareOutRoot(out, path.join(dir, 'default')), /not a regular file/);
+		const fresh = path.join(dir, 'fresh');
+		visualDiff.prepareOutRoot(fresh, path.join(dir, 'default'));
+		assert.ok(fs.lstatSync(path.join(fresh, '.visual-view-diff-output')).isDirectory(), 'the marker is a real directory');
+		assert.doesNotThrow(() => visualDiff.prepareOutRoot(fresh, path.join(dir, 'default')), 'and claims the root on the next run');
+
+		const foreign = path.join(dir, 'foreign');
+		fs.mkdirSync(path.join(foreign, 'diff'), { recursive: true });
+		assert.throws(() => visualDiff.prepareOutRoot(foreign, path.join(dir, 'default')), /refusing to delete/);
+		assert.throws(() => visualDiff.prepareOutRoot(foreign, path.join(dir, 'default')), /refusing to delete/, 'a refused run does not leave a marker behind that would let the next one through');
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('a committed registry cannot choose the fixture directory; a generated one can', () => {
+	const dir = tempDir();
+	try {
+		const views = [{ id: 'v', bundle: 'v', global: '__G__', fixture: 'v.json', fixtureDir: '/etc' }];
+		fs.writeFileSync(path.join(dir, 'views.config.json'), JSON.stringify({ defaults: {}, views }));
+		assert.equal(config.readConfig(dir).views[0].fixtureDir, undefined, 'stripped from the skill registry');
+		assert.equal(config.readConfig(dir, path.join(dir, 'views.config.json')).views[0].fixtureDir, '/etc', 'kept for an explicit --config');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('renderView refuses a fixture outside its fixture directory before opening a page', async (t) => {
+	const { root, parent } = fakeRepo();
+	try {
+		const dist = path.join(root, 'dist');
+		const fixtures = path.join(root, 'fixtures');
+		fs.mkdirSync(dist);
+		fs.mkdirSync(fixtures);
+		fs.writeFileSync(path.join(dist, 'v.js'), '');
+		const browser = { newPage: () => { throw new Error('no page should be opened'); } };
+		const render = (fixture: string) => renderViews.renderView({
+			browser, view: { id: 'v', bundle: 'v', global: '__G__', fixture, fixtureDir: fixtures },
+			state: null, theme: 'dark', outDir: parent, tmpDir: parent, defaults: {}, distDir: dist, repoRoot: root,
+		});
+		for (const fixture of ['../../secret.json', path.join(parent, 'secret.json')]) {
+			const result = await render(fixture);
+			assert.equal(result.status, 'error', fixture);
+			assert.match(String(result.error), /fixture/, fixture);
+		}
+		const bundleEscape = await renderViews.renderView({
+			browser, view: { id: 'v', bundle: '../../secret', global: '__G__', fixture: 'f.json', fixtureDir: fixtures },
+			state: null, theme: 'dark', outDir: parent, tmpDir: parent, defaults: {}, distDir: dist, repoRoot: root,
+		});
+		assert.match(String(bundleEscape.error), /bundle .* resolves outside/);
+		try {
+			fs.symlinkSync(path.join(parent, 'secret.json'), path.join(fixtures, 'link.json'), 'file');
+		} catch {
+			t.skip('symlinks are not permitted on this machine');
+			return;
+		}
+		assert.match(String((await render('link.json')).error), /resolves outside/);
+	} finally {
+		fs.rmSync(parent, { recursive: true, force: true });
 	}
 });

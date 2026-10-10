@@ -61,7 +61,7 @@ const SKILL_DIR = path.join(__dirname, '..', '.github', 'skills', 'visual-view-d
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DIST_DIR = path.join(REPO_ROOT, 'vscode-extension', 'dist', 'webview');
 
-const { buildPageHtml, loadFixture } = require(path.join(SKILL_DIR, 'lib', 'harness.js'));
+const { buildPageHtml, loadFixture, resolveInside } = require(path.join(SKILL_DIR, 'lib', 'harness.js'));
 const { blockNetwork, loadChromium } = require(path.join(SKILL_DIR, 'lib', 'browser.js'));
 const { parseArgs, readConfig, selectViews } = require(path.join(SKILL_DIR, 'lib', 'config.js'));
 // The step vocabulary (`click`, `select`, `post`) is shared with the visual
@@ -421,7 +421,16 @@ async function runScenario(page, view, scenario) {
 }
 
 async function smokeView({ browser, view, defaults, handledCommands, isolate }) {
-  const bundlePath = path.join(DIST_DIR, `${view.bundle}.js`);
+  // Registry paths are contained the same way render-views.js contains them:
+  // no absolute paths, `../` or symlinks out of the dist or fixtures directory.
+  let bundlePath;
+  let fixturePath;
+  try {
+    bundlePath = resolveInside(DIST_DIR, `${view.bundle}.js`, 'bundle');
+    fixturePath = resolveInside(path.join(SKILL_DIR, 'fixtures'), view.fixture, 'fixture');
+  } catch (error) {
+    return { view: view.id, status: 'error', error: String(error && error.message || error), controls: [], findings: [] };
+  }
   if (!fs.existsSync(bundlePath)) {
     return {
       view: view.id,
@@ -431,7 +440,6 @@ async function smokeView({ browser, view, defaults, handledCommands, isolate }) 
       findings: [],
     };
   }
-  const fixturePath = path.join(SKILL_DIR, 'fixtures', view.fixture);
   if (!fs.existsSync(fixturePath)) {
     return { view: view.id, status: 'error', error: `Missing fixture ${view.fixture}`, controls: [], findings: [] };
   }
