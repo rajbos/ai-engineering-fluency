@@ -110,6 +110,9 @@ export async function discoverSessionFiles(): Promise<string[]> {
 }
 
 /** Instruction files that satisfy the CLI's "has customization" check (case-insensitive). */
+/** The customization type the CLI's instructions-file check reports (same id as the extension's). */
+const CLI_INSTRUCTIONS_TYPE = { id: 'instructions', icon: '📋', label: 'Instructions' };
+
 const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md'];
 
 /** Workspace folder a session belongs to, or undefined when it cannot be resolved. */
@@ -263,20 +266,23 @@ export async function buildCustomizationMatrix(
 	let workspacesWithIssues = 0;
 	const workspaces: WorkspaceCustomizationRow[] = groups.map(group => {
 		const folders = [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
-		if (!folders.some(hasInstructions)) { workspacesWithIssues++; }
+		const customized = folders.some(hasInstructions);
+		if (!customized) { workspacesWithIssues++; }
 		return {
 			workspacePath: group.canonicalPath,
 			workspaceName: group.displayName,
 			sessionCount: group.sessionCount,
 			interactionCount: group.interactionCount,
-			typeStatuses: {},
+			// The one type the CLI checks, from the same group-wide test as workspacesWithIssues, so
+			// the shared scorer never mistakes a customized repository for a missing one.
+			typeStatuses: { [CLI_INSTRUCTIONS_TYPE.id]: customized ? '✅' : '❌' },
 			...(group.memberPaths.length > 1 ? { memberPaths: group.memberPaths } : {}),
 		};
 	});
 	const ungrouped = detectArtefactWorkspaceNames(groups).map(a => a.displayName);
 
 	return {
-		customizationTypes: [],
+		customizationTypes: [CLI_INSTRUCTIONS_TYPE],
 		workspaces,
 		totalWorkspaces: workspaces.length,
 		workspacesWithIssues,

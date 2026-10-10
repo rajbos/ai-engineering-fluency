@@ -314,3 +314,22 @@ test('buildCustomizationMatrix: a file referenced from another repository is not
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test('buildCustomizationMatrix: rows carry the instructions status the issue count is based on', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-custmatrix-'));
+	try {
+		const customized = path.join(root, 'code', 'customized');
+		const missing = path.join(root, 'code', 'missing');
+		for (const dir of [customized, missing]) { fs.mkdirSync(dir, { recursive: true }); }
+		fs.writeFileSync(path.join(customized, 'AGENTS.md'), '# instructions');
+		const matrix = await buildCustomizationMatrix(makeSessions(root, [customized, missing]));
+		assert.ok(matrix);
+		assert.deepEqual(matrix.customizationTypes.map(t => t.id), ['instructions']);
+		const status = (name: string) => matrix.workspaces.find(w => w.workspaceName === name)?.typeStatuses;
+		assert.deepEqual(status('customized'), { instructions: '✅' });
+		assert.deepEqual(status('missing'), { instructions: '❌' });
+		assert.equal(matrix.workspacesWithIssues, 1);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
