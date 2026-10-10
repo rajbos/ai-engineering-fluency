@@ -273,53 +273,31 @@ function planAttachments(comparisons, roots, budget, titles) {
   return { attachments, inline };
 }
 
-/** Screenshots per row in the inline grid; three keeps a full-page shot readable without endless scrolling. */
-const GRID_COLUMNS = 3;
-
 const image = (f) => `![${f.alt}](${f.file})`;
 
 /**
- * Only one image per view is shown inline: the diff for a changed view, the
- * screenshot itself for an added or removed one. The webview screenshots are
- * full-page (often 6000+ px tall), so a before/after/diff row per view made
- * the comment one long scroll. Before and after still matter — the diff paints
- * changed pixels solid magenta, so it shows where the UI changed but not what
- * it now looks like — and sit in a collapsed section, one click away.
+ * Show the before, after and diff together for each changed view. Sorting by
+ * view first keeps light and dark rows together, with light mode first.
  */
 function renderImages(lines, shown, plan, titles) {
   const files = (c) => plan.inline.get(`${key(c)}.${c.theme}`);
   if (shown.length === 0) return;
-  const cells = shown.map((c) => {
-    const lead = files(c).find((f) => f.kind === 'Diff') || files(c)[0];
-    const note = c.status === 'changed' ? `${formatPercent(c.changedPercent)} changed` : c.status;
-    return `<code>${key(c)}</code> · ${c.theme}<br>${note}<br>${image(lead)}`;
-  });
-  // One table rather than one per row: GitHub sizes columns per table, so a
-  // short last row keeps the width of the full rows above it instead of
-  // stretching its images across the whole comment. `gh --attach` only
-  // rewrites Markdown image references, so an <img width> is not an option.
-  const columns = Math.min(GRID_COLUMNS, cells.length);
-  lines.push(`|${' |'.repeat(columns)}`, `|${' --- |'.repeat(columns)}`);
-  for (let i = 0; i < cells.length; i += columns) {
-    const row = cells.slice(i, i + columns);
-    while (row.length < columns) row.push(' ');
-    lines.push(`| ${row.join(' | ')} |`);
-  }
-  // Added and removed views show the screenshot itself, not a diff, so the
-  // magenta legend only belongs when a changed view is in the grid.
-  const pairs = shown.filter((c) => c.status === 'changed');
-  const legend = pairs.length > 0 ? 'Magenta marks changed pixels; the rest is the new screenshot, dimmed. ' : '';
-  lines.push('', `<sub>${legend}Click an image for full size.</sub>`, '');
+  const themeOrder = { light: 0, dark: 1 };
+  const ordered = [...shown].sort((a, b) =>
+    key(a).localeCompare(key(b)) ||
+    themeOrder[a.theme] - themeOrder[b.theme]);
+  const screenshot = (c, kind) => files(c).find((f) => f.kind === kind);
+  const cell = (c, kind) => {
+    const file = screenshot(c, kind);
+    return file ? image(file) : '';
+  };
 
-  if (pairs.length > 0) {
-    lines.push(`<details><summary>Before and after screenshots (${pairs.length})</summary>`, '');
-    for (const c of pairs) {
-      const [before, after] = ['Before', 'After'].map((kind) => files(c).find((f) => f.kind === kind));
-      lines.push(`**<code>${key(c)}</code> · ${describe(c, titles)} · ${c.theme}**`, '');
-      lines.push('| Before | After |', '| --- | --- |', `| ${image(before)} | ${image(after)} |`, '');
-    }
-    lines.push('</details>', '');
+  lines.push('| Name | Before | After | Diff |', '| --- | --- | --- | --- |');
+  for (const c of ordered) {
+    const name = `**${describe(c, titles)}** (${c.theme} mode)`;
+    lines.push(`| ${name} | ${cell(c, 'Before')} | ${cell(c, 'After')} | ${cell(c, 'Diff')} |`);
   }
+  lines.push('', '<sub>Magenta marks changed pixels in the diff. Click an image for full size.</sub>', '');
 }
 
 function renderBody(report, opts, titles, plan, { withImages }) {
