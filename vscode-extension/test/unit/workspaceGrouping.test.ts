@@ -14,6 +14,7 @@ import {
 	mergeGroupCustomizationFiles,
 	workspaceProbePaths,
 	workspaceEntriesWithRemotes,
+	groupFolders,
 	type WorkspaceUsageEntry,
 	type WorkspaceGroupingProbes,
 	type WorkspaceGitInfo,
@@ -959,4 +960,13 @@ test('readWorkspaceGitInfo ignores a .git file that does not point into a worktr
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test('groupFolders: canonical first, including a checkout that had no sessions of its own', () => {
+	assert.deepEqual(groupFolders({ canonicalPath: 'C:\\code\\gadget', memberPaths: ['C:\\wt\\feature'] }), ['C:\\code\\gadget', 'C:\\wt\\feature']);
+	assert.deepEqual(groupFolders({ canonicalPath: '/b', memberPaths: ['/a', '/b', '/c'] }), ['/b', '/a', '/c']);
+	assert.deepEqual(groupFolders({ canonicalPath: '/only', memberPaths: ['/only'] }), ['/only']);
+	// The real case: a deleted worktree resolved through its pointer to an existing checkout.
+	const [g] = groupWorkspaces([entry('C:\\wt\\feature')], probes('win32', ['C:\\wt\\feature', 'C:\\code\\gadget'], { 'C:\\wt\\feature': { mainWorktreePath: 'C:\\code\\gadget' } }));
+	assert.deepEqual(groupFolders(g), ['C:\\code\\gadget', 'C:\\wt\\feature']);
 });

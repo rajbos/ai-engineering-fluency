@@ -697,6 +697,16 @@ function pickCanonical(indexes: number[], nodes: Node[], pathExists: (p: string)
 	)[0];
 }
 
+/**
+ * Every folder a group covers: its canonical path first, then the merged input folders. The
+ * canonical path can be a checkout found only through a worktree's `.git` pointer or layout,
+ * with no sessions of its own, so it is not always one of `memberPaths`; a group made of one
+ * worktree plus that checkout still covers two folders, and the UI should say so.
+ */
+export function groupFolders(group: Pick<WorkspaceGroup, 'canonicalPath' | 'memberPaths'>): string[] {
+	return [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
+}
+
 // ── Customization files of a group ───────────────────────────────────────────
 
 /** The fields of a customization file entry the merge looks at. */

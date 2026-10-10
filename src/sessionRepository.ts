@@ -110,6 +110,31 @@ export function referencesWithinWorkspace(refs: ContentReferences, workspacePath
  * workspace every reference counts (the session is not attributed to a workspace then).
  */
 export async function extractWorkspaceRepository(refs: ContentReferences, workspacePath?: string): Promise<string | undefined> {
-	const scoped = workspacePath ? referencesWithinWorkspace(refs, workspacePath) : refs;
+	const scoped = workspacePath ? referencesWithinWorkspace(resolveRelativeReferences(refs, workspacePath), workspacePath) : refs;
 	return scoped.length > 0 ? extractRepositoryFromContentReferences(scoped) : undefined;
+}
+
+/** Absolute on any platform: POSIX root, drive letter, UNC root, or a `/C:` URI-style path. */
+function isAbsoluteAnyPlatform(p: string): boolean {
+	return /^(?:[\\/]|[a-z]:[\\/])/i.test(p);
+}
+
+/**
+ * Tools log cwd-relative paths (`src/a.ts`); resolve them against the workspace so they can count
+ * as inside it and be looked up. The result keeps the workspace's separator style, with `.`/`..`
+ * resolved, so the git-root walk sees a real path.
+ */
+export function resolveRelativeReferences(refs: ContentReferences, workspacePath: string): ContentReferences {
+	const sep = workspacePath.includes('\\') && !workspacePath.startsWith('/') ? '\\' : '/';
+	const resolve = (relative: string): string => {
+		const joined = `${workspacePath.replace(/[\\/]+$/, '')}/${relative}`.replace(/\\/g, '/');
+		const unc = joined.startsWith('//') ? '/' : '';
+		const normalized = unc + path.posix.normalize(joined);
+		return sep === '\\' ? normalized.replace(/\//g, '\\') : normalized;
+	};
+	return refs.map(ref => {
+		const p = referencePath(ref);
+		if (!p || isAbsoluteAnyPlatform(p)) { return ref; }
+		return { kind: ref.kind ?? 'reference', reference: { fsPath: resolve(p) } };
+	});
 }

@@ -354,7 +354,7 @@ import {
   normalizeToRepoRoot as _normalizeToRepoRoot,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
-import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, type WorkspaceGroup } from '../../src/workspaceGrouping';
+import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, groupFolders as _groupFolders, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
@@ -8328,7 +8328,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private mergeGroupCustomizationScans(): void {
 		for (const group of this._workspaceGroups.values()) {
-			const folders = [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
+			const folders = _groupFolders(group);
 			if (folders.length < 2) { continue; }
 			const merged = _mergeGroupCustomizationFiles(folders.map(f => this._customizationFilesCache.get(f)));
 			for (const member of folders.slice(1)) { this._customizationFilesCache.delete(member); }
@@ -8353,7 +8353,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 			if (customizationTypes.every(t => typeStatuses[t.id] === '❌')) { issues++; }
 			const group = this._workspaceGroups.get(folderPath);
-			const memberPaths = group && group.memberPaths.length > 1 ? group.memberPaths : undefined;
+			const folders = group ? _groupFolders(group) : [];
+			const memberPaths = folders.length > 1 ? folders : undefined;
 			rows.push({
 				workspacePath: folderPath, workspaceName: group?.displayName ?? path.basename(folderPath),
 				sessionCount, interactionCount: interactionCounts.get(folderPath) || 0, typeStatuses,

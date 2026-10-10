@@ -24,7 +24,7 @@ import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsag
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
-import { groupWorkspaces, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
+import { groupWorkspaces, groupFolders, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { extractRepositoryFromSessionContent } from '../../src/sessionRepository';
 import { getTimeWindowStartDate } from '../../src/timeWindows';
@@ -265,7 +265,7 @@ export async function buildCustomizationMatrix(
 
 	let workspacesWithIssues = 0;
 	const workspaces: WorkspaceCustomizationRow[] = groups.map(group => {
-		const folders = [group.canonicalPath, ...group.memberPaths.filter(m => m !== group.canonicalPath)];
+		const folders = groupFolders(group);
 		const customized = folders.some(hasInstructions);
 		if (!customized) { workspacesWithIssues++; }
 		return {
@@ -276,7 +276,7 @@ export async function buildCustomizationMatrix(
 			// The one type the CLI checks, from the same group-wide test as workspacesWithIssues, so
 			// the shared scorer never mistakes a customized repository for a missing one.
 			typeStatuses: { [CLI_INSTRUCTIONS_TYPE.id]: customized ? '✅' : '❌' },
-			...(group.memberPaths.length > 1 ? { memberPaths: group.memberPaths } : {}),
+			...(folders.length > 1 ? { memberPaths: folders } : {}),
 		};
 	});
 	const ungrouped = detectArtefactWorkspaceNames(groups).map(a => a.displayName);

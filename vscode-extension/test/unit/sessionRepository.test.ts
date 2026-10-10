@@ -9,6 +9,7 @@ import {
 	extractRepositoryFromSessionContent,
 	extractWorkspaceRepository,
 	referencesWithinWorkspace,
+	resolveRelativeReferences,
 	requestContentReferences,
 	toolArgumentPathReferences,
 } from '../../../src/sessionRepository';
@@ -118,6 +119,34 @@ test('extractWorkspaceRepository ignores a repository the session only reference
 		assert.equal(await extractWorkspaceRepository(refs, a.repo), 'https://github.com/acme/app.git');
 		assert.equal(await extractWorkspaceRepository([ref(b.file)], a.repo), undefined, 'only an outside reference: no remote');
 		assert.equal(await extractWorkspaceRepository([ref(b.file)]), 'https://github.com/acme/lib.git', 'no known workspace: every reference counts');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('resolveRelativeReferences resolves cwd-relative tool paths against the workspace (POSIX and Windows)', () => {
+	const fsPathOf = (r: ReturnType<typeof ref>) => r.reference.fsPath;
+	assert.deepEqual(resolveRelativeReferences([ref('src/a.ts'), ref('./b/../c.ts'), ref('/abs/d.ts')], '/home/u/app/').map(r => (r as ReturnType<typeof ref>).reference.fsPath),
+		['/home/u/app/src/a.ts', '/home/u/app/c.ts', '/abs/d.ts']);
+	assert.deepEqual(resolveRelativeReferences([ref('src\\a.ts'), ref('C:\\other\\x.ts')], 'C:\\code\\app').map(r => fsPathOf(r as ReturnType<typeof ref>)),
+		['C:\\code\\app\\src\\a.ts', 'C:\\other\\x.ts']);
+	// A relative path that climbs out of the workspace resolves outside it, so it is then filtered out.
+	const climbed = resolveRelativeReferences([ref('../lib/x.ts')], '/home/u/app');
+	assert.equal(fsPathOf(climbed[0] as ReturnType<typeof ref>), '/home/u/lib/x.ts');
+	assert.equal(referencesWithinWorkspace(climbed, '/home/u/app', 'linux').length, 0);
+});
+
+test('extractWorkspaceRepository finds the remote from relative tool paths when the workspace is a repo sub-folder', async () => {
+	const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'session-repo-')));
+	try {
+		const repo = path.join(root, 'widget');
+		const workspace = path.join(repo, 'packages', 'api'); // no .git of its own
+		fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+		fs.mkdirSync(path.join(workspace, 'src'), { recursive: true });
+		fs.writeFileSync(path.join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/acme/widget.git\n');
+		fs.writeFileSync(path.join(workspace, 'src', 'a.ts'), '');
+		const relative = toolArgumentPathReferences({ path: 'src/a.ts' });
+		assert.equal(await extractWorkspaceRepository(relative, workspace), 'https://github.com/acme/widget.git');
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
