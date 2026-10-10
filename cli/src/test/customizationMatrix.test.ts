@@ -65,7 +65,7 @@ for (const file of [
 // ── Workspace grouping (shared src/workspaceGrouping.ts) ─────────────────────
 
 import { groupWorkspaces } from '../../../src/workspaceGrouping';
-import { createNodeWorkspaceGroupingProbes } from '../../../src/workspaceGroupingProbes';
+import { prefetchWorkspaceGroupingProbes } from '../../../src/workspaceGroupingProbes';
 
 /** One VS Code-style session file per folder, so each folder counts one session. */
 function makeSessions(root: string, folders: string[]): string[] {
@@ -120,7 +120,8 @@ test('buildCustomizationMatrix: grouped totals match the shared grouping the ext
 		for (const dir of folders) { fs.mkdirSync(dir, { recursive: true }); }
 		const matrix = await buildCustomizationMatrix(makeSessions(root, folders));
 		// The extension feeds the same folder → count list through the same function.
-		const expected = groupWorkspaces(folders.map(p => ({ path: p, sessionCount: 1, interactionCount: 0 })), createNodeWorkspaceGroupingProbes());
+		const entries = folders.map(p => ({ path: p, sessionCount: 1, interactionCount: 0 }));
+		const expected = groupWorkspaces(entries, await prefetchWorkspaceGroupingProbes(entries));
 		assert.ok(matrix);
 		assert.equal(matrix.totalWorkspaces, expected.length);
 		assert.deepEqual(

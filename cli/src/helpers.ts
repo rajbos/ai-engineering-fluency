@@ -24,8 +24,8 @@ import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsag
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
-import { groupWorkspaces, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes } from '../../src/workspaceGrouping';
-import { createNodeWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
+import { groupWorkspaces, detectArtefactWorkspaceNames, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
+import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 
@@ -110,6 +110,18 @@ export async function discoverSessionFiles(): Promise<string[]> {
 const INSTRUCTION_PATHS = ['.github/copilot-instructions.md', 'AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md'];
 
 /** Workspace folder a session belongs to, or undefined when it cannot be resolved. */
+/**
+ * A session's workspace folder and git remote. The owning adapter's metadata comes first
+ * (Copilot CLI, OpenCode, Crush and the other adapter-backed editors record both); the
+ * format-specific fallbacks below cover Claude Code JSONL and VS Code chatSessions files.
+ */
+async function resolveSessionWorkspace(sessionFile: string, claudeBasePath: string): Promise<{ path: string; repository?: string } | undefined> {
+	const meta = await getSessionMeta(sessionFile);
+	if (meta?.workspacePath) { return { path: meta.workspacePath, repository: meta.repository }; }
+	const workspacePath = await resolveSessionWorkspacePath(sessionFile, claudeBasePath);
+	return workspacePath ? { path: workspacePath, repository: meta?.repository } : undefined;
+}
+
 async function resolveSessionWorkspacePath(sessionFile: string, claudeBasePath: string): Promise<string | undefined> {
 	// Claude Code session: ~/.claude/projects/<hash>/<uuid>.jsonl
 	if (sessionFile.startsWith(claudeBasePath + path.sep) || sessionFile.startsWith(claudeBasePath + '/')) {
@@ -152,23 +164,20 @@ async function resolveSessionWorkspacePath(sessionFile: string, claudeBasePath: 
  */
 export async function buildCustomizationMatrix(
 	sessionFiles: string[],
-	probes: WorkspaceGroupingProbes = createNodeWorkspaceGroupingProbes(),
+	probes?: WorkspaceGroupingProbes,
 ): Promise<WorkspaceCustomizationMatrix | undefined> {
-	const sessionCounts = new Map<string, number>();
 	const claudeBasePath = path.join(os.homedir(), '.claude', 'projects');
+	// One entry per session; the grouping sums sessions of the same folder.
+	const entries: WorkspaceUsageEntry[] = [];
 	for (const sessionFile of sessionFiles) {
-		const workspacePath = await resolveSessionWorkspacePath(sessionFile, claudeBasePath);
-		if (!workspacePath) { continue; }
+		const workspace = await resolveSessionWorkspace(sessionFile, claudeBasePath);
+		if (!workspace) { continue; }
 		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
-		const norm = path.normalize(workspacePath);
-		sessionCounts.set(norm, (sessionCounts.get(norm) ?? 0) + 1);
+		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: 0, repository: workspace.repository });
 	}
-	if (sessionCounts.size === 0) { return undefined; }
+	if (entries.length === 0) { return undefined; }
 
-	const groups = groupWorkspaces(
-		[...sessionCounts].map(([p, sessionCount]) => ({ path: p, sessionCount, interactionCount: 0 })),
-		probes,
-	);
+	const groups = groupWorkspaces(entries, probes ?? await prefetchWorkspaceGroupingProbes(entries));
 	const hasInstructions = (wsPath: string): boolean => withErrorRecoverySync(
 		// Same case-insensitive resolution as the shared customization scanner, so the CLI
 		// accepts every spelling the extension does (including on case-sensitive filesystems).

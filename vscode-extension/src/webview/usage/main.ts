@@ -38,6 +38,8 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, compute
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { statusBadgeHtml, type CustomizationTypeStatus } from './statusBadge';
+import { buildCustomizationSectionHtml, wireCustomizationMatrixSection } from './customizationMatrixSection';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
 import { formatToolEditors, sanitizeToolCallsByEditor } from './toolEditors';
 import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
@@ -281,24 +283,6 @@ interface CustomizationFileEntry {
 	category?: 'copilot' | 'non-copilot';
 }
 
-type CustomizationTypeStatus = '✅' | '⚠️' | '❌';
-
-/**
- * Returns a modern styled HTML badge for a status value, replacing plain emoji icons.
- * Pass/fresh → green ✓, warning/stale → amber !, fail/missing → red ✕
- */
-function statusBadgeHtml(status: CustomizationTypeStatus | string, label?: string): string {
-	const titleAttr = label ? ` title="${escapeHtml(label)}"` : '';
-	const base = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-weight:700;flex-shrink:0;';
-	if (status === '✅') {
-		return `<span style="${base}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present and fresh')}">✓</span>`;
-	} else if (status === '⚠️') {
-		return `<span style="${base}background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present but stale')}">!</span>`;
-	} else {
-		return `<span style="${base}background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Missing')}">✕</span>`;
-	}
-}
-
 interface WorkspaceCustomizationRow {
 	workspacePath: string;
 	workspaceName: string;
@@ -314,24 +298,6 @@ interface WorkspaceCustomizationMatrix {
 	totalWorkspaces: number;
 	workspacesWithIssues: number;
 	ungroupedWorkspaceNames?: string[];
-}
-
-/** Expandable list of the folders (worktrees, clones) grouped into one workspace row. */
-function renderMergedWorkspaceMembers(memberPaths: string[] | undefined): string {
-	if (!memberPaths || memberPaths.length < 2) { return ''; }
-	const items = memberPaths.map(p => `<li>${escapeHtml(p)}</li>`).join('');
-	return `
-		<details class="workspace-group-members" style="font-family: sans-serif; font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
-			<summary title="${escapeHtml(memberPaths.join('\n'))}" style="cursor: pointer;">${escapeHtml(localizeFormat('customizationMatrix.mergedFolders', memberPaths.length))}</summary>
-			<ul style="margin: 4px 0 0 16px; padding: 0; font-family: 'Courier New', monospace;">${items}</ul>
-		</details>`;
-}
-
-/** Summary note for workspace names that still look like worktree / clone artefacts after grouping. */
-function renderUngroupedWorkspaceNote(names: string[] | undefined): string {
-	if (!names || names.length === 0) { return ''; }
-	const examples = names.slice(0, 3).join(', ');
-	return `<span class="ungrouped-workspace-note" style="display:inline-flex;align-items:center;gap:4px;" title="${escapeHtml(names.join('\n'))}">${statusBadgeHtml('⚠️')} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedNames', names.length, examples))}</span>`;
 }
 
 interface MissedPotentialWorkspace {
@@ -763,7 +729,7 @@ function showLoadError(message: string): void {
 	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
 	const icon = document.createElement('div');
 	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
-	setHtml(icon, statusBadgeHtml('❌', 'Error'));
+	setHtml(icon, statusBadgeHtml('❌', localize('usage.customization.status.error')));
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
@@ -3090,88 +3056,6 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): boolean {
 		${renderAgentSessionsContent(data)}
 	`);
 	return true;
-}
-
-function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
-	if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
-		return `
-			<div class="section" id="section-customization-files">
-				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
-				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
-				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
-			</div>`;
-	}
-	const workspaceRows = matrix.workspaces.map(ws => {
-		const statuses = ws.typeStatuses ?? {};
-		const hasNoCustomization = Object.values(statuses).every(s => s === '❌');
-		const typeCells = (matrix.customizationTypes ?? []).map(type => {
-			const status = statuses[type.id] || '❓';
-			const statusLabel =
-				status === '✅' ? 'Present and fresh'
-				: status === '⚠️' ? 'Present but stale'
-				: status === '❌' ? 'Missing'
-				: 'Status unknown';
-			return `
-				<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
-					${statusBadgeHtml(status, statusLabel)}
-				</td>`;
-		}).join('');
-		return `
-			<tr>
-				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', localize('customizationMatrix.noCustomizationFiles'))}</span>` : ''}${renderMergedWorkspaceMembers(ws.memberPaths)}
-				</td>
-				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
-					${ws.sessionCount}
-				</td>
-				${typeCells}
-			</tr>`;
-	}).join('');
-	return `
-		<div id="section-customization-files" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-				🛠️ Copilot Customization Files
-			</div>
-			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-				Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
-				${matrix.workspacesWithIssues > 0
-					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
-				${renderUngroupedWorkspaceNote(matrix.ungroupedWorkspaceNames)}
-			</div>
-			<div class="customization-matrix-container">
-				<table class="customization-matrix">
-					<thead>
-						<tr>
-							<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
-							<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
-							${(matrix.customizationTypes ?? []).map(type => `
-								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
-									${escapeHtml(type.icon)}
-								</th>
-							`).join('')}
-						</tr>
-					</thead>
-					<tbody>
-						${workspaceRows}
-					</tbody>
-				</table>
-			</div>
-			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-					${(matrix.customizationTypes ?? []).map(type => `
-						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-					`).join('')}
-				</div>
-				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
-					<span style="color: var(--text-muted);">•</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
-					<span style="color: var(--text-muted);">•</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
-				</div>
-			</div>
-		</div>`;
 }
 
 /** Renders a compact three-period model cost breakdown for the Activity tab. */
@@ -5887,6 +5771,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	wireAboutInfoToggle();
 	wireRepositoryButtons();
 	wireCurationButtons();
+	wireCustomizationMatrixSection();
 	renderRepositoryHygienePanels();
 	// Before setupTabs(): its first-visit replay marks new insights as seen when the render opens
 	// on the Insights tab (a deep link can), and that reads currentInsights. Assigned after, the

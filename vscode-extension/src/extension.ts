@@ -356,7 +356,7 @@ import {
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
 import { groupWorkspaces as _groupWorkspaces, detectArtefactWorkspaceNames as _detectArtefactWorkspaceNames, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, type WorkspaceGroup } from '../../src/workspaceGrouping';
-import { createNodeWorkspaceGroupingProbes as _createNodeWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
+import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
 // --- Chart building ---
@@ -8297,7 +8297,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async deduplicateWorkspacePathsWithScans(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): Promise<void> {
 		await this.resolvePendingCustomizationScans();
-		this.deduplicateWorkspacePaths(sessionCounts, interactionCounts);
+		await this.deduplicateWorkspacePaths(sessionCounts, interactionCounts);
 		await this.resolvePendingCustomizationScans();
 		this.mergeGroupCustomizationScans();
 	}
@@ -8308,7 +8308,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * to be keyed by each group's canonical path, and a canonical path nobody has scanned yet (a
 	 * main checkout reached through a worktree) is queued for its own customization scan.
 	 */
-	private deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+	private async deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): Promise<void> {
 		const paths = new Set([...sessionCounts.keys(), ...interactionCounts.keys()]);
 		const entries = [...paths].map(p => ({
 			path: p,
@@ -8316,7 +8316,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			interactionCount: interactionCounts.get(p) || 0,
 			repository: this._workspaceRepositoryAccum.get(p),
 		}));
-		const groups = _groupWorkspaces(entries, _createNodeWorkspaceGroupingProbes());
+		// Disk checks run asynchronously before the (pure, synchronous) grouping, so a slow or
+		// network-mounted workspace cannot block the extension host.
+		const groups = _groupWorkspaces(entries, await _prefetchWorkspaceGroupingProbes(entries));
 		sessionCounts.clear();
 		interactionCounts.clear();
 		this._workspaceGroups = new Map();

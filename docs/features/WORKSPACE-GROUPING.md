@@ -8,10 +8,13 @@ the CLI's Customization evidence counts repositories, not folders.
 
 - Code: [`src/workspaceGrouping.ts`](../../src/workspaceGrouping.ts) (pure rules) and
   [`src/workspaceGroupingProbes.ts`](../../src/workspaceGroupingProbes.ts) (the Node
-  filesystem probes it is given).
+  filesystem probes it is given: `prefetchWorkspaceGroupingProbes()` checks every path the
+  grouping can ask about asynchronously up front, so the extension host never blocks on disk).
 - Used by: the VS Code extension's customization matrix
   (`deduplicateWorkspacePaths()` in `vscode-extension/src/extension.ts`, which only applies
-  the result) and the CLI's `buildCustomizationMatrix()` in `cli/src/helpers.ts`.
+  the result) and the CLI's `buildCustomizationMatrix()` in `cli/src/helpers.ts`, which takes
+  each session's folder and remote from the owning adapter's metadata first (Copilot CLI,
+  OpenCode, Crush, …) and falls back to Claude Code JSONL and VS Code `chatSessions` paths.
 - Tests: [`vscode-extension/test/unit/workspaceGrouping.test.ts`](../../vscode-extension/test/unit/workspaceGrouping.test.ts)
   and the parity tests in `cli/src/test/customizationMatrix.test.ts`.
 
@@ -19,7 +22,8 @@ the CLI's Customization evidence counts repositories, not folders.
 
 1. **Same git remote** — folders whose sessions recorded the same `repository` remote, or whose
    `.git/config` (read while the folder still exists) names the same `origin`, are one
-   repository. The remote is normalised to `owner/name` (https, ssh, `ssh://` and Azure DevOps
+   repository. A folder seen with two different remotes (reused for another repository) has no
+   identity rather than either one. The remote is normalised to `owner/name` (https, ssh, `ssh://` and Azure DevOps
    `_git` forms). The group is displayed as the repository name.
 2. **Worktree pointer** — an existing linked worktree's `.git` file
    (`gitdir: <main>/.git/worktrees/<name>`) leads to its main checkout, which becomes the group's
@@ -42,9 +46,10 @@ the CLI's Customization evidence counts repositories, not folders.
 
 No rule merges two groups whose remotes say they are different repositories. A name pattern on
 its own never invents a group: `groups-dashboard-layout-85ed99` with nothing named
-`groups-dashboard-layout` and no remote stays its own row. When a name-based rule (3–5) finds
-candidates belonging to two different repositories, a folder without a remote is ambiguous and
-joins neither (several such same-named folders still fold together). The result depends only on
+`groups-dashboard-layout` and no remote stays its own row. Name-based rules (3–5) decide per name
+component, before merging anything: when the folders sharing a name belong to two different
+repositories, the component is ambiguous and a folder without a remote joins neither (several
+such same-named folders still fold together). The result depends only on
 the set of folders, never on their order.
 
 The canonical folder of a group (the row's path) is, in order: an existing main checkout found by
@@ -64,8 +69,9 @@ the folders (they are also in the tooltip). A wrong merge is therefore visible, 
 
 `detectArtefactWorkspaceNames()` flags display names that still look like worktree or clone
 artefacts after grouping: a 6+ character hex suffix containing a digit (`-85ed99`, but not
-`-facade`), generated `adjective-name-<hex>` names, a `-wt` suffix, or a name that is a folder
-directly under `worktrees` / `copilot-worktrees`.
+`-facade`), generated `adjective-name-<hex>` names, a `-wt` suffix, or a name that is still its own
+folder name although that folder sits anywhere below a `worktrees` / `copilot-worktrees` folder
+(an unknown layout such as `/tmp/worktrees/repo/feature`).
 
 - **At runtime** the Workspace Health summary line says how many workspace names look like
   ungrouped worktrees or clones, with a few examples, and the extension log lists them with the

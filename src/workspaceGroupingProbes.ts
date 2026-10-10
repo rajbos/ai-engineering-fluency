@@ -1,14 +1,37 @@
 /**
  * Node filesystem implementation of the probes `groupWorkspaces()` takes.
  * Kept apart from `workspaceGrouping.ts` so the grouping rules stay pure and testable offline.
+ *
+ * All disk access is asynchronous and happens up front (prefetchWorkspaceGroupingProbes): the
+ * grouping then reads the answers synchronously, so the extension host's event loop is never
+ * blocked by `existsSync` / `readFileSync` on slow or network-mounted workspaces
+ * (docs/adr/ANALYSIS-WORKER.md).
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { parseGitRemoteUrl } from './workspaceHelpers';
-import type { WorkspaceGitInfo, WorkspaceGroupingProbes } from './workspaceGrouping';
+import {
+	workspaceProbePaths,
+	type WorkspaceGitInfo,
+	type WorkspaceGroupingProbes,
+	type WorkspaceUsageEntry,
+} from './workspaceGrouping';
 
-function readFileOrUndefined(filePath: string): string | undefined {
-	try { return fs.readFileSync(filePath, 'utf8'); } catch { return undefined; }
+/** How many filesystem checks run at once. */
+const PROBE_CONCURRENCY = 16;
+
+async function readFileOrUndefined(filePath: string): Promise<string | undefined> {
+	try { return await fs.promises.readFile(filePath, 'utf8'); } catch { return undefined; }
+}
+
+async function pathExistsAsync(filePath: string): Promise<boolean> {
+	try { await fs.promises.access(filePath); return true; } catch { return false; }
+}
+
+async function forEachLimited<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
+	for (let i = 0; i < items.length; i += PROBE_CONCURRENCY) {
+		await Promise.all(items.slice(i, i + PROBE_CONCURRENCY).map(fn));
+	}
 }
 
 /**
@@ -18,21 +41,21 @@ function readFileOrUndefined(filePath: string): string | undefined {
  *    and the remote from `<main>/.git/config`.
  * Only the folder itself is inspected (no walking up), so a sub-folder of a repo reports nothing.
  */
-export function readWorkspaceGitInfo(folderPath: string): WorkspaceGitInfo | undefined {
+export async function readWorkspaceGitInfo(folderPath: string): Promise<WorkspaceGitInfo | undefined> {
 	const dotGit = path.join(folderPath, '.git');
 	let stat: fs.Stats;
-	try { stat = fs.statSync(dotGit); } catch { return undefined; }
+	try { stat = await fs.promises.stat(dotGit); } catch { return undefined; }
 	if (stat.isDirectory()) {
-		const config = readFileOrUndefined(path.join(dotGit, 'config'));
+		const config = await readFileOrUndefined(path.join(dotGit, 'config'));
 		return config ? { remote: parseGitRemoteUrl(config) } : undefined;
 	}
-	const pointer = readFileOrUndefined(dotGit)?.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+	const pointer = (await readFileOrUndefined(dotGit))?.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
 	if (!pointer) { return undefined; }
 	const gitdir = path.resolve(folderPath, pointer);
 	const worktreesDir = path.dirname(gitdir);
 	if (path.basename(worktreesDir).toLowerCase() !== 'worktrees') { return undefined; }
 	const mainGitDir = path.dirname(worktreesDir);
-	const config = readFileOrUndefined(path.join(mainGitDir, 'config'));
+	const config = await readFileOrUndefined(path.join(mainGitDir, 'config'));
 	return {
 		remote: config ? parseGitRemoteUrl(config) : undefined,
 		// `<main>/.git` → `<main>`; a bare repo's git dir has no checkout to point at.
@@ -40,11 +63,32 @@ export function readWorkspaceGitInfo(folderPath: string): WorkspaceGitInfo | und
 	};
 }
 
-/** Probes backed by the local filesystem, for the extension and the CLI. */
-export function createNodeWorkspaceGroupingProbes(platform: string = process.platform): WorkspaceGroupingProbes {
+/**
+ * Check, asynchronously, everything `groupWorkspaces()` can ask about these entries, and
+ * return probes that answer from those results. A path that was not prefetched reads as
+ * "does not exist", which the grouping already treats as the safe default.
+ */
+export async function prefetchWorkspaceGroupingProbes(
+	entries: WorkspaceUsageEntry[],
+	platform: string = process.platform,
+): Promise<WorkspaceGroupingProbes> {
+	const exists = new Map<string, boolean>();
+	const gitInfo = new Map<string, WorkspaceGitInfo>();
+	const check = async (p: string): Promise<void> => {
+		if (!exists.has(p)) { exists.set(p, await pathExistsAsync(p)); }
+	};
+	const paths = workspaceProbePaths(entries, platform);
+	await forEachLimited(paths, check);
+	const inputs = new Set(entries.map(e => e.path));
+	await forEachLimited(paths.filter(p => inputs.has(p) && exists.get(p)), async p => {
+		const info = await readWorkspaceGitInfo(p);
+		if (!info) { return; }
+		gitInfo.set(p, info);
+		if (info.mainWorktreePath) { await check(info.mainWorktreePath); }
+	});
 	return {
 		platform,
-		pathExists: p => { try { return fs.existsSync(p); } catch { return false; } },
-		readGitInfo: readWorkspaceGitInfo,
+		pathExists: p => exists.get(p) ?? false,
+		readGitInfo: p => gitInfo.get(p),
 	};
 }

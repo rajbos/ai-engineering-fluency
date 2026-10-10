@@ -12,12 +12,13 @@ import {
 	repositoryIdentity,
 	workspaceBasename,
 	mergeGroupCustomizationFiles,
+	workspaceProbePaths,
 	type WorkspaceUsageEntry,
 	type WorkspaceGroupingProbes,
 	type WorkspaceGitInfo,
 	type WorkspaceGroup,
 } from '../../../src/workspaceGrouping';
-import { readWorkspaceGitInfo, createNodeWorkspaceGroupingProbes } from '../../../src/workspaceGroupingProbes';
+import { readWorkspaceGitInfo, prefetchWorkspaceGroupingProbes } from '../../../src/workspaceGroupingProbes';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -204,8 +205,12 @@ test('corpus invariant: after grouping no display name looks like a worktree or 
 	}
 });
 
+/** Rows are permuted exhaustively, which is factorial: keep each row small (6 entries = 720 orders). */
+const MAX_PERMUTED_ENTRIES = 6;
+
 test('corpus invariant: every row gives the same groups in every input order', () => {
 	for (const row of CORPUS) {
+		assert.ok(row.entries.length <= MAX_PERMUTED_ENTRIES, `${row.name}: split rows above ${MAX_PERMUTED_ENTRIES} entries, every order is checked`);
 		const p = probes(row.platform, row.existing, row.git);
 		const expected = summarize(groupWorkspaces(row.entries, p));
 		for (const order of permutations(row.entries)) {
@@ -287,6 +292,37 @@ test('ambiguous remote path: a WSL folder named like two different local reposit
 		assert.ok(groups.some(g => g.memberPaths.length === 1 && g.memberPaths[0] === '/home/dev/tools'));
 		assert.equal(groups.length, 3);
 	}
+});
+
+test('ambiguous component: a remote-less local folder between two remote paths of different repositories joins neither, in every order', () => {
+	const entries = [
+		entry('C:\\work\\tools', 1, 1),
+		entry('/home/a/tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('/home/b/tools', 1, 1, 'https://github.com/other/tools'),
+	];
+	for (const order of permutations(entries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		assert.deepEqual(groups.map(g => g.memberPaths).sort(), [['/home/a/tools'], ['/home/b/tools'], ['C:\\work\\tools']]);
+	}
+});
+
+test('a path seen with two different remotes has no identity, so neither remote claims it', () => {
+	const entries = [
+		entry('C:\\reused\\tools', 1, 1, 'https://github.com/acme/tools'),
+		entry('C:\\reused\\tools', 1, 1, 'https://github.com/other/tools'),
+		entry('D:\\acme\\checkout', 1, 1, 'https://github.com/acme/tools'),
+		entry('D:\\other\\checkout', 1, 1, 'https://github.com/other/tools'),
+	];
+	for (const order of permutations(entries)) {
+		const groups = groupWorkspaces(order, probes('win32'));
+		const reused = groups.find(g => g.memberPaths.includes('C:\\reused\\tools'))!;
+		assert.deepEqual(reused.memberPaths, ['C:\\reused\\tools']);
+		assert.equal(reused.repositoryId, undefined);
+		assert.equal(reused.sessionCount, 2);
+	}
+	// The same remote twice is not a conflict.
+	const [same] = groupWorkspaces([entry('C:\\r', 1, 1, 'acme/r'), entry('C:\\r', 1, 1, 'https://github.com/acme/r.git')], probes('win32'));
+	assert.equal(same.repositoryId, 'acme/r');
 });
 
 test('a remote path joins the single local repository it names even when that repository has a remote', () => {
@@ -455,6 +491,40 @@ test('detectArtefactWorkspaceNames flags a group still named after a worktree fo
 	assert.deepEqual(flagged.map(f => [f.displayName, f.reason]), [['feature', 'worktree-folder'], ['fix', 'worktree-folder'], ['repo-wt', 'worktree-suffix']]);
 });
 
+test('detectArtefactWorkspaceNames flags an unknown layout with worktrees anywhere above the folder', () => {
+	const groups = groupWorkspaces([entry('/tmp/worktrees/repo/feature')], probes('linux'));
+	assert.deepEqual(detectArtefactWorkspaceNames(groups).map(f => [f.displayName, f.reason]), [['feature', 'worktree-folder']]);
+	// …but not a folder that was renamed to its repository, nor the worktrees folder itself.
+	assert.deepEqual(detectArtefactWorkspaceNames([
+		{ canonicalPath: '/tmp/worktrees/repo/feature', displayName: 'repo', memberPaths: [], sessionCount: 1, interactionCount: 1 },
+		{ canonicalPath: '/tmp/worktrees', displayName: 'worktrees', memberPaths: [], sessionCount: 1, interactionCount: 1 },
+	]), []);
+});
+
+test('workspaceProbePaths lists every path the grouping can ask about, and nothing remote', () => {
+	const paths = workspaceProbePaths([
+		entry('C:\\u\\.copilot\\copilot-worktrees\\api\\fix'),
+		entry('/src/widget/.claude/worktrees/agent/server'),
+		entry('/home/dev/wsl-only'),
+		entry('<unresolved:abc>'),
+	], 'win32');
+	assert.deepEqual(paths.sort(), [
+		'C:\\u\\.copilot\\copilot-worktrees\\api',
+		'C:\\u\\.copilot\\copilot-worktrees\\api\\fix',
+		'C:\\u\\.copilot\\repos\\api',
+	]);
+	const linux = workspaceProbePaths([entry('/src/widget/.claude/worktrees/agent/server')], 'linux');
+	assert.deepEqual(linux.sort(), ['/src/widget', '/src/widget/.claude/worktrees/agent/server', '/src/widget/.git']);
+});
+
+test('grouping with prefetched probes asks nothing outside the prefetched set', () => {
+	const entries = [entry('/src/widget/.claude/worktrees/agent/server'), entry('/home/u/.copilot/copilot-worktrees/api/fix'), entry('/code/repo-wt')];
+	const known = new Set(workspaceProbePaths(entries, 'linux'));
+	const asked: string[] = [];
+	groupWorkspaces(entries, { platform: 'linux', pathExists: p => { asked.push(p); return false; } });
+	assert.deepEqual(asked.filter(p => !known.has(p)), []);
+});
+
 test('matchWorktreeConvention reads the three layouts', () => {
 	assert.deepEqual(matchWorktreeConvention('/home/u/.claude/worktrees/repo/name'), { repoName: 'repo', anchorPath: '/home/u/.claude/worktrees/repo', anchorIsCheckout: false });
 	assert.deepEqual(matchWorktreeConvention('/src/repo/.claude/worktrees/name'), { repoName: 'repo', anchorPath: '/src/repo', anchorIsCheckout: true });
@@ -561,7 +631,7 @@ test('mergeGroupCustomizationFiles: same path under two types is two entries; no
 
 // ── Node probes (real temp folders, never user data) ──────────────────────────
 
-test('readWorkspaceGitInfo reads a checkout remote and a worktree pointer', () => {
+test('readWorkspaceGitInfo reads a checkout remote and a worktree pointer', async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-grouping-'));
 	try {
 		const main = path.join(root, 'main-repo');
@@ -573,12 +643,13 @@ test('readWorkspaceGitInfo reads a checkout remote and a worktree pointer', () =
 		const plain = path.join(root, 'plain');
 		fs.mkdirSync(plain);
 
-		assert.deepEqual(readWorkspaceGitInfo(main), { remote: 'https://github.com/acme/widget.git' });
-		assert.deepEqual(readWorkspaceGitInfo(wt), { remote: 'https://github.com/acme/widget.git', mainWorktreePath: main });
-		assert.equal(readWorkspaceGitInfo(plain), undefined);
-		assert.equal(readWorkspaceGitInfo(path.join(root, 'missing')), undefined);
+		assert.deepEqual(await readWorkspaceGitInfo(main), { remote: 'https://github.com/acme/widget.git' });
+		assert.deepEqual(await readWorkspaceGitInfo(wt), { remote: 'https://github.com/acme/widget.git', mainWorktreePath: main });
+		assert.equal(await readWorkspaceGitInfo(plain), undefined);
+		assert.equal(await readWorkspaceGitInfo(path.join(root, 'missing')), undefined);
 
-		const groups = groupWorkspaces([entry(wt, 2, 2), entry(plain)], createNodeWorkspaceGroupingProbes());
+		const entries = [entry(wt, 2, 2), entry(plain)];
+		const groups = groupWorkspaces(entries, await prefetchWorkspaceGroupingProbes(entries));
 		const widget = groups.find(g => g.displayName === 'widget')!;
 		assert.equal(widget.canonicalPath, main);
 		assert.deepEqual(widget.memberPaths, [wt]);
@@ -587,13 +658,37 @@ test('readWorkspaceGitInfo reads a checkout remote and a worktree pointer', () =
 	}
 });
 
-test('readWorkspaceGitInfo ignores a .git file that does not point into a worktrees folder', () => {
+test('prefetchWorkspaceGroupingProbes answers from async checks, including a main checkout found through a pointer', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-grouping-'));
+	try {
+		const main = path.join(root, 'gadget');
+		fs.mkdirSync(path.join(main, '.git', 'worktrees', 'x'), { recursive: true });
+		fs.writeFileSync(path.join(main, '.git', 'config'), '[remote "origin"]\n\turl = git@github.com:acme/gadget.git\n');
+		const wt = path.join(root, 'feature-x');
+		fs.mkdirSync(wt);
+		fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(main, '.git', 'worktrees', 'x')}\n`);
+		const gone = path.join(root, 'deleted');
+
+		const entries = [entry(wt), entry(gone)];
+		const p = await prefetchWorkspaceGroupingProbes(entries);
+		assert.equal(p.pathExists!(wt), true);
+		assert.equal(p.pathExists!(main), true, 'the main checkout behind the pointer is prefetched');
+		assert.equal(p.pathExists!(gone), false);
+		assert.equal(p.pathExists!(path.join(root, 'never-asked')), false, 'unknown paths read as missing');
+		assert.deepEqual(p.readGitInfo!(wt), { remote: 'git@github.com:acme/gadget.git', mainWorktreePath: main });
+		assert.equal(p.readGitInfo!(gone), undefined);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('readWorkspaceGitInfo ignores a .git file that does not point into a worktrees folder', async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-grouping-'));
 	try {
 		fs.writeFileSync(path.join(root, '.git'), 'gitdir: ../somewhere/modules/sub\n');
-		assert.equal(readWorkspaceGitInfo(root), undefined);
+		assert.equal(await readWorkspaceGitInfo(root), undefined);
 		fs.writeFileSync(path.join(root, '.git'), 'not a pointer');
-		assert.equal(readWorkspaceGitInfo(root), undefined);
+		assert.equal(await readWorkspaceGitInfo(root), undefined);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

@@ -10,7 +10,7 @@
  * folder's git remote) comes in through {@link WorkspaceGroupingProbes}, so every rule is
  * unit-testable offline. `workspaceGroupingProbes.ts` holds the real Node implementation.
  *
- * Grouping rules, strongest evidence first (see docs/features/workspace-grouping.md):
+ * Grouping rules, strongest evidence first (see docs/features/WORKSPACE-GROUPING.md):
  *   1. same git remote identity (`owner/name`) → one group, displayed as the repository name;
  *   2. a worktree whose `.git` pointer resolves to a main checkout → grouped with that checkout;
  *   3. known worktree path conventions (`.claude/worktrees/<repo>/<name>`,
@@ -263,6 +263,23 @@ function matchClaudeWorktree(
 	return { repoName: workspaceBasename(repoRoot), anchorPath: repoRoot, anchorIsCheckout: true };
 }
 
+/**
+ * Every path `groupWorkspaces()` can ask `pathExists` about for these entries: the local
+ * folders themselves and the checkouts and `.git` folders their worktree layouts point at.
+ * Main checkouts reported by `readGitInfo` come on top. Lets a host check them all
+ * asynchronously up front (prefetchWorkspaceGroupingProbes) instead of blocking on sync I/O.
+ */
+export function workspaceProbePaths(entries: WorkspaceUsageEntry[], platform: string): string[] {
+	const paths = new Set<string>();
+	for (const entry of entries) {
+		if (isUnresolved(entry.path) || isRemotePath(entry.path, platform)) { continue; }
+		paths.add(entry.path);
+		const match = matchWorktreeConvention(entry.path, p => { paths.add(p); return false; });
+		if (match) { paths.add(match.anchorPath); }
+	}
+	return [...paths];
+}
+
 // ── Union-find with a "different repositories" veto ───────────────────────────
 
 class Groups {
@@ -338,6 +355,8 @@ class NodeList {
 	readonly nodes: Node[] = [];
 	readonly repoIds: Array<string | undefined> = [];
 	private readonly indexByPath = new Map<string, number>();
+	/** Paths seen with two different remotes; their identity is unknown from then on. */
+	private readonly conflictingIds = new Set<number>();
 
 	add(node: Node, repoId: string | undefined): number {
 		const existing = this.indexByPath.get(node.path);
@@ -352,8 +371,23 @@ class NodeList {
 		n.interactionCount += node.interactionCount;
 		n.isInput = n.isInput || node.isInput;
 		n.isCheckoutAnchor = n.isCheckoutAnchor || node.isCheckoutAnchor;
-		this.repoIds[existing] = this.repoIds[existing] ?? repoId;
+		this.mergeRepoId(existing, repoId);
 		return existing;
+	}
+
+	/**
+	 * A folder reused for another repository, or sessions disagreeing about its remote, makes
+	 * its identity unknown rather than whichever remote happened to come first: keeping one
+	 * would hide the conflict from the veto and allow a wrong merge.
+	 */
+	private mergeRepoId(idx: number, repoId: string | undefined): void {
+		if (!repoId || this.conflictingIds.has(idx)) { return; }
+		const current = this.repoIds[idx];
+		if (current === undefined) { this.repoIds[idx] = repoId; return; }
+		if (current !== repoId) {
+			this.repoIds[idx] = undefined;
+			this.conflictingIds.add(idx);
+		}
 	}
 }
 
@@ -404,45 +438,37 @@ function nodeName(n: Node): string {
 }
 
 /**
- * Join `i` to every candidate's group, unless that would put two different repositories in
- * play: then a folder without a remote cannot be attributed to either, and stays apart.
- * Returns whether `i` joined.
+ * Rules 3 (remote paths), 4 (sibling artefact folders) and 5 (same basename).
+ *
+ * Ambiguity is decided per name component, from the repository identities the strong rules
+ * (1–3) established, before any name-based union happens: a component naming two different
+ * repositories is ambiguous as a whole, so no folder in it is attributed to one of them by
+ * whichever union ran first. Its remote-less local folders still fold together.
  */
-function joinUnlessAmbiguous(groups: Groups, i: number, candidates: number[]): boolean {
-	const others = candidates.filter(c => groups.find(c) !== groups.find(i));
-	if (others.length === 0) { return false; }
-	const ids = new Set<string>();
-	for (const idx of [i, ...others]) { for (const id of groups.repositoryIds(idx)) { ids.add(id); } }
-	if (ids.size > 1) { return false; }
-	for (const c of others) { groups.union(c, i); }
-	return true;
-}
-
-/** Rules 3 (remote paths), 4 (sibling artefact folders) and 5 (same basename), in that order. */
 function unionByName(nodes: Node[], groups: Groups): void {
-	const localByName = new Map<string, number[]>();
-	nodes.forEach((n, i) => {
-		if (n.remote) { return; }
-		const name = nodeName(n);
-		localByName.set(name, [...(localByName.get(name) ?? []), i]);
-	});
+	const idsBefore = nodes.map((_n, i) => [...groups.repositoryIds(i)]);
+	const componentIds = (indexes: number[]): Set<string> => new Set(indexes.flatMap(i => idsBefore[i]));
+	const byName = new Map<string, number[]>();
+	nodes.forEach((n, i) => { byName.set(nodeName(n), [...(byName.get(nodeName(n)) ?? []), i]); });
 
-	nodes.forEach((n, i) => {
-		if (n.remote) { joinUnlessAmbiguous(groups, i, localByName.get(nodeName(n)) ?? []); }
-	});
+	// 4. Sibling artefact folders: the most specific stem that names local workspaces decides.
 	nodes.forEach((n, i) => {
 		if (n.remote || n.convention) { return; }
-		// The most specific stem that names another workspace decides; an ambiguous one is not retried with a shorter stem.
-		const candidates = artefactStems(workspaceBasename(n.path))
-			.map(stem => (localByName.get(stem.toLowerCase()) ?? []).filter(c => c !== i))
+		const target = artefactStems(workspaceBasename(n.path))
+			.map(stem => (byName.get(stem.toLowerCase()) ?? []).filter(c => c !== i && !nodes[c].remote))
 			.find(list => list.length > 0);
-		if (candidates) { joinUnlessAmbiguous(groups, i, candidates); }
+		if (target && componentIds([i, ...target]).size <= 1) { target.forEach(c => groups.union(c, i)); }
 	});
-	for (const same of localByName.values()) {
-		if (joinUnlessAmbiguous(groups, same[0], same.slice(1))) { continue; }
-		// Different repositories share this name: still fold the folders that have no remote together.
-		const unidentified = same.filter(idx => groups.repositoryIds(idx).size === 0);
-		unidentified.slice(1).forEach(idx => groups.union(unidentified[0], idx));
+	// 3 + 5. Remote paths and same-named local folders, one name component at a time.
+	for (const component of byName.values()) {
+		const locals = component.filter(i => !nodes[i].remote);
+		if (locals.length === 0) { continue; } // remote paths alone never merge by name
+		if (componentIds(component).size <= 1) {
+			component.forEach(i => groups.union(locals[0], i));
+			continue;
+		}
+		const unidentified = locals.filter(i => idsBefore[i].length === 0);
+		unidentified.forEach(i => groups.union(unidentified[0], i));
 	}
 }
 
@@ -598,9 +624,11 @@ export function detectArtefactWorkspaceNames(groups: WorkspaceGroup[]): Artefact
 		if (isUnresolved(g.canonicalPath)) { continue; }
 		let reason = classifyArtefactName(g.displayName);
 		if (!reason) {
+			// Still named after its own folder although that folder sits anywhere below a
+			// `worktrees` folder: a layout the conventions do not know yet (e.g. /tmp/worktrees/repo/feature).
 			const segments = splitSegments(g.canonicalPath).filter(Boolean).map(s => s.toLowerCase());
-			const parent = segments[segments.length - 2];
-			if (parent && WORKTREE_PARENTS.has(parent) && g.displayName.toLowerCase() === segments[segments.length - 1]) {
+			const insideWorktrees = segments.slice(0, -1).some(s => WORKTREE_PARENTS.has(s));
+			if (insideWorktrees && g.displayName.toLowerCase() === segments[segments.length - 1]) {
 				reason = 'worktree-folder';
 			}
 		}
