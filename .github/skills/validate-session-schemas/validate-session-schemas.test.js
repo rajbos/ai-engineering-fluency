@@ -27,6 +27,7 @@ const {
   walkValue,
   newDiscoveryContext,
   removeTempDirs,
+  cleanupTempDirsOrWarn,
   exportOpenCodeDbSessions,
   DICT_KEY,
 } = require('./validate-session-schemas.js');
@@ -283,4 +284,43 @@ test('recent sessions with only unsafe ids are INCONCLUSIVE, not NO_RECENT_FILES
   assert.equal(oc.filesAnalyzed, 0);
   assert.ok(oc.notes.some((n) => /failed validation/.test(n)), oc.notes.join('; '));
   assert.deepEqual(fs.readdirSync(tmp), []);
+});
+
+test('removeTempDirs keeps and reports a directory whose delete fails, retries later', () => {
+  const ctx = newDiscoveryContext(0, 5);
+  ctx.tempDirs.push('/tmp/oc-dbses-ok', '/tmp/oc-dbses-locked');
+  const calls = [];
+  const failing = (dir, opts) => {
+    calls.push({ dir, opts });
+    if (dir.endsWith('locked')) { throw new Error('EBUSY: resource busy or locked'); }
+  };
+
+  const failures = removeTempDirs(ctx, failing);
+  assert.deepEqual(failures, [{ dir: '/tmp/oc-dbses-locked', error: 'EBUSY: resource busy or locked' }]);
+  // Only the successfully removed dir is forgotten; the failed one stays registered.
+  assert.deepEqual(ctx.tempDirs, ['/tmp/oc-dbses-locked']);
+  // Deletes use rmSync's bounded retries.
+  for (const c of calls) {
+    assert.equal(c.opts.recursive, true);
+    assert.ok(c.opts.maxRetries > 0 && c.opts.retryDelay > 0, JSON.stringify(c.opts));
+  }
+
+  // A later attempt (e.g. the signal handler) can still remove it.
+  assert.deepEqual(removeTempDirs(ctx, () => {}), []);
+  assert.deepEqual(ctx.tempDirs, []);
+});
+
+test('cleanupTempDirsOrWarn warns on stderr with the path when a delete fails', (t) => {
+  const ctx = newDiscoveryContext(0, 5);
+  ctx.tempDirs.push('/tmp/oc-dbses-locked');
+  const errors = [];
+  t.mock.method(console, 'error', (msg) => { errors.push(msg); });
+  const ok = cleanupTempDirsOrWarn(ctx, () => { throw new Error('EPERM: operation not permitted'); });
+  assert.equal(ok, false);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /cleanup failed/);
+  assert.match(errors[0], /\/tmp\/oc-dbses-locked/);
+  assert.match(errors[0], /EPERM/);
+  assert.deepEqual(ctx.tempDirs, ['/tmp/oc-dbses-locked']);
+  assert.equal(cleanupTempDirsOrWarn(ctx, () => {}), true);
 });

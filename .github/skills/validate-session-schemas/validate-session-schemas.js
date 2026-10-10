@@ -24,7 +24,8 @@
  * can contain user prompts / file paths / secrets. Pass --include-examples to
  * capture truncated samples.
  *
- * Exit codes:  0 = all observed contracts pass   1 = drift / parse failure
+ * Exit codes:  0 = all observed contracts pass   1 = drift / parse failure /
+ *              temp-export cleanup failed
  *              2 = configuration / environment error
  */
 
@@ -90,7 +91,7 @@ Options:
   --json               Emit machine-readable JSON only
   -h, --help           Show this help
 
-Exit codes: 0 ok | 1 drift / parse failure | 2 config error`);
+Exit codes: 0 ok | 1 drift / parse failure / temp cleanup failed | 2 config error`);
 }
 
 // ---------------------------------------------------------------------------
@@ -256,10 +257,34 @@ function newDiscoveryContext(cutoff, max) {
   return { cutoff, max, tempDirs: [], unexported: {}, displayPaths: new Map() };
 }
 
-function removeTempDirs(ctx) {
-  for (const dir of ctx.tempDirs.splice(0)) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+/**
+ * Remove every registered temp directory. A directory leaves ctx.tempDirs only
+ * once it is actually gone, so a failed delete (permission / in-use error after
+ * rmSync's own bounded retries) stays registered for a later attempt — e.g. the
+ * signal handler — and is returned so the caller can report it.
+ * Returns [{ dir, error }] for directories that could not be removed.
+ */
+function removeTempDirs(ctx, rmSync = fs.rmSync) {
+  const failures = [];
+  for (const dir of [...ctx.tempDirs]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      ctx.tempDirs.splice(ctx.tempDirs.indexOf(dir), 1);
+    } catch (e) {
+      failures.push({ dir, error: e && e.message ? e.message : String(e) });
+    }
   }
+  return failures;
+}
+
+/** Remove temp dirs and warn on stderr for any that could not be removed. Returns true when all are gone. */
+function cleanupTempDirsOrWarn(ctx, rmSync = fs.rmSync) {
+  const failures = removeTempDirs(ctx, rmSync);
+  for (const f of failures) {
+    console.error(`WARNING: cleanup failed — could not remove temp export ${f.dir} (${f.error}). ` +
+      'It contains raw session content; delete it manually.');
+  }
+  return failures.length === 0;
 }
 
 /** Session id of a legacy OpenCode JSON file (`ses_<id>.json` -> `ses_<id>`). */
@@ -736,7 +761,7 @@ function run(opts) {
   // returns, so the cleanup below always happens first; the handler then exits
   // with the conventional 128+n code.
   const onSignal = (signal) => {
-    removeTempDirs(ctx);
+    cleanupTempDirsOrWarn(ctx);
     process.exit(128 + (os.constants.signals[signal] || 0));
   };
   for (const sig of EXIT_SIGNALS) { process.on(sig, onSignal); }
@@ -744,10 +769,14 @@ function run(opts) {
     validatePlatforms(platformIds, baseline, opts, cutoff, ctx, report, flags);
   } finally {
     // Temp exports (OpenCode DB sessions) hold raw conversation text; never
-    // leave them behind, even when analysis throws.
-    removeTempDirs(ctx);
+    // leave them behind, even when analysis throws. Failures are warned about
+    // on stderr, recorded in the report and fail the run (exit 1).
+    if (!cleanupTempDirsOrWarn(ctx)) {
+      report.tempCleanupFailed = [...ctx.tempDirs];
+      flags.cleanupFailed = true;
+    }
   }
-  const { anyDrift, anyNewFields, anyParseFailure } = flags;
+  const { anyDrift, anyNewFields, anyParseFailure, cleanupFailed } = flags;
 
   if (opts.updateBaseline) {
     baseline.lastUpdated = new Date().toISOString().slice(0, 10);
@@ -760,7 +789,7 @@ function run(opts) {
     printHuman(report, opts);
   }
 
-  if (anyDrift || anyParseFailure) { process.exitCode = 1; }
+  if (anyDrift || anyParseFailure || cleanupFailed) { process.exitCode = 1; }
   else if (opts.failOnNewFields && anyNewFields) { process.exitCode = 1; }
   else { process.exitCode = 0; }
 }
@@ -809,6 +838,9 @@ function printHuman(report, opts) {
   console.log('');
   console.log(line);
   console.log(`Not validated by this skill (DB/binary formats): ${report.notValidated.join(', ')}`);
+  if (report.tempCleanupFailed && report.tempCleanupFailed.length > 0) {
+    console.log(`❌ Cleanup failed: temp export(s) left on disk: ${report.tempCleanupFailed.join(', ')}`);
+  }
   console.log(line);
 }
 
@@ -833,6 +865,7 @@ module.exports = {
   walkValue,
   newDiscoveryContext,
   removeTempDirs,
+  cleanupTempDirsOrWarn,
   exportOpenCodeDbSessions,
   DICT_KEY,
 };

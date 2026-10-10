@@ -67,7 +67,11 @@ None. SQLite is accessed in-process.
 - The temp directory comes from `mkdtemp`, so another local user cannot pre-create or
   symlink a predictable path. Files inside it are written with `flag: 'wx'` (fail if they
   exist), named from validated session ids only, and the whole directory is removed in
-  `run`'s `finally`. Only DB sessions that will actually be analyzed (combined
+  `run`'s `finally`. Deletion uses `rmSync` with bounded retries (`maxRetries: 3`,
+  `retryDelay: 100`); a directory is dropped from the cleanup list only after it is
+  actually gone, so the signal handler can retry it. A directory that still cannot be
+  removed is reported, never swallowed: a `cleanup failed` warning with the path on
+  stderr, `tempCleanupFailed` in the report, and exit code 1. Only DB sessions that will actually be analyzed (combined
   `--days`/`--max` window) are exported.
 - `run` registers SIGINT/SIGTERM/SIGHUP listeners. Without a listener Node terminates on
   these signals immediately and skips `finally`; with one, the signal is queued until the
@@ -97,7 +101,9 @@ None. SQLite is accessed in-process.
 - Keys shaped like plain identifiers are kept, so dictionaries keyed by tool name or model
   id (for example `copilot_readFile`, `gpt-6-luna`) still appear in field paths. These are
   product identifiers, not user data, but they do reach the report and baseline.
-- The temp export still exists on disk while the run is in progress. Termination that
+- The temp export still exists on disk while the run is in progress, and a directory whose
+  delete keeps failing (for example a file held open by another process) stays on disk
+  until the user removes it. It is reported, not retried on a later run. Termination that
   cannot be intercepted — `SIGKILL`, Windows `taskkill /F` or closing the console window,
   a crash of the Node process itself, power loss — skips the cleanup and leaves it behind.
   Signal handling is not covered by the tests.

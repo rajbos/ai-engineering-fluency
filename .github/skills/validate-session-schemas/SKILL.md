@@ -99,7 +99,7 @@ node .github/skills/validate-session-schemas/validate-session-schemas.js --inclu
 ### Exit codes
 
 - `0` — all observed contracts pass (new fields alone do not fail unless `--fail-on-new-fields`)
-- `1` — contract drift or an unparseable file
+- `1` — contract drift, an unparseable file, or a temp export (OpenCode) that could not be deleted — the path is printed on stderr and in the report (`tempCleanupFailed`)
 - `2` — configuration / environment error (bad args, missing baseline)
 
 ### Per-platform statuses
