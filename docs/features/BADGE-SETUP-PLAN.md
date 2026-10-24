@@ -28,6 +28,20 @@ Build a badge app for the GitHub Universe 2026 badge that shows live data from t
 
 **Dropped or deferred:** `vscode://` deep links from a QR, mDNS discovery, automatic same-network detection, and any marketplace (the badge has none; apps are copied as files).
 
+## Mockups
+
+Rendered at 2x the badge's 320x240 LCD, with sample data. The images live in [`badge-mockups/`](badge-mockups/).
+
+| Score | 30-day history | QR to repo | QR to LinkedIn |
+| --- | --- | --- | --- |
+| ![Score](badge-mockups/1-score.png) | ![History](badge-mockups/2-history.png) | ![QR repo](badge-mockups/3-qr-repo.png) | ![QR LinkedIn](badge-mockups/4-qr-linkedin.png) |
+
+| Sync status | Wearer view | Tip after a shake | VS Code Badge setup panel |
+| --- | --- | --- | --- |
+| ![Sync](badge-mockups/5-sync-status.png) | ![Wearer](badge-mockups/6-wearer.png) | ![Tip](badge-mockups/7-tip.png) | ![Panel](badge-mockups/vscode-badge-setup.png) |
+
+The LinkedIn screen shows a labelled placeholder until the official logo is added (see Open items).
+
 ## Setup
 
 **Repos and references**
@@ -101,11 +115,11 @@ Keep it under about 4 KB (the badge's data partition is roughly 980 KiB in total
 
 **QR codes**
 
-- `contacts` uses `image.qr(url, image.QR_LOW, 2)`. Only `QR_LOW` appears in that repo, so check on the device which error-correction constants exist. A centre logo needs the high level.
-- Module counts at high error correction: repo URL 41x41 (4 px per module on screen), LinkedIn 33x33 (5 px). Both fit beside text.
-- Fallback if the firmware cannot do high error correction: pre-render both codes on the PC with Python `qrcode` (high level, logo pasted in the centre) and ship them as PNGs in `assets/`.
-- Blit order: white quiet area, QR, white ring around the centre, then the logo. The repo mark sits on a dark rounded tile; the LinkedIn logo is the official blue "in" bug.
-- LinkedIn URL: read `CONTACT_LINKEDIN` from `/secrets.py` if set (the stock Settings app edits it), otherwise use `linkedin.com/in/bosrob`.
+- The app ships pre-rendered PNGs (`assets/qr_repo.png`, `assets/qr_linkedin.png`) and blits them 1:1. They are built by [`badge-app/tools/make_qr.py`](../../badge-app/tools/make_qr.py) at the high error-correction level with a 4-module quiet zone, and were checked to decode with OpenCV, also after blurring and lowering the contrast.
+- Why not `image.qr()` on the device: `contacts` uses `image.qr(url, image.QR_LOW, 2)`, and only `QR_LOW` appears in `badger/home`. A centre logo needs the high level, which may not exist on the firmware. Pre-rendering avoids that question.
+- Sizes: repo URL 41x41 modules at 4 px (196 px with quiet zone), LinkedIn 33x33 at 5 px (205 px). Both fit the 240 px screen height beside text.
+- The repo mark sits on a dark rounded tile with a one-module white ring. The LinkedIn code has no logo yet; rerun the script with `--linkedin-logo <png>` once the official "in" logo is saved.
+- The QR codes are fixed to these two URLs. A per-user URL from `CONTACT_LINKEDIN` in `/secrets.py` would need on-device generation and is left for later.
 
 **Wi-Fi receiver** (second milestone; copy the pattern from `badge/apps/Copilot/copilot_monitor.py` in `badger/home`)
 
@@ -214,12 +228,10 @@ Recommendation: B first, A once the badge app works on hardware.
 - [ ] Where the badge app lives: `badge-app/fluency/` in this repo (assumed here) or a fork of `badger/home` under `badge/apps/fluency/`.
 - [ ] Button route for the Badge setup screen: option A (full navigation button) or B (extension-point button), see Part 3.
 - [ ] The URL to show for the GitHub Universe badge reference. No official badge page was found yet; until one is picked, the links block uses `badger/home`, the Tufty 2350 page and badgewa.re.
-- [ ] The official LinkedIn "in" logo PNG, saved as `badge-app/fluency/assets/linkedin.png`.
-- [ ] The sync mockup still says "UP: announce on LAN" and the VS Code panel mockup still mentions a pairing step. Discovery is deferred and there is no pairing code, so both lines should be reworded when the screens are built.
+- [ ] The official LinkedIn "in" logo PNG. Save it anywhere and run `python badge-app/tools/make_qr.py --linkedin-logo <png>` to rebuild the LinkedIn code with it.
 
 **Risks to verify on the hardware**
 
-- Which QR error-correction constants the firmware exposes. Without a high level the centre logo breaks scanning; use the pre-rendered PNG fallback.
 - Whether the chosen fonts, stroke widths and the 4 px QR modules stay legible at 320x240 on the real LCD and scan from arm's length. Shortening the URLs is the lever if not.
 - Whether `mpremote` writes to `/state` cleanly while the app is running, and how long the soft reset takes.
 - Whether the firmware exposes the IMU's step counter, which decides if steps walked ships. Also whether tilt-scrubbing stays steady while walking.
