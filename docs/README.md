@@ -101,6 +101,7 @@ Detailed documentation for individual features.
 | [features/DARK-FACTORY-READINESS.md](features/DARK-FACTORY-READINESS.md) | Dark Factory Readiness — per-repository governance control scan on the Fluency Score view |
 | [features/WORKSPACE-GROUPING.md](features/WORKSPACE-GROUPING.md) | Workspace grouping — folding worktrees, clones and remote spellings of one repository into one workspace, shared by the extension and the CLI |
 | [features/TTFT-TRENDS.md](features/TTFT-TRENDS.md) | Research > TTFT diagnostics tab — time-to-first-token averages and per-model trendlines from VS Code Chat's debug log |
+| [features/BADGE-SETUP-PLAN.md](features/BADGE-SETUP-PLAN.md) | Plan: GitHub Universe 2026 badge app showing fluency score, 30-day history and QR codes, synced from the extension over USB and Wi-Fi |
 | [features/WHATS-NEW.md](features/WHATS-NEW.md) | What's New view and the one-a-day new-feature notification — the release catalog, view-visit tracking, and the pacing rules |
 
 ## Architecture Decision Records (ADR)
