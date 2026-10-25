@@ -1,6 +1,6 @@
 # Universe Badge — Implementation Plan
 
-**Status:** plan, not implemented yet. Last updated 2026-10-25.
+**Status:** step 1 (the badge screens, reading `/state/fluency.json`) is built in [`badge-app/`](../../badge-app/README.md); the rest is planned. Last updated 2026-10-25.
 
 Build a badge app for the GitHub Universe 2026 badge that shows live data from the AI Engineering Fluency extension, plus two QR codes. Everything below is decided unless it sits under [Open items](#open-items-risks-and-order-of-work).
 
