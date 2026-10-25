@@ -24,6 +24,8 @@ Run `ls -a` (or `git ls-files | cut -d/ -f1 | sort -u`) for the live top level.
 ├── jetbrains-plugin/            ← JetBrains IDE plugin (Kotlin / Gradle / IntelliJ Platform)
 ├── desktop/                     ← Electron tray app; reuses vscode-extension's built
 │                                   webview bundles and cli/vscode-extension stats logic
+├── badge-app/                   ← MicroPython app for the GitHub Universe 2026 badge, showing
+│                                   the fluency.json the extension writes (plus preview/QR tools)
 ├── sharing-server/              ← Self-hosted API server + web dashboard for sharing
 │                                   fluency data across a team (TypeScript, SQLite, Docker)
 ├── release-video/               ← Local release-video generator: the What's New

@@ -288,6 +288,7 @@ import {
   type TtftSample,
 } from '../../src/tokenEstimation';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
+import { RepoHeatmapPanel, createRepoHeatmapHost } from './repoHeatmapPanel';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
@@ -301,7 +302,6 @@ import {
   analyzeContextReferences as _analyzeContextReferences,
   analyzeContentReferences as _analyzeContentReferences,
   analyzeVariableData as _analyzeVariableData,
-  deriveConversationPatterns as _deriveConversationPatterns,
   analyzeRequestContext as _analyzeRequestContext,
   calculateModelSwitching as _calculateModelSwitching,
   trackEnhancedMetrics as _trackEnhancedMetrics,
@@ -1279,7 +1279,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
 	private hermes!: HermesDataAccess;
-	private ecosystems!: IEcosystemAdapter[];
+	public ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
 	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
@@ -16025,7 +16025,8 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.openMcpJson();
     },
   );
-  context.subscriptions.push(showMaturityCommand, showReadinessCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, showWhatsNewCommand, openMcpJsonCommand);
+  const repoHeatmap = new RepoHeatmapPanel(createRepoHeatmapHost(context, tokenTracker));
+  context.subscriptions.push(showMaturityCommand, showReadinessCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, showWhatsNewCommand, openMcpJsonCommand, vscode.commands.registerCommand("aiEngineeringFluency.showRepoHeatmap", () => repoHeatmap.show()));
 }
 
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
