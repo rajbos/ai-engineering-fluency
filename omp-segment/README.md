@@ -291,6 +291,7 @@ oh-my-posh init pwsh --config "$env:TEMP\test.omp.json" | Invoke-Expression
 | Segment never updates | OMP cache too long | Set `cache.duration` to `"1m"` or use `--hide-zero` |
 | Stale numbers | CLI cache still valid | Run `ai-engineering-fluency segment --refresh` |
 | Prompt shows stale data even after refresh | OMP `cache` block on a Method 2 env var segment | **Remove** the `"cache"` block from the env var segment — OMP caches the rendered string, bypassing env var updates from `Set-PoshContext` |
+| Prompt keeps showing `?` for token totals | Older Method 2 hook cannot launch the npm CLI from a `-NoProfile` worker, its profile path contains spaces, or an abandoned `posh-hook-cache.lock` blocks refreshes | Copy the current [`posh-hook.ps1`](./posh-hook.ps1) function and [`Update-PoshContextCache.ps1`](./Update-PoshContextCache.ps1) next to your profile; the current hook clears locks older than 10 minutes |
 | Icon shows as a box / `?` | Not using a Nerd Font | Replace `\uec1e` with `🤖` or remove the icon |
 | Prompt slows down | OMP cache not set (Method 1 only) | Add `"cache": {"duration": "5m", "strategy": "session"}` to the `{{ cmd }}` segment |
 | New terminal / profile reload hangs for 45s+ | Method 2 hook calling `usage --json` synchronously (old version) | Update to the current [`posh-hook.ps1`](./posh-hook.ps1) + [`Update-PoshContextCache.ps1`](./Update-PoshContextCache.ps1), which read from a cache file and refresh in a detached background process instead |

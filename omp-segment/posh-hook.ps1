@@ -43,6 +43,12 @@ function Set-PoshContext {
     $cacheFile     = Join-Path $cacheDir 'posh-hook-cache.json'
     $lockFile      = Join-Path $cacheDir 'posh-hook-cache.lock'
     $refreshScript = Join-Path $PSScriptRoot 'Update-PoshContextCache.ps1'
+    $cliCommand    = Get-Command 'ai-engineering-fluency.cmd' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $cliCommand) {
+        $cliCommand = Get-Command 'ai-engineering-fluency' -CommandType Application, ExternalScript -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    }
 
     # 1. Show the last known values instantly - this never blocks shell startup.
     $lastRun = [DateTime]::MinValue
@@ -75,13 +81,39 @@ function Set-PoshContext {
 
     # 2. Refresh in a fully detached background process when the cache is stale.
     #    See the header comment above for why this must never run synchronously.
+    #    A worker killed mid-run (reboot, closed session) never removes its lock, which
+    #    would block every future refresh, so treat old locks as abandoned.
+    if ((Test-Path $lockFile) -and ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalMinutes -ge 10) {
+        Remove-Item -Path $lockFile -Force -ErrorAction SilentlyContinue
+    }
     if (([DateTime]::UtcNow - $lastRun).TotalMinutes -ge 5 -and -not (Test-Path $lockFile)) {
-        if (Test-Path $refreshScript) {
+        if ((Test-Path $refreshScript) -and $cliCommand) {
             try {
                 New-Item -Path $cacheDir -ItemType Directory -Force | Out-Null
                 New-Item -Path $lockFile -ItemType File -Force | Out-Null
+
+                # Start-Process joins ArgumentList values into one command line. Quote every
+                # path explicitly so profiles under folders such as "OneDrive - Company"
+                # do not split the worker's -File and cache arguments.
+                $quotedRefreshScript = '"' + $refreshScript + '"'
+                $quotedCacheFile = '"' + $cacheFile + '"'
+                $quotedLockFile = '"' + $lockFile + '"'
+                $quotedCliPath = '"' + $cliCommand.Source + '"'
                 Start-Process -FilePath (Get-Process -Id $PID).Path `
-                    -ArgumentList @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', $refreshScript, $cacheFile, $lockFile) `
+                    -ArgumentList @(
+                        '-NoProfile',
+                        '-NonInteractive',
+                        '-WindowStyle',
+                        'Hidden',
+                        '-File',
+                        $quotedRefreshScript,
+                        '-CacheFile',
+                        $quotedCacheFile,
+                        '-LockFile',
+                        $quotedLockFile,
+                        '-CliPath',
+                        $quotedCliPath
+                    ) `
                     -WindowStyle Hidden -ErrorAction SilentlyContinue
             }
             catch {

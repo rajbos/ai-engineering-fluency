@@ -19,7 +19,8 @@
 #>
 param(
     [Parameter(Mandatory)][string]$CacheFile,
-    [Parameter(Mandatory)][string]$LockFile
+    [Parameter(Mandatory)][string]$LockFile,
+    [string]$CliPath = 'ai-engineering-fluency'
 )
 
 # Ensure multi-byte characters (e.g. the "·" separator) survive the round-trip through
@@ -28,7 +29,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 try {
-    $json = ai-engineering-fluency segment --json
+    $json = & $CliPath segment --json
     if ([string]::IsNullOrWhiteSpace($json)) { throw "empty output from 'ai-engineering-fluency segment --json'" }
 
     # Validate it round-trips as JSON before trusting/caching it
