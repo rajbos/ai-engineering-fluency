@@ -58,7 +58,15 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
-          cache-dependency-path: cli/pnpm-lock.yaml
+          cache-dependency-path: |
+            vscode-extension/pnpm-lock.yaml
+            cli/pnpm-lock.yaml
+
+      # The CLI type-check resolves shared src/ typings (e.g. @types/sql.js) from
+      # vscode-extension/node_modules, same as cli-publish.yml.
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install CLI dependencies
         working-directory: cli
@@ -104,7 +112,15 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
-          cache-dependency-path: cli/pnpm-lock.yaml
+          cache-dependency-path: |
+            vscode-extension/pnpm-lock.yaml
+            cli/pnpm-lock.yaml
+
+      # The CLI type-check resolves shared src/ typings (e.g. @types/sql.js) from
+      # vscode-extension/node_modules, same as cli-publish.yml.
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install CLI dependencies
         working-directory: cli
@@ -159,7 +175,15 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
-          cache-dependency-path: cli/pnpm-lock.yaml
+          cache-dependency-path: |
+            vscode-extension/pnpm-lock.yaml
+            cli/pnpm-lock.yaml
+
+      # The CLI type-check resolves shared src/ typings (e.g. @types/sql.js) from
+      # vscode-extension/node_modules, same as cli-publish.yml.
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install CLI dependencies
         working-directory: cli
@@ -213,7 +237,15 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
-          cache-dependency-path: cli/pnpm-lock.yaml
+          cache-dependency-path: |
+            vscode-extension/pnpm-lock.yaml
+            cli/pnpm-lock.yaml
+
+      # The CLI type-check resolves shared src/ typings (e.g. @types/sql.js) from
+      # vscode-extension/node_modules, same as cli-publish.yml.
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install CLI dependencies
         working-directory: cli
