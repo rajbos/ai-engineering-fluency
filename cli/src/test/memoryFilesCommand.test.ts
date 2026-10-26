@@ -1,12 +1,12 @@
 /**
  * Unit tests for the `memory-files` CLI command's threshold parsing.
- * Tests resolveMemoryFilesThresholds() in cli/src/commands/memory-files.ts
+ * Tests resolveMemoryFilesThresholds() in cli/src/commands/memoryFiles.ts
  */
 
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveMemoryFilesThresholds, buildPromoteOutput, analyzesLocalCheckout, resolveRepoOverride } from '../commands/memory-files';
+import { resolveMemoryFilesThresholds, buildPromoteOutput, analyzesLocalCheckout, resolveRepoOverride } from '../commands/memoryFiles';
 import { analyzeServerMemories, normalizeRepoSlug } from '../../../src/copilotServerMemories';
 import { DEFAULT_STALE_DAYS, DEFAULT_LARGE_FILE_BYTES } from '../../../src/copilotMemoryFiles';
 

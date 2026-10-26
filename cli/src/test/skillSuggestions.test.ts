@@ -12,7 +12,7 @@ import * as path from 'path';
 
 import { calculateUsageAnalysisStats, createSessionActivityLookup, isActiveSince, repeatedTaskActivityMs, type SessionActivitySources, type SessionMeta } from '../helpers';
 import { disableCache } from '../cliCache';
-import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skill-suggestions';
+import { createSkillSuggestionsPayload, formatSkillSuggestionsReport } from '../commands/skillSuggestions';
 import type { RepeatedTaskReport } from '../../../src/types';
 
 // node --test runs each test file in its own process, so this only affects this file.

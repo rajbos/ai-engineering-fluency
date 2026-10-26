@@ -524,7 +524,7 @@ test/unit/
 ├── backend-sync-profiles.test.ts     # Sharing profiles (281 lines)
 ├── backend-redaction.test.ts         # Secret redaction
 ├── backend-sharingProfile.test.ts    # Profile policy computation
-├── logging-redaction.test.ts         # Logging PII protection
+├── loggingRedaction.test.ts         # Logging PII protection
 ├── credentialService.test.ts         # Auth & secrets
 ├── azureResourceService.test.ts      # Provisioning wizard (215 lines)
 └── sessionParser.test.ts             # Session file parsing

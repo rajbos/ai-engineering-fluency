@@ -2039,7 +2039,7 @@ test('resolveSessionWorkspaceName: app-store worktree workspaceFolderPath resolv
 // Regression coverage for the exact bug class fixed here: resolveSessionWorkspaceName must
 // route every workspaceFolderPath through the worktree-aware getRepoNameFromWorkspacePath(),
 // not a plain path.basename(). Each of these mirrors a layout already covered by
-// utils-pathUtils.test.ts's getRepoNameFromWorkspacePath suite so a future revert to
+// utilsPathUtils.test.ts's getRepoNameFromWorkspacePath suite so a future revert to
 // path.basename() fails broadly, not just for a single naming convention.
 const worktreeWorkspaceFolderPathCases: { name: string; workspaceFolderPath: string; expected: string }[] = [
     {

@@ -127,8 +127,8 @@ For each mutant classified as worth killing:
 | `src/sessionParser.ts` | `src/test/sessionParser.test.ts` |
 | `src/workspaceHelpers.ts` | `test/unit/workspaceHelpers.test.ts` |
 | `src/claudecode.ts` | `test/unit/claudecode.test.ts` |
-| `src/utils/dayKeys.ts` | `src/test/utils-dayKeys.test.ts` |
-| `src/utils/errors.ts` | `src/test/utils-errors.test.ts` |
+| `src/utils/dayKeys.ts` | `src/test/utilsDayKeys.test.ts` |
+| `src/utils/errors.ts` | `src/test/utilsErrors.test.ts` |
 | `src/utils/html.ts` | `test/unit/utils-html.test.ts` |
 
 ### Writing effective mutation-killing tests
