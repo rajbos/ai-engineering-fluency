@@ -145,6 +145,18 @@ describe('analyzeHydraFusionSession', () => {
 		assert.equal(analyzeHydraFusionSession(''), undefined);
 	});
 
+	test('skips malformed and id-less fusion lines without losing the valid turn', () => {
+		const content = [
+			'{"type":"session.fusion_resolved" fusion truncated',
+			line('session.fusion_resolved', { noFusionId: true }),
+			cascadeSession(),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content);
+		assert.ok(summary);
+		assert.equal(summary.totalTurns, 1);
+		assert.equal(summary.totalAiu, analyzeHydraFusionSession(cascadeSession())!.totalAiu);
+	});
+
 	test('reconstructs a cascade turn leg by leg, in completion order', () => {
 		const summary = analyzeHydraFusionSession(cascadeSession());
 		assert.ok(summary);

@@ -229,6 +229,59 @@ function detectEditMoments(
  */
 const ESCALATION_WINDOW_TURNS = 4;
 
+function detectUserCorrection(
+	userText: string | undefined, turnNumber: number, timestamp: string | null, state: CorrectionDetectionState,
+): { label: string; index: number } | null {
+	const userMatch = matchPattern(userText, USER_CORRECTION_PATTERNS);
+	if (!userMatch) { return null; }
+	const escalated = state.lastUserCorrectionTurn !== null && turnNumber - state.lastUserCorrectionTurn <= ESCALATION_WINDOW_TURNS;
+	retainMoment(state, {
+		type: 'user-correction', turnNumber, timestamp,
+		snippet: makeSnippet(userText!, userMatch.index),
+		matchedPattern: userMatch.label,
+		...(hasIntensityCue(userText!) ? { intensity: 'strong' } : {}),
+		...(escalated ? { escalated: true } : {}),
+	});
+	state.lastUserCorrectionTurn = turnNumber;
+	return userMatch;
+}
+
+/** Records tool failures and marks earlier failures of the same tool as retried. Returns whether this turn had a failure. */
+function detectToolErrorMoments(
+	toolCalls: NonNullable<CorrectionTurn['toolCalls']>, turnNumber: number, timestamp: string | null, state: CorrectionDetectionState,
+): boolean {
+	let turnHasToolError = false;
+	for (const call of toolCalls) {
+		// A later call of the same tool marks an earlier failure as recovered.
+		const openError = state.openToolErrors.get(call.toolName);
+		if (openError) {
+			openError.retried = true;
+			state.counts.toolErrorsRetried++;
+			state.openToolErrors.delete(call.toolName);
+		}
+		if (call.isError === true) {
+			const moment: CorrectionMoment = {
+				type: 'tool-error', turnNumber, timestamp,
+				snippet: `Tool failed: ${call.toolName}`,
+				tool: call.toolName,
+				retried: false,
+			};
+			retainMoment(state, moment);
+			state.openToolErrors.set(call.toolName, moment);
+			turnHasToolError = true;
+		}
+	}
+	return turnHasToolError;
+}
+
+function pickCorroboration(
+	turnHasToolError: boolean, turnHasEditRetry: boolean, userCorrectionNearby: boolean,
+): CorrectionMoment['corroboratedBy'] {
+	if (turnHasToolError) { return 'tool-error'; }
+	if (turnHasEditRetry) { return 'edit-retry'; }
+	return userCorrectionNearby ? 'user-correction' : undefined;
+}
+
 /**
  * Detect all correction moments in a session's turns.
  * Turn numbers are 1-based array positions, matching ChatTurn.turnNumber.
@@ -252,42 +305,10 @@ export function detectCorrectionAnalysis(turns: CorrectionTurn[]): CorrectionDet
 		const userText = isHumanAuthored(turn.userMessage) ? turn.userMessage : undefined;
 		const prevTurnHadUserCorrection = state.lastUserCorrectionTurn === turnNumber - 1;
 
-		const userMatch = matchPattern(userText, USER_CORRECTION_PATTERNS);
-		if (userMatch) {
-			const escalated = state.lastUserCorrectionTurn !== null && turnNumber - state.lastUserCorrectionTurn <= ESCALATION_WINDOW_TURNS;
-			retainMoment(state, {
-				type: 'user-correction', turnNumber, timestamp,
-				snippet: makeSnippet(userText!, userMatch.index),
-				matchedPattern: userMatch.label,
-				...(hasIntensityCue(userText!) ? { intensity: 'strong' } : {}),
-				...(escalated ? { escalated: true } : {}),
-			});
-			state.lastUserCorrectionTurn = turnNumber;
-		}
+		const userMatch = detectUserCorrection(userText, turnNumber, timestamp, state);
 
 		const toolCalls = turn.toolCalls ?? [];
-		let turnHasToolError = false;
-		for (const call of toolCalls) {
-			// A later call of the same tool marks an earlier failure as recovered.
-			const openError = state.openToolErrors.get(call.toolName);
-			if (openError) {
-				openError.retried = true;
-				state.counts.toolErrorsRetried++;
-				state.openToolErrors.delete(call.toolName);
-			}
-			if (call.isError === true) {
-				const moment: CorrectionMoment = {
-					type: 'tool-error', turnNumber, timestamp,
-					snippet: `Tool failed: ${call.toolName}`,
-					tool: call.toolName,
-					retried: false,
-				};
-				retainMoment(state, moment);
-				state.openToolErrors.set(call.toolName, moment);
-				turnHasToolError = true;
-			}
-		}
-
+		const turnHasToolError = detectToolErrorMoments(toolCalls, turnNumber, timestamp, state);
 		const turnHasEditRetry = detectEditMoments(toolCalls, turnNumber, timestamp, state);
 
 		// agent-self-correction phrasing ("let me fix", "you're right", ...) is extremely
@@ -295,22 +316,15 @@ export function detectCorrectionAnalysis(turns: CorrectionTurn[]): CorrectionDet
 		// correction moment when corroborated by an independent signal: a tool failure or
 		// edit-retry in this turn, or a user-correction just before/in this turn.
 		const agentMatch = matchPattern(turn.assistantResponse, AGENT_SELF_CORRECTION_PATTERNS);
-		if (agentMatch) {
-			const corroboratedBy: CorrectionMoment['corroboratedBy'] = turnHasToolError
-				? 'tool-error'
-				: turnHasEditRetry
-					? 'edit-retry'
-					: (prevTurnHadUserCorrection || userMatch !== null)
-						? 'user-correction'
-						: undefined;
-			if (corroboratedBy) {
-				retainMoment(state, {
-					type: 'agent-self-correction', turnNumber, timestamp,
-					snippet: makeSnippet(turn.assistantResponse!, agentMatch.index),
-					matchedPattern: agentMatch.label,
-					corroboratedBy,
-				});
-			}
+		if (!agentMatch) { continue; }
+		const corroboratedBy = pickCorroboration(turnHasToolError, turnHasEditRetry, prevTurnHadUserCorrection || userMatch !== null);
+		if (corroboratedBy) {
+			retainMoment(state, {
+				type: 'agent-self-correction', turnNumber, timestamp,
+				snippet: makeSnippet(turn.assistantResponse!, agentMatch.index),
+				matchedPattern: agentMatch.label,
+				corroboratedBy,
+			});
 		}
 	}
 
