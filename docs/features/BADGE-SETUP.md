@@ -1,6 +1,6 @@
 # Badge setup
 
-The **Badge setup** view sends your AI Engineering Fluency score and 30-day usage to the GitHub Universe 2026 badge. The badge app itself lives in [`badge-app/`](../../badge-app/README.md); the plan and decisions are in [BADGE-SETUP-PLAN.md](BADGE-SETUP-PLAN.md).
+The **Badge setup** view sends your AI Engineering Fluency score and 30-day usage to the GitHub Universe 2026 badge. The badge app itself lives in [`badge-app/`](../../badge-app/README.md); the design decisions, data format and roadmap are in [BADGE-SETUP-PLAN.md](BADGE-SETUP-PLAN.md).
 
 ## Open it
 

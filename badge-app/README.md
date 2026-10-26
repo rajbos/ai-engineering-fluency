@@ -1,7 +1,11 @@
 # Badge app
 
 A MicroPython app for the GitHub Universe 2026 badge that shows your AI
-Engineering Fluency data. The plan, decisions and mockups are in
+Engineering Fluency data: your fluency stage and categories, a 30-day usage
+history, and QR codes to the repo and LinkedIn. The easy way to install it and
+send it data is the VS Code extension's **Universe Badge** view (see
+[`docs/features/BADGE-SETUP.md`](../docs/features/BADGE-SETUP.md)). The data
+format, controls and roadmap are in
 [`docs/features/BADGE-SETUP-PLAN.md`](../docs/features/BADGE-SETUP-PLAN.md).
 
 | Path | What it is |
@@ -15,12 +19,11 @@ Engineering Fluency data. The plan, decisions and mockups are in
 
 ## Status
 
-Step 1 of the plan: the screens, read from `/state/fluency.json`. The VS Code
-extension's Badge setup view now writes that file over USB, installs the app and
-reads the theme colours (see
-[`docs/features/BADGE-SETUP.md`](../docs/features/BADGE-SETUP.md)). Not done
-yet: Wi-Fi push and the motion features beyond tilt-to-scrub (wearer view,
-shake for a tip).
+The screens read `/state/fluency.json`. The VS Code extension's Badge setup view
+writes that file over USB, installs the app and reads the theme colours. Tilt
+scrubs the 30-day history. Not done yet: Wi-Fi push, the wearer view and shake
+for a tip (see the roadmap in
+[`docs/features/BADGE-SETUP-PLAN.md`](../docs/features/BADGE-SETUP-PLAN.md)).
 
 ## Try it without a badge
 
@@ -54,10 +57,11 @@ pip install mpremote
 mpremote mount badge-app run badge-app/tools/run_on_badge.py
 ```
 
-To install it, put the badge in USB disk mode (double-tap RESET), copy
+To install it, use **Install app on badge** in the extension's Universe Badge
+view, or do it by hand: put the badge in USB disk mode (double-tap RESET), copy
 `badge-app/fluency` to `apps/` on the `BADGER` drive and eject.
 
-Give it data:
+Give it data (the extension's **Sync over USB** button does the same with your real numbers):
 
 ```sh
 mpremote fs cp badge-app/fluency/assets/sample.json :/state/fluency.json
