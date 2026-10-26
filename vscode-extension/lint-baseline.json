@@ -50,7 +50,7 @@
 			"vscode-extension/src/backend/services/syncService.ts": 47,
 			"vscode-extension/src/backend/settings.ts": 1,
 			"vscode-extension/src/backend/teamServerConfigPanel.ts": 1,
-			"vscode-extension/src/extension.ts": 173,
+			"vscode-extension/src/extension.ts": 172,
 			"vscode-extension/src/githubPrService.ts": 7,
 			"vscode-extension/src/types/jsdom.d.ts": 2,
 			"vscode-extension/src/types/json.d.ts": 2,
@@ -99,12 +99,9 @@
 			"vscode-extension/src/webview/usage/usageListTables.ts": 1
 		},
 		"@typescript-eslint/triple-slash-reference": {
-			"src/codexcli.ts": 1,
 			"src/copilotCliStore.ts": 1,
 			"src/crush.ts": 1,
 			"src/cursor.ts": 1,
-			"src/devinCli.ts": 1,
-			"src/hermes.ts": 1,
 			"src/utils/sqlJsDbCache.ts": 1,
 			"vscode-extension/src/copilotAppData.ts": 1
 		},

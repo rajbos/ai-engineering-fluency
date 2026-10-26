@@ -81,6 +81,7 @@ async function main() {
 			maturity: 'src/webview/maturity/main.ts',
 			dashboard: 'src/webview/dashboard/main.ts',
 			'fluency-level-viewer': 'src/webview/fluency-level-viewer/main.ts',
+			'badge-setup': 'src/webview/badge-setup/main.ts',
 			environmental: 'src/webview/environmental/main.ts',
 			efficiency: 'src/webview/efficiency/main.ts',
 			whatsnew: 'src/webview/whatsnew/main.ts',
@@ -167,6 +168,22 @@ async function main() {
 				fs.copyFileSync(codiconSrc, codiconDst);
 			}
 		}
+	}
+
+	// Bundle the badge app so the Badge setup view can reveal the folder the user copies to the badge.
+	const badgeAppSrc = path.join(__dirname, '..', 'badge-app', 'fluency');
+	if (fs.existsSync(badgeAppSrc)) {
+		fs.cpSync(badgeAppSrc, path.join(__dirname, 'dist', 'badge-app', 'fluency'), {
+			recursive: true,
+			filter: (source) => path.basename(source) !== '__pycache__',
+		});
+	}
+
+	// The Universe badge photo for the Badge setup view (optional: the view skips it when it is missing).
+	const badgeImageSrc = path.join(__dirname, 'media', 'badge-universe.jpg');
+	if (fs.existsSync(badgeImageSrc)) {
+		fs.mkdirSync(path.join(__dirname, 'dist', 'webview'), { recursive: true });
+		fs.copyFileSync(badgeImageSrc, path.join(__dirname, 'dist', 'webview', 'badge-universe.jpg'));
 	}
 
 	// Copy sql.js WASM file to dist/ for OpenCode SQLite support

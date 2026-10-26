@@ -20,6 +20,7 @@ Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or inst
 - **Social Media Sharing**: Share your Fluency Score achievements on LinkedIn, Bluesky, and Mastodon with #CopilotFluencyScore
 - **Usage Analysis Dashboard**: Comprehensive analytics on how you use Copilot (modes, tool calls, context references, MCP tools)
 - **Fluency Level Viewer**: Debug-only tool to explore all scoring rules and thresholds (requires active debugger)
+- **Badge Setup**: Install the GitHub Universe 2026 badge app and sync your fluency score and 30-day usage to the badge over USB. See [Badge setup](../features/BADGE-SETUP.md)
 - **Automatic Updates**: Refreshes every 5 minutes to show the latest usage
 - **Click to Refresh**: Click the status bar item to manually refresh the token count
 - **Smart Estimation**: Uses character-based analysis with model-specific ratios for token estimation

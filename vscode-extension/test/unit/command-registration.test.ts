@@ -18,16 +18,20 @@ function findPackageRoot(): string {
 // Commands that are contributed but intentionally not registered in extension.ts.
 const INTENTIONALLY_UNREGISTERED: string[] = [];
 
+// Modules outside extension.ts that call registerCommand for contributed commands.
+const EXTRA_REGISTRATION_MODULES = [path.join('src', 'badge', 'registerBadgeSetup.ts')];
+
 describe('contributed commands are registered', () => {
 	const root = findPackageRoot();
 	const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 	const source = fs.readFileSync(path.join(root, 'src', 'extension.ts'), 'utf8');
+	const registrationSource = [source, ...EXTRA_REGISTRATION_MODULES.map((file) => fs.readFileSync(path.join(root, file), 'utf8'))].join('\n');
 	const contributed: string[] = pkg.contributes.commands.map((c: { command: string }) => c.command);
 
 	/** IDs passed as a literal first argument to registerCommand(...); plain mentions of an id do not count. */
 	function literalRegistrations(): Set<string> {
 		const ids = new Set<string>();
-		for (const m of source.matchAll(/registerCommand\(\s*["'`]([^"'`$]+)["'`]/g)) {
+		for (const m of registrationSource.matchAll(/registerCommand\(\s*["'`]([^"'`$]+)["'`]/g)) {
 			ids.add(m[1]);
 		}
 		return ids;

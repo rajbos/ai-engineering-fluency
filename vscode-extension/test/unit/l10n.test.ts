@@ -2269,3 +2269,47 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: Badge setup strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'command.showBadgeSetup.title': 'Show Badge Setup',
+		'badge.button.label': 'Universe Badge',
+		'badge.title': 'Badge Setup',
+		'badge.status.never': 'Not synced yet.',
+		'badge.action.syncUsb': 'Sync over USB',
+		'badge.action.install': 'Install app on badge',
+		'badge.sync.cancelled': 'Sync cancelled.',
+		'badge.install.title': 'Install the app',
+		'badge.theme.title': 'Badge colours',
+		'badge.link.badgewareDocs': 'Badgeware docs',
+		'command.hideBadgeSetup.title': 'Hide Badge Button',
+		'command.restoreBadgeSetup.title': 'Show Badge Button',
+		'badge.action.hide': 'Hide this view (I have no badge)',
+		'badge.image.alt': 'The GitHub Universe 2026 badge',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+	assert.equal(t('badge.status.last', 'Oct 23, 2026', '1,024', 'COM5'), 'Last synced Oct 23, 2026 · 1,024 bytes · COM5');
+	assert.equal(t('badge.sync.ok', '1,024', 'COM5'), 'Synced 1,024 bytes over COM5. The badge app restarts while it loads the new data.');
+	assert.equal(t('badge.sync.failed', 'boom'), 'Sync failed: boom');
+	assert.equal(t('badge.install.copied', 'E:\\apps\\fluency'), 'Copied the app to E:\\apps\\fluency. Eject the drive, then open Fluency from the badge menu.');
+	assert.equal(t('badge.install.failed', 'denied'), 'Install failed: denied');
+	assert.match(t('badge.install.noDrive'), /No BADGER drive found/);
+	assert.match(t('badge.sync.mpremoteMissing'), /pip install mpremote/);
+	assert.match(t('badge.hide.notice'), /Show Badge Button/);
+
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('badge.title'), '徽章设置');
+		assert.equal(t('badge.action.syncUsb'), '通过 USB 同步');
+		assert.equal(t('command.restoreBadgeSetup.title'), '显示徽章按钮');
+		assert.equal(t('badge.action.hide'), '隐藏此视图（我没有徽章）');
+		assert.equal(t('badge.status.last', 'Oct 23, 2026', '1,024', 'COM5'), '上次同步 Oct 23, 2026 · 1,024 字节 · COM5');
+		assert.equal(t('badge.sync.ok', '1,024', 'COM5'), '已通过 COM5 同步 1,024 字节。徽章应用在加载新数据时会重新启动。');
+		assert.match(t('badge.sync.mpremoteMissing'), /pip install mpremote/);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
