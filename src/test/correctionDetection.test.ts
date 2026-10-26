@@ -100,6 +100,15 @@ test('agent-self-correction: detects admission phrasings when corroborated by a 
     }
 });
 
+test('agent-self-correction: tool-error corroboration outranks an edit-retry in the same turn', () => {
+    const moments = detectCorrectionMoments([
+        { toolCalls: [editCall('a.ts')] },
+        { assistantResponse: 'My mistake, fixing it.', toolCalls: [editCall('a.ts'), { toolName: 'run', isError: true }] },
+    ]);
+    const selfCorrection = moments.find(m => m.type === 'agent-self-correction');
+    assert.equal(selfCorrection?.corroboratedBy, 'tool-error');
+});
+
 test('agent-self-correction: leaves ordinary responses alone', () => {
     const moments = detectCorrectionMoments([{ assistantResponse: 'Done — I added the login page and tests pass.' }]);
     assert.equal(moments.length, 0);
