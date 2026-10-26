@@ -2274,7 +2274,7 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	const english: Record<string, string> = {
 		'command.showBadgeSetup.title': 'Show Badge Setup',
-		'badge.button.label': 'Badge',
+		'badge.button.label': 'Universe Badge',
 		'badge.title': 'Badge Setup',
 		'badge.status.never': 'Not synced yet.',
 		'badge.action.syncUsb': 'Sync over USB',

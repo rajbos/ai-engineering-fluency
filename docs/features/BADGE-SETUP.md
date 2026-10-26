@@ -4,7 +4,7 @@ The **Badge setup** view sends your AI Engineering Fluency score and 30-day usag
 
 ## Open it
 
-- Click the **Badge** button in the button row of any view, or
+- Click the **Universe Badge** button in the button row of any view, or
 - run **AI Engineering Fluency: Show Badge Setup** from the Command Palette.
 
 The button is registered through the extension-point API (`registerButton`), so it appears as a text button at the end of the row rather than as one of the icon buttons. Promoting it to a full navigation button is a follow-up.

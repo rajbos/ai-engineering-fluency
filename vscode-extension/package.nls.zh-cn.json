@@ -1094,7 +1094,7 @@
   "repoHeatmap.note.privacy": "删除操作通过 shell 命令（rm、del、Remove-Item）检测，可能不完整。文件路径仅保留在本机。",
 
   "command.showBadgeSetup.title": "显示徽章设置",
-  "badge.button.label": "徽章",
+  "badge.button.label": "Universe 徽章",
   "badge.title": "徽章设置",
   "badge.intro": "在 GitHub Universe 2026 徽章上显示你的 AI 工程流利度得分和 30 天用量。只需安装一次应用，之后随时通过 USB 同步最新数据。",
   "badge.status.title": "同步状态",

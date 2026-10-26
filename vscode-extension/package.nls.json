@@ -1094,7 +1094,7 @@
   "repoHeatmap.note.privacy": "Deletes are detected from shell commands (rm, del, Remove-Item) and may be incomplete. File paths stay on this machine.",
 
   "command.showBadgeSetup.title": "Show Badge Setup",
-  "badge.button.label": "Badge",
+  "badge.button.label": "Universe Badge",
   "badge.title": "Badge Setup",
   "badge.intro": "Show your AI Engineering Fluency score and 30-day usage on the GitHub Universe 2026 badge. Install the app once, then sync over USB whenever you want fresh numbers.",
   "badge.status.title": "Sync status",
