@@ -481,6 +481,8 @@ import { isGuidMcpTool, isKnownToolDisplayName, isMcpFamilyResolvedTool, lookupK
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
+import { registerBadgeSetup, type BadgeSnapshot } from './badge/registerBadgeSetup';
+import { formatWindsurfDiagnosticsContent } from './windsurfDiagnosticsReport';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 import { TtftScanResultCache } from './ttftAnalysisCache';
 import {
@@ -11592,6 +11594,12 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded, originGeneration), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
 
+	/** The fluency score and per-day totals the badge payload is built from. */
+	public async getBadgeSnapshot(): Promise<BadgeSnapshot> {
+		if (!this.currentFullDailyStats && !this.currentDailyStats) { await this.updateTokenStats(true); }
+		return { maturity: await this.calculateMaturityScores(true), dailyStats: this.currentFullDailyStats ?? this.currentDailyStats ?? [] };
+	}
+
 	/**
 	 * Run the Dark Factory readiness scan over the repositories in this workspace.
 	 *
@@ -16091,45 +16099,6 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
   registerSecondaryViewCommands(context, tokenTracker);
 }
 
-function formatWindsurfDiagnosticsContent(diagnostics: any): string {
-  return `# Windsurf Diagnostics Report
-
-Generated: ${new Date().toISOString()}
-
-## Environment
-- Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
-- Running in Devin: ${diagnostics.environment.isRunningInDevin}
-- App Name: ${diagnostics.environment.appName}
-
-## Extension Status
-- Extension Found: ${diagnostics.extension.found}
-- Extension Active: ${diagnostics.extension.active}
-- Extension Version: ${diagnostics.extension.packageJSON}
-
-## Credentials
-- Available: ${diagnostics.credentials.available}
-- Port: ${diagnostics.credentials.port}
-- CSRF Token Length: ${diagnostics.credentials.csrfLength}
-
-## API Connectivity Test
-- Success: ${diagnostics.apiTest.success}
-- Status Code: ${diagnostics.apiTest.statusCode}
-- Error: ${diagnostics.apiTest.error || 'None'}
-
-## Configuration
-- Windsurf Integration Enabled: ${diagnostics.configuration.enabled}
-
-## Sessions
-- Available: ${diagnostics.sessions.available}
-- Count: ${diagnostics.sessions.count}
-- Error: ${diagnostics.sessions.error || 'None'}
-
-## Recommendations
-
-${!diagnostics.extension.found ? '- Install the Windsurf extension\n' : ''}${!diagnostics.extension.active ? '- Activate the Windsurf extension or restart Windsurf\n' : ''}${!diagnostics.credentials.available ? '- Check if Windsurf language server is running\n' : ''}${!diagnostics.apiTest.success ? `- API connectivity issue: ${diagnostics.apiTest.error}\n` : ''}${diagnostics.sessions.count === 0 && diagnostics.apiTest.success ? '- Windsurf is working correctly, but no chat sessions have been created yet. Try starting a chat session in Windsurf and then refresh the token tracker.\n' : ''}
-`;
-}
-
 async function handleWindsurfDiagnosticsCommand(tokenTracker: CopilotTokenTracker): Promise<void> {
   try {
     const diagnostics = await tokenTracker.windsurf.runDiagnostics();
@@ -16269,6 +16238,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   setupBackend(context, tokenTracker);
   registerViewCommands(context, tokenTracker);
   registerDiagnosticAndAuthCommands(context, tokenTracker);
+  registerBadgeSetup(context, tokenTracker);
 
   context.subscriptions.push(tokenTracker);
 

@@ -15,9 +15,12 @@ Engineering Fluency data. The plan, decisions and mockups are in
 
 ## Status
 
-Step 1 of the plan: the screens, read from `/state/fluency.json`. Not done
-yet: the extension's sync command (USB and Wi-Fi), theme colours from VS Code,
-and the motion features beyond tilt-to-scrub (wearer view, shake for a tip).
+Step 1 of the plan: the screens, read from `/state/fluency.json`. The VS Code
+extension's Badge setup view now writes that file over USB, installs the app and
+reads the theme colours (see
+[`docs/features/BADGE-SETUP.md`](../docs/features/BADGE-SETUP.md)). Not done
+yet: Wi-Fi push and the motion features beyond tilt-to-scrub (wearer view,
+shake for a tip).
 
 ## Try it without a badge
 

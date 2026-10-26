@@ -1,0 +1,14 @@
+{
+  "lastSync": {
+    "at": "2026-10-23T19:14:00.000Z",
+    "bytes": 1342,
+    "port": "COM5"
+  },
+  "theme": {
+    "accent": "#0078d4",
+    "link": "#4daafc",
+    "good": "#2ea043",
+    "warn": "#f0883e"
+  },
+  "links": ["badgerHome", "tufty", "badgeware", "badgewareDocs"]
+}

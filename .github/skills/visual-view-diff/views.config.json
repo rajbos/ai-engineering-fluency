@@ -96,6 +96,24 @@
       "fixture": "fluency-level-viewer.json"
     },
     {
+      "id": "badge-setup",
+      "title": "Badge Setup",
+      "bundle": "badge-setup",
+      "global": "__INITIAL_BADGE_SETUP_DATA__",
+      "fixture": "badge-setup.json",
+      "scenarios": [
+        {
+          "name": "Install, link and sync buttons post their messages",
+          "expect": "#btn-badge-sync",
+          "steps": [
+            { "click": "#btn-badge-install", "expectPosted": "badgeInstallHelp" },
+            { "click": ".badge-link", "expectPosted": "badgeOpenLink" },
+            { "click": "#btn-badge-sync", "expectPosted": "badgeSyncUsb" }
+          ]
+        }
+      ]
+    },
+    {
       "id": "maturity",
       "title": "Fluency Score",
       "bundle": "maturity",

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import type { BadgeSyncResult } from './badgeSetupTypes';
 
 export interface CommandResult {
 	code: number;
@@ -29,16 +30,18 @@ const DATA_FILE = ':/state/fluency.json';
 /** USB vendor id of Raspberry Pi, which the badge's RP2350 reports. */
 const BADGE_VENDOR_ID = '2e8a';
 /** A serial port name as mpremote lists it: COM5, /dev/ttyACM0, /dev/cu.usbmodem1101. */
-const SAFE_PORT = /^[A-Za-z0-9][A-Za-z0-9_./:\\-]*$/;
+const SAFE_PORT = /^[A-Za-z0-9/][A-Za-z0-9_./:\\-]*$/;
 
 export const runCommand: CommandRunner = (command, args, timeoutMs) =>
 	new Promise((resolve) => {
 		execFile(command, args, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
-			if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+			const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+			if (errorCode === 'ENOENT') {
 				resolve({ code: -1, stdout: '', stderr: '', spawnError: 'ENOENT' });
 				return;
 			}
-			const code = error ? (typeof (error as NodeJS.ErrnoException).code === 'number' ? Number((error as NodeJS.ErrnoException).code) : 1) : 0;
+			// A non-zero exit status arrives as a numeric `code`; a timeout or signal has none.
+			const code = !error ? 0 : typeof errorCode === 'number' ? errorCode : 1;
 			resolve({ code, stdout: String(stdout), stderr: String(stderr) });
 		});
 	});
@@ -96,5 +99,38 @@ export async function syncOverUsb(options: { run: CommandRunner; payloadJson: st
 		return { status: 'ok', port: found.port, bytes: Buffer.byteLength(payloadJson, 'utf8') };
 	} finally {
 		await fs.promises.rm(tempDir, { recursive: true, force: true });
+	}
+}
+
+/** Builds the payload, copies it to the badge and, when several devices are plugged in, asks which one. */
+export async function syncBadge(options: {
+	run: CommandRunner;
+	buildPayload: () => Promise<string>;
+	pickPort: (ports: string[]) => Promise<string | undefined>;
+	now?: () => Date;
+	tempRoot?: string;
+}): Promise<BadgeSyncResult> {
+	let payloadJson: string;
+	try {
+		payloadJson = await options.buildPayload();
+	} catch (error) {
+		return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+	}
+
+	try {
+		const base = { run: options.run, payloadJson, tempRoot: options.tempRoot };
+		let outcome = await syncOverUsb(base);
+		if (outcome.status === 'multipleBadges') {
+			const port = await options.pickPort(outcome.ports);
+			if (!port) { return { status: 'cancelled' }; }
+			outcome = await syncOverUsb({ ...base, port });
+		}
+		if (outcome.status === 'ok') {
+			return { status: 'ok', port: outcome.port, bytes: outcome.bytes, at: (options.now?.() ?? new Date()).toISOString() };
+		}
+		// Only the multiple-devices case is left after the retry above, which a chosen port cannot trigger.
+		return outcome.status === 'multipleBadges' ? { status: 'noBadge' } : outcome;
+	} catch (error) {
+		return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
 	}
 }

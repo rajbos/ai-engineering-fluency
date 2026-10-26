@@ -81,6 +81,11 @@
         "category": "AI Engineering Fluency"
       },
       {
+        "command": "aiEngineeringFluency.showBadgeSetup",
+        "title": "%command.showBadgeSetup.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
         "command": "aiEngineeringFluency.runLocalViewRegression",
         "title": "%command.runLocalViewRegression.title%",
         "category": "AI Engineering Fluency"
