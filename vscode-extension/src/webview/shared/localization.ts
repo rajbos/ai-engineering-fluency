@@ -102,11 +102,3 @@ export function setCurrentLanguage(language: string): void {
 export function getCurrentLanguage(): string {
 	return currentLanguage;
 }
-
-/**
- * Check if the current language is right-to-left (RTL)
- */
-export function isRTL(): boolean {
-	const rtlLanguages = ['ar', 'he', 'fa', 'ur', 'ps', 'dv', 'yi'];
-	return rtlLanguages.some(lang => currentLanguage.startsWith(lang));
-}

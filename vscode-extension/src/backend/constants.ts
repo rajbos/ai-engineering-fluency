@@ -84,22 +84,6 @@ export const DEFAULT_EVENTS_TABLE = 'usageEvents';
 export const AZURE_SDK_QUERY_TIMEOUT_MS = 30 * 1000;
 
 /**
- * Azure SDK operation timeout for sync operations in milliseconds (60 seconds).
- * Longer timeout for data upload operations.
- */
-export const AZURE_SDK_SYNC_TIMEOUT_MS = 60 * 1000;
-
-/**
- * Maximum number of consecutive sync failures before stopping timer.
- */
-export const MAX_CONSECUTIVE_SYNC_FAILURES = 5;
-
-/**
- * Maximum number of retries for Azure SDK calls.
- */
-export const MAX_RETRY_ATTEMPTS = 3;
-
-/**
  * Cooldown duration for manual backend sync in milliseconds (5 seconds).
  * Prevents users from triggering rapid consecutive syncs.
  */

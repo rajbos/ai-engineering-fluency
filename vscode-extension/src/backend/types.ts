@@ -42,31 +42,6 @@ export interface DailyRollupValue {
 }
 
 /**
- * Storage entity for daily aggregates.
- * This is the shape stored in Azure Tables.
- */
-export interface BackendAggDailyEntity {
-	partitionKey: string;
-	rowKey: string;
-	schemaVersion: 1 | 2 | 3;
-	datasetId: string;
-	day: string;
-	model: string;
-	workspaceId: string;
-	workspaceName?: string;
-	machineId: string;
-	machineName?: string;
-	userId?: string;
-	userKeyType?: 'pseudonymous' | 'teamAlias' | 'entraObjectId';
-	shareWithTeam?: boolean;
-	consentAt?: string;
-	inputTokens: number;
-	outputTokens: number;
-	interactions: number;
-	updatedAt: string;
-}
-
-/**
  * Query result from the backend.
  */
 export interface BackendQueryResult {
