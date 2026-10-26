@@ -420,29 +420,45 @@ function percent(part: number, whole: number): number {
 	return whole > 0 ? (part / whole) * 100 : 0;
 }
 
-/**
- * Reconstructs every HydraFusion turn recorded in a Copilot CLI session log.
- *
- * @param content Raw `events.jsonl` text. Malformed lines are skipped rather than fatal —
- *   a session log can be truncated mid-write while the CLI is still running.
- * @returns The session's routing summary, or `undefined` when the session never used
- *   HydraFusion (the overwhelmingly common case) so callers can skip the UI entirely.
- */
-export function analyzeHydraFusionSession(content: string): HydraFusionSummary | undefined {
-	if (!content || !containsHydraFusionEvents(content)) { return undefined; }
+interface ParsedFusionEvents {
+	drafts: Map<string, TurnDraft>;
+	syntheticModel: string | null;
+}
 
-	const drafts = new Map<string, TurnDraft>();
-	let syntheticModel: string | null = null;
+function applyFusionEvent(state: ParsedFusionEvents, type: string, data: RawRecord, fusionId: string, timestamp: string | null): void {
+	let draft = state.drafts.get(fusionId);
+	if (!draft) {
+		draft = { fusionId, resolved: null, resolvedAt: null, completed: null, completedAt: null, phases: [], handoffs: [] };
+		state.drafts.set(fusionId, draft);
+	}
+	switch (type) {
+		case 'session.fusion_resolved':
+			draft.resolved = data;
+			draft.resolvedAt = timestamp;
+			state.syntheticModel = state.syntheticModel ?? asString(data.syntheticModel);
+			break;
+		case 'assistant.fusion_phase_completed':
+			draft.phases.push({ data, timestamp });
+			break;
+		case 'session.fusion_handoff':
+			draft.handoffs.push({
+				sourcePhaseId: asString(data.sourcePhaseId) ?? '',
+				targetPhaseId: asString(data.targetPhaseId) ?? '',
+				targetModel: asString(data.targetModel) ?? 'unknown',
+			});
+			break;
+		case 'session.fusion_completed':
+			draft.completed = data;
+			draft.completedAt = timestamp;
+			state.syntheticModel = state.syntheticModel ?? asString(data.syntheticModel);
+			break;
+		default:
+			break;
+	}
+}
 
-	const draftFor = (fusionId: string): TurnDraft => {
-		let draft = drafts.get(fusionId);
-		if (!draft) {
-			draft = { fusionId, resolved: null, resolvedAt: null, completed: null, completedAt: null, phases: [], handoffs: [] };
-			drafts.set(fusionId, draft);
-		}
-		return draft;
-	};
-
+function parseFusionEvents(content: string): ParsedFusionEvents {
+	const state: ParsedFusionEvents = { drafts: new Map(), syntheticModel: null };
 	for (const line of content.split('\n')) {
 		const trimmed = line.trim();
 		if (!trimmed || !trimmed.includes('fusion')) { continue; }
@@ -455,44 +471,12 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
 		if (!type || !data) { continue; }
 		const fusionId = asString(data.fusionId);
 		if (!fusionId) { continue; }
-		const timestamp = asString(event.timestamp);
-
-		switch (type) {
-			case 'session.fusion_resolved': {
-				const draft = draftFor(fusionId);
-				draft.resolved = data;
-				draft.resolvedAt = timestamp;
-				syntheticModel = syntheticModel ?? asString(data.syntheticModel);
-				break;
-			}
-			case 'assistant.fusion_phase_completed':
-				draftFor(fusionId).phases.push({ data, timestamp });
-				break;
-			case 'session.fusion_handoff':
-				draftFor(fusionId).handoffs.push({
-					sourcePhaseId: asString(data.sourcePhaseId) ?? '',
-					targetPhaseId: asString(data.targetPhaseId) ?? '',
-					targetModel: asString(data.targetModel) ?? 'unknown',
-				});
-				break;
-			case 'session.fusion_completed': {
-				const draft = draftFor(fusionId);
-				draft.completed = data;
-				draft.completedAt = timestamp;
-				syntheticModel = syntheticModel ?? asString(data.syntheticModel);
-				break;
-			}
-			default:
-				break;
-		}
+		applyFusionEvent(state, type, data, fusionId, asString(event.timestamp));
 	}
+	return state;
+}
 
-	// A fusion with neither a plan nor a single completed leg carries nothing to show.
-	const turns = [...drafts.values()]
-		.filter(d => d.resolved !== null || d.phases.length > 0)
-		.map(buildTurn);
-	if (turns.length === 0) { return undefined; }
-
+function buildHydraFusionSummary(turns: HydraFusionTurn[], syntheticModel: string | null): HydraFusionSummary {
 	const judgeVerdicts = turns.flatMap(t => t.phases).map(p => p.verdict).filter((v): v is string => v !== null);
 	const judgeAccepts = judgeVerdicts.filter(v => v === 'accept').length;
 	const judgeRejects = judgeVerdicts.filter(v => v === 'reject').length;
@@ -528,6 +512,28 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
 		degradedTurns: turns.filter(t => t.degradedReason !== null).length,
 		syntheticModel,
 	};
+}
+
+/**
+ * Reconstructs every HydraFusion turn recorded in a Copilot CLI session log.
+ *
+ * @param content Raw `events.jsonl` text. Malformed lines are skipped rather than fatal —
+ *   a session log can be truncated mid-write while the CLI is still running.
+ * @returns The session's routing summary, or `undefined` when the session never used
+ *   HydraFusion (the overwhelmingly common case) so callers can skip the UI entirely.
+ */
+export function analyzeHydraFusionSession(content: string): HydraFusionSummary | undefined {
+	if (!content || !containsHydraFusionEvents(content)) { return undefined; }
+
+	const { drafts, syntheticModel } = parseFusionEvents(content);
+
+	// A fusion with neither a plan nor a single completed leg carries nothing to show.
+	const turns = [...drafts.values()]
+		.filter(d => d.resolved !== null || d.phases.length > 0)
+		.map(buildTurn);
+	if (turns.length === 0) { return undefined; }
+
+	return buildHydraFusionSummary(turns, syntheticModel);
 }
 
 /**
