@@ -17,6 +17,8 @@ export interface BadgeSetupData {
 	theme: BadgeTheme;
 	/** Link ids only; the URLs live in the host so the webview can only ask for known pages. */
 	links: BadgeLinkId[];
+	/** Webview URI of the Universe badge photo; absent when the image was not bundled. */
+	imageUri?: string;
 	localization?: Record<string, string>;
 	language?: string;
 }

@@ -179,6 +179,13 @@ async function main() {
 		});
 	}
 
+	// The Universe badge photo for the Badge setup view (optional: the view skips it when it is missing).
+	const badgeImageSrc = path.join(__dirname, 'media', 'badge-universe.jpg');
+	if (fs.existsSync(badgeImageSrc)) {
+		fs.mkdirSync(path.join(__dirname, 'dist', 'webview'), { recursive: true });
+		fs.copyFileSync(badgeImageSrc, path.join(__dirname, 'dist', 'webview', 'badge-universe.jpg'));
+	}
+
 	// Copy sql.js WASM file to dist/ for OpenCode SQLite support
 	const wasmSrc = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
 	const wasmDst = path.join(__dirname, 'dist', 'sql-wasm.wasm');

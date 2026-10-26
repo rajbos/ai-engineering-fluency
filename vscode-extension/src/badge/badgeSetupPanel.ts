@@ -13,6 +13,7 @@ import type { BadgeHostMessage, BadgeLastSync, BadgeLinkId, BadgeSetupData } fro
 const PANEL_VIEW_TYPE = 'aiFluencyBadgeSetup';
 const THEME_STATE_KEY = 'badge.theme';
 const LAST_SYNC_STATE_KEY = 'badge.lastSync';
+const BADGE_IMAGE_FILE = 'badge-universe.jpg';
 
 /** The pages the panel may open. The webview only ever sends an id, never a URL. */
 const BADGE_LINKS: Record<BadgeLinkId, string> = {
@@ -44,6 +45,8 @@ export interface BadgeSetupDeps {
 	getSnapshot: () => Promise<BadgeSnapshot>;
 	openView: (view: FeatureViewId) => Promise<void>;
 	log: (message: string) => void;
+	/** Hides the Badge button (and so the view) for people who have no badge. */
+	hideButton: () => Promise<void>;
 	run?: CommandRunner;
 }
 
@@ -104,6 +107,7 @@ export class BadgeSetupPanel {
 			badgeSyncUsb: () => this.syncUsb(),
 			badgeInstallApp: () => this.installApp(),
 			badgeTheme: () => this.deps.context.globalState.update(THEME_STATE_KEY, normalizeBadgeTheme(message?.theme as Record<string, unknown> | undefined)),
+			badgeHideButton: () => this.deps.hideButton(),
 			badgeOpenLink: () => this.openLink(message?.id),
 			refresh: () => this.rerender(),
 		};
@@ -174,6 +178,12 @@ export class BadgeSetupPanel {
 		}
 	}
 
+	/** The Universe badge photo, shipped in `dist/webview` when the build found it in `media/`. */
+	private getImageUri(webview: vscode.Webview): string | undefined {
+		const file = vscode.Uri.joinPath(this.deps.context.extensionUri, 'dist', 'webview', BADGE_IMAGE_FILE);
+		return fs.existsSync(file.fsPath) ? webview.asWebviewUri(file).toString() : undefined;
+	}
+
 	private getHtml(webview: vscode.Webview): string {
 		const extensionUri = this.deps.context.extensionUri;
 		const nonce = getNonce();
@@ -183,6 +193,7 @@ export class BadgeSetupPanel {
 			lastSync: this.getLastSync(),
 			theme: this.getCachedTheme(),
 			links: Object.keys(BADGE_LINKS) as BadgeLinkId[],
+			imageUri: this.getImageUri(webview),
 			localization: { ...buildWebviewLocalization(t), '__language__': language },
 			language,
 		};

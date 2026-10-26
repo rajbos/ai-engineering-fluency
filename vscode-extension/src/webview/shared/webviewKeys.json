@@ -684,5 +684,7 @@
   "badge.link.tufty",
   "badge.link.badgeware",
   "badge.link.badgewareDocs",
-  "badge.privacy"
+  "badge.privacy",
+  "badge.action.hide",
+  "badge.image.alt"
 ]

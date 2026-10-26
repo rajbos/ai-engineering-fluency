@@ -140,6 +140,7 @@ function layoutHtml(): string {
 				<div class="button-row">${navButtons}</div>
 			</div>
 
+			${initialData?.imageUri ? `<img class="badge-photo" src="${escapeHtml(initialData.imageUri)}" alt="${escapeHtml(localize('badge.image.alt'))}" />` : ''}
 			<p class="intro">${escapeHtml(localize('badge.intro'))}</p>
 
 			<section class="card">
@@ -174,6 +175,7 @@ function layoutHtml(): string {
 			</section>
 
 			<p class="privacy">${escapeHtml(localize('badge.privacy'))}</p>
+			<p><vscode-button id="btn-badge-hide" appearance="secondary">${escapeHtml(localize('badge.action.hide'))}</vscode-button></p>
 		</div>
 	`;
 }
@@ -191,6 +193,9 @@ function wire(): void {
 	document.getElementById('btn-badge-install')?.addEventListener('click', () => {
 		installMessage = '';
 		vscode.postMessage({ command: 'badgeInstallApp' });
+	});
+	document.getElementById('btn-badge-hide')?.addEventListener('click', () => {
+		vscode.postMessage({ command: 'badgeHideButton' });
 	});
 	document.querySelectorAll<HTMLAnchorElement>('.badge-link').forEach((link) => {
 		link.addEventListener('click', (event) => {

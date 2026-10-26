@@ -1128,5 +1128,10 @@
   "badge.link.tufty": "Tufty 2350 产品页面",
   "badge.link.badgeware": "badgewa.re",
   "badge.link.badgewareDocs": "Badgeware 文档",
-  "badge.privacy": "只会向徽章发送计数、你的流利度阶段、简短标签和颜色，不包含提示词、文件路径、仓库名称或会话标题。"
+  "badge.privacy": "只会向徽章发送计数、你的流利度阶段、简短标签和颜色，不包含提示词、文件路径、仓库名称或会话标题。",
+  "command.hideBadgeSetup.title": "隐藏徽章按钮",
+  "command.restoreBadgeSetup.title": "显示徽章按钮",
+  "badge.action.hide": "隐藏此视图（我没有徽章）",
+  "badge.hide.notice": "徽章按钮已隐藏。运行“AI Engineering Fluency: 显示徽章按钮”即可恢复。",
+  "badge.image.alt": "GitHub Universe 2026 徽章"
 }

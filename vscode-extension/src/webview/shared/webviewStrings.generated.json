@@ -684,5 +684,7 @@
   "badge.link.tufty": "Tufty 2350 product page",
   "badge.link.badgeware": "badgewa.re",
   "badge.link.badgewareDocs": "Badgeware docs",
-  "badge.privacy": "Only counts, your fluency stage, short labels and colours are sent to the badge. No prompts, file paths, repository names or session titles."
+  "badge.privacy": "Only counts, your fluency stage, short labels and colours are sent to the badge. No prompts, file paths, repository names or session titles.",
+  "badge.action.hide": "Hide this view (I have no badge)",
+  "badge.image.alt": "The GitHub Universe 2026 badge"
 }
