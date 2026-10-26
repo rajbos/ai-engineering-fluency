@@ -344,7 +344,7 @@ test('getDeduplicatedCacheEntries() delegates to the shared dedupeByNormalizedKe
 // on: on a non-Linux platform, a cache-recorded key and a freshly discovered key for the same
 // physical file that differ only in drive-letter case or separator style normalize identically,
 // so they can never coexist in the `seen` set as two "different" files. normalizePathForDedup()
-// itself already has full behavioral coverage in utils-pathUtils.test.ts; this test exists to
+// itself already has full behavioral coverage in utilsPathUtils.test.ts; this test exists to
 // make the tie to *this* PR's dedup contract explicit rather than assumed.
 test('normalizePathForDedup() collapses the exact kind of equivalent-path pair the cache/discovery dedup relies on', () => {
 	const cacheRecordedKey = normalizePathForDedup('C:\\Users\\dev\\.copilot\\session.json', 'win32');
