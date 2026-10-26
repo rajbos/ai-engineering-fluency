@@ -7,9 +7,6 @@
  */
 import type { CustomizationTypeStatus, WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../../src/types';
 
-// Re-export for consumers (tests etc.) so they don't need to depend on types.ts directly
-export type { CustomizationTypeStatus, WorkspaceCustomizationMatrix as SanitizedCustomizationMatrix, WorkspaceCustomizationRow as SanitizedCustomizationRow } from '../../../../src/types';
-
 const VALID_STATUSES = new Set<string>(['✅', '⚠️', '❌']);
 
 function coerceStringArray(value: unknown): string[] | undefined {

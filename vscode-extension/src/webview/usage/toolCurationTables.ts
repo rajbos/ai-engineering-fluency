@@ -5,8 +5,6 @@ import { getDataTableState, renderDataTable, renderDataTableFilter, type DataTab
 
 type McpServerEntry = ToolCurationAnalysis['underusedMcpServers'][number];
 
-export type CurationTableId = 'mcp' | 'builtin' | 'skills';
-
 const curationLinkStyle = 'background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;';
 const defaultMcpConfigLink = '<code>.vscode/mcp.json</code>'; // i18n-exempt: configuration filename, not translatable prose.
 
@@ -177,17 +175,6 @@ function renderBuiltinTable(tools: AvailableToolEntry[]): string {
 		columns,
 		initialSort: { columnId: 'overhead', direction: 'desc' },
 	});
-}
-
-export function renderCurationTable(tableId: CurationTableId, analysis: ToolCurationAnalysis): string {
-	switch (tableId) {
-		case 'mcp':
-			return renderMcpTable(analysis.underusedMcpServers, analysis.estimatedPromptBloat);
-		case 'builtin':
-			return renderBuiltinTable(analysis.availableTools.filter(tool => tool.source === 'builtin'));
-		case 'skills':
-			return renderSkillsTable(analysis.unusedTools.filter(tool => tool.source === 'skill'));
-	}
 }
 
 export function buildUnusedMcpHtml(

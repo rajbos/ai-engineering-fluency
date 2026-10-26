@@ -23,9 +23,6 @@ export function setCompactNumbers(enabled: boolean): void {
 	compactNumbersEnabled = enabled;
 }
 
-/** Union of all known editor display names that have explicit icon mappings. */
-export type EditorName = keyof typeof _EDITOR_ICON_MAP;
-
 /**
  * Re-export canonical map for callers that need the full record.
  * The authoritative source is `src/editorIcons.ts`.

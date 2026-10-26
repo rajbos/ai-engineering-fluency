@@ -1,19 +1,5 @@
 import type { ValueSignals } from '../../../../src/efficiencyAnalysis';
 
-/**
- * Host → webview Value update for the Efficiency panel.
- *
- * The Value tab's PR metrics come from the Repository PRs snapshot, which is loaded from the
- * *Usage Analysis* panel — so it routinely lands after the Efficiency panel has already
- * rendered. With `retainContextWhenHidden` the retained document is never re-created, so
- * without this message the Value tab keeps its "open Usage Analysis → Repository PRs" hint
- * until the user presses Refresh.
- */
-export interface EfficiencyValueSignalsMessage {
-	command: 'valueSignalsUpdated';
-	value: ValueSignals;
-}
-
 /** Webview → host readiness announcement, mirroring `usageWebviewReady`. */
 export interface EfficiencyWebviewReadyMessage {
 	command: 'efficiencyWebviewReady';

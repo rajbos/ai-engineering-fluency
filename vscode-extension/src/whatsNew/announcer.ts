@@ -271,8 +271,3 @@ export function planAnnouncement(input: {
 		announcement: chosen,
 	};
 }
-
-/** How many queued features are still waiting — used to badge the What's New entry point. */
-export function pendingCount(state: WhatsNewState): number {
-	return state.pending.length;
-}

@@ -123,13 +123,6 @@ export const BUTTONS: Record<ButtonId, ButtonConfig> = new Proxy({} as Record<Bu
 });
 
 /**
- * Helper function to get button configuration by ID.
- */
-export function getButton(id: ButtonId): ButtonConfig {
-	return BUTTONS[id];
-}
-
-/**
  * Canonical order of the shared navigation button row rendered by every webview panel.
  */
 const NAV_ORDER: ButtonId[] = [
