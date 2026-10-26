@@ -26,7 +26,12 @@ export type BadgeSyncResult =
 	| { status: 'mpremoteMissing' | 'noBadge' | 'cancelled' }
 	| { status: 'failed'; message: string };
 
+export type BadgeInstallResult =
+	| { status: 'copied'; target: string }
+	| { status: 'noDrive' | 'unavailable' }
+	| { status: 'failed'; message: string };
+
 /** Messages the host posts into the webview. */
 export type BadgeHostMessage =
 	| { command: 'badgeSyncResult'; result: BadgeSyncResult }
-	| { command: 'badgeInstallResult'; revealed: boolean };
+	| { command: 'badgeInstallResult'; result: BadgeInstallResult };

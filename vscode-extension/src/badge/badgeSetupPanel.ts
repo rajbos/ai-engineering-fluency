@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { buildBadgePayload, normalizeBadgeTheme, serializeBadgePayload, type BadgeDayInput, type BadgeMaturityInput, type BadgeTheme } from '../../../src/badgePayload';
 import { resolvedLocale, t } from '../l10n';
@@ -6,6 +7,7 @@ import { buildWebviewLocalization } from '../webviewLocalization';
 import { buildCspMeta, getCodiconStylesheetTag, getNonce } from '../utils/webviewUtils';
 import type { FeatureViewId } from '../whatsNew/catalog';
 import { runCommand, syncBadge, type CommandRunner } from './badgeSyncService';
+import { installBadgeApp } from './badgeInstallService';
 import type { BadgeHostMessage, BadgeLastSync, BadgeLinkId, BadgeSetupData } from './badgeSetupTypes';
 
 const PANEL_VIEW_TYPE = 'aiFluencyBadgeSetup';
@@ -100,7 +102,7 @@ export class BadgeSetupPanel {
 		const command = typeof message?.command === 'string' ? message.command : '';
 		const handlers: Record<string, () => unknown> = {
 			badgeSyncUsb: () => this.syncUsb(),
-			badgeInstallHelp: () => this.revealAppFolder(),
+			badgeInstallApp: () => this.installApp(),
 			badgeTheme: () => this.deps.context.globalState.update(THEME_STATE_KEY, normalizeBadgeTheme(message?.theme as Record<string, unknown> | undefined)),
 			badgeOpenLink: () => this.openLink(message?.id),
 			refresh: () => this.rerender(),
@@ -149,11 +151,27 @@ export class BadgeSetupPanel {
 		}
 	}
 
-	private async revealAppFolder(): Promise<void> {
+	private async installApp(): Promise<void> {
 		const folder = vscode.Uri.joinPath(this.deps.context.extensionUri, 'dist', 'badge-app', 'fluency');
-		const exists = fs.existsSync(folder.fsPath);
-		if (exists) { await vscode.commands.executeCommand('revealFileInOS', folder); }
-		this.post({ command: 'badgeInstallResult', revealed: exists });
+		const outcome = await installBadgeApp({
+			sourceDir: folder.fsPath,
+			platform: process.platform,
+			run: this.deps.run ?? runCommand,
+			userName: os.userInfo().username,
+			exists: fs.existsSync,
+		});
+		if (outcome.status === 'copied') {
+			this.post({ command: 'badgeInstallResult', result: { status: 'copied', target: outcome.target } });
+		} else if (outcome.status === 'noDrive') {
+			// Without the drive the user still needs the folder, so show it for a manual copy.
+			await vscode.commands.executeCommand('revealFileInOS', folder);
+			this.post({ command: 'badgeInstallResult', result: { status: 'noDrive' } });
+		} else if (outcome.status === 'sourceMissing') {
+			this.post({ command: 'badgeInstallResult', result: { status: 'unavailable' } });
+		} else {
+			this.deps.log(`Badge app install failed: ${outcome.message}`);
+			this.post({ command: 'badgeInstallResult', result: { status: 'failed', message: outcome.message } });
+		}
 	}
 
 	private getHtml(webview: vscode.Webview): string {

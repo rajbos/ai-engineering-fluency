@@ -15,7 +15,7 @@ The button is registered through the extension-point API (`registerButton`), so 
 | --- | --- |
 | Sync status | Shows when the badge was last synced, the payload size and the serial port. |
 | **Sync over USB** | Builds the payload and copies it to `/state/fluency.json` on the badge with `mpremote`. |
-| **Install app on badge** | Reveals the bundled `fluency` app folder in your file manager. Copy it to the `BADGER` drive (USB disk mode, double-tap RESET), eject, then open it from the badge menu. |
+| **Install app on badge** | Copies the bundled `fluency` app to `apps/fluency` on the `BADGER` drive and replaces an older copy. Put the badge in USB disk mode first (double-tap RESET). The drive is found by its label: a Windows drive letter (via PowerShell `Get-Volume`), `/Volumes/BADGER` on macOS, or the usual `/media`, `/run/media` and `/mnt` mount points on Linux. If no drive is found, the app folder is revealed in your file manager for a manual copy. Eject the drive afterwards (the view cannot do that for you), then open Fluency from the badge menu. |
 | Badge colours | The accent, link, positive and warning colours the badge takes from your current VS Code theme. |
 | Links | `badger/home`, the Tufty 2350 product page, badgewa.re and the Badgeware docs. |
 
@@ -39,7 +39,6 @@ The extension API does not expose resolved theme colours, so the view reads the 
 
 - Wi-Fi push and the pairing token (milestone two in the plan).
 - Per-category tips in the payload, which the shake-for-a-tip screen would use.
-- Copying the app to a mounted `BADGER` drive automatically.
 
 ## Where the code is
 
@@ -48,6 +47,7 @@ The extension API does not expose resolved theme colours, so the view reads the 
 | Payload builder (shared, editor-neutral) | `src/badgePayload.ts`, tests in `src/test/badgePayload.test.ts` |
 | USB sync (`mpremote`, injected runner) | `vscode-extension/src/badge/badgeSyncService.ts`, tests in `vscode-extension/test/unit/badgeSyncService.test.ts` |
 | Panel host | `vscode-extension/src/badge/badgeSetupPanel.ts` |
+| App install (find the `BADGER` drive, copy the app) | `vscode-extension/src/badge/badgeInstallService.ts`, tests in `vscode-extension/test/unit/badgeInstallService.test.ts` |
 | Command and button registration | `vscode-extension/src/badge/registerBadgeSetup.ts` |
 | Webview | `vscode-extension/src/webview/badge-setup/` |
 | Visual registry entry and fixture | `.github/skills/visual-view-diff/views.config.json`, `.github/skills/visual-view-diff/fixtures/badge-setup.json` |

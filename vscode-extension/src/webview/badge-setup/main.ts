@@ -9,7 +9,7 @@ import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { normalizeBadgeTheme, normalizeHexColor, type BadgeTheme, type BadgeThemeKey } from '../../../../src/badgePayload';
-import type { BadgeHostMessage, BadgeLastSync, BadgeLinkId, BadgeSetupData, BadgeSyncResult } from '../../badge/badgeSetupTypes';
+import type { BadgeHostMessage, BadgeInstallResult, BadgeLastSync, BadgeLinkId, BadgeSetupData, BadgeSyncResult } from '../../badge/badgeSetupTypes';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 
 declare function acquireVsCodeApi<TState = unknown>(): {
@@ -93,6 +93,15 @@ function syncResultText(result: BadgeSyncResult): string {
 		case 'noBadge': return localize('badge.sync.noBadge');
 		case 'cancelled': return localize('badge.sync.cancelled');
 		case 'failed': return localizeFormat('badge.sync.failed', result.message);
+	}
+}
+
+function installResultText(result: BadgeInstallResult): string {
+	switch (result.status) {
+		case 'copied': return localizeFormat('badge.install.copied', result.target);
+		case 'noDrive': return localize('badge.install.noDrive');
+		case 'unavailable': return localize('badge.install.unavailable');
+		case 'failed': return localizeFormat('badge.install.failed', result.message);
 	}
 }
 
@@ -180,7 +189,8 @@ function wire(): void {
 		vscode.postMessage({ command: 'badgeSyncUsb' });
 	});
 	document.getElementById('btn-badge-install')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'badgeInstallHelp' });
+		installMessage = '';
+		vscode.postMessage({ command: 'badgeInstallApp' });
 	});
 	document.querySelectorAll<HTMLAnchorElement>('.badge-link').forEach((link) => {
 		link.addEventListener('click', (event) => {
@@ -206,7 +216,7 @@ function onHostMessage(message: BadgeHostMessage): void {
 		}
 		render();
 	} else if (message?.command === 'badgeInstallResult') {
-		installMessage = localize(message.revealed ? 'badge.install.revealed' : 'badge.install.unavailable');
+		installMessage = installResultText(message.result);
 		render();
 	}
 }

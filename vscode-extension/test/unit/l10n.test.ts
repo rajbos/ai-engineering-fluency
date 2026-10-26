@@ -2290,6 +2290,9 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 	assert.equal(t('badge.status.last', 'Oct 23, 2026', '1,024', 'COM5'), 'Last synced Oct 23, 2026 · 1,024 bytes · COM5');
 	assert.equal(t('badge.sync.ok', '1,024', 'COM5'), 'Synced 1,024 bytes over COM5. The badge app restarts while it loads the new data.');
 	assert.equal(t('badge.sync.failed', 'boom'), 'Sync failed: boom');
+	assert.equal(t('badge.install.copied', 'E:\\apps\\fluency'), 'Copied the app to E:\\apps\\fluency. Eject the drive, then open Fluency from the badge menu.');
+	assert.equal(t('badge.install.failed', 'denied'), 'Install failed: denied');
+	assert.match(t('badge.install.noDrive'), /No BADGER drive found/);
 	assert.match(t('badge.sync.mpremoteMissing'), /pip install mpremote/);
 
 	mock.setLanguage('zh-cn');

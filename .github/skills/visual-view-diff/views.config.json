@@ -106,7 +106,7 @@
           "name": "Install, link and sync buttons post their messages",
           "expect": "#btn-badge-sync",
           "steps": [
-            { "click": "#btn-badge-install", "expectPosted": "badgeInstallHelp" },
+            { "click": "#btn-badge-install", "expectPosted": "badgeInstallApp" },
             { "click": ".badge-link", "expectPosted": "badgeOpenLink" },
             { "click": "#btn-badge-sync", "expectPosted": "badgeSyncUsb" }
           ]
