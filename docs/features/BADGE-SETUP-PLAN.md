@@ -14,11 +14,19 @@ The badge app shows live data from the AI Engineering Fluency extension, plus tw
 4. QR code to `https://linkedin.com/in/bosrob`, with a labelled placeholder until the official LinkedIn logo is added.
 5. Sync status, shown on demand with MENU (and automatically when there is no data yet).
 
+The score and history screens come in three looks the wearer switches on the badge (a tap on SELECT, or UP/DOWN on the sync screen). The choice is saved in `/state/fluency_look.json`.
+
+| Look | What changes |
+| --- | --- |
+| Motion (default) | Screens slide when you flip them, the segment bars and history bars grow in, the history cursor glides with a pulsing halo, and a band sweeps across when new data lands. |
+| 3D radar | The score screen becomes a turning radar prism, one spoke per category labelled with its name and stage. Left/right tilt spins it faster or backwards, forward/back tilt changes the viewing angle. |
+| 3D skyline | The history screen becomes a 3D contribution graph: a tower per day, a column per weekday and a row per week. The camera sways slowly and forward/back tilt changes its angle; left/right tilt still scrubs. |
+
 Planned, not built yet: a wearer view and a tip screen (see [Motion features](#motion-features-not-built-yet)).
 
 **Decisions:**
 
-- No radar chart. It was dropped because it showed no values or category names.
+- The flat score screen keeps segment bars. A radar chart was first dropped because it showed no values or category names; the 3D radar look brings it back with a name and stage on every spoke, as an option rather than the default.
 - Sync is USB for the first load, with a Wi-Fi push option planned on top. The sharing server is not used.
 - Highlight colours come from the active VS Code theme, read from the webview's CSS variables, with a fixed dark ground on the badge.
 - QR codes use the full URLs as they are now. Shortening them is a later experiment after testing on the device.
@@ -79,9 +87,9 @@ A MicroPython app in `badge-app/fluency/`, copied to `apps/fluency` on the badge
 
 | Screen | LEFT / RIGHT | Motion | Other |
 | --- | --- | --- | --- |
-| Score, QR repo, QR LinkedIn | tap flips to previous / next screen | none yet | MENU opens sync status |
-| 30-day history | tap flips screen | tilt scrubs the day cursor | UP / DOWN toggles tokens and sessions |
-| Sync status | tap flips screen | none | BACK returns |
+| Score, QR repo, QR LinkedIn | tap flips to previous / next screen | 3D radar look: tilt spins and angles the radar | MENU opens sync status, a tap on SELECT switches the look |
+| 30-day history | tap flips screen | tilt scrubs the day cursor; 3D skyline look: forward/back tilt angles the camera | UP / DOWN toggles tokens and sessions, a tap on SELECT switches the look |
+| Sync status | tap flips screen | none | UP / DOWN switches the look, BACK returns |
 
 **Data file** `/state/fluency.json`, written by the extension (sample values; the builder is `src/badgePayload.ts`):
 
