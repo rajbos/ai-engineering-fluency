@@ -9,6 +9,7 @@
  * runtime only changes when that file does.
  */
 
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -50,21 +51,43 @@ function rawUrl(pin, repoPath) {
 	return `https://raw.githubusercontent.com/${pin.repository}/${pin.revision}/${repoPath}`;
 }
 
+/** Reads a file, or returns null when it does not exist; no separate existence check, so there is no window between the two. */
+function readIfPresent(file) {
+	try {
+		return fs.readFileSync(file);
+	} catch (error) {
+		if (error.code === 'ENOENT') { return null; }
+		throw error;
+	}
+}
+
+/** The cache location of a repository file; refuses anything that would resolve outside the cache root. */
+function cachePath(root, repoPath) {
+	const resolvedRoot = path.resolve(root);
+	const file = path.resolve(resolvedRoot, ...repoPath.split('/'));
+	if (file !== resolvedRoot && !file.startsWith(resolvedRoot + path.sep)) {
+		throw new Error(`${repoPath} would be cached outside ${root}`);
+	}
+	return file;
+}
+
 /**
  * Returns the cached copy of a repository file, downloading it on first use.
  * Resolves to null when the file does not exist at the pinned revision.
  */
 async function fetchCached(pin, repoPath, root, fetchImpl = fetch) {
-	const file = path.join(root, ...repoPath.split('/'));
-	if (fs.existsSync(file)) { return fs.readFileSync(file); }
+	const file = cachePath(root, repoPath);
+	const cached = readIfPresent(file);
+	if (cached) { return cached; }
 	const response = await fetchImpl(rawUrl(pin, repoPath));
 	if (response.status === 404) { return null; }
 	if (!response.ok) { throw new Error(`GET ${repoPath} at ${pin.revision.slice(0, 7)} failed: HTTP ${response.status}`); }
 	const data = Buffer.from(await response.arrayBuffer());
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	// Write then rename, so an interrupted download never leaves a truncated file in the cache.
-	const partial = `${file}.${process.pid}.partial`;
-	fs.writeFileSync(partial, data);
+	// The partial has a random name and is created exclusively, so nothing can pre-plant it.
+	const partial = `${file}.${crypto.randomBytes(8).toString('hex')}.partial`;
+	fs.writeFileSync(partial, data, { flag: 'wx', mode: 0o600 });
 	fs.renameSync(partial, file);
 	return data;
 }
@@ -145,6 +168,7 @@ function simulationSource(source) {
 }
 
 module.exports = {
+	cachePath,
 	cacheRoot,
 	extractFirmwareCompat,
 	fetchRuntimeFile,

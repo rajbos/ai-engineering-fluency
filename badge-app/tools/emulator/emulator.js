@@ -62,7 +62,8 @@ function startServer(pin, root) {
 			}
 			res.writeHead(404).end();
 		} catch (error) {
-			console.error(`[emulator] ${req.url}: ${error.message}`);
+			// The request path is attacker-shaped input; log it encoded so it cannot forge log lines.
+			console.error(`[emulator] ${JSON.stringify(req.url)}: ${error.message}`);
 			if (!res.headersSent) { res.writeHead(502); }
 			res.end();
 		}

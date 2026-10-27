@@ -96,6 +96,16 @@ function mergeReports(existing, badge) {
 	};
 }
 
+/** Parses a JSON file, or returns null when it does not exist; read directly rather than checked first. */
+function readJsonIfPresent(file) {
+	try {
+		return JSON.parse(fs.readFileSync(file, 'utf8'));
+	} catch (error) {
+		if (error.code === 'ENOENT') { return null; }
+		throw error;
+	}
+}
+
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const base = resolveBase(args.base || 'origin/main');
@@ -128,7 +138,7 @@ async function main() {
 		ensureDir(outRoot);
 		for (const name of ['baseline', 'current', 'diff']) { copyPngs(dirs[name], path.join(outRoot, name)); }
 		const reportPath = path.join(outRoot, 'diff', 'report.json');
-		const existing = fs.existsSync(reportPath) ? JSON.parse(fs.readFileSync(reportPath, 'utf8')) : null;
+		const existing = readJsonIfPresent(reportPath);
 		const badge = JSON.parse(fs.readFileSync(path.join(dirs.diff, 'report.json'), 'utf8'));
 		const merged = mergeReports(existing, badge);
 		fs.writeFileSync(reportPath, JSON.stringify(merged, null, 2) + '\n');

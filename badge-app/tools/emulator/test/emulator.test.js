@@ -39,6 +39,22 @@ test('fetchRuntimeFile refuses an unsafe path without fetching', async () => {
 	assert.equal(called, false);
 });
 
+test('cachePath keeps every cached file inside the cache root', () => {
+	const root = path.join(os.tmpdir(), 'emu-root');
+	assert.equal(runtime.cachePath(root, 'public/simulator/util.js'), path.join(root, 'public', 'simulator', 'util.js'));
+	assert.throws(() => runtime.cachePath(root, '../outside.js'), /outside/);
+	assert.throws(() => runtime.cachePath(root, 'a/../../outside.js'), /outside/);
+});
+
+test('fetchCached leaves no partial file behind and the cached copy is only visible once complete', async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emu-partial-'));
+	const pin = { repository: 'badger/badger.github.io', revision: 'b'.repeat(40) };
+	const fake = async () => ({ status: 200, ok: true, arrayBuffer: async () => new TextEncoder().encode('data').buffer });
+	assert.equal(String(await runtime.fetchRuntimeFile(pin, 'x.js', root, fake)), 'data');
+	assert.deepEqual(fs.readdirSync(path.join(root, 'simulator', 'public', 'simulator')), ['x.js']);
+	fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('fetchRuntimeFile caches the first download and maps 404 to null', async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emu-cache-'));
 	const pin = { repository: 'badger/badger.github.io', revision: 'a'.repeat(40) };
