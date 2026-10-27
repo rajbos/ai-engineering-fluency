@@ -300,6 +300,9 @@ SPIDER_POP_MS = 450  # a spoke popping out to its stage
 SPIDER_IDLE_MS = 7000  # a later, fainter turn of the arm
 SPIDER_PING_MS = 3600  # Spider chart: one sonar ping's trip from the centre to the rim
 SPIDER_PINGS = 3  # ...with this many rings in flight at once
+BARS_PING_MS = 3200  # Score bars: one sonar ping's trip out from the stage digit
+BARS_PINGS = 3
+BARS_PING_REACH = 300  # how far (px) a ping travels before it has faded out
 SPIDER_TRAIL = 0.55  # radians of fading trail behind the arm
 SPIDER_FLOOR = 0.12  # radius of a zero stage, so the shape never collapses
 
@@ -337,7 +340,17 @@ def score_footer(data):
            fd.updated_label(data["updated"])[:12])
 
 
+def draw_sonar(motion, colour):
+    """Rings that ripple out from the stage digit across the bars, under the text."""
+    for ping in range(BARS_PINGS):
+        state = fm.sonar_ping(motion.elapsed, ping, BARS_PINGS, BARS_PING_MS)
+        ring = fm.arc_points(MARGIN + 14, 52, BARS_PING_REACH * state[0], 0, 2 * math.pi, 48)
+        polygon(ring, rgb(colour, int(100 * state[1])), 1)
+
+
 def draw_score(data, accent, demo, motion=None):
+    if motion:
+        draw_sonar(motion, motion.reload_colour())
     score_header(data, accent, demo)
 
     stage = str(data["stage"])
@@ -919,7 +932,7 @@ class App:
     def pitch(self, base):
         return max(0.2, min(1.3, base + self.tilt.y * TILT_PITCH))
 
-    def draw_screen(self, index, data, colour, motion):
+    def draw_screen(self, index, data, colour, motion, leaving=False):
         name = SCREENS[index]
         look = fm.LOOKS[self.look]
         accent = rgb(colour)
@@ -931,7 +944,9 @@ class App:
             elif radar:
                 draw_radar(data, colour, self.store.demo, self.yaw, self.pitch(0.62), "UP/DOWN: spider chart")
             else:
-                draw_score(data, accent, self.store.demo, motion)
+                # The bars animate in every look, so they also get a motion here when the look has none.
+                bars_motion = None if leaving else motion or Motion(badge.ticks - self.entered, badge.ticks, self.glow, colour)
+                draw_score(data, accent, self.store.demo, bars_motion)
         elif name == "history":
             if look == "skyline":
                 sway = 0.22 * math.sin(badge.ticks / 2600)
@@ -971,7 +986,7 @@ class App:
             if sliding:
                 eased = fm.ease_in_out((now - self.slide_start) / TRANSITION_MS)
                 DX = int(-self.slide_direction * WIDTH * eased)
-                self.draw_screen(self.previous, data, accent_rgb, None)
+                self.draw_screen(self.previous, data, accent_rgb, None, leaving=True)
                 DX = int(self.slide_direction * WIDTH * (1 - eased))
                 self.draw_screen(self.screen, data, accent_rgb, motion)
                 DX = 0
