@@ -30,7 +30,7 @@
     "electron": "^45.0.0",
     "electron-builder": "^26.17.0",
     "esbuild": "^0.28.2",
-    "sql.js": "^1.15.0",
+    "sql.js": "^1.15.1",
     "typescript": "^7.0.2"
   },
   "engines": {
