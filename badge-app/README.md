@@ -104,6 +104,23 @@ Give it data (the extension's **Sync over USB** button does the same with your r
 mpremote fs cp badge-app/fluency/assets/sample.json :/state/fluency.json
 ```
 
+### If it crashes or freezes
+
+The app writes `/state/fluency_debug.txt` each run. Every 10 seconds it logs
+free memory, frames per second, the slowest frame, the longest gc pause and
+the screen and look on show. If the app dies, the traceback goes last. `/state` is not on the `BADGER` drive, so read the log
+over USB with the badge at the menu (not in disk mode, and without opening
+Fluency again, since each launch rewrites the file):
+
+```sh
+mpremote fs cat :/state/fluency_debug.txt
+```
+
+Free memory that keeps falling means a leak. A log that just stops, with no
+traceback, means the badge froze or reset below Python; the last line shows
+the screen it was on. (`machine.reset_cause()` cannot tell you more: on the
+RP2 every software reset reads as `WDT_RESET`.)
+
 ## Rebuild the QR codes
 
 ```sh
