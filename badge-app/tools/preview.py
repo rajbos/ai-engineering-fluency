@@ -222,6 +222,8 @@ def script(with_data):
     steps = wait(4) + [{"shot": "1a-score-growing"}] + wait(30) + [{"shot": "1-score"}]
     # UP on the score screen flips to the spider chart: the rings grow, the arm sweeps the spokes in.
     steps += [{"press": ("UP",)}] + wait(22) + [{"shot": "1c-chart-sweeping"}] + wait(45) + [{"shot": "1d-chart"}]
+    # After one more turn of the arm the chart replays its intro in the next colour.
+    steps += wait(240) + [{"shot": "1e-chart-recolour"}]
     steps += [{"press": ("DOWN",)}] + wait(30)
     steps += [{"press": ("RIGHT",)}] + wait(3) + [{"shot": "1b-slide"}]
     steps += [{"tilt": -0.5} for _ in range(10)]  # tilt left: scrub back a few days

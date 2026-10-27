@@ -313,6 +313,9 @@ BARS_PINGS = 3
 BARS_PING_REACH = 300  # how far (px) a ping travels before it has faded out
 SPIDER_TRAIL = 0.55  # radians of fading trail behind the arm
 SPIDER_FLOOR = 0.12  # radius of a zero stage, so the shape never collapses
+# Spider chart: once the arm finishes its first faint turn, the chart replays its
+# intro in the next BARS_PALETTE colour, like the score bars do.
+SPIDER_RELOAD_MS = SPIDER_SWEEP_START_MS + SPIDER_SWEEP_MS + SPIDER_IDLE_MS
 
 
 class Motion:
@@ -465,15 +468,18 @@ def spider_point(cx, cy, index, count, radius):
     return (cx + x, cy + z)
 
 
-def draw_spider(data, colour, demo, elapsed, now, hint):
+def draw_spider(data, theme, demo, elapsed, now, hint):
     """The score as a flat spider chart that a radar arm sweeps into view: the
     rings grow out of the centre, then the arm turns once and each category
     pops out to its stage with a blip as the arm passes it. Afterwards the arm
-    keeps turning faintly and the shape breathes. `colour` is (r, g, b)."""
+    turns faintly once and the shape breathes, then the whole intro replays in
+    the next colour. `theme` is the accent as (r, g, b), kept for the text."""
     categories = data["categories"][:6]
+    score_header(data, rgb(theme), demo)
+    score_column(data, categories, rgb(theme), hint)
+    cycle, elapsed = fm.reload_cycle(elapsed, SPIDER_RELOAD_MS)
+    colour = fm.cycle_colour(theme, BARS_PALETTE, cycle)
     accent = rgb(colour)
-    score_header(data, accent, demo)
-    score_column(data, categories, accent, hint)
 
     cx, cy, radius = 222, 126, 64
     count = len(categories)
