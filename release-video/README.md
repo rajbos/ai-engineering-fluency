@@ -204,9 +204,9 @@ Two things to know:
   auditioning, slow for a full render.
 
 Because it is slow and non-deterministic, Chatterbox is best kept for the final
-cut rather than for iterating. The engine `config.json` currently ships with is
-`mistral`, which clones the same voice far faster; `piper` is the one to switch
-to when you want a build that stays offline and free.
+cut rather than for iterating. `mistral` clones the same voice far faster and
+is the one to switch to for a render in your voice; `config.json` ships with
+`command` (Piper), which keeps the build offline and free.
 
 #### Switching engines
 
@@ -228,6 +228,24 @@ npm run video -- build --from voice
 Both degrade to the deterministic path rather than failing the build.
 
 ## Using it
+
+### Which releases the video covers
+
+Videos are not made for every bump, so a video usually covers everything
+since the previous one, not just the newest release. `--since` is the last
+version an earlier video covered (exclusive); every catalogued release after
+it, up to the newest (or `--version`), is included:
+
+```bash
+npm run video -- releases                     # the catalogue, with dates and feature counts
+npm run video -- build --since 0.17.2         # 0.18.0 up to the newest
+npm run video -- build --since none           # only the newest release
+```
+
+Run in a terminal without `--since`, `plan` and `build` list the releases and
+ask. Without a terminal (an agent, a script) they cover one release and say so.
+Agents follow the `release-video` skill (`.github/skills/release-video/`),
+which asks the user for this first.
 
 ```bash
 npm run video -- build                        # everything
@@ -352,7 +370,8 @@ individually if you want to recut rather than polish.
 
 | Symptom | Cause |
 |---|---|
-| `no webview bundles at …` | `cd ../vscode-extension && npm run compile` |
+| `no webview bundles at …` | `cd ../vscode-extension && pnpm install --frozen-lockfile && pnpm run compile` |
+| `npm error Unsupported URL Type "catalog:"` | You ran `npm install` in `vscode-extension/`, which is pnpm-only. Use the pnpm line above there; `npm install` belongs in `release-video/` |
 | `view "x" is not in views.config.json` | A new panel was added without registering it. See AGENTS.md, *Webview changes must be validated by clicking*. |
 | `view "x" has no state "y"` | The catalog names a tab that the harness has no `state` for. Add it to `views.config.json`. |
 | Screenshots look empty | The fixture for that view has no data. Fixtures live in `.github/skills/visual-view-diff/fixtures/`. |

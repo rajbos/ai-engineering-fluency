@@ -42,6 +42,7 @@ Per-component guides and READMEs.
 | [visual-studio/](visual-studio/README.md) | Visual Studio extension guide |
 | [sharing-server/](sharing-server/README.md) | Sharing server setup, personal dashboard and Team Insights |
 | [Sharing server data separation contract](../sharing-server/AGENTS.md) | Authoritative server privacy, comparison semantics and coding/testing requirements |
+| [release-video/](../release-video/README.md) | Making the extension's narrated release-notes video locally (`npm run video -- build --since <last covered version>`); agents use the `release-video` skill |
 | [specs/backend.md](specs/backend.md) | Backend API specification |
 | [specs/nonCopilotFilesDetection.md](specs/nonCopilotFilesDetection.md) | Non-Copilot file detection spec |
 

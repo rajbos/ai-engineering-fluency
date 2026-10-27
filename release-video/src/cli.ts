@@ -17,13 +17,14 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 
 import { loadConfig, paths } from './config';
 import { doctor } from './doctor';
 import { loadManifest, type Manifest } from './manifest';
 import { plan } from './plan';
 import { polishNarration } from './llm';
-import { selectRelease } from './catalog';
+import { readCatalog, selectRelease } from './catalog';
 import { countWords, estimateSeconds } from './speech';
 import { qa } from './qa';
 import { render } from './render';
@@ -39,6 +40,7 @@ type Stage = (typeof STAGES)[number];
 interface Args {
 	readonly command: string;
 	readonly version?: string;
+	readonly since?: string;
 	readonly output?: string;
 	readonly maxFeatures?: number;
 	readonly text?: string;
@@ -78,6 +80,7 @@ function parseArgs(argv: readonly string[]): Args {
 	return {
 		command: positional[0] ?? 'build',
 		...(asString('version') !== undefined ? { version: asString('version') } : {}),
+		...(asString('since') !== undefined ? { since: asString('since') } : {}),
 		...(asString('output') !== undefined ? { output: asString('output') } : {}),
 		...(asString('max-features') !== undefined ? { maxFeatures: Number(asString('max-features')) } : {}),
 		...(asString('text') !== undefined ? { text: asString('text') } : {}),
@@ -103,13 +106,17 @@ Commands
   render             Render scenes and assemble the MP4
   qa                 Probe the rendered file against the plan
   doctor             Check ffmpeg, the harness, the voice engine and the model
-  voices             List the installed Windows SAPI voices
+  releases           List the catalogued releases, to choose --since
+  voices            List the installed Windows SAPI voices
   say                Speak --text or --text-file with the configured voice engine
   script             Print the narration script (add --llm to preview a polish)
   timeline           Print the planned running order without rendering
 
 Options
   --version <x.y.z>  Release to make a video about (default: newest with features)
+  --since <x.y.z>    Also cover every release after this one: the last version
+                     an earlier video covered. "none" = only --version. When
+                     omitted in a terminal, plan asks; otherwise it is "none"
   --max-features <n> Only cover the first n features
   --keep-narration   Re-plan but keep narration you have already edited
   --llm              Polish narration with the local model (overrides config)
@@ -122,6 +129,8 @@ Options
 Examples
   npm run video -- doctor
   npm run video -- build
+  npm run video -- releases
+  npm run video -- build --since 0.17.2
   npm run video -- build --version 0.18.0 --llm
   npm run video -- build --from render --force
 `;
@@ -138,6 +147,10 @@ async function main(): Promise<number> {
 
 		case 'doctor':
 			return (await doctor(config)) ? 0 : 1;
+
+		case 'releases':
+			printReleases();
+			return 0;
 
 		case 'voices': {
 			const script = path.join(PROJECT_ROOT, 'scripts', 'sapi-speak.ps1');
@@ -191,7 +204,7 @@ ${polished.scenes.length} scenes, ${words} words, roughly ${formatClock(spoken)}
 		}
 
 		case 'plan':
-			await plan(config, planOptions(args));
+			await plan(config, await planOptions(args));
 			return 0;
 
 		case 'shots': {
@@ -251,7 +264,7 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 	let manifest: Manifest;
 
 	if (shouldRun('plan')) {
-		manifest = await plan(config, planOptions(args));
+		manifest = await plan(config, await planOptions(args));
 	} else {
 		manifest = requireManifest();
 	}
@@ -293,13 +306,55 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 	return 0;
 }
 
-function planOptions(args: Args) {
+async function planOptions(args: Args) {
+	const since = await resolveSince(args);
 	return {
 		...(args.version !== undefined ? { version: args.version } : {}),
+		...(since !== undefined ? { since } : {}),
 		...(args.maxFeatures !== undefined ? { maxFeatures: args.maxFeatures } : {}),
 		keepNarration: args.keepNarration,
 		...(args.llm !== undefined ? { useLlm: args.llm } : {}),
 	};
+}
+
+/**
+ * Which releases the video spans.
+ *
+ * Videos are not made for every bump, so defaulting to the newest release
+ * alone silently drops everything shipped since the previous video. In a
+ * terminal, ask; elsewhere (an agent, a script) use only the target release
+ * and say how to widen it.
+ */
+async function resolveSince(args: Args): Promise<string | undefined> {
+	if (args.since !== undefined) {
+		return args.since === 'none' ? undefined : args.since;
+	}
+	if (!process.stdin.isTTY) {
+		log.info('Covering one release. Pass --since <version> to include everything after an earlier video');
+		return undefined;
+	}
+
+	printReleases();
+	const prompt = createInterface({ input: process.stdin, output: process.stdout });
+	try {
+		const answer = (await prompt.question(
+			'Last version an earlier video already covered (Enter = only the newest release): ',
+		)).trim();
+		return answer === '' || answer === 'none' ? undefined : answer;
+	} finally {
+		prompt.close();
+	}
+}
+
+function printReleases(): void {
+	log.group('Catalogued releases, newest first');
+	for (const release of readCatalog()) {
+		log.info(
+			`${release.version.padEnd(8)} ${(release.date ?? 'unreleased').padEnd(11)} ` +
+			`${release.features.length} feature(s)`,
+		);
+	}
+	log.groupEnd();
 }
 
 function requireManifest(options?: { requireAssets?: boolean }): Manifest {

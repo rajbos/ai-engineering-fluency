@@ -315,6 +315,18 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Exit codes: `0` consistent · `1` mechanical drift · `2` config error · `3` no entry for the current version (needs written prose)
 - The editorial guidance for writing an entry: user-facing prose rather than changelog shorthand, ordering by importance because the cap truncates, and never reusing a feature `id` (they are persisted per user to remember what has been announced)
 
+### release-video
+
+**Purpose**: Make the narrated release-notes video for the extension with the local generator in `release-video/` — guidance only, no scripts.
+
+**Use this skill when:**
+- Asked to make or re-render a release video or "video for the release notes"
+
+**Contents:**
+- Asks the user which version the previous video covered and passes it as `--since`, so the video spans every release since then rather than only the newest bump
+- Build order (pnpm for `vscode-extension/`, npm for `release-video/`), switching to the maintainer's cloned voice with the `mistral` engine, and the plan → edit `content/manifest.json` → build loop
+- Local only: there is no CI workflow that renders the video
+
 ### create-issue
 
 **Purpose**: Describe how issues are created in this repo — guidance only, no scripts.

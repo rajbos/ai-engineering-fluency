@@ -27,6 +27,8 @@ import { log, slug, writeJson } from './util';
 
 export interface PlanOptions {
 	readonly version?: string;
+	/** Cover every release after this version, not just `version` itself. */
+	readonly since?: string;
 	readonly maxFeatures?: number;
 	readonly keepNarration?: boolean;
 	readonly useLlm?: boolean;
@@ -79,8 +81,11 @@ function motionFor(index: number, config: Config): Scene['motion'] {
 }
 
 export async function plan(config: Config, options: PlanOptions = {}): Promise<Manifest> {
-	const release = selectRelease(options.version);
+	const release = selectRelease(options.version, options.since);
 	log.group(`Planning ${config.project.productName} ${release.version}`);
+	if (release.covers !== undefined) {
+		log.info(`Covering everything since ${release.since}: ${release.covers.join(', ')}`);
+	}
 	log.info(`${release.features.length} catalogued feature(s)${release.date ? `, released ${release.date}` : ', unreleased'}`);
 
 	const features = options.maxFeatures !== undefined
@@ -159,7 +164,7 @@ export async function plan(config: Config, options: PlanOptions = {}): Promise<M
 		id: 'download-card',
 		image: cardRelativePath('download'),
 		title: '',
-		narration: previous.get('download-card') ?? outroNarration(body.length, config.project.productName),
+		narration: previous.get('download-card') ?? outroNarration(body.length, config.project.productName, release.since),
 		motion: { type: 'still', from: 1.0, to: 1.0, focusX: 0.5, focusY: 0.5 },
 		transition: 'none',
 		transitionSeconds: 0,
