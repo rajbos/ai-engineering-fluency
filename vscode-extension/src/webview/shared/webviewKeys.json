@@ -691,5 +691,12 @@
   "badge.link.badgewareDocs",
   "badge.privacy",
   "badge.action.hide",
-  "badge.image.alt"
+  "badge.image.alt",
+  "badge.preview.title",
+  "badge.preview.description",
+  "badge.preview.loading",
+  "badge.preview.chartLabel",
+  "badge.preview.summary",
+  "badge.range.label",
+  "badge.range.days"
 ]
