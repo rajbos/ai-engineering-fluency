@@ -13,6 +13,8 @@ export interface BadgeLastSync {
 /** Initial payload of the panel (`window.__INITIAL_BADGE_SETUP_DATA__`). */
 export interface BadgeSetupData {
 	lastSync?: BadgeLastSync;
+	/** The app was installed from this view (or the user said it already is); enables Sync. */
+	appInstalled?: boolean;
 	/** Editor theme colours cached from the last time the panel was open; the webview re-probes them live. */
 	theme: BadgeTheme;
 	/** Which palette a sync sends. Absent means the default, the Universe palette. */

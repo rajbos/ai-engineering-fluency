@@ -659,6 +659,8 @@
   "badge.status.last",
   "badge.action.syncUsb",
   "badge.action.install",
+  "badge.action.skipInstall",
+  "badge.sync.needsInstall",
   "badge.sync.running",
   "badge.sync.ok",
   "badge.sync.mpremoteMissing",

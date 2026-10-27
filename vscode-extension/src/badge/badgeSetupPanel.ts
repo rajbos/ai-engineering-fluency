@@ -15,6 +15,7 @@ const THEME_STATE_KEY = 'badge.theme';
 const THEME_SOURCE_STATE_KEY = 'badge.themeSource';
 const RANGE_STATE_KEY = 'badge.range';
 const LAST_SYNC_STATE_KEY = 'badge.lastSync';
+const APP_INSTALLED_STATE_KEY = 'badge.appInstalled';
 const BADGE_IMAGE_FILE = 'badge-universe.jpg';
 
 /** The pages the panel may open. The webview only ever sends an id, never a URL. */
@@ -130,6 +131,7 @@ export class BadgeSetupPanel {
 		const handlers: Record<string, () => unknown> = {
 			badgeSyncUsb: () => this.syncUsb(),
 			badgeInstallApp: () => this.installApp(),
+			badgeMarkInstalled: () => this.deps.context.globalState.update(APP_INSTALLED_STATE_KEY, true),
 			badgeTheme: () => this.deps.context.globalState.update(THEME_STATE_KEY, normalizeBadgeTheme(message?.theme as Record<string, unknown> | undefined)),
 			badgeThemeSource: async () => {
 				await this.deps.context.globalState.update(THEME_SOURCE_STATE_KEY, normalizeBadgeThemeSource(message?.source));
@@ -195,6 +197,7 @@ export class BadgeSetupPanel {
 			exists: fs.existsSync,
 		});
 		if (outcome.status === 'copied') {
+			await this.deps.context.globalState.update(APP_INSTALLED_STATE_KEY, true);
 			this.post({ command: 'badgeInstallResult', result: { status: 'copied', target: outcome.target } });
 		} else if (outcome.status === 'noDrive') {
 			// Without the drive the user still needs the folder, so show it for a manual copy.
@@ -221,6 +224,7 @@ export class BadgeSetupPanel {
 		const language = resolvedLocale(vscode.env.language);
 		const data: BadgeSetupData = {
 			lastSync: this.getLastSync(),
+			appInstalled: this.deps.context.globalState.get<boolean>(APP_INSTALLED_STATE_KEY) === true,
 			theme: this.getCachedTheme(),
 			themeSource: this.getThemeSource(),
 			range: this.getRange(),

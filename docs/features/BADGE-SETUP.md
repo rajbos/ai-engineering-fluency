@@ -17,7 +17,8 @@ The **Hide this view (I have no badge)** button at the bottom of the view remove
 
 | Part | What it does |
 | --- | --- |
-| Sync status | Shows when the badge was last synced, the payload size and the serial port. |
+| Step 1: install the app | Comes first. **Install app on badge** copies the app (see below). **Already installed** skips the step for people who put the app on the badge earlier. |
+| Step 2: sync status | Shows when the badge was last synced, the payload size and the serial port. **Sync over USB** stays disabled, with a hint, until the app is installed (installed from this view, marked as already installed, or synced before). The choice is remembered. |
 | **Sync over USB** | Builds the payload and copies it to `/state/fluency.json` on the badge with `mpremote`. |
 | **Install app on badge** | Copies the bundled `fluency` app to `apps/fluency` on the `BADGER` drive and replaces an older copy. Put the badge in USB disk mode first (double-tap RESET). The drive is found by its label and is only used when it holds an `apps` folder, so nothing is deleted on another volume that happens to be called BADGER. On Windows the label is read with `pwsh`, falling back to `powershell.exe` and then to `bash` (via `cmd.exe vol`); if none of them works the app folder is revealed for a manual copy. a Windows drive letter (via PowerShell `Get-Volume`), `/Volumes/BADGER` on macOS, or the usual `/media`, `/run/media` and `/mnt` mount points on Linux. If no drive is found, the app folder is revealed in your file manager for a manual copy. Eject the drive afterwards (the view cannot do that for you), then open Fluency from the badge menu. |
 | Badge colours | A **Palette** choice: **GitHub Universe** (the default) or **My VS Code theme**. The swatches show the accent, link, positive and warning colours the next sync sends. |
