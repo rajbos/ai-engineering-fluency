@@ -153,3 +153,20 @@
 	margin: 12px 0;
 	border-radius: 8px;
 }
+
+.badge-chart {
+	display: block;
+	width: 100%;
+	max-width: 640px;
+	height: 160px;
+	margin: 8px 0 4px;
+	padding: 6px;
+	box-sizing: border-box;
+	background: #160e24;
+	border-radius: 6px;
+}
+
+.chart-caption {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}

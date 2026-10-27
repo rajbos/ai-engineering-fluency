@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import { buildBadgePayload, normalizeBadgeTheme, normalizeBadgeThemeSource, resolveBadgeTheme, serializeBadgePayload, type BadgeDayInput, type BadgeMaturityInput, type BadgeTheme, type BadgeThemeSource } from '../../../src/badgePayload';
+import { buildBadgePayload, normalizeBadgeRange, normalizeBadgeTheme, normalizeBadgeThemeSource, resolveBadgeTheme, serializeBadgePayload, type BadgeDayInput, type BadgeMaturityInput, type BadgeRange, type BadgeTheme, type BadgeThemeSource } from '../../../src/badgePayload';
 import { resolvedLocale, t } from '../l10n';
 import { buildWebviewLocalization } from '../webviewLocalization';
 import { buildCspMeta, getCodiconStylesheetTag, getNonce } from '../utils/webviewUtils';
@@ -13,6 +13,7 @@ import type { BadgeHostMessage, BadgeLastSync, BadgeLinkId, BadgeSetupData } fro
 const PANEL_VIEW_TYPE = 'aiFluencyBadgeSetup';
 const THEME_STATE_KEY = 'badge.theme';
 const THEME_SOURCE_STATE_KEY = 'badge.themeSource';
+const RANGE_STATE_KEY = 'badge.range';
 const LAST_SYNC_STATE_KEY = 'badge.lastSync';
 const BADGE_IMAGE_FILE = 'badge-universe.jpg';
 
@@ -101,6 +102,24 @@ export class BadgeSetupPanel {
 		return normalizeBadgeThemeSource(this.deps.context.globalState.get<unknown>(THEME_SOURCE_STATE_KEY));
 	}
 
+	private getRange(): BadgeRange {
+		return normalizeBadgeRange(this.deps.context.globalState.get<unknown>(RANGE_STATE_KEY));
+	}
+
+	/** The payload a sync would send right now: the chosen palette and range over the latest numbers. */
+	private async buildPayload() {
+		const snapshot = await this.deps.getSnapshot();
+		return buildBadgePayload({ ...snapshot, theme: resolveBadgeTheme(this.getThemeSource(), this.getCachedTheme()), range: this.getRange(), now: new Date() });
+	}
+
+	private async postPreview(): Promise<void> {
+		try {
+			this.post({ command: 'badgePreview', payload: await this.buildPayload() });
+		} catch (error) {
+			this.deps.log(`Badge preview failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
 	private getLastSync(): BadgeLastSync | undefined {
 		const stored = this.deps.context.globalState.get<unknown>(LAST_SYNC_STATE_KEY);
 		return isLastSync(stored) ? stored : undefined;
@@ -112,7 +131,15 @@ export class BadgeSetupPanel {
 			badgeSyncUsb: () => this.syncUsb(),
 			badgeInstallApp: () => this.installApp(),
 			badgeTheme: () => this.deps.context.globalState.update(THEME_STATE_KEY, normalizeBadgeTheme(message?.theme as Record<string, unknown> | undefined)),
-			badgeThemeSource: () => this.deps.context.globalState.update(THEME_SOURCE_STATE_KEY, normalizeBadgeThemeSource(message?.source)),
+			badgeThemeSource: async () => {
+				await this.deps.context.globalState.update(THEME_SOURCE_STATE_KEY, normalizeBadgeThemeSource(message?.source));
+				await this.postPreview();
+			},
+			badgeRange: async () => {
+				await this.deps.context.globalState.update(RANGE_STATE_KEY, normalizeBadgeRange(message?.range));
+				await this.postPreview();
+			},
+			badgeRequestPreview: () => this.postPreview(),
 			badgeHideButton: () => this.deps.hideButton(),
 			badgeOpenLink: () => this.openLink(message?.id),
 			refresh: () => this.rerender(),
@@ -144,10 +171,7 @@ export class BadgeSetupPanel {
 		try {
 			const result = await syncBadge({
 				run: this.deps.run ?? runCommand,
-				buildPayload: async () => {
-					const snapshot = await this.deps.getSnapshot();
-					return serializeBadgePayload(buildBadgePayload({ ...snapshot, theme: resolveBadgeTheme(this.getThemeSource(), this.getCachedTheme()), now: new Date() }));
-				},
+				buildPayload: async () => serializeBadgePayload(await this.buildPayload()),
 				pickPort: (ports) => Promise.resolve(vscode.window.showQuickPick(ports, { placeHolder: t('badge.sync.pickPort') })),
 			});
 			if (result.status === 'ok') {
@@ -199,6 +223,7 @@ export class BadgeSetupPanel {
 			lastSync: this.getLastSync(),
 			theme: this.getCachedTheme(),
 			themeSource: this.getThemeSource(),
+			range: this.getRange(),
 			links: Object.keys(BADGE_LINKS) as BadgeLinkId[],
 			imageUri: this.getImageUri(webview),
 			localization: { ...buildWebviewLocalization(t), '__language__': language },

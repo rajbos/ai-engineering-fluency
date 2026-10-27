@@ -72,6 +72,19 @@ def ease_out_back(t, overshoot=1.70158):
     return 1 + t * t * ((overshoot + 1) * t + overshoot)
 
 
+def reload_cycle(elapsed_ms, period_ms):
+    """(cycle, ms into that cycle) for an animation that replays every `period_ms`."""
+    if elapsed_ms <= 0:
+        return 0, 0
+    return int(elapsed_ms // period_ms), elapsed_ms % period_ms
+
+
+def cycle_colour(first, palette, cycle):
+    """The colour for reload number `cycle`: `first` on the first load, then each
+    colour of `palette` in turn, so every reload looks different."""
+    return first if cycle <= 0 else palette[(cycle - 1) % len(palette)]
+
+
 def shade(rgb, factor):
     """Scale a colour's brightness; factor > 1 brightens, clamped to 0..255."""
     return tuple(max(0, min(255, int(c * factor))) for c in rgb)

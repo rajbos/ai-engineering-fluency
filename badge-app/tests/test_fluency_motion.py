@@ -77,6 +77,20 @@ class EasingTests(unittest.TestCase):
         self.assertEqual(fm.mix((0, 0, 0), (100, 200, 50), 4), (100, 200, 50))
 
 
+class ReloadTests(unittest.TestCase):
+    def test_reload_cycle_counts_periods(self):
+        self.assertEqual(fm.reload_cycle(-5, 1000), (0, 0))
+        self.assertEqual(fm.reload_cycle(999, 1000), (0, 999))
+        self.assertEqual(fm.reload_cycle(2500, 1000), (2, 500))
+
+    def test_every_reload_gets_a_different_colour(self):
+        palette = ((1, 1, 1), (2, 2, 2), (3, 3, 3))
+        first = (9, 9, 9)
+        colours = [fm.cycle_colour(first, palette, cycle) for cycle in range(5)]
+        self.assertEqual(colours, [first, (1, 1, 1), (2, 2, 2), (3, 3, 3), (1, 1, 1)])
+        self.assertTrue(all(a != b for a, b in zip(colours, colours[1:])))
+
+
 class CameraTests(unittest.TestCase):
     def test_origin_lands_on_the_centre(self):
         x, y, depth = fm.Camera(160, 120, 30).project(0, 0, 0)

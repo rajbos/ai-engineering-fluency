@@ -8,8 +8,9 @@ import themeStyles from '../shared/theme.css';
 import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { normalizeBadgeTheme, normalizeBadgeThemeSource, normalizeHexColor, resolveBadgeTheme, type BadgeTheme, type BadgeThemeKey, type BadgeThemeSource } from '../../../../src/badgePayload';
+import { BADGE_RANGES, normalizeBadgeRange, normalizeBadgeTheme, normalizeBadgeThemeSource, normalizeHexColor, resolveBadgeTheme, type BadgePayload, type BadgeRange, type BadgeTheme, type BadgeThemeKey, type BadgeThemeSource } from '../../../../src/badgePayload';
 import type { BadgeHostMessage, BadgeInstallResult, BadgeLastSync, BadgeLinkId, BadgeSetupData, BadgeSyncResult } from '../../badge/badgeSetupTypes';
+import { badgeChartSvg } from './previewChart';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 
 declare function acquireVsCodeApi<TState = unknown>(): {
@@ -65,6 +66,9 @@ let lastSync: BadgeLastSync | undefined = initialData?.lastSync;
 /** The editor theme colours, probed live and cached by the host. */
 let theme: BadgeTheme = initialData?.theme ?? {};
 let themeSource: BadgeThemeSource = normalizeBadgeThemeSource(initialData?.themeSource);
+let range: BadgeRange = normalizeBadgeRange(initialData?.range);
+/** What the next sync would send; arrives from the host after the view opens. */
+let preview: BadgePayload | undefined;
 let statusMessage = '';
 let installMessage = '';
 let syncing = false;
@@ -137,6 +141,28 @@ function themeSourceHtml(): string {
 	return `<fieldset id="badge-theme-source" class="theme-source"><legend>${escapeHtml(localize('badge.theme.source.label'))}</legend>${options}</fieldset>`;
 }
 
+function rangeHtml(): string {
+	const options = BADGE_RANGES.map((days) => `
+		<label class="theme-source-option">
+			<input type="radio" name="badge-range" value="${days}"${days === range ? ' checked' : ''} />
+			${escapeHtml(localizeFormat('badge.range.days', String(days)))}
+		</label>`).join('');
+	return `<fieldset id="badge-range" class="theme-source"><legend>${escapeHtml(localize('badge.range.label'))}</legend>${options}</fieldset>`;
+}
+
+function previewHtml(): string {
+	if (!preview) { return `<p class="message">${escapeHtml(localize('badge.preview.loading'))}</p>`; }
+	const days = preview.days.length;
+	const label = localizeFormat('badge.preview.chartLabel', String(days));
+	return `${badgeChartSvg(preview, label)}
+		<p class="chart-caption">${escapeHtml(localizeFormat('badge.preview.summary', String(days), formatNumber(preview.tokens30), formatNumber(preview.sessions30)))}</p>`;
+}
+
+function redrawPreview(): void {
+	const holder = document.getElementById('badge-preview');
+	if (holder) { setHtml(holder, previewHtml()); }
+}
+
 function statusLineHtml(): string {
 	if (!lastSync) { return escapeHtml(localize('badge.status.never')); }
 	return escapeHtml(localizeFormat('badge.status.last', formatAbsoluteDate(lastSync.at), formatNumber(lastSync.bytes), lastSync.port));
@@ -164,6 +190,13 @@ function layoutHtml(): string {
 
 			${initialData?.imageUri ? `<img class="badge-photo" src="${escapeHtml(initialData.imageUri)}" alt="${escapeHtml(localize('badge.image.alt'))}" />` : ''}
 			<p class="intro">${escapeHtml(localize('badge.intro'))}</p>
+
+			<section class="card">
+				<h3>${escapeHtml(localize('badge.preview.title'))}</h3>
+				<p>${escapeHtml(localize('badge.preview.description'))}</p>
+				${rangeHtml()}
+				<div id="badge-preview">${previewHtml()}</div>
+			</section>
 
 			<section class="card">
 				<h3>${escapeHtml(localize('badge.status.title'))}</h3>
@@ -223,6 +256,14 @@ function wire(): void {
 			themeSource = normalizeBadgeThemeSource(input.value);
 			vscode.postMessage({ command: 'badgeThemeSource', source: themeSource });
 			redrawSwatches();
+			vscode.postMessage({ command: 'badgeRequestPreview' });
+		});
+	});
+	document.querySelectorAll<HTMLInputElement>('input[name="badge-range"]').forEach((input) => {
+		input.addEventListener('change', () => {
+			if (!input.checked) { return; }
+			range = normalizeBadgeRange(Number(input.value));
+			vscode.postMessage({ command: 'badgeRange', range });
 		});
 	});
 	document.getElementById('btn-badge-hide')?.addEventListener('click', () => {
@@ -251,6 +292,9 @@ function onHostMessage(message: BadgeHostMessage): void {
 			lastSync = { at: message.result.at, bytes: message.result.bytes, port: message.result.port };
 		}
 		render();
+	} else if (message?.command === 'badgePreview') {
+		preview = message.payload;
+		redrawPreview();
 	} else if (message?.command === 'badgeInstallResult') {
 		installMessage = installResultText(message.result);
 		render();
@@ -261,6 +305,7 @@ async function bootstrap(): Promise<void> {
 	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 	render();
 	registerMessageHandler<BadgeHostMessage>(onHostMessage);
+	vscode.postMessage({ command: 'badgeRequestPreview' });
 
 	// Theme colours are only visible from inside a webview, so it reports them to the host.
 	probeTheme();

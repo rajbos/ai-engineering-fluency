@@ -282,6 +282,9 @@ TILT_PITCH = 0.4  # how far (radians) a forward/back tilt swings the 3D cameras
 TRANSITION_MS = 260  # Motion look: screen slide
 GROW_MS = 450  # Motion look: one bar growing in
 GROW_STAGGER_MS = 18  # Motion look: delay between neighbouring bars
+BARS_RELOAD_MS = 5000  # Motion look: the score bars empty and load again this often...
+# ...each time in the next colour: Universe lavender, orange, sky blue and pink after the first load.
+BARS_PALETTE = ((177, 140, 255), (255, 138, 51), (88, 166, 255), (255, 95, 160))
 SWEEP_MS = 600  # Motion look: the band that crosses the screen when new data lands
 TOAST_MS = 1400  # how long the look name shows after switching
 
@@ -307,9 +310,17 @@ class Motion:
         self.now = now
         self.glow = glow
         self.accent = accent  # (r, g, b), for the translucent effects
+        self.cycle, self.cycle_elapsed = fm.reload_cycle(elapsed, BARS_RELOAD_MS)
 
     def grow(self, index):
         return fm.stagger(self.elapsed, index, GROW_STAGGER_MS, GROW_MS)
+
+    def reload_grow(self, index):
+        """Like grow(), but replays every BARS_RELOAD_MS."""
+        return fm.stagger(self.cycle_elapsed, index, GROW_STAGGER_MS, GROW_MS)
+
+    def reload_colour(self):
+        return fm.cycle_colour(self.accent, BARS_PALETTE, self.cycle)
 
 
 # ── screens ───────────────────────────────────────────────────────────────
@@ -320,7 +331,7 @@ def score_header(data, accent, demo):
 
 
 def score_footer(data):
-    footer("last 30 days  %s tokens  %d sessions" % (fd.compact(data["tokens30"]), data["sessions30"]),
+    footer("last %d days  %s tokens  %d sessions" % (data["range"], fd.compact(data["tokens30"]), data["sessions30"]),
            fd.updated_label(data["updated"])[:12])
 
 
@@ -333,6 +344,9 @@ def draw_score(data, accent, demo, motion=None):
     text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), left, 30, 12, LIGHT)
     text(data["label"], left, 46, 18, accent)
 
+    # Each reload of the bars uses the next colour.
+    bars = rgb(motion.reload_colour()) if motion else accent
+
     # Category rows fill the space down to the footer: bigger names, scores and pips.
     column_width = (WIDTH - MARGIN * 2 - 18) // 2
     for index, (name, value) in enumerate(data["categories"][:6]):
@@ -340,8 +354,8 @@ def draw_score(data, accent, demo, motion=None):
         y = 80 + (index // 2) * 38
         text(name, x, y, 13, LIGHT)
         text_right("%d/%d" % (value, fd.MAX_STAGE), x + column_width, y, 13, WHITE)
-        filled = value * motion.grow(index * 3) if motion else value
-        segments(x, y + 18, column_width, filled, fd.MAX_STAGE, accent, height=9, gap=4)
+        filled = value * motion.reload_grow(index * 3) if motion else value
+        segments(x, y + 18, column_width, filled, fd.MAX_STAGE, bars if motion else accent, height=9, gap=4)
 
     text_right("UP/DOWN: spider chart", WIDTH - MARGIN, 188, 8, DIM)
     score_footer(data)
@@ -502,7 +516,7 @@ def draw_spider(data, colour, demo, elapsed, now, hint):
 
 def history_header(data, accent, index, metric, motion):
     days = data["days"]
-    text("Last 30 days", MARGIN, 9, 12, accent)
+    text("Last %d days" % data["range"], MARGIN, 9, 12, accent)
     text_right("UP/DOWN: " + ("sessions" if metric == 1 else "tokens"), WIDTH - MARGIN, 10, 10, DIM)
     date, tokens, sessions = days[index]
     count_up = motion.grow(0) if motion else 1.0
@@ -526,7 +540,7 @@ def no_history():
 def draw_history(data, accent, good, cursor, metric, motion=None):
     days = data["days"]
     if not days:
-        text("Last 30 days", MARGIN, 9, 12, accent)
+        text("Last %d days" % data["range"], MARGIN, 9, 12, accent)
         no_history()
         return
 
@@ -574,7 +588,7 @@ def draw_skyline(data, colour, good, cursor, metric, yaw, pitch, now):
     days = data["days"]
     accent = rgb(colour)
     if not days:
-        text("Last 30 days", MARGIN, 9, 12, accent)
+        text("Last %d days" % data["range"], MARGIN, 9, 12, accent)
         no_history()
         return
 
@@ -585,7 +599,7 @@ def draw_skyline(data, colour, good, cursor, metric, yaw, pitch, now):
     rows = cells[-1][1] + 1
     values = [d[1 + metric] for d in days]
     peak = max(values) or 1
-    camera = fm.Camera(160, 132, 26, yaw, pitch, 16.0)
+    camera = fm.Camera(160, 132, 26 * min(1.0, 6.0 / rows), yaw, pitch, 16.0)
     size = 0.74
     tallest = 1.7
     recent = len(days) - 7
@@ -873,7 +887,7 @@ class App:
         if SCREENS[self.screen] == "history":
             amount = abs(self.tilt.x)
             if amount > TILT_DEAD_ZONE:
-                speed = (amount - TILT_DEAD_ZONE) / (1 - TILT_DEAD_ZONE) * TILT_DAYS_PER_SECOND
+                speed = (amount - TILT_DEAD_ZONE) / (1 - TILT_DEAD_ZONE) * TILT_DAYS_PER_SECOND * days / fd.DAYS
                 direction = TILT_DIRECTION if self.tilt.x > 0 else -TILT_DIRECTION
                 self.cursor += direction * speed * badge.ticks_delta / 1000
         self.cursor = max(0.0, min(float(days - 1), self.cursor))

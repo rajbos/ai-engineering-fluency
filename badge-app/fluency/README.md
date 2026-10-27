@@ -1,6 +1,6 @@
 # AI Engineering Fluency
 
-Shows your AI Engineering Fluency score, 30-day token history and QR codes for the extension and LinkedIn.
+Shows your AI Engineering Fluency score, 30- or 90-day token history and QR codes for the extension and LinkedIn.
 
 ![Score screen](../../docs/features/badge-mockups/1-score.png)
 
@@ -8,7 +8,7 @@ Shows your AI Engineering Fluency score, 30-day token history and QR codes for t
 
 | Control | Action |
 | --- | --- |
-| LEFT / RIGHT | Flip between score, 30-day history, QR to the repo and QR to LinkedIn |
+| LEFT / RIGHT | Flip between score, 30/90-day history, QR to the repo and QR to LinkedIn |
 | SELECT (tap) | Switch the look: Motion, 3D radar, 3D skyline |
 | Tilt (3D radar look, score screen) | Left/right spins the radar, forward/back changes the viewing angle |
 | Tilt forward/back (3D skyline look, history screen) | Changes the camera angle |
