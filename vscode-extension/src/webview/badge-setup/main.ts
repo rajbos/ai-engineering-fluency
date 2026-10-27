@@ -8,7 +8,7 @@ import themeStyles from '../shared/theme.css';
 import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { normalizeBadgeTheme, normalizeHexColor, type BadgeTheme, type BadgeThemeKey } from '../../../../src/badgePayload';
+import { normalizeBadgeTheme, normalizeBadgeThemeSource, normalizeHexColor, resolveBadgeTheme, type BadgeTheme, type BadgeThemeKey, type BadgeThemeSource } from '../../../../src/badgePayload';
 import type { BadgeHostMessage, BadgeInstallResult, BadgeLastSync, BadgeLinkId, BadgeSetupData, BadgeSyncResult } from '../../badge/badgeSetupTypes';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 
@@ -37,6 +37,11 @@ const THEME_LABEL_KEYS: Record<BadgeThemeKey, string> = {
 	warn: 'badge.theme.warn',
 };
 
+const THEME_SOURCE_LABEL_KEYS: Record<BadgeThemeSource, string> = {
+	universe: 'badge.theme.source.universe',
+	editor: 'badge.theme.source.editor',
+};
+
 const LINK_LABEL_KEYS: Record<BadgeLinkId, string> = {
 	badgerHome: 'badge.link.badgerHome',
 	tufty: 'badge.link.tufty',
@@ -57,7 +62,9 @@ const NAV_COMMANDS: Record<string, string> = {
 };
 
 let lastSync: BadgeLastSync | undefined = initialData?.lastSync;
+/** The editor theme colours, probed live and cached by the host. */
 let theme: BadgeTheme = initialData?.theme ?? {};
+let themeSource: BadgeThemeSource = normalizeBadgeThemeSource(initialData?.themeSource);
 let statusMessage = '';
 let installMessage = '';
 let syncing = false;
@@ -82,6 +89,10 @@ function probeTheme(): void {
 	if (Object.keys(probed).length === 0 || sameTheme(probed, theme)) { return; }
 	theme = probed;
 	vscode.postMessage({ command: 'badgeTheme', theme });
+	redrawSwatches();
+}
+
+function redrawSwatches(): void {
 	const strip = document.getElementById('badge-theme-strip');
 	if (strip) { setHtml(strip, themeSwatchesHtml()); }
 }
@@ -105,14 +116,25 @@ function installResultText(result: BadgeInstallResult): string {
 	}
 }
 
+/** The swatches show the colours a sync sends, so they follow the chosen palette. */
 function themeSwatchesHtml(): string {
+	const shown = resolveBadgeTheme(themeSource, theme);
 	return (Object.keys(THEME_VARIABLES) as BadgeThemeKey[]).map((key) => {
-		const colour = normalizeHexColor(theme[key]);
+		const colour = normalizeHexColor(shown[key]);
 		const swatch = colour
 			? `<span class="swatch" style="background:${colour}"></span>`
 			: '<span class="swatch swatch-empty"></span>';
 		return `<div class="swatch-item">${swatch}<span class="swatch-label">${escapeHtml(localize(THEME_LABEL_KEYS[key]))}</span><span class="swatch-value">${escapeHtml(colour ?? '–')}</span></div>`;
 	}).join('');
+}
+
+function themeSourceHtml(): string {
+	const options = (Object.keys(THEME_SOURCE_LABEL_KEYS) as BadgeThemeSource[]).map((source) => `
+		<label class="theme-source-option">
+			<input type="radio" name="badge-theme-source" value="${source}"${source === themeSource ? ' checked' : ''} />
+			${escapeHtml(localize(THEME_SOURCE_LABEL_KEYS[source]))}
+		</label>`).join('');
+	return `<fieldset id="badge-theme-source" class="theme-source"><legend>${escapeHtml(localize('badge.theme.source.label'))}</legend>${options}</fieldset>`;
 }
 
 function statusLineHtml(): string {
@@ -166,6 +188,7 @@ function layoutHtml(): string {
 			<section class="card">
 				<h3>${escapeHtml(localize('badge.theme.title'))}</h3>
 				<p>${escapeHtml(localize('badge.theme.description'))}</p>
+				${themeSourceHtml()}
 				<div id="badge-theme-strip" class="swatch-strip">${themeSwatchesHtml()}</div>
 			</section>
 
@@ -193,6 +216,14 @@ function wire(): void {
 	document.getElementById('btn-badge-install')?.addEventListener('click', () => {
 		installMessage = '';
 		vscode.postMessage({ command: 'badgeInstallApp' });
+	});
+	document.querySelectorAll<HTMLInputElement>('input[name="badge-theme-source"]').forEach((input) => {
+		input.addEventListener('change', () => {
+			if (!input.checked) { return; }
+			themeSource = normalizeBadgeThemeSource(input.value);
+			vscode.postMessage({ command: 'badgeThemeSource', source: themeSource });
+			redrawSwatches();
+		});
 	});
 	document.getElementById('btn-badge-hide')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'badgeHideButton' });

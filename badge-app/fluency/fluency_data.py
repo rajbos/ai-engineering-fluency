@@ -8,8 +8,9 @@ MAX_BYTES = 8192  # the extension keeps the file under about 4 KB
 DAYS = 30
 MAX_STAGE = 4
 
-DEFAULT_ACCENT = (211, 250, 55)  # the stock badge app's phosphor green
-DEFAULT_GOOD = (46, 160, 67)
+# The GitHub Universe palette (src/badgePayload.ts UNIVERSE_BADGE_THEME), used until a sync sends colours.
+DEFAULT_ACCENT = (95, 237, 131)  # Universe bright green
+DEFAULT_GOOD = (8, 135, 43)  # the GitHub green of Universe buttons
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 STAGE_LABELS = {1: "AI Skeptic", 2: "AI Explorer", 3: "AI Collaborator", 4: "AI Strategist"}

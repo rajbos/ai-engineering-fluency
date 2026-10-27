@@ -53,6 +53,13 @@ No Wi-Fi or `secrets.py` settings are needed. If `GITHUB_USERNAME` or
 `CONTACT_NAME` is set in `secrets.py` (the stock Settings app edits both),
 the score screen shows your handle and the LinkedIn screen your name.
 
+To show your employer's logo under your name on the LinkedIn screen, copy a
+small PNG (at most about 110 pixels wide) to `/state/company_logo.png`:
+
+```sh
+mpremote fs cp company_logo.png :/state/company_logo.png
+```
+
 ## Install
 
 Put the badge in USB disk mode (double-tap RESET, or open the Mass Storage

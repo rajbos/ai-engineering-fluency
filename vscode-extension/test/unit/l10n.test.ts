@@ -2282,6 +2282,9 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 		'badge.sync.cancelled': 'Sync cancelled.',
 		'badge.install.title': 'Install the app',
 		'badge.theme.title': 'Badge colours',
+		'badge.theme.source.label': 'Palette',
+		'badge.theme.source.universe': 'GitHub Universe',
+		'badge.theme.source.editor': 'My VS Code theme',
 		'badge.link.badgewareDocs': 'Badgeware docs',
 		'command.hideBadgeSetup.title': 'Hide Badge Button',
 		'command.restoreBadgeSetup.title': 'Show Badge Button',
@@ -2306,6 +2309,8 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 		assert.equal(t('badge.action.syncUsb'), '通过 USB 同步');
 		assert.equal(t('command.restoreBadgeSetup.title'), '显示徽章按钮');
 		assert.equal(t('badge.action.hide'), '隐藏此视图（我没有徽章）');
+		assert.equal(t('badge.theme.source.label'), '配色');
+		assert.equal(t('badge.theme.source.editor'), '我的 VS Code 主题');
 		assert.equal(t('badge.status.last', 'Oct 23, 2026', '1,024', 'COM5'), '上次同步 Oct 23, 2026 · 1,024 字节 · COM5');
 		assert.equal(t('badge.sync.ok', '1,024', 'COM5'), '已通过 COM5 同步 1,024 字节。徽章应用在加载新数据时会重新启动。');
 		assert.match(t('badge.sync.mpremoteMissing'), /pip install mpremote/);

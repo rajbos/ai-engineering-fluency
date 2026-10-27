@@ -1,5 +1,5 @@
 // Types shared by the Badge setup panel (host) and its webview bundle. No `vscode` imports.
-import type { BadgeTheme } from '../../../src/badgePayload';
+import type { BadgeTheme, BadgeThemeSource } from '../../../src/badgePayload';
 
 export type BadgeLinkId = 'badgerHome' | 'tufty' | 'badgeware' | 'badgewareDocs';
 
@@ -13,8 +13,10 @@ export interface BadgeLastSync {
 /** Initial payload of the panel (`window.__INITIAL_BADGE_SETUP_DATA__`). */
 export interface BadgeSetupData {
 	lastSync?: BadgeLastSync;
-	/** Colours cached from the last time the panel was open; the webview re-probes them live. */
+	/** Editor theme colours cached from the last time the panel was open; the webview re-probes them live. */
 	theme: BadgeTheme;
+	/** Which palette a sync sends. Absent means the default, the Universe palette. */
+	themeSource?: BadgeThemeSource;
 	/** Link ids only; the URLs live in the host so the webview can only ask for known pages. */
 	links: BadgeLinkId[];
 	/** Webview URI of the Universe badge photo; absent when the image was not bundled. */
