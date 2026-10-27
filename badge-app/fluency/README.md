@@ -32,7 +32,8 @@ Shows your AI Engineering Fluency score, 30- or 90-day token history and QR code
 The app remembers the look in `/state/fluency_look.json`. In every look,
 UP / DOWN on the score screen flips to a flat spider chart: the rings grow
 out of the centre, a radar arm sweeps round once and each category pops out
-to its stage as the arm passes it.
+to its stage as the arm passes it. After one more faint turn of the arm the
+chart replays that intro in the next colour, like the score bars.
 
 ## Data
 
