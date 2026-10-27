@@ -133,11 +133,11 @@ jobs:
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
-        run: pnpm publish --provenance --access public
+        run: pnpm publish --provenance --access public --no-git-checks
 
       - name: Dry run publish
         if: ${{ inputs.dry_run }}
-        run: pnpm publish --provenance --access public --dry-run
+        run: pnpm publish --provenance --access public --no-git-checks --dry-run
 
       - name: Commit version bump and create PR
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' && steps.trigger_type.outputs.is_tag != 'true' }}
