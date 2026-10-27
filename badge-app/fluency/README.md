@@ -58,3 +58,10 @@ the score screen shows your handle and the LinkedIn screen your name.
 Put the badge in USB disk mode (double-tap RESET, or open the Mass Storage
 app), copy this `fluency` folder into `apps/` on the `BADGER` drive, and eject.
 The app appears in the launcher.
+
+The stock MonaOS 4.0 launcher only draws its own built-in icons, so the app
+shows a generic dot grid until the menu is patched to load `icon.png`. The
+patch is [Gadgetoid's menu change](https://gist.github.com/Gadgetoid/f72b85e6efe603bd02b2b730bbc40356),
+which [`badger/home`](https://github.com/badger/home) already ships. Apply it
+to `apps/menu/app.py` on the `BADGER` drive while it is in USB disk mode; the
+serial connection cannot write there. Keep a copy of the original file to undo it.

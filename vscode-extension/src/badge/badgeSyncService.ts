@@ -46,9 +46,14 @@ export const runCommand: CommandRunner = (command, args, timeoutMs) =>
 		});
 	});
 
+/** A USB `vid:pid` column as mpremote prints it (`2e8a:1101`). */
+const USB_ID = /^[0-9a-f]{4}:[0-9a-f]{4}$/i;
+
 /**
- * Reads the ports out of `mpremote devs`. Each line is `<port> <vid:pid> <serial> <maker> <product>`;
- * ports with the Raspberry Pi vendor id are preferred, and every port is kept when none match.
+ * Reads the ports out of `mpremote devs`. Each line is `<port> <serial> <vid:pid> <maker> <product>`
+ * (the serial can be `None`). The `vid:pid` column is found by shape rather than position so a
+ * change in column order does not silently drop the filter. Ports with the Raspberry Pi vendor id
+ * are preferred, and every port is kept when none match.
  */
 export function parseDeviceList(output: string): string[] {
 	const all: string[] = [];
@@ -58,9 +63,20 @@ export function parseDeviceList(output: string): string[] {
 		const port = parts[0];
 		if (!port || !SAFE_PORT.test(port)) { continue; }
 		all.push(port);
-		if (parts[1]?.toLowerCase().startsWith(`${BADGE_VENDOR_ID}:`)) { badge.push(port); }
+		const usbId = parts.slice(1).find((part) => USB_ID.test(part));
+		if (usbId?.toLowerCase().startsWith(`${BADGE_VENDOR_ID}:`)) { badge.push(port); }
 	}
 	return badge.length > 0 ? badge : all;
+}
+
+/**
+ * The part of mpremote's output worth showing: a Python traceback ends with the exception line,
+ * so the last non-empty line is kept rather than the first 300 characters of the stack.
+ */
+export function describeFailure(result: CommandResult): string {
+	const lines = (result.stderr || result.stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+	const last = lines[lines.length - 1] ?? '';
+	return last.replace(/^[\w.]*Error:\s*/, '').slice(0, 300) || `mpremote exited with code ${result.code}`;
 }
 
 async function findPort(run: CommandRunner, preferredPort: string | undefined): Promise<BadgeSyncOutcome | { port: string }> {
@@ -94,7 +110,7 @@ export async function syncOverUsb(options: { run: CommandRunner; payloadJson: st
 		const copy = await run(MPREMOTE, ['connect', found.port, 'fs', 'cp', tempFile, DATA_FILE], COPY_TIMEOUT_MS);
 		if (copy.spawnError) { return { status: 'mpremoteMissing' }; }
 		if (copy.code !== 0) {
-			return { status: 'failed', message: (copy.stderr || copy.stdout).trim().slice(0, 300) || `mpremote exited with code ${copy.code}` };
+			return { status: 'failed', message: describeFailure(copy) };
 		}
 		return { status: 'ok', port: found.port, bytes: Buffer.byteLength(payloadJson, 'utf8') };
 	} finally {

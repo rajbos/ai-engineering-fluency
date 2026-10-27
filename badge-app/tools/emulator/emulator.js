@@ -41,6 +41,9 @@ const CONTENT_TYPES = {
 };
 const FRAME_TIMEOUT_MS = 30000;
 const SETTLE_FRAMES = 6;
+// The app animates on its clock (the Motion look slides screens for 260 ms), so a shot also waits
+// this long after the last button press; frames alone can arrive faster than the slide ends.
+const SETTLE_MS = 600;
 
 /** Serves the page and the runtime, downloading runtime files on first request. */
 function startServer(pin, root) {
@@ -193,6 +196,7 @@ async function renderApp({ browser, origin, compat, appDir, appName, outDir, sca
 			await session.waitFrames(SETTLE_FRAMES);
 			for (const step of run.steps) {
 				if (step.shot) {
+					await page.waitForTimeout(SETTLE_MS);
 					await session.waitFrames(SETTLE_FRAMES);
 					const dataUrl = await page.evaluate((s) => window.emu.capture(s), scale);
 					const file = path.join(outDir, `${view}--${step.shot}.dark.png`);

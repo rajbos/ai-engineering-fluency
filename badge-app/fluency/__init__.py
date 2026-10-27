@@ -528,6 +528,10 @@ def draw_skyline(data, colour, good, cursor, metric, yaw, pitch, now):
 
 
 QR_IMAGES = {}
+# The column beside a QR code is narrow, so these sizes rely on wrapping into the free space below.
+QR_TITLE_SIZE = 14
+QR_NAME_SIZE = 14
+QR_DETAIL_SIZE = 11
 
 
 def qr(name):
@@ -543,18 +547,18 @@ def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent):
     box(plate_x, plate_y, plate, plate, PLATE, 6)
     screen.blit(code, vec2(plate_x + 4 + DX, plate_y + 4))
 
-    y = text_block(wrap(title, text_width_px, 11), text_x, 30, 11, accent)
-    y += 6
+    y = text_block(wrap(title, text_width_px, QR_TITLE_SIZE), text_x, 26, QR_TITLE_SIZE, accent)
+    y += 8
     for size, pen, value in lines:
-        y = text_block(wrap(value, text_width_px, size), text_x, y, size, pen) + 5
-    text("< > screens", text_x, HEIGHT - 26, 8, DIM)
+        y = text_block(wrap(value, text_width_px, size), text_x, y, size, pen) + 7
+    text("< > screens", text_x, HEIGHT - 26, 10, DIM)
 
 
 def draw_qr_repo(accent):
-    draw_qr("qr_repo", 10, 226, WIDTH - 226 - 8, "Get the extension", (
-        (10, WHITE, "AI Engineering Fluency"),
-        (8, DIM, "github.com/rajbos/ai-engineering-fluency"),
-        (8, DIM, "VS Code, Visual Studio, JetBrains, CLI"),
+    draw_qr("qr_repo", 6, 212, WIDTH - 212 - 6, "Get the extension", (
+        (QR_NAME_SIZE, WHITE, "AI Engineering Fluency"),
+        (QR_DETAIL_SIZE, LIGHT, "github.com/rajbos/ai-engineering-fluency"),
+        (QR_DETAIL_SIZE, DIM, "VS Code, Visual Studio, JetBrains, CLI"),
     ), accent)
 
 
@@ -562,8 +566,8 @@ def draw_qr_linkedin(accent):
     code = qr("qr_linkedin")
     plate_x = WIDTH - 10 - (code.width + 8)
     draw_qr("qr_linkedin", plate_x, MARGIN, plate_x - MARGIN - 8, "Connect", (
-        (12, WHITE, CONTACT_NAME),
-        (8, DIM, "linkedin.com/in/bosrob"),
+        (QR_NAME_SIZE + 2, WHITE, CONTACT_NAME),
+        (QR_DETAIL_SIZE, LIGHT, "linkedin.com/in/bosrob"),
     ), accent)
 
 
