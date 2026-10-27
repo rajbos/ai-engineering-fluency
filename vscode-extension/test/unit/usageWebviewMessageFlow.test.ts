@@ -170,6 +170,14 @@ function buildStatsWithInsights(): Record<string, unknown> {
 	return stats;
 }
 
+/** Polls until `condition` holds (or `timeoutMs` passes) instead of sleeping a guessed duration. */
+async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition() && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
@@ -1239,7 +1247,7 @@ test('worktree repositories expand into a per-worktree table that moves with its
 	harness.post(worktree('C:\\wt\\a1', 'alpha', 10));
 	harness.post(worktree('C:\\wt\\b1', 'beta', 20));
 	harness.post(worktree('C:\\wt\\b2', 'beta', 30));
-	await new Promise((resolve) => setTimeout(resolve, 50));
+	await waitFor(() => doc.querySelectorAll('#data-table-root-worktree-repos tr.worktree-repo-row').length >= 2);
 	const repoOrder = () => [...doc.querySelectorAll('#data-table-root-worktree-repos tr.worktree-repo-row')].map((row: any) => row.getAttribute('data-repo'));
 
 	assert.deepEqual(repoOrder(), ['beta', 'alpha'], 'most worktrees first by default');
@@ -1736,7 +1744,7 @@ test("the highlight flash restores a new card's own glow instead of stripping it
 
 	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
 	await harness.settleScroll();
-	await new Promise((resolve) => setTimeout(resolve, 2100));
+	await waitFor(() => harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow === before);
 
 	assert.equal(
 		harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow,
@@ -1755,7 +1763,7 @@ test('flashing the same card twice in a row does not leave it permanently outlin
 	await harness.settleScroll();
 	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
 	await harness.settleScroll();
-	await new Promise((resolve) => setTimeout(resolve, 2100));
+	await waitFor(() => harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow === before);
 
 	assert.equal(
 		harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow,
@@ -2022,7 +2030,10 @@ test('flashing a second card while the first is still lit restores both', async 
 	await harness.settleScroll();
 	harness.post({ command: 'switchTab', tab: 'insights', anchor: second });
 	await harness.settleScroll();
-	await new Promise((resolve) => setTimeout(resolve, 2200));
+	await waitFor(() => {
+		const doc = harness.window.document;
+		return doc.getElementById(first).style.boxShadow === before.first && doc.getElementById(second).style.boxShadow === before.second;
+	});
 
 	assert.equal(harness.window.document.getElementById(first).style.boxShadow, before.first);
 	assert.equal(harness.window.document.getElementById(second).style.boxShadow, before.second);

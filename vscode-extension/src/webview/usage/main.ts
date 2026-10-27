@@ -6453,6 +6453,13 @@ async function bootstrap(): Promise<void> {
 	if (Object.prototype.hasOwnProperty.call(initialData, 'correctionReport')) {
 		initialData.correctionReport = sanitizeCorrectionReport(initialData.correctionReport);
 	}
+	// Same for missedPotential: a malformed row (null, non-object, no workspacePath) must be
+	// dropped here too, or it crashes the Workspace Health / Missed Potential renderers.
+	if (Object.prototype.hasOwnProperty.call(initialData, 'missedPotential')) {
+		const holder: UsageAnalysisStats = { missedPotential: undefined } as unknown as UsageAnalysisStats;
+		_applyMissedPotential(holder, initialData);
+		initialData.missedPotential = holder.missedPotential ?? [];
+	}
 	renderLayout(initialData);
 	setupSessionsTableHandlers();
 
