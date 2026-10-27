@@ -8,7 +8,7 @@ The badge app shows live data from the AI Engineering Fluency extension, plus tw
 
 **The badge shows these screens** (mockups below):
 
-1. Fluency score: overall stage (1 to 4) and its label, plus all six categories with their names and stage values as segment bars.
+1. Fluency score: overall stage (1 to 4) and its label, plus all six categories with their names and stage values as segment bars. UP/DOWN flips to a sub-view with the same data as a spider chart, animated in like a radar scan (rings grow out of the centre, an arm sweeps round once and each category pops out to its stage as it passes), and back.
 2. 30-day history: one bar per day for tokens, with a day cursor you scrub; a toggle switches to sessions.
 3. QR code to `https://github.com/rajbos/ai-engineering-fluency` with the repo logo mark in the centre on a dark tile.
 4. QR code to `https://linkedin.com/in/bosrob`, with a labelled placeholder until the official LinkedIn logo is added.
@@ -26,7 +26,7 @@ Planned, not built yet: a wearer view and a tip screen (see [Motion features](#m
 
 **Decisions:**
 
-- The flat score screen keeps segment bars. A radar chart was first dropped because it showed no values or category names; the 3D radar look brings it back with a name and stage on every spoke, as an option rather than the default.
+- The flat score screen keeps segment bars. A radar chart was first dropped because it showed no values or category names; the 3D radar look brings it back with a name and stage on every spoke, as an option rather than the default, and the UP/DOWN spider chart sub-view does the same flat, with the stage summary beside it.
 - Sync is USB for the first load, with a Wi-Fi push option planned on top. The sharing server is not used.
 - Highlight colours come from the active VS Code theme, read from the webview's CSS variables, with a fixed dark ground on the badge.
 - QR codes use the full URLs as they are now. Shortening them is a later experiment after testing on the device.
@@ -87,7 +87,8 @@ A MicroPython app in `badge-app/fluency/`, copied to `apps/fluency` on the badge
 
 | Screen | LEFT / RIGHT | Motion | Other |
 | --- | --- | --- | --- |
-| Score, QR repo, QR LinkedIn | tap flips to previous / next screen | 3D radar look: tilt spins and angles the radar | MENU opens sync status, a tap on SELECT switches the look |
+| Score | tap flips to previous / next screen | 3D radar look: tilt spins and angles the radar | UP / DOWN flips between the bars (or 3D radar) and the spider chart, MENU opens sync status, a tap on SELECT switches the look |
+| QR repo, QR LinkedIn | tap flips to previous / next screen | none | MENU opens sync status, a tap on SELECT switches the look |
 | 30-day history | tap flips screen | tilt scrubs the day cursor; 3D skyline look: forward/back tilt angles the camera | UP / DOWN toggles tokens and sessions, a tap on SELECT switches the look |
 | Sync status | tap flips screen | none | UP / DOWN switches the look, BACK returns |
 

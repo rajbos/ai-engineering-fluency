@@ -93,6 +93,9 @@ test('the committed scenarios are valid and bad ones are rejected', () => {
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ press: 'jump' }] }] }), /unknown button/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ shot: 'Bad Name' }] }] }), /bad shot name/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ shot: 'one' }] }, { id: 'y', steps: [{ shot: 'one' }] }] }), /used twice/);
+	validateScenarios({ a: [{ id: 'x', steps: [{ wait: 80 }, { shot: 'one' }] }] });
+	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ wait: 0 }] }] }), /wait must be/);
+	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ wait: 2.5 }] }] }), /wait must be/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{}] }] }), /needs shot/);
 });
 

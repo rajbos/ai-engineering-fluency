@@ -3,7 +3,8 @@
 # Shows the fluency score, a 30-day token history and two QR codes, from
 # /state/fluency.json written by the AI Engineering Fluency extension.
 # LEFT / RIGHT flip screens, a tap on SELECT switches the look (Motion,
-# 3D radar, 3D skyline), MENU opens sync status, BACK exits.
+# 3D radar, 3D skyline), UP / DOWN on the score screen flips to a spider
+# chart and back, MENU opens sync status, BACK exits.
 
 import math
 import os
@@ -288,6 +289,15 @@ RADAR_SPIN = 0.35  # radians per second the radar turns on its own
 RADAR_TILT_SPIN = 2.2  # extra radians per second at full left/right tilt
 RADAR_HEIGHT = 0.28  # height of the radar prism, in radar radii
 
+SPIDER_RING_MS = 420  # Spider chart: one ring growing out of the centre
+SPIDER_RING_STAGGER_MS = 80  # delay between neighbouring rings
+SPIDER_SWEEP_START_MS = 300  # when the arm starts its first turn
+SPIDER_SWEEP_MS = 1500  # the first turn, lighting each spoke as it passes
+SPIDER_POP_MS = 450  # a spoke popping out to its stage
+SPIDER_IDLE_MS = 7000  # a later, fainter turn of the arm
+SPIDER_TRAIL = 0.55  # radians of fading trail behind the arm
+SPIDER_FLOOR = 0.12  # radius of a zero stage, so the shape never collapses
+
 
 class Motion:
     """What a screen needs to animate in the Motion look."""
@@ -333,17 +343,13 @@ def draw_score(data, accent, demo, motion=None):
         filled = value * motion.grow(index * 3) if motion else value
         segments(x, y + 18, column_width, filled, fd.MAX_STAGE, accent, height=9, gap=4)
 
+    text_right("UP/DOWN: spider chart", WIDTH - MARGIN, 188, 8, DIM)
     score_footer(data)
 
 
-def draw_radar(data, colour, demo, yaw, pitch):
-    """The score as a turning 3D radar: one spoke per category, the data shape
-    extruded into a prism, with the stage summary in a column on the left.
-    `colour` is the accent as (r, g, b), since the prism shades it."""
-    categories = data["categories"][:6]
-    accent = rgb(colour)
-    score_header(data, accent, demo)
-
+def score_column(data, categories, accent, hint):
+    """The stage summary down the left of the radar views: the big stage digit,
+    the label, the strongest category and the one to grow next."""
     stage = str(data["stage"])
     text(stage, MARGIN, 26, 48, WHITE)
     text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), MARGIN, 82, 10, DIM)
@@ -354,10 +360,21 @@ def draw_radar(data, colour, demo, yaw, pitch):
     text("%s %d" % strongest, MARGIN, y + 11, 10, LIGHT)
     text("Grow next", MARGIN, y + 29, 10, DIM)
     text("%s %d" % weakest, MARGIN, y + 40, 10, LIGHT)
+    text(hint, MARGIN, 200, 8, DIM)
+
+
+def draw_radar(data, colour, demo, yaw, pitch, hint):
+    """The score as a turning 3D radar: one spoke per category, the data shape
+    extruded into a prism, with the stage summary in a column on the left.
+    `colour` is the accent as (r, g, b), since the prism shades it."""
+    categories = data["categories"][:6]
+    accent = rgb(colour)
+    score_header(data, accent, demo)
+    score_column(data, categories, accent, hint)
 
     camera = fm.Camera(222, 128, 54, yaw, pitch, 5.0)
     count = len(categories)
-    floor = 0.12
+    floor = SPIDER_FLOOR
 
     # Floor: one ring per stage and a spoke per category.
     for level in range(1, fd.MAX_STAGE + 1):
@@ -399,6 +416,86 @@ def draw_radar(data, colour, demo, yaw, pitch):
         half = text_width(label, 8) / 2
         px = max(126 + half, min(WIDTH - 6 - half, px))
         text_centre(label, px, py - 4, 10, LIGHT if depth < 0.2 else DIM)
+
+    score_footer(data)
+
+
+def spider_point(cx, cy, index, count, radius):
+    x, z = fm.radar_spoke(index, count, radius)
+    return (cx + x, cy + z)
+
+
+def draw_spider(data, colour, demo, elapsed, now, hint):
+    """The score as a flat spider chart that a radar arm sweeps into view: the
+    rings grow out of the centre, then the arm turns once and each category
+    pops out to its stage with a blip as the arm passes it. Afterwards the arm
+    keeps turning faintly and the shape breathes. `colour` is (r, g, b)."""
+    categories = data["categories"][:6]
+    accent = rgb(colour)
+    score_header(data, accent, demo)
+    score_column(data, categories, accent, hint)
+
+    cx, cy, radius = 222, 126, 64
+    count = len(categories)
+    floor = SPIDER_FLOOR
+
+    # The web: one ring per stage and a spoke per category, growing outwards.
+    for level in range(1, fd.MAX_STAGE + 1):
+        grow = fm.stagger(elapsed, level - 1, SPIDER_RING_STAGGER_MS, SPIDER_RING_MS)
+        if grow <= 0:
+            continue
+        r = radius * (floor + (1 - floor) * level / fd.MAX_STAGE) * grow
+        ring = [spider_point(cx, cy, i, count, r) for i in range(count)]
+        polygon(ring, DIM if level == fd.MAX_STAGE else TRACK, 1)
+    reach = radius * fm.stagger(elapsed, fd.MAX_STAGE - 1, SPIDER_RING_STAGGER_MS, SPIDER_RING_MS)
+    for i in range(count):
+        line((cx, cy), spider_point(cx, cy, i, count, reach), 1, TRACK)
+
+    sweep = elapsed - SPIDER_SWEEP_START_MS
+    if sweep < 0:
+        score_footer(data)
+        return
+
+    # The arm with a fading trail behind it; faint once the first turn is done.
+    turn = fm.sweep_fraction(sweep, SPIDER_SWEEP_MS, SPIDER_IDLE_MS)
+    angle = 2 * math.pi * turn
+    strength = 1.0 if sweep < SPIDER_SWEEP_MS else 0.4
+    steps = 5
+    for step in range(steps):
+        a0 = angle - SPIDER_TRAIL * (step + 1) / steps
+        a1 = angle - SPIDER_TRAIL * step / steps
+        alpha = int(80 * strength * (1 - step / steps))
+        polygon([(cx, cy)] + fm.arc_points(cx, cy, radius, a0, a1, 2), rgb(colour, alpha))
+    line((cx, cy), spider_point(cx, cy, turn * count, count, radius), 2, rgb(colour, int(255 * strength)))
+
+    # The data shape: each vertex pops out as the arm passes its spoke.
+    points = []
+    reveals = []
+    for i, (_, value) in enumerate(categories):
+        reveal = fm.spoke_reveal(sweep, i, count, SPIDER_SWEEP_MS, SPIDER_POP_MS)
+        reveals.append(reveal)
+        points.append(spider_point(cx, cy, i, count, radius * (floor + (1 - floor) * value / fd.MAX_STAGE) * reveal))
+    if max(reveals) > 0:
+        polygon(points, rgb(colour, int(60 + 40 * fm.pulse(now, 2400))))
+        polygon(points, accent, 2)
+
+    # Blips, dots and labels on the spokes that have been swept.
+    for i, (name, value) in enumerate(categories):
+        reveal = reveals[i]
+        if reveal <= 0:
+            continue
+        pop = fm.clamp01((sweep - SPIDER_SWEEP_MS * i / count) / SPIDER_POP_MS)
+        px, py = points[i]
+        if pop < 1:
+            screen.pen = rgb(colour, int(120 * (1 - pop)))
+            screen.shape(shape.circle(px + DX, py, 3 + 10 * fm.ease_out(pop)))
+        screen.pen = WHITE
+        screen.shape(shape.circle(px + DX, py, 2.5 * min(1.0, reveal)))
+        lx, ly = spider_point(cx, cy, i, count, radius * 1.32)
+        label = "%s %d" % (name, value)
+        half = text_width(label, 8) / 2
+        lx = max(126 + half, min(WIDTH - 6 - half, lx))
+        text_centre(label, lx, ly - 4, 8, color.rgb(201, 209, 217, int(255 * pop)))
 
     score_footer(data)
 
@@ -687,6 +784,7 @@ class App:
         self.screen = 0
         self.show_sync = False
         self.metric = 0
+        self.chart = False  # score screen: the spider chart instead of the bars / 3D radar
         self.cursor = None
         self.look = load_look()
         self.previous = None  # screen sliding out in the Motion look
@@ -755,8 +853,12 @@ class App:
                 self.flip(-1)
             if badge.pressed(BUTTON_RIGHT):
                 self.flip(1)
-        if on_history and (badge.pressed(BUTTON_UP) or badge.pressed(BUTTON_DOWN)):
-            self.metric = 1 - self.metric
+        if badge.pressed(BUTTON_UP) or badge.pressed(BUTTON_DOWN):
+            if on_history:
+                self.metric = 1 - self.metric
+            elif SCREENS[self.screen] == "score":
+                self.chart = not self.chart
+                self.entered = badge.ticks
         if badge.released(BUTTON_SELECT):
             # A tap (not a scrub) switches the look.
             if self.select_armed and not self.select_moved:
@@ -781,11 +883,12 @@ class App:
         """Advance tilt, scrub and the radar's spin once per frame, whatever is drawn."""
         name = SCREENS[self.screen]
         look = fm.LOOKS[self.look]
-        if name == "history" or (name == "score" and look == "radar"):
+        radar = name == "score" and look == "radar" and not self.chart
+        if name == "history" or radar:
             self.tilt.update()
         if name == "history":
             self.scrub(max(1, len(data["days"])))
-        if name == "score" and look == "radar":
+        if radar:
             spin = RADAR_SPIN + self.tilt.x * RADAR_TILT_SPIN
             self.yaw = (self.yaw + spin * badge.ticks_delta / 1000) % (2 * math.pi)
 
@@ -797,8 +900,12 @@ class App:
         look = fm.LOOKS[self.look]
         accent = rgb(colour)
         if name == "score":
-            if look == "radar" and len(data["categories"]) >= 3:
-                draw_radar(data, colour, self.store.demo, self.yaw, self.pitch(0.62))
+            radar = look == "radar" and len(data["categories"]) >= 3
+            if self.chart and len(data["categories"]) >= 3:
+                draw_spider(data, colour, self.store.demo, badge.ticks - self.entered, badge.ticks,
+                            "UP/DOWN: " + ("3D radar" if radar else "bars"))
+            elif radar:
+                draw_radar(data, colour, self.store.demo, self.yaw, self.pitch(0.62), "UP/DOWN: spider chart")
             else:
                 draw_score(data, accent, self.store.demo, motion)
         elif name == "history":

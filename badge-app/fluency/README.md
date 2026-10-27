@@ -14,6 +14,7 @@ Shows your AI Engineering Fluency score, 30-day token history and QR codes for t
 | Tilt forward/back (3D skyline look, history screen) | Changes the camera angle |
 | Tilt (history screen) | Scrub through the days; tilt further to move faster |
 | SELECT held + LEFT / RIGHT (history screen) | Step one day at a time |
+| UP / DOWN (score screen) | Flip between the bars (or 3D radar) and an animated spider chart of the categories |
 | UP / DOWN (history screen) | Switch between tokens and sessions |
 | MENU | Open sync status |
 | UP / DOWN (sync status) | Switch the look |
@@ -28,7 +29,10 @@ Shows your AI Engineering Fluency score, 30-day token history and QR codes for t
 | 3D radar | A turning radar prism with every category's name and stage | Flat bars |
 | 3D skyline | Flat bars | A 3D contribution graph: a tower per day, laid out by weekday and week |
 
-The app remembers the look in `/state/fluency_look.json`.
+The app remembers the look in `/state/fluency_look.json`. In every look,
+UP / DOWN on the score screen flips to a flat spider chart: the rings grow
+out of the centre, a radar arm sweeps round once and each category pops out
+to its stage as the arm passes it.
 
 ## Data
 

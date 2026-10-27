@@ -64,6 +64,14 @@ def pulse(ticks_ms, period_ms=1200):
     return 0.5 - 0.5 * math.cos(2 * math.pi * (ticks_ms % period_ms) / period_ms)
 
 
+def ease_out_back(t, overshoot=1.70158):
+    """Ease-out that overshoots its target a little before settling: a pop."""
+    if t <= 0:
+        return 0.0
+    t = clamp01(t) - 1
+    return 1 + t * t * ((overshoot + 1) * t + overshoot)
+
+
 def shade(rgb, factor):
     """Scale a colour's brightness; factor > 1 brightens, clamped to 0..255."""
     return tuple(max(0, min(255, int(c * factor))) for c in rgb)
@@ -153,6 +161,35 @@ def radar_polygon(values, max_value, floor=0.12):
     so the shape never collapses to a point."""
     count = len(values)
     return [radar_spoke(i, count, floor + (1 - floor) * min(v, max_value) / max_value) for i, v in enumerate(values)]
+
+
+# ── spider chart ──────────────────────────────────────────────────────────
+
+def sweep_fraction(elapsed_ms, intro_ms, idle_period_ms):
+    """Where a radar arm points, as a fraction of a clockwise turn from straight
+    up: one even turn during the intro, so the spokes light up in order, then
+    slower endless turns. Negative time keeps the arm at the start."""
+    if elapsed_ms <= 0:
+        return 0.0
+    if elapsed_ms < intro_ms:
+        return elapsed_ms / intro_ms
+    return ((elapsed_ms - intro_ms) / idle_period_ms) % 1.0
+
+
+def spoke_reveal(elapsed_ms, index, count, intro_ms, pop_ms):
+    """0..1 (briefly a little over 1) how far spoke `index` of `count` has popped
+    out, starting the moment the intro sweep passes it."""
+    return ease_out_back((elapsed_ms - intro_ms * index / count) / pop_ms)
+
+
+def arc_points(cx, cy, radius, start, end, steps):
+    """Points along a circle from angle `start` to `end` (radians, clockwise
+    from straight up on screen), as `steps` straight segments."""
+    points = []
+    for i in range(steps + 1):
+        angle = start + (end - start) * i / steps
+        points.append((cx + radius * math.sin(angle), cy - radius * math.cos(angle)))
+    return points
 
 
 # ── skyline ───────────────────────────────────────────────────────────────

@@ -154,6 +154,10 @@ class Session {
 	}
 
 	async step(step) {
+		if (step.wait) {
+			await this.waitFrames(step.wait);
+			return;
+		}
 		const held = step.hold ? BUTTONS[step.hold] : 0;
 		if (held) { await this.setButtons(held); }
 		for (let i = 0; i < (step.times || 1); i++) {
