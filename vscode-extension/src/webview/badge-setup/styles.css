@@ -72,6 +72,28 @@
 	line-height: 1.6;
 }
 
+.theme-source {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	margin: 0 0 12px;
+	padding: 0;
+	border: none;
+}
+
+.theme-source legend {
+	padding: 0;
+	margin-bottom: 6px;
+	font-weight: 600;
+}
+
+.theme-source-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+}
+
 .swatch-strip {
 	display: flex;
 	flex-wrap: wrap;

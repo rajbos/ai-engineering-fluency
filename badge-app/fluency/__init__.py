@@ -27,6 +27,8 @@ except ImportError:
 
 DATA_FILE = STATE_DIR + "/fluency.json"
 PAIRING_FILE = STATE_DIR + "/fluency_pairing.json"
+# Optional: a small PNG of your employer's logo, shown on the Connect screen (copy it over USB).
+COMPANY_LOGO_FILE = STATE_DIR + "/company_logo.png"
 SAMPLE_FILE = APP_DIR + "/assets/sample.json"
 LOOK_FILE = STATE_DIR + "/fluency_look.json"
 RELOAD_CHECK_MS = 3000
@@ -50,12 +52,15 @@ def rgb(values, alpha=255):
     return color.rgb(values[0], values[1], values[2], alpha)
 
 
-BACKGROUND = color.rgb(13, 17, 23)
-WHITE = color.rgb(238, 242, 246)
-LIGHT = color.rgb(201, 209, 217)
-DIM = color.rgb(139, 148, 158)
-TRACK = color.rgb(33, 38, 45)
+# GitHub Universe palette: the deep plum ground of the Universe artwork, with
+# lavender-tinted greys so text stays readable on it.
+BACKGROUND = color.rgb(22, 14, 36)
+WHITE = color.rgb(246, 244, 252)
+LIGHT = color.rgb(218, 212, 236)
+DIM = color.rgb(168, 158, 196)
+TRACK = color.rgb(50, 38, 76)
 PLATE = color.rgb(255, 255, 255)
+TOAST = (56, 42, 84)
 
 
 def setting(key, fallback=""):
@@ -159,10 +164,13 @@ def segments(x, y, width, filled, total, accent, height=5, gap=3):
             box(left, y, max(2, int((step - gap) * part)), height, accent, 2)
 
 
+FOOTER_SIZE = 10
+
+
 def footer(left, right=""):
-    text(left, MARGIN, HEIGHT - 16, 8, DIM)
+    text(left, MARGIN, HEIGHT - 18, FOOTER_SIZE, DIM)
     if right:
-        text_right(right, WIDTH - MARGIN, HEIGHT - 16, 8, DIM)
+        text_right(right, WIDTH - MARGIN, HEIGHT - 18, FOOTER_SIZE, DIM)
 
 
 # ── data ──────────────────────────────────────────────────────────────────
@@ -298,7 +306,7 @@ class Motion:
 
 def score_header(data, accent, demo):
     text("@" + HANDLE if HANDLE else "AI Fluency", MARGIN, 9, 12, accent)
-    text_right("DEMO DATA" if demo else "AI Engineering Fluency", WIDTH - MARGIN, 11, 9, accent if demo else DIM)
+    text_right("DEMO DATA" if demo else "AI Engineering Fluency", WIDTH - MARGIN, 10, 10, accent if demo else DIM)
 
 
 def score_footer(data):
@@ -312,17 +320,18 @@ def draw_score(data, accent, demo, motion=None):
     stage = str(data["stage"])
     text(stage, MARGIN, 26, 48, WHITE)
     left = MARGIN + text_width(stage, 48) + 10
-    text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), left, 32, 10, DIM)
-    text(data["label"], left, 46, 16, accent)
+    text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), left, 30, 12, LIGHT)
+    text(data["label"], left, 46, 18, accent)
 
-    column_width = (WIDTH - MARGIN * 2 - 14) // 2
+    # Category rows fill the space down to the footer: bigger names, scores and pips.
+    column_width = (WIDTH - MARGIN * 2 - 18) // 2
     for index, (name, value) in enumerate(data["categories"][:6]):
-        x = MARGIN + (index % 2) * (column_width + 14)
-        y = 82 + (index // 2) * 25
-        text(name, x, y, 9, LIGHT)
-        text_right("%d/%d" % (value, fd.MAX_STAGE), x + column_width, y, 9, DIM)
+        x = MARGIN + (index % 2) * (column_width + 18)
+        y = 80 + (index // 2) * 38
+        text(name, x, y, 13, LIGHT)
+        text_right("%d/%d" % (value, fd.MAX_STAGE), x + column_width, y, 13, WHITE)
         filled = value * motion.grow(index * 3) if motion else value
-        segments(x, y + 13, column_width, filled, fd.MAX_STAGE, accent)
+        segments(x, y + 18, column_width, filled, fd.MAX_STAGE, accent, height=9, gap=4)
 
     score_footer(data)
 
@@ -341,9 +350,9 @@ def draw_radar(data, colour, demo, yaw, pitch):
     y = text_block(wrap(data["label"], 112, 14), MARGIN, 97, 14, accent, 2) + 8
     strongest = max(categories, key=lambda c: c[1])
     weakest = fd.weakest(categories)
-    text("Strongest", MARGIN, y, 8, DIM)
+    text("Strongest", MARGIN, y, 10, DIM)
     text("%s %d" % strongest, MARGIN, y + 11, 10, LIGHT)
-    text("Grow next", MARGIN, y + 29, 8, DIM)
+    text("Grow next", MARGIN, y + 29, 10, DIM)
     text("%s %d" % weakest, MARGIN, y + 40, 10, LIGHT)
 
     camera = fm.Camera(222, 128, 54, yaw, pitch, 5.0)
@@ -389,7 +398,7 @@ def draw_radar(data, colour, demo, yaw, pitch):
         label = "%s %d" % (name, value)
         half = text_width(label, 8) / 2
         px = max(126 + half, min(WIDTH - 6 - half, px))
-        text_centre(label, px, py - 4, 8, LIGHT if depth < 0.2 else DIM)
+        text_centre(label, px, py - 4, 10, LIGHT if depth < 0.2 else DIM)
 
     score_footer(data)
 
@@ -397,14 +406,14 @@ def draw_radar(data, colour, demo, yaw, pitch):
 def history_header(data, accent, index, metric, motion):
     days = data["days"]
     text("Last 30 days", MARGIN, 9, 12, accent)
-    text_right("UP/DOWN: " + ("sessions" if metric == 1 else "tokens"), WIDTH - MARGIN, 11, 8, DIM)
+    text_right("UP/DOWN: " + ("sessions" if metric == 1 else "tokens"), WIDTH - MARGIN, 10, 10, DIM)
     date, tokens, sessions = days[index]
     count_up = motion.grow(0) if motion else 1.0
     big = fd.compact(int(tokens * count_up)) if metric == 0 else str(int(sessions * count_up))
     text(big, MARGIN, 26, 26, WHITE)
     detail = ("tokens  %d sessions" % sessions) if metric == 0 else ("sessions  %s tokens" % fd.compact(tokens))
-    text(detail, MARGIN + text_width(big, 26) + 7, 38, 10, LIGHT)
-    text_right(fd.day_label(date), WIDTH - MARGIN, 36, 11, accent)
+    text(detail, MARGIN + text_width(big, 26) + 7, 36, 12, LIGHT)
+    text_right(fd.day_label(date), WIDTH - MARGIN, 34, 13, accent)
 
 
 def history_footer(values, metric):
@@ -427,7 +436,7 @@ def draw_history(data, accent, good, cursor, metric, motion=None):
     index = max(0, min(len(days) - 1, int(cursor)))
     history_header(data, accent, index, metric, motion)
 
-    top, bottom = 70, 196
+    top, bottom = 70, 192
     values = [d[1 + metric] for d in days]
     peak = max(values) or 1
     count = len(days)
@@ -453,8 +462,8 @@ def draw_history(data, accent, good, cursor, metric, motion=None):
     screen.pen = TRACK
     screen.shape(shape.rectangle(MARGIN + DX, bottom + 1, WIDTH - MARGIN * 2, 1))
 
-    text(fd.day_label(days[0][0]), MARGIN, bottom + 5, 8, DIM)
-    text_right(fd.day_label(days[-1][0]), WIDTH - MARGIN, bottom + 5, 8, DIM)
+    text(fd.day_label(days[0][0]), MARGIN, bottom + 4, 10, DIM)
+    text_right(fd.day_label(days[-1][0]), WIDTH - MARGIN, bottom + 4, 10, DIM)
     history_footer(values, metric)
 
 
@@ -522,12 +531,16 @@ def draw_skyline(data, colour, good, cursor, metric, yaw, pitch, now):
     for column in range(7):
         x, z = place(column, rows - 1)
         px, py, _ = camera.project(x, 0, z - 0.85)
-        text_centre(WEEKDAY_LETTERS[column], px, py - 4, 8, DIM)
+        text_centre(WEEKDAY_LETTERS[column], px, py - 4, 10, DIM)
 
     history_footer(values, metric)
 
 
 QR_IMAGES = {}
+# The column beside a QR code is narrow, so these sizes rely on wrapping into the free space below.
+QR_TITLE_SIZE = 14
+QR_NAME_SIZE = 14
+QR_DETAIL_SIZE = 11
 
 
 def qr(name):
@@ -536,44 +549,66 @@ def qr(name):
     return QR_IMAGES[name]
 
 
-def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent):
+def optional_image(path):
+    """An image that may not exist, loaded once; None when it is missing or unreadable."""
+    if path not in QR_IMAGES:
+        try:
+            QR_IMAGES[path] = image.load(path)
+        except (OSError, ValueError):
+            QR_IMAGES[path] = None
+    return QR_IMAGES[path]
+
+
+def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent, icon=None):
     code = qr(name)
     plate = code.width + 8
     plate_y = (HEIGHT - plate) // 2
     box(plate_x, plate_y, plate, plate, PLATE, 6)
     screen.blit(code, vec2(plate_x + 4 + DX, plate_y + 4))
 
-    y = text_block(wrap(title, text_width_px, 11), text_x, 30, 11, accent)
-    y += 6
+    top = 24
+    if icon is not None:
+        # The icon sits left of a one-line title, centred on it.
+        screen.blit(icon, vec2(text_x + DX, top))
+        text(title, text_x + icon.width + 8, top + (icon.height - QR_TITLE_SIZE) // 2 - 1, QR_TITLE_SIZE, accent)
+        y = top + icon.height
+    else:
+        y = text_block(wrap(title, text_width_px, QR_TITLE_SIZE), text_x, top + 2, QR_TITLE_SIZE, accent)
+    y += 10
     for size, pen, value in lines:
-        y = text_block(wrap(value, text_width_px, size), text_x, y, size, pen) + 5
-    text("< > screens", text_x, HEIGHT - 26, 8, DIM)
+        y = text_block(wrap(value, text_width_px, size), text_x, y, size, pen) + 7
+    text("< > screens", text_x, HEIGHT - 26, 10, DIM)
+    return y
 
 
 def draw_qr_repo(accent):
-    draw_qr("qr_repo", 10, 226, WIDTH - 226 - 8, "Get the extension", (
-        (10, WHITE, "AI Engineering Fluency"),
-        (8, DIM, "github.com/rajbos/ai-engineering-fluency"),
-        (8, DIM, "VS Code, Visual Studio, JetBrains, CLI"),
+    draw_qr("qr_repo", 6, 212, WIDTH - 212 - 6, "Get the extension", (
+        (QR_NAME_SIZE, WHITE, "AI Engineering Fluency"),
+        (QR_DETAIL_SIZE, LIGHT, "github.com/rajbos/ai-engineering-fluency"),
+        (QR_DETAIL_SIZE, DIM, "VS Code, Visual Studio, JetBrains, CLI"),
     ), accent)
 
 
 def draw_qr_linkedin(accent):
     code = qr("qr_linkedin")
     plate_x = WIDTH - 10 - (code.width + 8)
-    draw_qr("qr_linkedin", plate_x, MARGIN, plate_x - MARGIN - 8, "Connect", (
-        (12, WHITE, CONTACT_NAME),
-        (8, DIM, "linkedin.com/in/bosrob"),
-    ), accent)
+    width = plate_x - MARGIN - 10
+    draw_qr("qr_linkedin", plate_x, MARGIN, width, "Connect", (
+        (QR_NAME_SIZE + 4, WHITE, CONTACT_NAME),
+        (QR_DETAIL_SIZE + 1, LIGHT, "linkedin.com/in/bosrob"),
+    ), accent, icon=qr("linkedin"))
+    company = optional_image(COMPANY_LOGO_FILE)
+    if company is not None and company.width <= width:
+        screen.blit(company, vec2(MARGIN + DX, HEIGHT - 34 - company.height))
 
 
 def draw_sync(store, accent, look):
     text("Sync", MARGIN, 9, 12, accent)
-    text_right("BACK: return" if store.data else "BACK: exit", WIDTH - MARGIN, 11, 8, DIM)
+    text_right("BACK: return" if store.data else "BACK: exit", WIDTH - MARGIN, 11, 10, DIM)
 
     half = (WIDTH - MARGIN * 2 - 8) // 2
     box(MARGIN, 32, half, 52, TRACK, 6)
-    text("Data", MARGIN + 8, 38, 8, DIM)
+    text("Data", MARGIN + 8, 38, 10, DIM)
     if store.demo:
         status, detail = "demo data", "sample, not yours"
     elif store.data:
@@ -583,18 +618,18 @@ def draw_sync(store, accent, look):
     else:
         status, detail = "none yet", "/state/fluency.json"
     text(status, MARGIN + 8, 51, 12, WHITE)
-    text(detail, MARGIN + 8, 68, 8, DIM)
+    text(detail, MARGIN + 8, 68, 10, DIM)
 
     x = MARGIN + half + 8
     box(x, 32, half, 52, TRACK, 6)
-    text("Paired", x + 8, 38, 8, DIM)
+    text("Paired", x + 8, 38, 10, DIM)
     text("yes" if store.paired else "not yet", x + 8, 51, 12, WHITE)
-    text("token from USB" if store.paired else "no token on badge", x + 8, 68, 8, DIM)
+    text("token from USB" if store.paired else "no token on badge", x + 8, 68, 10, DIM)
 
     box(MARGIN, 92, WIDTH - MARGIN * 2, 34, TRACK, 6)
-    text("Look", MARGIN + 8, 97, 8, DIM)
+    text("Look", MARGIN + 8, 97, 10, DIM)
     text("< %s >" % fm.look_label(look), MARGIN + 8, 108, 12, WHITE)
-    text_right("UP/DOWN changes", WIDTH - MARGIN - 8, 110, 8, DIM)
+    text_right("UP/DOWN changes", WIDTH - MARGIN - 8, 110, 10, DIM)
 
     y = 136
     if store.data and not store.demo:
@@ -605,7 +640,7 @@ def draw_sync(store, accent, look):
                  "mpremote fs cp fluency.json :/state/fluency.json",
                  "SELECT: " + ("back to your data" if store.demo else "show demo data"))
     for value in lines:
-        y = text_block(wrap(value, WIDTH - MARGIN * 2, 9), MARGIN, y, 9, LIGHT) + 4
+        y = text_block(wrap(value, WIDTH - MARGIN * 2, 10), MARGIN, y, 10, LIGHT) + 4
     footer("MENU opens this screen", "BACK " + ("returns" if store.data else "exits"))
 
 
@@ -613,8 +648,8 @@ def draw_toast(message, age):
     fade = 1.0 - fm.clamp01((age - (TOAST_MS - 300)) / 300)
     width = text_width(message, 10) + 24
     x = (WIDTH - width) // 2
-    box(x, HEIGHT - 50, width, 22, color.rgb(48, 54, 61, int(235 * fade)), 11)
-    text_centre(message, WIDTH / 2, HEIGHT - 45, 10, color.rgb(238, 242, 246, int(255 * fade)))
+    box(x, HEIGHT - 50, width, 22, rgb(TOAST, int(235 * fade)), 11)
+    text_centre(message, WIDTH / 2, HEIGHT - 45, 10, color.rgb(246, 244, 252, int(255 * fade)))
 
 
 def draw_sweep(accent, age):

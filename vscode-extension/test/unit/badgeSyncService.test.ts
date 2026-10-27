@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { parseDeviceList, syncBadge, syncOverUsb, type CommandResult, type CommandRunner } from '../../src/badge/badgeSyncService';
+import { describeFailure, parseDeviceList, syncBadge, syncOverUsb, type CommandResult, type CommandRunner } from '../../src/badge/badgeSyncService';
 
 interface Call { command: string; args: string[]; fileContent?: string }
 
@@ -26,15 +26,39 @@ function fakeRunner(answers: { devs?: CommandResult; mkdir?: CommandResult; cp?:
 	return { run, calls };
 }
 
-const BADGE_LINE = 'COM5 2e8a:0003 E6614C311B123456 Pimoroni Tufty 2350';
+// mpremote prints `<port> <serial> <vid:pid> <maker> <product>`; the serial may be `None`.
+const BADGE_LINE = 'COM5 E6614C311B123456 2e8a:0003 Pimoroni Tufty 2350';
 
 function tempRoot(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), 'badge-sync-test-'));
 }
 
 test('parseDeviceList: prefers ports with the Raspberry Pi vendor id', () => {
-	const output = ['COM3 0403:6001 A1 FTDI Serial', BADGE_LINE, ''].join('\r\n');
+	const output = ['COM3 A1 0403:6001 FTDI Serial', BADGE_LINE, ''].join('\r\n');
 	assert.deepEqual(parseDeviceList(output), ['COM5']);
+});
+
+test('parseDeviceList: matches the real mpremote 1.29 output of a badge next to a motherboard serial port', () => {
+	const output = 'COM3 None 0000:0000 Intel None\nCOM4 5A76B1DB67E35605 2e8a:1101 Microsoft None\n';
+	assert.deepEqual(parseDeviceList(output), ['COM4']);
+});
+
+test('parseDeviceList: still finds the vendor id when the columns are in the old order', () => {
+	assert.deepEqual(parseDeviceList('COM3 0403:6001 A1 FTDI Serial\nCOM5 2e8a:0003 E6614C311B123456 Pimoroni'), ['COM5']);
+});
+
+test('describeFailure: keeps the exception line of a Python traceback, not the top of the stack', () => {
+	const stderr = [
+		'Traceback (most recent call last):',
+		'  File "<frozen runpy>", line 203, in _run_module_as_main',
+		'  File "C:\\mpremote\\transport_serial.py", line 195, in enter_raw_repl',
+		'    raise TransportError("could not enter raw repl")',
+		'mpremote.transport.TransportError: could not enter raw repl',
+		'',
+	].join('\r\n');
+	assert.equal(describeFailure({ code: 1, stdout: '', stderr }), 'could not enter raw repl');
+	assert.equal(describeFailure({ code: 3, stdout: '', stderr: '' }), 'mpremote exited with code 3');
+	assert.equal(describeFailure({ code: 1, stdout: 'cp a :b\nmpremote: no device found', stderr: '' }), 'mpremote: no device found');
 });
 
 test('parseDeviceList: keeps every port when none carries the badge vendor id', () => {

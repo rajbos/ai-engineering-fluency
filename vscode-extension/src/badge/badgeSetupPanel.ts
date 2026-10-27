@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import { buildBadgePayload, normalizeBadgeTheme, serializeBadgePayload, type BadgeDayInput, type BadgeMaturityInput, type BadgeTheme } from '../../../src/badgePayload';
+import { buildBadgePayload, normalizeBadgeTheme, normalizeBadgeThemeSource, resolveBadgeTheme, serializeBadgePayload, type BadgeDayInput, type BadgeMaturityInput, type BadgeTheme, type BadgeThemeSource } from '../../../src/badgePayload';
 import { resolvedLocale, t } from '../l10n';
 import { buildWebviewLocalization } from '../webviewLocalization';
 import { buildCspMeta, getCodiconStylesheetTag, getNonce } from '../utils/webviewUtils';
@@ -12,6 +12,7 @@ import type { BadgeHostMessage, BadgeLastSync, BadgeLinkId, BadgeSetupData } fro
 
 const PANEL_VIEW_TYPE = 'aiFluencyBadgeSetup';
 const THEME_STATE_KEY = 'badge.theme';
+const THEME_SOURCE_STATE_KEY = 'badge.themeSource';
 const LAST_SYNC_STATE_KEY = 'badge.lastSync';
 const BADGE_IMAGE_FILE = 'badge-universe.jpg';
 
@@ -96,6 +97,10 @@ export class BadgeSetupPanel {
 		return normalizeBadgeTheme(this.deps.context.globalState.get<Record<string, unknown>>(THEME_STATE_KEY));
 	}
 
+	private getThemeSource(): BadgeThemeSource {
+		return normalizeBadgeThemeSource(this.deps.context.globalState.get<unknown>(THEME_SOURCE_STATE_KEY));
+	}
+
 	private getLastSync(): BadgeLastSync | undefined {
 		const stored = this.deps.context.globalState.get<unknown>(LAST_SYNC_STATE_KEY);
 		return isLastSync(stored) ? stored : undefined;
@@ -107,6 +112,7 @@ export class BadgeSetupPanel {
 			badgeSyncUsb: () => this.syncUsb(),
 			badgeInstallApp: () => this.installApp(),
 			badgeTheme: () => this.deps.context.globalState.update(THEME_STATE_KEY, normalizeBadgeTheme(message?.theme as Record<string, unknown> | undefined)),
+			badgeThemeSource: () => this.deps.context.globalState.update(THEME_SOURCE_STATE_KEY, normalizeBadgeThemeSource(message?.source)),
 			badgeHideButton: () => this.deps.hideButton(),
 			badgeOpenLink: () => this.openLink(message?.id),
 			refresh: () => this.rerender(),
@@ -140,7 +146,7 @@ export class BadgeSetupPanel {
 				run: this.deps.run ?? runCommand,
 				buildPayload: async () => {
 					const snapshot = await this.deps.getSnapshot();
-					return serializeBadgePayload(buildBadgePayload({ ...snapshot, theme: this.getCachedTheme(), now: new Date() }));
+					return serializeBadgePayload(buildBadgePayload({ ...snapshot, theme: resolveBadgeTheme(this.getThemeSource(), this.getCachedTheme()), now: new Date() }));
 				},
 				pickPort: (ports) => Promise.resolve(vscode.window.showQuickPick(ports, { placeHolder: t('badge.sync.pickPort') })),
 			});
@@ -192,6 +198,7 @@ export class BadgeSetupPanel {
 		const data: BadgeSetupData = {
 			lastSync: this.getLastSync(),
 			theme: this.getCachedTheme(),
+			themeSource: this.getThemeSource(),
 			links: Object.keys(BADGE_LINKS) as BadgeLinkId[],
 			imageUri: this.getImageUri(webview),
 			localization: { ...buildWebviewLocalization(t), '__language__': language },

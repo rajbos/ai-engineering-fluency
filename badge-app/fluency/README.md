@@ -53,8 +53,22 @@ No Wi-Fi or `secrets.py` settings are needed. If `GITHUB_USERNAME` or
 `CONTACT_NAME` is set in `secrets.py` (the stock Settings app edits both),
 the score screen shows your handle and the LinkedIn screen your name.
 
+To show your employer's logo under your name on the LinkedIn screen, copy a
+small PNG (at most about 110 pixels wide) to `/state/company_logo.png`:
+
+```sh
+mpremote fs cp company_logo.png :/state/company_logo.png
+```
+
 ## Install
 
 Put the badge in USB disk mode (double-tap RESET, or open the Mass Storage
 app), copy this `fluency` folder into `apps/` on the `BADGER` drive, and eject.
 The app appears in the launcher.
+
+The stock MonaOS 4.0 launcher only draws its own built-in icons, so the app
+shows a generic dot grid until the menu is patched to load `icon.png`. The
+patch is [Gadgetoid's menu change](https://gist.github.com/Gadgetoid/f72b85e6efe603bd02b2b730bbc40356),
+which [`badger/home`](https://github.com/badger/home) already ships. Apply it
+to `apps/menu/app.py` on the `BADGER` drive while it is in USB disk mode; the
+serial connection cannot write there. Keep a copy of the original file to undo it.

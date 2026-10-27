@@ -6,6 +6,9 @@ import {
 	BADGE_MAX_PAYLOAD_BYTES,
 	buildBadgePayload,
 	normalizeBadgeTheme,
+	normalizeBadgeThemeSource,
+	resolveBadgeTheme,
+	UNIVERSE_BADGE_THEME,
 	normalizeHexColor,
 	serializeBadgePayload,
 	shortCategoryName,
@@ -131,6 +134,33 @@ test('normalizeBadgeTheme: keeps only known roles and drops unusable values', ()
 		{ accent: '#0078d4', good: '#2ea043' },
 	);
 	assert.deepEqual(normalizeBadgeTheme(undefined), {});
+});
+
+test('normalizeBadgeThemeSource: defaults to the Universe palette for anything but editor', () => {
+	assert.equal(normalizeBadgeThemeSource('editor'), 'editor');
+	assert.equal(normalizeBadgeThemeSource('universe'), 'universe');
+	assert.equal(normalizeBadgeThemeSource(undefined), 'universe');
+	assert.equal(normalizeBadgeThemeSource('vscode'), 'universe');
+});
+
+test('resolveBadgeTheme: Universe ignores the editor colours, editor keeps only usable ones', () => {
+	const editor = { accent: '#0078d4', link: 'blue' };
+	assert.deepEqual(resolveBadgeTheme('universe', editor), UNIVERSE_BADGE_THEME);
+	assert.deepEqual(resolveBadgeTheme('editor', editor), { accent: '#0078d4' });
+	// A copy, so a caller cannot change the shared palette.
+	const universe = resolveBadgeTheme('universe', {});
+	universe.accent = '#000000';
+	assert.equal(UNIVERSE_BADGE_THEME.accent, '#5fed83');
+});
+
+test('buildBadgePayload: carries the Universe palette when it is the chosen theme', () => {
+	const payload = buildBadgePayload({
+		maturity: { overallStage: 2, overallLabel: 'AI Explorer', categories: [] },
+		dailyStats: [],
+		theme: resolveBadgeTheme('universe', { accent: '#0078d4' }),
+		now: new Date(2026, 9, 27, 12, 0, 0),
+	});
+	assert.deepEqual(payload.theme, { accent: '#5fed83', link: '#b18cff', good: '#08872b', warn: '#c65400' });
 });
 
 test('shortCategoryName: falls back to a truncated first word for unknown categories', () => {

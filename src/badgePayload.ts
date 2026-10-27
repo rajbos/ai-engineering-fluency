@@ -14,9 +14,33 @@ export const BADGE_DAYS = 30;
 /** The badge's data partition is small; the plan keeps the file under about 4 KB. */
 export const BADGE_MAX_PAYLOAD_BYTES = 4096;
 
-/** Colour roles the badge takes from the active editor theme. */
+/** Colour roles the badge takes from the chosen palette. */
 export type BadgeThemeKey = 'accent' | 'link' | 'good' | 'warn';
 export type BadgeTheme = Partial<Record<BadgeThemeKey, string>>;
+
+/** Where the badge colours come from: the GitHub Universe palette or the active editor theme. */
+export type BadgeThemeSource = 'universe' | 'editor';
+export const DEFAULT_BADGE_THEME_SOURCE: BadgeThemeSource = 'universe';
+
+/**
+ * The GitHub Universe 2026 palette: its bright green as the accent, the
+ * GitHub green of its buttons for positive values, plus its lavender and orange.
+ */
+export const UNIVERSE_BADGE_THEME: Readonly<Required<BadgeTheme>> = {
+	accent: '#5fed83',
+	link: '#b18cff',
+	good: '#08872b',
+	warn: '#c65400',
+};
+
+export function normalizeBadgeThemeSource(value: unknown): BadgeThemeSource {
+	return value === 'editor' ? 'editor' : DEFAULT_BADGE_THEME_SOURCE;
+}
+
+/** The colours to send: the Universe palette, or the editor theme colours the host cached. */
+export function resolveBadgeTheme(source: BadgeThemeSource, editorTheme: BadgeTheme): BadgeTheme {
+	return source === 'editor' ? normalizeBadgeTheme(editorTheme) : { ...UNIVERSE_BADGE_THEME };
+}
 
 export interface BadgeMaturityInput {
 	overallStage: number;
