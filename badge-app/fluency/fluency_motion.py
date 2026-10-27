@@ -195,6 +195,16 @@ def spoke_reveal(elapsed_ms, index, count, intro_ms, pop_ms):
     return ease_out_back((elapsed_ms - intro_ms * index / count) / pop_ms)
 
 
+def sonar_ping(elapsed_ms, index, count, period_ms):
+    """(radius fraction 0..1, strength 1..0) of sonar ring `index` of `count`: each
+    ring leaves the centre in turn, evenly spread over `period_ms`, and fades as it
+    reaches the rim. None while the ring has not started (negative time)."""
+    if elapsed_ms < 0:
+        return None
+    phase = ((elapsed_ms - period_ms * index / count) % period_ms) / period_ms
+    return ease_out(phase), (1 - phase) ** 2
+
+
 def arc_points(cx, cy, radius, start, end, steps):
     """Points along a circle from angle `start` to `end` (radians, clockwise
     from straight up on screen), as `steps` straight segments."""

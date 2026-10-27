@@ -91,6 +91,22 @@ class ReloadTests(unittest.TestCase):
         self.assertTrue(all(a != b for a, b in zip(colours, colours[1:])))
 
 
+class SonarTests(unittest.TestCase):
+    def test_not_started_before_time_zero(self):
+        self.assertIsNone(fm.sonar_ping(-1, 0, 3, 3000))
+
+    def test_ring_grows_and_fades(self):
+        early = fm.sonar_ping(100, 0, 3, 3000)
+        late = fm.sonar_ping(2900, 0, 3, 3000)
+        self.assertLess(early[0], late[0])
+        self.assertGreater(early[1], late[1])
+        self.assertTrue(all(0 <= v <= 1 for v in early + late))
+
+    def test_rings_are_spread_over_the_period(self):
+        radii = [fm.sonar_ping(500, i, 3, 3000)[0] for i in range(3)]
+        self.assertEqual(len(set(radii)), 3)
+
+
 class CameraTests(unittest.TestCase):
     def test_origin_lands_on_the_centre(self):
         x, y, depth = fm.Camera(160, 120, 30).project(0, 0, 0)

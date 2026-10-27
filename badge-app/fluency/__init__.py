@@ -298,6 +298,8 @@ SPIDER_SWEEP_START_MS = 300  # when the arm starts its first turn
 SPIDER_SWEEP_MS = 1500  # the first turn, lighting each spoke as it passes
 SPIDER_POP_MS = 450  # a spoke popping out to its stage
 SPIDER_IDLE_MS = 7000  # a later, fainter turn of the arm
+SPIDER_PING_MS = 3600  # Spider chart: one sonar ping's trip from the centre to the rim
+SPIDER_PINGS = 3  # ...with this many rings in flight at once
 SPIDER_TRAIL = 0.55  # radians of fading trail behind the arm
 SPIDER_FLOOR = 0.12  # radius of a zero stage, so the shape never collapses
 
@@ -469,6 +471,14 @@ def draw_spider(data, colour, demo, elapsed, now, hint):
     if sweep < 0:
         score_footer(data)
         return
+
+    # Sonar: rings leave the centre and fade out towards the rim, under the data shape.
+    for ping in range(SPIDER_PINGS):
+        state = fm.sonar_ping(sweep - SPIDER_SWEEP_MS, ping, SPIDER_PINGS, SPIDER_PING_MS)
+        if state is None:
+            continue
+        circle = fm.arc_points(cx, cy, radius * state[0], 0, 2 * math.pi, 28)
+        polygon(circle, rgb(colour, int(150 * state[1])), 1)
 
     # The arm with a fading trail behind it; faint once the first turn is done.
     turn = fm.sweep_fraction(sweep, SPIDER_SWEEP_MS, SPIDER_IDLE_MS)
