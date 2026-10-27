@@ -4,6 +4,12 @@ All notable changes to the Visual Studio extension will be documented in this fi
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-10-27
+
+### ✨ Features & Improvements
+- Updated webview bundles with the latest shared-view changes: sortable, paged tables in every view, per-tool reliability and latency in Usage Analysis, a One model, two harnesses comparison in Efficiency, and a View index in What's New
+- Updated bundled CLI: resumed Copilot CLI sessions are no longer double counted and worktrees are grouped into one workspace
+
 ## [1.4.2] - 2026-10-02
 
 ### ✨ Features & Improvements

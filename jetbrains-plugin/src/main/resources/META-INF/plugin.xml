@@ -28,6 +28,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.5.4</h3>
+        <ul>
+            <li>Updated shared webview bundles: sortable, paged tables in every view, per-tool reliability and latency in Usage Analysis, a One model, two harnesses comparison in Efficiency, and a View index in What's New</li>
+            <li>Updated bundled CLI: resumed Copilot CLI sessions are no longer double counted and worktrees are grouped into one workspace</li>
+        </ul>
         <h3>0.5.3</h3>
         <ul>
             <li>Fixed a startup error on IntelliJ Platform 2026.2 and newer caused by the JCEF classloader split</li>
