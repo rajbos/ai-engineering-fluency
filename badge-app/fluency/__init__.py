@@ -352,15 +352,15 @@ def score_column(data, categories, accent, hint):
     the label, the strongest category and the one to grow next."""
     stage = str(data["stage"])
     text(stage, MARGIN, 26, 48, WHITE)
-    text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), MARGIN, 82, 10, DIM)
-    y = text_block(wrap(data["label"], 112, 14), MARGIN, 97, 14, accent, 2) + 8
+    text("Stage %d of %d" % (data["stage"], fd.MAX_STAGE), MARGIN, 80, 12, DIM)
+    y = text_block(wrap(data["label"], 112, 16), MARGIN, 96, 16, accent, 2) + 8
     strongest = max(categories, key=lambda c: c[1])
     weakest = fd.weakest(categories)
-    text("Strongest", MARGIN, y, 10, DIM)
-    text("%s %d" % strongest, MARGIN, y + 11, 10, LIGHT)
-    text("Grow next", MARGIN, y + 29, 10, DIM)
-    text("%s %d" % weakest, MARGIN, y + 40, 10, LIGHT)
-    text(hint, MARGIN, 200, 8, DIM)
+    text("Strongest", MARGIN, y, 11, DIM)
+    text("%s %d" % strongest, MARGIN, y + 12, 13, LIGHT)
+    text("Grow next", MARGIN, y + 32, 11, DIM)
+    text("%s %d" % weakest, MARGIN, y + 44, 13, LIGHT)
+    text(hint, MARGIN, 201, 10, DIM)
 
 
 def draw_radar(data, colour, demo, yaw, pitch, hint):
