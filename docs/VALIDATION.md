@@ -231,7 +231,7 @@ rule out machine load.
 | Job | Checks |
 |---|---|
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
-| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** |
+| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** (extension changes); **badge emulator screenshots vs the merge base** (`badge-app/` changes, see [badge-app/README.md](../badge-app/README.md#try-it-in-the-emulator)) |
 | `ui-checks-comment.yml` (`workflow_run`, same-repo PRs) | posts the screenshots as a PR comment (holds `GH_PAT`; runs from the default branch) |
 | `desktop-build` (`desktop-build.yml`) | desktop type-check, **desktop message contract**, **webview page shell**, production build, **headless render of every view**, build-output check; host view sync (informational) |
 | `validate-skills` / `security-classification` | **every skill that ships scripts has a `SECURITY.md` or an exempt/pending entry** (`node scripts/validate-skill-security.js`, over all skills) |

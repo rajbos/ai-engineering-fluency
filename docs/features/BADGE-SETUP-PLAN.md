@@ -73,7 +73,7 @@ A MicroPython app in `badge-app/fluency/`, copied to `apps/fluency` on the badge
 - Call `badge.mode(HIRES | VSYNC)` for the full 320x240 surface; the default is 160x120.
 - Input is orientation-aware: `badge.pressed(BUTTON_LEFT)`, `held`, `released`. `BUTTON_MENU` and `BUTTON_BACK` drive the sync screen.
 - The app folder is resolved like the `commits` app does: `/remote/apps/fluency` first, then `/system/apps/fluency`. That makes `mpremote mount` testing work without copying files.
-- No simulator models the 2026 badge. Pimoroni's desktop and web Badgeware simulators help with layout, but test on hardware.
+- The badger.github.io simulator (MicroPython compiled to WebAssembly, used by the Badge Simulator canvas in `badger/home`) runs 2026 apps with the real fonts and graphics. `badge-app/tools/emulator/` runs this app in it headlessly and CI screenshots it. It has no IMU, sockets or real timing, so still test on hardware.
 
 **Controls**
 

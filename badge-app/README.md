@@ -15,6 +15,7 @@ format, controls and roadmap are in
 | `fluency/assets/` | Pre-rendered QR codes, the repo mark and `sample.json` (demo data). |
 | `tools/make_qr.py` | Rebuilds the QR code and logo PNGs. |
 | `tools/preview.py` | Runs the app on a laptop and saves each screen as a PNG. |
+| `tools/emulator/` | Runs the app in the badger.github.io WebAssembly simulator, headlessly, and saves each screen as a PNG. CI uses it. |
 | `tests/` | Unit tests for `fluency_data.py`. |
 
 ## Status
@@ -46,6 +47,35 @@ python -m unittest discover -s badge-app/tests
 
 To check the code compiles for MicroPython: `pip install mpy-cross`, then
 `python -m mpy_cross badge-app/fluency/__init__.py`.
+
+## Try it in the emulator
+
+`tools/emulator/` runs the app in the same MicroPython WebAssembly runtime as
+[badger.github.io](https://badger.github.io/editor) and the Badge Simulator
+canvas in [`badger/home`](https://github.com/badger/home), so it uses the real
+badge fonts and graphics library rather than Pillow stubs. It needs Node and
+the Playwright Chromium the visual-view-diff skill uses:
+
+```sh
+node badge-app/tools/emulator/emulator.js        # screens -> badge-app/preview/emulator/
+node badge-app/tools/emulator/badge-diff.js --base origin/main   # vs the merge base -> visual-output/
+node --test badge-app/tools/emulator/test/*.test.js
+```
+
+The runtime is pinned to one badger.github.io commit in
+`tools/emulator/runtime.json`. It is downloaded from raw.githubusercontent.com
+on first use and cached in `~/.cache/ai-fluency-badge-emulator/` (set
+`BADGE_EMULATOR_CACHE` to move it). The screens it walks through, and the
+button presses between them, are in `tools/emulator/lib/scenarios.js`; add a
+`shot` there when you add a screen. A run fails if the app prints a traceback
+or stops drawing.
+
+In CI, a pull request that touches `badge-app/` runs it in the `ui-checks`
+job: it renders the app at the merge base and at the PR head, and the changed
+screens appear in the same screenshot comment as the webviews.
+
+The emulator has no accelerometer (tilt is replaced by SELECT + LEFT/RIGHT),
+no sockets and different timing, so finish on a real badge.
 
 ## Try it on a badge
 

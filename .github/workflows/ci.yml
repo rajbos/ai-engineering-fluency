@@ -22,17 +22,19 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      # Three predicates, one runner slot. The expensive jobs (build, ui-checks)
+      # Four predicates, one runner slot. The expensive jobs (build, ui-checks)
       # only care about the extension and its shared sources. The cheap guards
       # see wider trees the extension build does not depend on: the coverage
       # guard also needs cli/src, and the duplication ratchet needs cli/src,
       # sharing-server/src, desktop/src and release-video/src. Gating them all
       # on one flag made a CLI-, sharing-server-, desktop- or release-video-only
       # change schedule the full extension build and the Playwright suite for
-      # nothing.
+      # nothing. badge-relevant is the badge app: it adds the emulator
+      # screenshots to ui-checks without building the extension.
       ci-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.ci-relevant == 'true' }}
       coverage-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.coverage-relevant == 'true' }}
       duplication-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.duplication-relevant == 'true' }}
+      badge-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.badge-relevant == 'true' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
@@ -110,6 +112,14 @@ jobs:
               - 'scripts/check-code-duplication.js'
               - 'scripts/code-duplication-baseline.json'
               - '.github/workflows/ci.yml'
+            # Gates the badge emulator steps in ui-checks: the app, its emulator
+            # harness, and the visual-view-diff code the harness reuses for the
+            # browser and the screenshot comparison.
+            badge-relevant:
+              - 'badge-app/**'
+              - '.github/skills/visual-view-diff/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/dependencies/playwright/**'
 
   # Deterministic guard against "new source logic without test changes" — the
   # class of finding the Test Expert agent would otherwise have to
@@ -583,11 +593,19 @@ jobs:
   # the panels now look like. This job clicks every control in every panel, and
   # renders the panels next to the merge base so a reviewer can see the change
   # rather than infer it from a diff of CSS.
+  #
+  # The changed folders decide which screenshots it takes: the webview steps
+  # run for an extension change (ci-relevant), the badge emulator steps for a
+  # badge-app change (badge-relevant), and both land in one report, artifact
+  # and PR comment. The job keeps its name for a badge-only change because
+  # ui-checks-comment.yml finds the run by it.
   ui-checks:
     name: Webview UI checks
     runs-on: ubuntu-latest
     needs: check-changes
-    if: github.event_name == 'pull_request' && needs.check-changes.outputs.ci-relevant == 'true'
+    if: >-
+      github.event_name == 'pull_request'
+      && (needs.check-changes.outputs.ci-relevant == 'true' || needs.check-changes.outputs.badge-relevant == 'true')
     permissions:
       contents: read # read-only and secret-free: this job runs the PR's own code
     # One ui-checks run per PR at a time; the older head's screenshots are
@@ -632,6 +650,7 @@ jobs:
       run: node --test .github/workflows/scripts/visual-diff-comment.test.js
 
     - name: Install dependencies
+      if: needs.check-changes.outputs.ci-relevant == 'true'
       working-directory: vscode-extension
       run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -663,15 +682,18 @@ jobs:
         fi
 
     - name: Compile webview bundles
+      if: needs.check-changes.outputs.ci-relevant == 'true'
       working-directory: vscode-extension
       run: pnpm run compile
 
     - name: Interaction smoke (click every control)
+      if: needs.check-changes.outputs.ci-relevant == 'true'
       working-directory: vscode-extension
       run: pnpm run check:interaction
 
     - name: Visual view diff vs merge base
       id: visual
+      if: needs.check-changes.outputs.ci-relevant == 'true'
       # A visual change is usually intended, so this reports rather than gates;
       # the report and the images are the deliverable for the reviewer.
       continue-on-error: true
@@ -679,6 +701,29 @@ jobs:
       env:
         # The PR's base branch, not origin/main: the merge base is computed
         # against whatever the PR is actually targeting.
+        BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+
+    - name: Badge emulator unit tests
+      if: needs.check-changes.outputs.badge-relevant == 'true'
+      run: node --test badge-app/tools/emulator/test/*.test.js
+
+    # The MicroPython WebAssembly runtime is pinned to one badger.github.io
+    # commit in runtime.json, so that file's hash is an exact cache key.
+    - name: Cache badge emulator runtime
+      if: needs.check-changes.outputs.badge-relevant == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ai-fluency-badge-emulator
+        key: badge-emulator-${{ hashFiles('badge-app/tools/emulator/runtime.json') }}
+
+    # Runs after the webview diff, which clears visual-output/ when it starts,
+    # and merges the badge screens into its report. Unlike the webview diff this
+    # gates: the app crashing or not drawing in the emulator fails the step.
+    # Screen changes themselves are reported, not failed.
+    - name: Badge emulator screenshots vs merge base
+      if: needs.check-changes.outputs.badge-relevant == 'true'
+      run: node badge-app/tools/emulator/badge-diff.js --base "$BASE_REF"
+      env:
         BASE_REF: origin/${{ github.event.pull_request.base.ref }}
 
     - name: Publish visual diff to the job summary
