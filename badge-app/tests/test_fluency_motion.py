@@ -63,6 +63,13 @@ class EasingTests(unittest.TestCase):
         self.assertAlmostEqual(fm.pulse(0), 0)
         self.assertAlmostEqual(fm.pulse(600), 1)
 
+    def test_ease_out_back_overshoots_then_settles(self):
+        self.assertEqual(fm.ease_out_back(0), 0)
+        self.assertAlmostEqual(fm.ease_out_back(1), 1)
+        self.assertAlmostEqual(fm.ease_out_back(5), 1)
+        self.assertEqual(fm.ease_out_back(-1), 0)
+        self.assertGreater(max(fm.ease_out_back(t / 20) for t in range(21)), 1.05)
+
     def test_shade_and_mix_clamp(self):
         self.assertEqual(fm.shade((200, 100, 0), 2), (255, 200, 0))
         self.assertEqual(fm.shade((200, 100, 10), 0.5), (100, 50, 5))
@@ -116,6 +123,37 @@ class RadarTests(unittest.TestCase):
     def test_values_above_the_maximum_are_capped(self):
         x, z = fm.radar_polygon([9], 4)[0]
         self.assertAlmostEqual(math.hypot(x, z), 1.0)
+
+
+class SpiderTests(unittest.TestCase):
+    def test_sweep_turns_once_evenly_then_idles_slowly(self):
+        self.assertEqual(fm.sweep_fraction(-50, 1500, 7000), 0.0)
+        self.assertEqual(fm.sweep_fraction(0, 1500, 7000), 0.0)
+        self.assertAlmostEqual(fm.sweep_fraction(750, 1500, 7000), 0.5)
+        self.assertAlmostEqual(fm.sweep_fraction(1500, 1500, 7000), 0.0)  # wraps as the idle turn starts
+        self.assertAlmostEqual(fm.sweep_fraction(1500 + 3500, 1500, 7000), 0.5)
+        self.assertAlmostEqual(fm.sweep_fraction(1500 + 7000 + 700, 1500, 7000), 0.1)
+        self.assertTrue(all(0 <= fm.sweep_fraction(t, 1500, 7000) < 1 for t in range(0, 20000, 37)))
+
+    def test_spokes_pop_in_sweep_order(self):
+        count = 6
+        self.assertGreater(fm.spoke_reveal(200, 0, count, 1500, 450), 0)
+        self.assertEqual(fm.spoke_reveal(200, 1, count, 1500, 450), 0)  # the arm has not reached spoke 1 yet
+        self.assertGreater(fm.spoke_reveal(300, 1, count, 1500, 450), 0)  # 1500 / 6 = 250 ms per spoke
+        self.assertAlmostEqual(fm.spoke_reveal(5000, 5, count, 1500, 450), 1)
+        reveals = [fm.spoke_reveal(900, i, count, 1500, 450) for i in range(count)]
+        self.assertEqual([r > 0 for r in reveals], [True, True, True, True, False, False])
+        settled = [min(1.0, r) for r in reveals]  # a spoke mid-pop overshoots 1, so compare clamped
+        self.assertEqual(settled, sorted(settled, reverse=True))
+
+    def test_arc_points_run_clockwise_from_straight_up(self):
+        points = fm.arc_points(100, 100, 10, 0, math.pi / 2, 2)
+        self.assertEqual(len(points), 3)
+        self.assertAlmostEqual(points[0][0], 100)
+        self.assertAlmostEqual(points[0][1], 90)  # straight up: smaller y
+        self.assertAlmostEqual(points[2][0], 110)  # a quarter turn clockwise: to the right
+        self.assertAlmostEqual(points[2][1], 100)
+        self.assertTrue(all(abs(math.hypot(x - 100, y - 100) - 10) < 1e-9 for x, y in points))
 
 
 class SkylineTests(unittest.TestCase):

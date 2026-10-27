@@ -220,6 +220,9 @@ def script(with_data):
         return [{"shot": "0-sync-no-data"}]
     # Motion look (the default): bars grow in, screens slide.
     steps = wait(4) + [{"shot": "1a-score-growing"}] + wait(30) + [{"shot": "1-score"}]
+    # UP on the score screen flips to the spider chart: the rings grow, the arm sweeps the spokes in.
+    steps += [{"press": ("UP",)}] + wait(22) + [{"shot": "1c-chart-sweeping"}] + wait(45) + [{"shot": "1d-chart"}]
+    steps += [{"press": ("DOWN",)}] + wait(30)
     steps += [{"press": ("RIGHT",)}] + wait(3) + [{"shot": "1b-slide"}]
     steps += [{"tilt": -0.5} for _ in range(10)]  # tilt left: scrub back a few days
     steps += wait(30) + [{"shot": "2-history"}, {"press": ("UP",)}, {"shot": "2b-history-sessions"}, {"press": ("UP",)}]
