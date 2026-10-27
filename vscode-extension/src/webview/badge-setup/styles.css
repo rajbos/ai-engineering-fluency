@@ -162,7 +162,7 @@
 	margin: 8px 0 4px;
 	padding: 6px;
 	box-sizing: border-box;
-	background: #160e24;
+	background: var(--vscode-editorWidget-background);
 	border-radius: 6px;
 }
 
