@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Badge emulator</title>
+<style>
+	html, body { margin: 0; background: #000; }
+	canvas { display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="320" height="240"></canvas>
+<script type="module">
+// Headless host for the badger.github.io MicroPython worker. emulator.js loads
+// this page, calls emu.start() with the program and files, then drives it with
+// emu.setButtons() and reads frames back with emu.capture().
+const screen = document.getElementById('screen');
+const state = { ready: false, running: false, failed: false, bootError: null, frames: 0, log: [] };
+let pending = null;
+let buttons = 0;
+
+const worker = new Worker('/simulator/micropython.worker.js', { type: 'module' });
+worker.onerror = (event) => { event.preventDefault(); state.bootError = `Worker error: ${event.message}`; };
+worker.onmessage = ({ data }) => {
+	if (typeof data.stdout === 'string') { state.log.push(...data.stdout.split('\n')); }
+	if (data.running) { state.running = true; }
+	if (data.completed) { state.running = false; }
+	if (data.failed) { state.failed = true; }
+	if (data.bootError) { state.bootError = String(data.bootError); }
+	if (data.ready) {
+		state.ready = true;
+		worker.postMessage({ buttons });
+		if (pending) { send(pending); }
+	}
+	if (data.frame) {
+		const { width, height, buffer } = data.frame;
+		if (screen.width !== width || screen.height !== height) { screen.width = width; screen.height = height; }
+		screen.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(buffer), width, height), 0, 0);
+		state.frames++;
+	}
+};
+
+function decode(base64) {
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+	return bytes;
+}
+
+function send(request) {
+	pending = null;
+	worker.postMessage({ program: request.program, files: request.files.map((f) => ({ name: f.name, content: decode(f.data) })), debug: false });
+	worker.postMessage({ pause: false });
+}
+
+window.emu = {
+	start(request) { if (state.ready) { send(request); } else { pending = request; } },
+	setButtons(mask) { buttons = mask; worker.postMessage({ buttons }); },
+	status() { return { ...state, log: undefined, logLength: state.log.length, width: screen.width, height: screen.height }; },
+	logSince(index) { return state.log.slice(index); },
+	// The screen at an integer scale, without smoothing, as a PNG data URL.
+	capture(scale) {
+		const out = document.createElement('canvas');
+		out.width = screen.width * scale;
+		out.height = screen.height * scale;
+		const ctx = out.getContext('2d');
+		ctx.imageSmoothingEnabled = false;
+		ctx.drawImage(screen, 0, 0, out.width, out.height);
+		return out.toDataURL('image/png');
+	},
+};
+</script>
+</body>
+</html>

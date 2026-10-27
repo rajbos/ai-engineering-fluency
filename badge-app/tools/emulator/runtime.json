@@ -1,0 +1,13 @@
+{
+  "$comment": [
+    "Pins the badger.github.io simulator the emulator runs the badge app in.",
+    "It is the MicroPython WebAssembly runtime the badger/home Badge Simulator",
+    "canvas uses (its web/BUILD_INFO.json names the same revision). The files are",
+    "fetched from raw.githubusercontent.com at this exact commit the first time",
+    "and cached, so a run is reproducible and works offline after that.",
+    "To update: pick a newer commit of badger/badger.github.io, change revision,",
+    "and run `node badge-app/tools/emulator/emulator.js` to check the app still runs."
+  ],
+  "repository": "badger/badger.github.io",
+  "revision": "2da92a8a89afd551261e7ae7eff8397f7237e093"
+}
