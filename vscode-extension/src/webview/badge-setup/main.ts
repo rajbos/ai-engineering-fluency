@@ -65,6 +65,8 @@ let lastSync: BadgeLastSync | undefined = initialData?.lastSync;
 /** The editor theme colours, probed live and cached by the host. */
 let theme: BadgeTheme = initialData?.theme ?? {};
 let themeSource: BadgeThemeSource = normalizeBadgeThemeSource(initialData?.themeSource);
+/** Sync needs the app on the badge, so it stays disabled until an install (or an earlier sync) is known. */
+let appInstalled = initialData?.appInstalled === true || !!initialData?.lastSync;
 let statusMessage = '';
 let installMessage = '';
 let syncing = false;
@@ -166,23 +168,27 @@ function layoutHtml(): string {
 			<p class="intro">${escapeHtml(localize('badge.intro'))}</p>
 
 			<section class="card">
-				<h3>${escapeHtml(localize('badge.status.title'))}</h3>
-				<p id="badge-status-line">${statusLineHtml()}</p>
-				<div class="actions">
-					<vscode-button id="btn-badge-sync"${syncing ? ' disabled' : ''}>${escapeHtml(localize('badge.action.syncUsb'))}</vscode-button>
-					<vscode-button id="btn-badge-install" appearance="secondary">${escapeHtml(localize('badge.action.install'))}</vscode-button>
-				</div>
-				<p id="badge-sync-message" class="message" role="status">${escapeHtml(statusMessage)}</p>
-			</section>
-
-			<section class="card">
 				<h3>${escapeHtml(localize('badge.install.title'))}</h3>
 				<ol class="steps">
 					<li>${escapeHtml(localize('badge.install.step1'))}</li>
 					<li>${escapeHtml(localize('badge.install.step2'))}</li>
 					<li>${escapeHtml(localize('badge.install.step3'))}</li>
 				</ol>
+				<div class="actions">
+					<vscode-button id="btn-badge-install"${appInstalled ? ' appearance="secondary"' : ''}>${escapeHtml(localize('badge.action.install'))}</vscode-button>
+					${appInstalled ? '' : `<vscode-button id="btn-badge-skip-install" appearance="secondary">${escapeHtml(localize('badge.action.skipInstall'))}</vscode-button>`}
+				</div>
 				<p id="badge-install-message" class="message" role="status">${escapeHtml(installMessage)}</p>
+			</section>
+
+			<section class="card">
+				<h3>${escapeHtml(localize('badge.status.title'))}</h3>
+				<p id="badge-status-line">${statusLineHtml()}</p>
+				<div class="actions">
+					<vscode-button id="btn-badge-sync"${syncing || !appInstalled ? ' disabled' : ''}>${escapeHtml(localize('badge.action.syncUsb'))}</vscode-button>
+				</div>
+				${appInstalled ? '' : `<p class="message">${escapeHtml(localize('badge.sync.needsInstall'))}</p>`}
+				<p id="badge-sync-message" class="message" role="status">${escapeHtml(statusMessage)}</p>
 			</section>
 
 			<section class="card">
@@ -216,6 +222,11 @@ function wire(): void {
 	document.getElementById('btn-badge-install')?.addEventListener('click', () => {
 		installMessage = '';
 		vscode.postMessage({ command: 'badgeInstallApp' });
+	});
+	document.getElementById('btn-badge-skip-install')?.addEventListener('click', () => {
+		appInstalled = true;
+		vscode.postMessage({ command: 'badgeMarkInstalled' });
+		render();
 	});
 	document.querySelectorAll<HTMLInputElement>('input[name="badge-theme-source"]').forEach((input) => {
 		input.addEventListener('change', () => {
@@ -253,6 +264,7 @@ function onHostMessage(message: BadgeHostMessage): void {
 		render();
 	} else if (message?.command === 'badgeInstallResult') {
 		installMessage = installResultText(message.result);
+		if (message.result.status === 'copied') { appInstalled = true; }
 		render();
 	}
 }
