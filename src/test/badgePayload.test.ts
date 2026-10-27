@@ -3,6 +3,8 @@ import * as assert from 'node:assert/strict';
 
 import {
 	BADGE_DAYS,
+	BADGE_MAX_DAYS,
+	normalizeBadgeRange,
 	BADGE_MAX_PAYLOAD_BYTES,
 	buildBadgePayload,
 	normalizeBadgeTheme,
@@ -167,4 +169,27 @@ test('shortCategoryName: falls back to a truncated first word for unknown catego
 	assert.equal(shortCategoryName('Tool Usage'), 'Tools');
 	assert.equal(shortCategoryName('Brand New Category'), 'Brand');
 	assert.equal(shortCategoryName('Supercalifragilisticexpialidocious'), 'Supercalifragili');
+});
+
+test('buildBadgePayload: a 90-day range returns 90 padded days that still fit the payload budget', () => {
+	const payload = buildBadgePayload({
+		maturity: MATURITY,
+		dailyStats: [{ date: '2026-10-23', tokens: 52000, sessions: 6 }, { date: '2026-07-26', tokens: 7, sessions: 1 }],
+		now: NOW,
+		range: 90,
+	});
+	assert.equal(payload.days.length, BADGE_MAX_DAYS);
+	assert.equal(payload.days[0][0], '2026-07-26');
+	assert.deepEqual(payload.days[0], ['2026-07-26', 7, 1]);
+	assert.equal(payload.tokens30, 52007);
+	// Worst case: every day carries large counts.
+	const busy = Array.from({ length: 90 }, (_, i) => ({ date: payload.days[i][0], tokens: 123456789, sessions: 9999 }));
+	const full = buildBadgePayload({ maturity: MATURITY, dailyStats: busy, now: NOW, range: 90 });
+	assert.doesNotThrow(() => serializeBadgePayload(full));
+});
+
+test('normalizeBadgeRange: only 30 and 90 are accepted, anything else is the 30-day default', () => {
+	assert.equal(normalizeBadgeRange(90), 90);
+	assert.equal(normalizeBadgeRange(30), 30);
+	for (const value of [60, '90', undefined, null, NaN]) { assert.equal(normalizeBadgeRange(value), 30); }
 });

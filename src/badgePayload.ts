@@ -11,6 +11,16 @@ import { addDaysUtc, toLocalDayKey } from './utils/dayKeys';
 
 export const BADGE_PAYLOAD_VERSION = 1;
 export const BADGE_DAYS = 30;
+/** The longest history the badge can show; the sync picks 30 or 90 days of it. */
+export const BADGE_MAX_DAYS = 90;
+/** The chart ranges a sync can push to the badge, in days. */
+export const BADGE_RANGES = [30, 90] as const;
+export type BadgeRange = typeof BADGE_RANGES[number];
+export const DEFAULT_BADGE_RANGE: BadgeRange = 30;
+
+export function normalizeBadgeRange(value: unknown): BadgeRange {
+	return BADGE_RANGES.find((range) => range === value) ?? DEFAULT_BADGE_RANGE;
+}
 /** The badge's data partition is small; the plan keeps the file under about 4 KB. */
 export const BADGE_MAX_PAYLOAD_BYTES = 4096;
 
@@ -61,7 +71,9 @@ export interface BadgePayload {
 	stage: number;
 	label: string;
 	categories: Array<[string, number]>;
+	/** The last 30 or 90 days (see {@link BadgeRange}); the badge reads the range from the length. */
 	days: Array<[string, number, number]>;
+	/** Totals over `days`. The names are historical: with a 90-day range they cover 90 days. */
 	tokens30: number;
 	sessions30: number;
 	today: [number, number];
@@ -139,7 +151,7 @@ export function normalizeBadgeTheme(theme: Record<string, unknown> | undefined |
 	return result;
 }
 
-function buildDays(dailyStats: readonly BadgeDayInput[], now: Date): Array<[string, number, number]> {
+function buildDays(dailyStats: readonly BadgeDayInput[], now: Date, range: BadgeRange): Array<[string, number, number]> {
 	const byDate = new Map<string, { tokens: number; sessions: number }>();
 	for (const day of dailyStats) {
 		const existing = byDate.get(day.date) ?? { tokens: 0, sessions: 0 };
@@ -150,7 +162,7 @@ function buildDays(dailyStats: readonly BadgeDayInput[], now: Date): Array<[stri
 	// Keys are generated from the local calendar day; addDaysUtc only does day arithmetic on that key.
 	const todayKey = toLocalDayKey(now);
 	const days: Array<[string, number, number]> = [];
-	for (let offset = BADGE_DAYS - 1; offset >= 0; offset--) {
+	for (let offset = range - 1; offset >= 0; offset--) {
 		const key = addDaysUtc(todayKey, -offset);
 		const entry = byDate.get(key);
 		days.push([key, entry?.tokens ?? 0, entry?.sessions ?? 0]);
@@ -159,16 +171,17 @@ function buildDays(dailyStats: readonly BadgeDayInput[], now: Date): Array<[stri
 }
 
 /**
- * Builds the badge payload. Days are always exactly the last 30 local days,
- * ending today, with missing days padded with zeros.
+ * Builds the badge payload. Days are always exactly the last 30 (or 90) local
+ * days, ending today, with missing days padded with zeros.
  */
 export function buildBadgePayload(input: {
 	maturity: BadgeMaturityInput;
 	dailyStats: readonly BadgeDayInput[];
 	theme?: Record<string, unknown> | null;
 	now: Date;
+	range?: BadgeRange;
 }): BadgePayload {
-	const days = buildDays(input.dailyStats, input.now);
+	const days = buildDays(input.dailyStats, input.now, input.range ?? DEFAULT_BADGE_RANGE);
 	const stage = clampStage(input.maturity.overallStage, 1);
 	const last = days[days.length - 1];
 	return {

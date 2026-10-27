@@ -5,7 +5,8 @@ import json
 
 SCHEMA_VERSION = 1
 MAX_BYTES = 8192  # the extension keeps the file under about 4 KB
-DAYS = 30
+DAYS = 30  # the default history length
+MAX_DAYS = 90  # the extension can push 30 or 90 days; the badge shows whatever it gets
 MAX_STAGE = 4
 
 # The GitHub Universe palette (src/badgePayload.ts UNIVERSE_BADGE_THEME), used until a sync sends colours.
@@ -58,7 +59,7 @@ def parse(raw):
         if not isinstance(entry, list) or len(entry) != 3:
             raise ValueError("each day must be [date, tokens, sessions]")
         days.append((_text(entry[0], "day", 10), _int(entry[1], "tokens"), _int(entry[2], "sessions")))
-    days = days[-DAYS:]
+    days = days[-MAX_DAYS:]
 
     today = raw.get("today")
     if isinstance(today, list) and len(today) == 2:
@@ -73,6 +74,8 @@ def parse(raw):
         "label": label,
         "categories": categories,
         "days": days,
+        "range": len(days) or DAYS,
+        # tokens30 / sessions30 are the totals over `days`, so they cover 90 days when 90 are sent.
         "tokens30": _int(raw.get("tokens30", sum(d[1] for d in days)), "tokens30"),
         "sessions30": _int(raw.get("sessions30", sum(d[2] for d in days)), "sessions30"),
         "today": today,

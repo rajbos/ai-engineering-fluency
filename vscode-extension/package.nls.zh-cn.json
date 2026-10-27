@@ -1138,5 +1138,12 @@
   "command.restoreBadgeSetup.title": "显示徽章按钮",
   "badge.action.hide": "隐藏此视图（我没有徽章）",
   "badge.hide.notice": "徽章按钮已隐藏。运行“AI Engineering Fluency: 显示徽章按钮”即可恢复。",
-  "badge.image.alt": "GitHub Universe 2026 徽章"
+  "badge.image.alt": "GitHub Universe 2026 徽章",
+  "badge.preview.title": "图表预览",
+  "badge.preview.description": "下次同步会放到徽章上的历史图表。选择要推送的天数。",
+  "badge.preview.loading": "正在加载预览…",
+  "badge.preview.chartLabel": "最近 {0} 天的每日令牌数",
+  "badge.preview.summary": "最近 {0} 天 · {1} 个令牌 · {2} 次会话",
+  "badge.range.label": "历史范围",
+  "badge.range.days": "{0} 天"
 }

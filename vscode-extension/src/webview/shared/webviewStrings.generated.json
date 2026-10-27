@@ -691,5 +691,12 @@
   "badge.link.badgewareDocs": "Badgeware docs",
   "badge.privacy": "Only counts, your fluency stage, short labels and colours are sent to the badge. No prompts, file paths, repository names or session titles.",
   "badge.action.hide": "Hide this view (I have no badge)",
-  "badge.image.alt": "The GitHub Universe 2026 badge"
+  "badge.image.alt": "The GitHub Universe 2026 badge",
+  "badge.preview.title": "Chart preview",
+  "badge.preview.description": "The history chart the next sync puts on the badge. Pick how many days to push.",
+  "badge.preview.loading": "Loading the preview…",
+  "badge.preview.chartLabel": "Daily tokens over the last {0} days",
+  "badge.preview.summary": "Last {0} days · {1} tokens · {2} sessions",
+  "badge.range.label": "History",
+  "badge.range.days": "{0} days"
 }

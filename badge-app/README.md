@@ -23,10 +23,12 @@ format, controls and roadmap are in
 
 The screens read `/state/fluency.json`. The VS Code extension's Badge setup view
 writes that file over USB, installs the app and reads the theme colours. Tilt
-scrubs the 30-day history. A tap on SELECT switches between three looks:
+scrubs the history (30 or 90 days, whichever the Badge setup view pushed; its
+chart preview shows what the next sync sends). On Motion, the score bars reload
+every 5 seconds in a new colour. A tap on SELECT switches between three looks:
 Motion (animated bars and sliding screens), 3D radar (score screen) and
 3D skyline (history screen). UP/DOWN on the score screen flips to a spider
-chart that a radar arm sweeps into view, and back. Not done yet: Wi-Fi push, the wearer view and shake
+chart that a radar arm sweeps into view (with sonar pings rippling out from the centre), and back. Not done yet: Wi-Fi push, the wearer view and shake
 for a tip (see the roadmap in
 [`docs/features/BADGE-SETUP-PLAN.md`](../docs/features/BADGE-SETUP-PLAN.md)).
 

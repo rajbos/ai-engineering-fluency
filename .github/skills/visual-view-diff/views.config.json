@@ -108,6 +108,7 @@
           "steps": [
             { "click": "#btn-badge-install", "expectPosted": "badgeInstallApp" },
             { "click": ".badge-link", "expectPosted": "badgeOpenLink" },
+            { "click": "input[name=badge-range][value=\"90\"]", "expectPosted": "badgeRange" },
             { "click": "#btn-badge-sync", "expectPosted": "badgeSyncUsb" }
           ]
         }

@@ -57,10 +57,17 @@ class ParseTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=repr(overrides)):
                 fd.parse(payload(**overrides))
 
-    def test_keeps_only_last_30_days(self):
-        days = [["2026-09-%02d" % (d % 30 + 1), d, 1] for d in range(45)]
-        self.assertEqual(len(fd.parse(payload(days=days))["days"]), fd.DAYS)
-        self.assertEqual(fd.parse(payload(days=days))["days"][0][1], 15)
+    def test_keeps_only_last_90_days(self):
+        days = [["2026-09-%02d" % (d % 30 + 1), d, 1] for d in range(120)]
+        data = fd.parse(payload(days=days))
+        self.assertEqual(len(data["days"]), fd.MAX_DAYS)
+        self.assertEqual(data["days"][0][1], 30)
+
+    def test_range_follows_the_number_of_days_sent(self):
+        self.assertEqual(fd.parse(payload())["range"], 30)
+        days = [["2026-08-%02d" % (d % 30 + 1), d, 1] for d in range(90)]
+        self.assertEqual(fd.parse(payload(days=days))["range"], 90)
+        self.assertEqual(fd.parse(payload(days=[]))["range"], fd.DAYS)
 
     def test_missing_optional_fields_use_defaults(self):
         raw = payload()
