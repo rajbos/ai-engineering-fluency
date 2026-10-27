@@ -49,6 +49,11 @@ class Shape:
     def __init__(self, kind, *args):
         self.kind = kind
         self.args = args
+        self.outline = 0
+
+    def stroke(self, thickness, *_flags):
+        self.outline = thickness
+        return self
 
 
 class Picture:
@@ -101,6 +106,18 @@ class Screen:
         elif item.kind == "rounded_rectangle":
             x, y, w, h, r = item.args
             draw.rounded_rectangle((x, y, x + max(w, 1) - 1, y + max(h, 1) - 1), radius=min(r, w // 2, h // 2), fill=self.pen.rgba)
+        elif item.kind == "circle":
+            x, y, r = item.args
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=self.pen.rgba)
+        elif item.kind == "line":
+            x0, y0, x1, y1, w = item.args
+            draw.line((x0, y0, x1, y1), fill=self.pen.rgba, width=max(1, int(round(w))))
+        elif item.kind == "custom":
+            points = [(p.x, p.y) for p in item.args[0]]
+            if item.outline:
+                draw.line(points + points[:1], fill=self.pen.rgba, width=max(1, int(round(item.outline))))
+            else:
+                draw.polygon(points, fill=self.pen.rgba)
         else:
             raise NotImplementedError("preview does not draw shape." + item.kind)
         self._flatten(layer)
@@ -143,11 +160,12 @@ class Badge:
         return button in self._step().get("hold", ()) or self.pressed(button)
 
     def released(self, button):
-        return False
+        return button in self._step().get("release", ())
 
     def imu(self):
         ax = -self._step().get("tilt", 0.0) * 16384
-        return (ax, 0, 16384, 0, 0, 0)
+        az = 16384 * (1 + self._step().get("pitch", 0.0))
+        return (ax, 0, az, 0, 0, 0)
 
 
 def runtime(screen, badge_stub, app_dir, state_dir):
@@ -170,6 +188,9 @@ def runtime(screen, badge_stub, app_dir, state_dir):
         "shape": types.SimpleNamespace(
             rectangle=lambda *a: Shape("rectangle", *a),
             rounded_rectangle=lambda *a: Shape("rounded_rectangle", *a),
+            circle=lambda *a: Shape("circle", *a),
+            line=lambda *a: Shape("line", *a),
+            custom=lambda *a: Shape("custom", *a),
         ),
         "vec2": vec2,
         "is_dir": os.path.isdir,
@@ -182,16 +203,39 @@ def runtime(screen, badge_stub, app_dir, state_dir):
     return env
 
 
-# Each step is one frame: the buttons pressed or held in it, and an optional tilt in g.
+def wait(frames):
+    """Idle frames (33 ms each), so animations finish before a shot."""
+    return [{} for _ in range(frames)]
+
+
+def tap_select():
+    return [{"press": ("SELECT",)}, {"release": ("SELECT",)}]
+
+
+# Each step is one frame: the buttons pressed, held or released in it, and an
+# optional tilt (left/right) and pitch (forward/back) in g.
 # A step with "shot" saves the screen after that frame.
 def script(with_data):
     if not with_data:
         return [{"shot": "0-sync-no-data"}]
-    steps = [{"shot": "1-score"}, {"press": ("RIGHT",)}]
+    # Motion look (the default): bars grow in, screens slide.
+    steps = wait(4) + [{"shot": "1a-score-growing"}] + wait(30) + [{"shot": "1-score"}]
+    steps += [{"press": ("RIGHT",)}] + wait(3) + [{"shot": "1b-slide"}]
     steps += [{"tilt": -0.5} for _ in range(10)]  # tilt left: scrub back a few days
-    steps += [{"shot": "2-history"}, {"press": ("UP",)}, {"shot": "2b-history-sessions"}]
-    steps += [{"press": ("RIGHT",)}, {"shot": "3-qr-repo"}, {"press": ("RIGHT",)}, {"shot": "4-qr-linkedin"}]
-    steps += [{"press": ("MENU",)}, {"shot": "5-sync"}, {"press": ("BACK",)}, {"press": ("BACK",)}]
+    steps += wait(30) + [{"shot": "2-history"}, {"press": ("UP",)}, {"shot": "2b-history-sessions"}, {"press": ("UP",)}]
+    steps += [{"press": ("RIGHT",)}] + wait(10) + [{"shot": "3-qr-repo"}]
+    steps += [{"press": ("RIGHT",)}] + wait(10) + [{"shot": "4-qr-linkedin"}]
+    steps += [{"press": ("MENU",)}, {"shot": "5-sync"}]
+    # UP/DOWN on the sync screen changes the look: DOWN goes Motion -> 3D radar, UP goes back.
+    steps += [{"press": ("DOWN",)}, {"shot": "5b-sync-look"}, {"press": ("BACK",)}]
+    # 3D radar look on the score screen (RIGHT from the last screen wraps to score).
+    steps += [{"press": ("RIGHT",)}] + wait(50) + [{"shot": "6-radar"}]
+    steps += [{"pitch": 0.5} for _ in range(25)] + [{"shot": "6b-radar-tilted"}]
+    # A tap on SELECT moves to the 3D skyline look; it shows on the history screen.
+    steps += tap_select() + [{"press": ("RIGHT",)}] + wait(8) + [{"shot": "7a-skyline-toast"}]
+    steps += [{"tilt": -0.5} for _ in range(6)] + wait(50) + [{"shot": "7-skyline"}]
+    steps += [{"press": ("UP",)}] + wait(2) + [{"shot": "7b-skyline-sessions"}]
+    steps += [{"press": ("BACK",)}]
     return steps
 
 
