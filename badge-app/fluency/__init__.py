@@ -6,9 +6,11 @@
 # 3D radar, 3D skyline), UP / DOWN on the score screen flips to a spider
 # chart and back, MENU opens sync status, BACK exits.
 
+import gc
 import math
 import os
 import sys
+import time
 
 # The preview tool in badge-app/tools sets FLUENCY_APP_DIR / FLUENCY_STATE_DIR to run this on a laptop.
 # /remote/fluency is where `mpremote mount badge-app` puts it; /system/apps/fluency is the installed copy.
@@ -32,6 +34,12 @@ PAIRING_FILE = STATE_DIR + "/fluency_pairing.json"
 COMPANY_LOGO_FILE = STATE_DIR + "/company_logo.png"
 SAMPLE_FILE = APP_DIR + "/assets/sample.json"
 LOOK_FILE = STATE_DIR + "/fluency_look.json"
+# Free memory, frame and gc times, and the traceback if the app dies; rewritten on each launch.
+# /state is not on the BADGER drive (and the app folder is read-only to the app), so read it over
+# USB with the badge at the menu: mpremote fs cat :/state/fluency_debug.txt
+DEBUG_FILE = STATE_DIR + "/fluency_debug.txt"
+DEBUG_EVERY_MS = 10000
+DEBUG_MAX_LINES = 360  # an hour of samples, then it stops writing to flash
 RELOAD_CHECK_MS = 3000
 
 badge.mode(HIRES | VSYNC)
@@ -344,8 +352,11 @@ def draw_sonar(motion, colour):
     """Rings that ripple out from the stage digit across the bars, under the text."""
     for ping in range(BARS_PINGS):
         state = fm.sonar_ping(motion.elapsed, ping, BARS_PINGS, BARS_PING_MS)
+        alpha = int(100 * state[1])
+        if alpha < 6:
+            continue  # too faint to see, and a ring this far out is the biggest shape on the screen
         ring = fm.arc_points(MARGIN + 14, 52, BARS_PING_REACH * state[0], 0, 2 * math.pi, 48)
-        polygon(ring, rgb(colour, int(100 * state[1])), 1)
+        polygon(ring, rgb(colour, alpha), 1)
 
 
 def draw_score(data, accent, demo, motion=None):
@@ -693,6 +704,14 @@ def optional_image(path):
     return QR_IMAGES[path]
 
 
+def preload_images():
+    """Decode every image up front, so flipping to a QR screen never stalls a frame
+    on a PNG decode (a QR code decodes to over 100 KB)."""
+    for name in ("qr_repo", "qr_linkedin", "linkedin"):
+        qr(name)
+    optional_image(COMPANY_LOGO_FILE)
+
+
 def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent, icon=None):
     code = qr(name)
     plate = code.width + 8
@@ -807,6 +826,75 @@ def save_look(index):
             target.write(fm.dump_look(index))
     except OSError as error:
         print("fluency: could not save the look -", error)
+
+
+# ── debug log ─────────────────────────────────────────────────────────────
+
+class DebugLog:
+    """Leaves evidence on the badge when the app dies: every DEBUG_EVERY_MS a line
+    with free memory, frame rate, the slowest frame and the longest gc pause on
+    the screen being shown, and the traceback if update() raises. (The reset
+    cause is no help here: on the RP2 every machine.reset() reads as WDT_RESET.)"""
+
+    def __init__(self):
+        self.start = badge.ticks
+        self.next = self.start + DEBUG_EVERY_MS
+        self.frames = 0
+        self.slowest = 0
+        self.gc_slowest = 0
+        self.last = None
+        self.lines = 0
+        self.write("w", "launch  " + self.memory())
+
+    def memory(self):
+        free = getattr(gc, "mem_free", None)  # MicroPython only; the laptop preview has none
+        if free is None:
+            return "free n/a"
+        return "free %d alloc %d" % (free(), gc.mem_alloc())
+
+    def write(self, mode, line, error=None):
+        try:
+            with open(DEBUG_FILE, mode) as target:
+                target.write("%7d ms  %s\n" % (badge.ticks - self.start, line))
+                if error is not None:
+                    if hasattr(sys, "print_exception"):
+                        sys.print_exception(error, target)
+                    else:
+                        import traceback
+                        traceback.print_exception(error, file=target)
+        except OSError as problem:
+            print("fluency: could not write the debug log -", problem)
+
+    def collect(self):
+        started = clock_ms()
+        gc.collect()
+        self.gc_slowest = max(self.gc_slowest, clock_ms() - started)
+
+    def frame(self, where):
+        now = badge.ticks
+        if self.last is not None:
+            self.slowest = max(self.slowest, now - self.last)
+        self.last = now
+        self.frames += 1
+        if now >= self.next and self.lines < DEBUG_MAX_LINES:
+            fps = self.frames * 1000 / max(1, now - self.next + DEBUG_EVERY_MS)
+            self.write("a", "%s  fps %.1f  slowest %d ms  gc %d ms  %s" % (
+                self.memory(), fps, self.slowest, self.gc_slowest, where))
+            self.lines += 1
+            self.next = now + DEBUG_EVERY_MS
+            self.frames = 0
+            self.slowest = 0
+            self.gc_slowest = 0
+
+    def crash(self, error):
+        gc.collect()  # a MemoryError leaves little room to write the report in
+        self.write("a", "crashed  " + self.memory(), error)
+
+
+def clock_ms():
+    """A millisecond clock that moves within a frame (badge.ticks only moves between frames)."""
+    ticks_ms = getattr(time, "ticks_ms", None)  # MicroPython; the laptop preview falls back
+    return ticks_ms() if ticks_ms else int(time.monotonic() * 1000)
 
 
 # ── app ───────────────────────────────────────────────────────────────────
@@ -929,6 +1017,12 @@ class App:
             spin = RADAR_SPIN + self.tilt.x * RADAR_TILT_SPIN
             self.yaw = (self.yaw + spin * badge.ticks_delta / 1000) % (2 * math.pi)
 
+    def where(self):
+        """The screen and look being shown, for the debug log."""
+        if self.show_sync or self.store.data is None:
+            return "sync"
+        return "%s%s/%s" % (SCREENS[self.screen], "+chart" if self.chart else "", fm.LOOKS[self.look])
+
     def pitch(self, base):
         return max(0.2, min(1.3, base + self.tilt.y * TILT_PITCH))
 
@@ -1001,5 +1095,24 @@ class App:
         return None
 
 
+preload_images()
+debug_log = DebugLog()
 app = App()
-run(app.update)
+
+
+def update():
+    # Every frame leaves hundreds of small shapes, colours and point lists behind. Collecting
+    # each frame keeps every pause short; left alone, MicroPython only collects once the
+    # 8 MB heap is full. The app used to die after about a minute on the badge; with this
+    # it has run for over 17 minutes through every screen and look.
+    debug_log.collect()
+    try:
+        result = app.update()
+    except Exception as error:
+        debug_log.crash(error)
+        raise  # the runtime still shows its Error! box with the traceback
+    debug_log.frame(app.where())
+    return result
+
+
+run(update)
