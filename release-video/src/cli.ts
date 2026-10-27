@@ -251,6 +251,16 @@ ${polished.scenes.length} scenes, ${words} words, roughly ${formatClock(spoken)}
 			return await build(args, config);
 
 		default:
+			// `npm run video --since 0.17.2` (no `--`) makes npm eat the flag and
+			// pass only its value, which then arrives here as the command.
+			if (/^\d+(\.\d+){0,2}$/.test(args.command)) {
+				process.stderr.write(
+					`"${args.command}" looks like a version, not a command: npm kept the flag before it.\n` +
+					`Put "--" after "video" and name the command, e.g.\n` +
+					`  npm run video -- build --since ${args.command}\n`,
+				);
+				return 2;
+			}
 			process.stderr.write(`Unknown command "${args.command}".\n${USAGE}\n`);
 			return 2;
 	}
