@@ -4,6 +4,8 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-27
+
 ### Features
 - New **Badge Setup** view (a **Universe Badge** button in every view's button row, or `AI Engineering Fluency: Show Badge Setup`): installs the bundled GitHub Universe 2026 badge app with one click (copies it to `apps/fluency` on the `BADGER` drive when the badge is in USB disk mode, otherwise reveals the folder) and syncs your fluency stage, category stages and 30-day tokens and sessions to the badge over USB with `mpremote`. The badge uses the GitHub Universe colours by default; a **Palette** choice in the view switches it to your VS Code theme's accent colours. Only counts, a stage, short labels and colours are sent. See [docs/features/BADGE-SETUP.md](../docs/features/BADGE-SETUP.md) People without a badge can hide the button with `AI Engineering Fluency: Hide Badge Button` (or the view's own button) and bring it back with `AI Engineering Fluency: Show Badge Button`.
 - New **Repository Heatmap** view (`AI Engineering Fluency: Show Repository Heatmap`): every file an agent read, edited, created or deleted as a treemap (one rectangle per file, sized by touches, nested by folder, click a folder to zoom), filtered by the standard time-window picker, a repository picker and per-kind toggles. Built from the tool calls in Claude Code, Copilot CLI and VS Code Copilot Chat session logs (deletes are inferred from shell commands such as `rm` and `Remove-Item`). File paths are derived and cached locally and are never uploaded. See [docs/features/REPO-HEATMAP.md](../docs/features/REPO-HEATMAP.md)
