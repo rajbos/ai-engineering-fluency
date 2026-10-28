@@ -173,6 +173,14 @@ export function describeBehaviour(description: string): string {
  * reads as a stall. Over a live screen it is a title sequence.
  */
 export function coldOpenNarration(release: ResolvedRelease, productName: string): string {
+	// The headline sums up one release, so a video covering several says what
+	// span it covers instead of reading out only the newest one's summary.
+	if (release.since !== undefined) {
+		return toSpokenText(
+			`This is ${productName}, version ${release.version}, ` +
+			`with everything that is new since version ${release.since}.`,
+		);
+	}
 	return toSpokenText(`This is ${productName}, version ${release.version}. ${release.headline}`);
 }
 
@@ -186,10 +194,11 @@ export function introNarration(_release: ResolvedRelease, _productName: string):
 	return toSpokenText(`Let's take a look at what is new.`);
 }
 
-export function outroNarration(count: number, productName: string): string {
+export function outroNarration(count: number, productName: string, since?: string): string {
+	const span = since === undefined ? 'in this release' : `since version ${since}`;
 	const summary = count === 1
-		? 'That is the one change in this release'
-		: `That is all ${count} changes in this release`;
+		? `That is the one change ${span}`
+		: `That is all ${count} changes ${span}`;
 
 	// Spoken over the download card, so it ends on where to get it rather than
 	// on a recap. The card itself carries the URL — the narration should not

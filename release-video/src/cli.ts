@@ -17,13 +17,14 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 
-import { loadConfig, paths } from './config';
+import { loadConfig, paths, type Config, type VoiceEngine } from './config';
 import { doctor } from './doctor';
 import { loadManifest, type Manifest } from './manifest';
 import { plan } from './plan';
 import { polishNarration } from './llm';
-import { selectRelease } from './catalog';
+import { readCatalog, selectRelease } from './catalog';
 import { countWords, estimateSeconds } from './speech';
 import { qa } from './qa';
 import { render } from './render';
@@ -34,11 +35,14 @@ import { formatClock, generateVoice, speakOnce } from './voice';
 import { log, PROJECT_ROOT, resolveInProject, run, writeJson } from './util';
 
 const STAGES = ['plan', 'shots', 'voice', 'subs', 'render', 'qa'] as const;
+const VOICE_ENGINES: readonly VoiceEngine[] = ['mistral', 'voicebox', 'sapi', 'command', 'silence'];
 type Stage = (typeof STAGES)[number];
 
 interface Args {
 	readonly command: string;
 	readonly version?: string;
+	readonly since?: string;
+	readonly voice?: VoiceEngine;
 	readonly output?: string;
 	readonly maxFeatures?: number;
 	readonly text?: string;
@@ -75,9 +79,16 @@ function parseArgs(argv: readonly string[]): Args {
 		throw new Error(`--from must be one of ${STAGES.join(', ')}`);
 	}
 
+	const voice = asString('voice');
+	if (voice !== undefined && !VOICE_ENGINES.includes(voice as VoiceEngine)) {
+		throw new Error(`--voice must be one of ${VOICE_ENGINES.join(', ')}`);
+	}
+
 	return {
 		command: positional[0] ?? 'build',
+		...(voice !== undefined ? { voice: voice as VoiceEngine } : {}),
 		...(asString('version') !== undefined ? { version: asString('version') } : {}),
+		...(asString('since') !== undefined ? { since: asString('since') } : {}),
 		...(asString('output') !== undefined ? { output: asString('output') } : {}),
 		...(asString('max-features') !== undefined ? { maxFeatures: Number(asString('max-features')) } : {}),
 		...(asString('text') !== undefined ? { text: asString('text') } : {}),
@@ -103,13 +114,20 @@ Commands
   render             Render scenes and assemble the MP4
   qa                 Probe the rendered file against the plan
   doctor             Check ffmpeg, the harness, the voice engine and the model
-  voices             List the installed Windows SAPI voices
+  releases           List the catalogued releases, to choose --since
+  voices            List the installed Windows SAPI voices
   say                Speak --text or --text-file with the configured voice engine
   script             Print the narration script (add --llm to preview a polish)
   timeline           Print the planned running order without rendering
 
 Options
   --version <x.y.z>  Release to make a video about (default: newest with features)
+  --since <x.y.z>    Also cover every release after this one: the last version
+                     an earlier video covered. "none" = only --version. When
+                     omitted in a terminal, plan asks; otherwise it is "none"
+  --voice <engine>   Voice engine for this run, overriding config.json:
+                     mistral (your cloned voice, billed), command (Piper),
+                     voicebox, sapi or silence
   --max-features <n> Only cover the first n features
   --keep-narration   Re-plan but keep narration you have already edited
   --llm              Polish narration with the local model (overrides config)
@@ -122,13 +140,15 @@ Options
 Examples
   npm run video -- doctor
   npm run video -- build
+  npm run video -- releases
+  npm run video -- build --since 0.17.2 --voice mistral
   npm run video -- build --version 0.18.0 --llm
   npm run video -- build --from render --force
 `;
 
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
-	const config = loadConfig();
+	const config = withVoiceOverride(loadConfig(), args.voice);
 
 	switch (args.command) {
 		case 'help':
@@ -138,6 +158,10 @@ async function main(): Promise<number> {
 
 		case 'doctor':
 			return (await doctor(config)) ? 0 : 1;
+
+		case 'releases':
+			printReleases();
+			return 0;
 
 		case 'voices': {
 			const script = path.join(PROJECT_ROOT, 'scripts', 'sapi-speak.ps1');
@@ -191,7 +215,7 @@ ${polished.scenes.length} scenes, ${words} words, roughly ${formatClock(spoken)}
 		}
 
 		case 'plan':
-			await plan(config, planOptions(args));
+			await plan(config, await planOptions(args));
 			return 0;
 
 		case 'shots': {
@@ -238,6 +262,16 @@ ${polished.scenes.length} scenes, ${words} words, roughly ${formatClock(spoken)}
 			return await build(args, config);
 
 		default:
+			// `npm run video --since 0.17.2` (no `--`) makes npm eat the flag and
+			// pass only its value, which then arrives here as the command.
+			if (/^\d+(\.\d+){0,2}$/.test(args.command)) {
+				process.stderr.write(
+					`"${args.command}" looks like a version, not a command: npm kept the flag before it.\n` +
+					`Put "--" after "video" and name the command, e.g.\n` +
+					`  npm run video -- build --since ${args.command}\n`,
+				);
+				return 2;
+			}
 			process.stderr.write(`Unknown command "${args.command}".\n${USAGE}\n`);
 			return 2;
 	}
@@ -251,7 +285,7 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 	let manifest: Manifest;
 
 	if (shouldRun('plan')) {
-		manifest = await plan(config, planOptions(args));
+		manifest = await plan(config, await planOptions(args));
 	} else {
 		manifest = requireManifest();
 	}
@@ -293,13 +327,66 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 	return 0;
 }
 
-function planOptions(args: Args) {
+async function planOptions(args: Args) {
+	const since = await resolveSince(args);
 	return {
 		...(args.version !== undefined ? { version: args.version } : {}),
+		...(since !== undefined ? { since } : {}),
 		...(args.maxFeatures !== undefined ? { maxFeatures: args.maxFeatures } : {}),
 		keepNarration: args.keepNarration,
 		...(args.llm !== undefined ? { useLlm: args.llm } : {}),
 	};
+}
+
+/**
+ * `--voice` picks the engine for one run without editing the committed
+ * config. The engine's own settings (Mistral voiceId, Piper argv) still come
+ * from `config.json`, and the narration cache key follows the engine, so
+ * switching back and forth never mixes voices in one soundtrack.
+ */
+function withVoiceOverride(config: Config, engine: VoiceEngine | undefined): Config {
+	if (engine === undefined || engine === config.voice.engine) { return config; }
+	return { ...config, voice: { ...config.voice, engine } };
+}
+
+/**
+ * Which releases the video spans.
+ *
+ * Videos are not made for every bump, so defaulting to the newest release
+ * alone silently drops everything shipped since the previous video. In a
+ * terminal, ask; elsewhere (an agent, a script) use only the target release
+ * and say how to widen it.
+ */
+async function resolveSince(args: Args): Promise<string | undefined> {
+	if (args.since !== undefined) {
+		return args.since === 'none' ? undefined : args.since;
+	}
+	if (!process.stdin.isTTY) {
+		log.info('Covering one release. Pass --since <version> to include everything after an earlier video');
+		return undefined;
+	}
+
+	printReleases();
+	const prompt = createInterface({ input: process.stdin, output: process.stdout });
+	try {
+		const answer = (await prompt.question(
+			'Last version an earlier video already covered (Enter = only the newest release): ',
+		)).trim();
+		return answer === '' || answer === 'none' ? undefined : answer;
+	} finally {
+		prompt.close();
+	}
+}
+
+function printReleases(): void {
+	log.group('Catalogued releases, newest first');
+	for (const release of readCatalog()) {
+		log.info(
+			`${release.version.padEnd(8)} ${(release.date ?? 'unreleased').padEnd(11)} ` +
+			`${release.features.length} feature(s)`,
+		);
+	}
+	log.groupEnd();
 }
 
 function requireManifest(options?: { requireAssets?: boolean }): Manifest {
