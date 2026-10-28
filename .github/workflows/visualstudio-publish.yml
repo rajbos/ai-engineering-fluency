@@ -314,6 +314,42 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Marketplace publish failed" }
           Write-Host "✅ Published to Visual Studio Marketplace"
 
+      - name: Tag Visual Studio release (vs/v<manifest version>)
+        # Marketplace publishes from release.yml / dispatch carry no vs/v* tag otherwise,
+        # so the prep-release agent would diff from a stale base. Tagged with the
+        # GITHUB_TOKEN, so the push does not re-trigger the vs/v* workflow.
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true && inputs.dry_run != true
+        shell: pwsh
+        run: |
+          [xml]$manifest = Get-Content "visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest"
+          $version = $manifest.PackageManifest.Metadata.Identity.Version
+          $tag = "vs/v$version"
+          Write-Host "Tagging: $tag"
+
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "ℹ️ Tag $tag already exists on remote — skipping tag creation"
+            exit 0
+          }
+
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          if ($LASTEXITCODE -ne 0) { throw "git tag failed" }
+          git push origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "git push of $tag failed" }
+
+          for ($i = 1; $i -le 5; $i++) {
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" *> $null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✅ Tag $tag created and verified on remote"
+              exit 0
+            }
+            Write-Host "Waiting for tag to propagate (attempt $i/5)..."
+            Start-Sleep -Seconds 2
+          }
+          throw "Failed to verify tag $tag on remote"
+
       # ── Summary ────────────────────────────────────────────────────────────
 
       - name: Build summary
