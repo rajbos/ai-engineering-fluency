@@ -77,7 +77,8 @@ def setting(key, fallback=""):
 
 
 HANDLE = setting("GITHUB_USERNAME")
-CONTACT_NAME = setting("CONTACT_NAME", "Rob Bos")
+CONTACT_NAME = setting("CONTACT_NAME", HANDLE)
+LINKEDIN_PATH = fd.linkedin_path(setting("CONTACT_LINKEDIN"))
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────
@@ -700,6 +701,25 @@ def qr(name):
     return QR_IMAGES[name]
 
 
+QR_LINKEDIN_MAX = 200  # px; leaves room for the plate inside the 240 px screen height
+
+
+def linkedin_qr():
+    """The LinkedIn QR code, made on the badge from CONTACT_LINKEDIN: one pixel per
+    module with a 2-module quiet zone, drawn scaled up by draw_qr."""
+    if "qr_linkedin" not in QR_IMAGES:
+        # Medium error correction where the firmware has it; the stock contacts app only uses QR_LOW.
+        level = getattr(image, "QR_MEDIUM", image.QR_LOW)
+        QR_IMAGES["qr_linkedin"] = image.qr("https://linkedin.com/" + LINKEDIN_PATH, level, 2)
+    return QR_IMAGES["qr_linkedin"]
+
+
+def linkedin_qr_size():
+    """The drawn size of the LinkedIn code: the largest whole-pixel module that fits."""
+    code = linkedin_qr()
+    return code.width * max(1, QR_LINKEDIN_MAX // code.width)
+
+
 def optional_image(path):
     """An image that may not exist, loaded once; None when it is missing or unreadable."""
     if path not in QR_IMAGES:
@@ -713,17 +733,23 @@ def optional_image(path):
 def preload_images():
     """Decode every image up front, so flipping to a QR screen never stalls a frame
     on a PNG decode (a QR code decodes to over 100 KB)."""
-    for name in ("qr_repo", "qr_linkedin", "linkedin"):
-        qr(name)
-    optional_image(COMPANY_LOGO_FILE)
+    qr("qr_repo")
+    if LINKEDIN_PATH:
+        linkedin_qr()
+        qr("linkedin")
+        optional_image(COMPANY_LOGO_FILE)
 
 
-def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent, icon=None):
-    code = qr(name)
-    plate = code.width + 8
+def draw_qr(code, plate_x, text_x, text_width_px, title, lines, accent, icon=None, size=None):
+    """A QR code on a white plate, drawn 1:1 or, with `size`, scaled to that many pixels."""
+    size = size or code.width
+    plate = size + 8
     plate_y = (HEIGHT - plate) // 2
     box(plate_x, plate_y, plate, plate, PLATE, 6)
-    screen.blit(code, vec2(plate_x + 4 + DX, plate_y + 4))
+    if size == code.width:
+        screen.blit(code, vec2(plate_x + 4 + DX, plate_y + 4))
+    else:
+        screen.blit(code, rect(0, 0, code.width, code.height), rect(plate_x + 4 + DX, plate_y + 4, size, size))
 
     top = 24
     if icon is not None:
@@ -741,7 +767,7 @@ def draw_qr(name, plate_x, text_x, text_width_px, title, lines, accent, icon=Non
 
 
 def draw_qr_repo(accent):
-    draw_qr("qr_repo", 6, 212, WIDTH - 212 - 6, "Get the extension", (
+    draw_qr(qr("qr_repo"), 6, 212, WIDTH - 212 - 6, "Get the extension", (
         (QR_NAME_SIZE, WHITE, "AI Engineering Fluency"),
         (QR_DETAIL_SIZE, LIGHT, "github.com/rajbos/ai-engineering-fluency"),
         (QR_DETAIL_SIZE, DIM, "VS Code, Visual Studio, JetBrains, CLI"),
@@ -749,13 +775,13 @@ def draw_qr_repo(accent):
 
 
 def draw_qr_linkedin(accent):
-    code = qr("qr_linkedin")
-    plate_x = WIDTH - 10 - (code.width + 8)
+    size = linkedin_qr_size()
+    plate_x = WIDTH - 10 - (size + 8)
     width = plate_x - MARGIN - 10
-    draw_qr("qr_linkedin", plate_x, MARGIN, width, "Connect", (
-        (QR_NAME_SIZE + 4, WHITE, CONTACT_NAME),
-        (QR_DETAIL_SIZE + 1, LIGHT, "linkedin.com/in/bosrob"),
-    ), accent, icon=qr("linkedin"))
+    lines = ((QR_NAME_SIZE + 4, WHITE, CONTACT_NAME),) if CONTACT_NAME else ()
+    draw_qr(linkedin_qr(), plate_x, MARGIN, width, "Connect", lines + (
+        (QR_DETAIL_SIZE + 1, LIGHT, "linkedin.com/" + LINKEDIN_PATH),
+    ), accent, icon=qr("linkedin"), size=size)
     company = optional_image(COMPANY_LOGO_FILE)
     if company is not None and company.width <= width:
         screen.blit(company, vec2(MARGIN + DX, HEIGHT - 34 - company.height))
@@ -905,7 +931,8 @@ def clock_ms():
 
 # ── app ───────────────────────────────────────────────────────────────────
 
-SCREENS = ("score", "history", "qr_repo", "qr_linkedin")
+# The LinkedIn screen only appears when secrets.py names a profile (CONTACT_LINKEDIN).
+SCREENS = ("score", "history", "qr_repo") + (("qr_linkedin",) if LINKEDIN_PATH else ())
 
 
 class App:

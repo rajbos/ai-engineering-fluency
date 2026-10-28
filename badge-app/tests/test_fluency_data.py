@@ -149,6 +149,16 @@ class FormatTests(unittest.TestCase):
     def test_weakest_picks_first_lowest(self):
         self.assertEqual(fd.weakest([("A", 3), ("B", 2), ("C", 2)]), ("B", 2))
 
+    def test_linkedin_path_takes_a_username_or_a_link(self):
+        for value in ("bosrob", "@bosrob", " bosrob/ ", "in/bosrob", "linkedin.com/in/bosrob",
+                      "https://linkedin.com/in/bosrob", "https://www.linkedin.com/in/bosrob/",
+                      "HTTPS://WWW.LinkedIn.com/in/bosrob?trk=x", "http://nl.linkedin.com/in/bosrob"):
+            self.assertEqual(fd.linkedin_path(value), "in/bosrob", value)
+
+    def test_linkedin_path_rejects_other_sites_and_empty(self):
+        for value in ("", "   ", "https://example.com/in/bosrob", "example.com", "https://linkedin.com"):
+            self.assertEqual(fd.linkedin_path(value), "", value)
+
 
 if __name__ == "__main__":
     unittest.main()

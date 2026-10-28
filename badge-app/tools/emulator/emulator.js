@@ -195,6 +195,9 @@ async function renderApp({ browser, origin, compat, appDir, appName, outDir, sca
 				if (!fs.existsSync(dataPath)) { throw new Error(`${view}/${run.id}: ${run.data} not found in ${appDir}`); }
 				files.push({ name: '/state/fluency.json', data: fs.readFileSync(dataPath).toString('base64') });
 			}
+			if (run.settings) {
+				files.push({ name: '/state/editor-settings.json', data: Buffer.from(JSON.stringify(run.settings)).toString('base64') });
+			}
 			await page.evaluate((request) => window.emu.start(request), { program: program(compat, appName), files });
 			const session = new Session(page, `${view}/${run.id}`);
 			await session.waitFrames(SETTLE_FRAMES);

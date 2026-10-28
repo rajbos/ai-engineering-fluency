@@ -127,7 +127,9 @@ RP2 every software reset reads as `WDT_RESET`.)
 ```sh
 pip install "qrcode[pil]"
 python badge-app/tools/make_qr.py
-python badge-app/tools/make_qr.py --linkedin-logo path/to/linkedin-in.png
 ```
+
+This rebuilds the repo QR code and the logos. The LinkedIn QR code is not a
+file: the app makes it on the badge from `CONTACT_LINKEDIN` in `secrets.py`.
 
 Check the result still scans with a phone before committing.
