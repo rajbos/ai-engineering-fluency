@@ -12,6 +12,9 @@
  * Shot names become part of the file name and the PR comment, so they are kept
  * to lowercase letters, digits and dashes. `data` is the fluency.json the run
  * starts with (a path relative to the app folder), or null for a fresh badge.
+ * `settings` are the secrets.py values the run starts with (the simulator's
+ * read-only /secrets.py loads them from /state/editor-settings.json), or
+ * omitted for none.
  */
 
 // Input bits the simulator worker reads (badger/home's badge-simulator extension.mjs).
@@ -24,6 +27,7 @@ const SCENARIOS = {
 		{
 			id: 'data',
 			data: 'assets/sample.json',
+			settings: { CONTACT_NAME: 'Rob Bos', CONTACT_LINKEDIN: 'https://linkedin.com/in/bosrob' },
 			steps: [
 				{ shot: '1-score' },
 				// UP on the score screen flips to the spider chart (and DOWN back).

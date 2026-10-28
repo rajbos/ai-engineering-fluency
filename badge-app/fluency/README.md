@@ -54,9 +54,14 @@ repository names.
 
 ## Requirements
 
-No Wi-Fi or `secrets.py` settings are needed. If `GITHUB_USERNAME` or
-`CONTACT_NAME` is set in `secrets.py` (the stock Settings app edits both),
-the score screen shows your handle and the LinkedIn screen your name.
+No Wi-Fi or `secrets.py` settings are needed. These optional ones are read
+from `secrets.py` (the stock Settings app edits them):
+
+| Setting | Shows |
+|---|---|
+| `GITHUB_USERNAME` | Your handle on the score screen. |
+| `CONTACT_LINKEDIN` | The LinkedIn screen, with a QR code to your profile made on the badge. Either your username (`bosrob`) or the full link (`https://linkedin.com/in/bosrob`). Without it the screen is left out. |
+| `CONTACT_NAME` | Your name on the LinkedIn screen (your GitHub handle when unset). |
 
 To show your employer's logo under your name on the LinkedIn screen, copy a
 small PNG (at most about 110 pixels wide) to `/state/company_logo.png`:

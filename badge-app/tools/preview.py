@@ -9,7 +9,7 @@ simulated.
 
 Usage (from the repo root):
 
-    pip install pillow
+    pip install pillow "qrcode[pil]"
     python badge-app/tools/preview.py                      # uses the app's sample data
     python badge-app/tools/preview.py --data my.json       # your own fluency.json
     python badge-app/tools/preview.py --out preview --scale 2
@@ -18,6 +18,7 @@ Usage (from the repo root):
 import argparse
 import os
 import shutil
+import sys
 import tempfile
 import types
 
@@ -32,6 +33,9 @@ FONT_CANDIDATES = (
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/segoeui.ttf",
 )
+
+# secrets.py values the preview runs with, as the stock Settings app writes them.
+SETTINGS = {"CONTACT_NAME": "Rob Bos", "CONTACT_LINKEDIN": "https://linkedin.com/in/bosrob"}
 
 BUTTONS = ("UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK", "MENU", "HOME")
 
@@ -132,8 +136,12 @@ class Screen:
         box = self._ttf(font_size).getbbox(value, anchor="lt")
         return (box[2] - box[0], box[3] - box[1])
 
-    def blit(self, picture, position):
-        self.img.alpha_composite(picture.img, (int(position.x), int(position.y)))
+    def blit(self, picture, position, target=None):
+        img = picture.img
+        if target is not None:  # blit(image, source rect, target rect) scales the source
+            position = target
+            img = img.resize((int(target.w), int(target.h)), Image.NEAREST)
+        self.img.alpha_composite(img, (int(position.x), int(position.y)))
 
 
 class Badge:
@@ -176,13 +184,24 @@ def runtime(screen, badge_stub, app_dir, state_dir):
     def vec2(x, y):
         return types.SimpleNamespace(x=x, y=y)
 
+    def rect(x, y, w, h):
+        return types.SimpleNamespace(x=x, y=y, w=w, h=h)
+
+    def make_qr(url, level, border):
+        import qrcode
+
+        code = qrcode.QRCode(error_correction=level, border=border, box_size=1)
+        code.add_data(url)
+        code.make(fit=True)
+        return Picture(code.make_image(fill_color="black", back_color="white").get_image())
+
     env = {
         "__name__": "fluency_preview",
         "FLUENCY_APP_DIR": app_dir,
         "FLUENCY_STATE_DIR": state_dir,
         "badge": badge_stub,
         "screen": screen,
-        "image": types.SimpleNamespace(load=load_image, X2=2, X4=4, OFF=0),
+        "image": types.SimpleNamespace(load=load_image, qr=make_qr, QR_LOW=1, QR_MEDIUM=0, X2=2, X4=4, OFF=0),
         "font": types.SimpleNamespace(load=lambda path: "vector", nope="bitmap"),
         "color": types.SimpleNamespace(rgb=Colour),
         "shape": types.SimpleNamespace(
@@ -193,6 +212,7 @@ def runtime(screen, badge_stub, app_dir, state_dir):
             custom=lambda *a: Shape("custom", *a),
         ),
         "vec2": vec2,
+        "rect": rect,
         "is_dir": os.path.isdir,
         "file_exists": os.path.exists,
         "HIRES": 1,
@@ -281,12 +301,18 @@ def main():
 
         env["run"] = run
         cwd = os.getcwd()
+        stdlib_secrets = sys.modules.get("secrets")
+        sys.modules["secrets"] = types.SimpleNamespace(**SETTINGS)
         try:
             with open(os.path.join(APP_DIR, "__init__.py")) as source:
                 code = compile(source.read(), os.path.join(APP_DIR, "__init__.py"), "exec")
             exec(code, env)  # noqa: S102 - runs this repo's own app code
         finally:
             os.chdir(cwd)
+            if stdlib_secrets is None:
+                sys.modules.pop("secrets", None)
+            else:
+                sys.modules["secrets"] = stdlib_secrets
         for path in saved:
             print("saved", os.path.relpath(path, ROOT))
     finally:

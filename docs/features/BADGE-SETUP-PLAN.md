@@ -11,7 +11,7 @@ The badge app shows live data from the AI Engineering Fluency extension, plus tw
 1. Fluency score: overall stage (1 to 4) and its label, plus all six categories with their names and stage values as segment bars. UP/DOWN flips to a sub-view with the same data as a spider chart, animated in like a radar scan (rings grow out of the centre, an arm sweeps round once and each category pops out to its stage as it passes), and back.
 2. 30-day history: one bar per day for tokens, with a day cursor you scrub; a toggle switches to sessions.
 3. QR code to `https://github.com/rajbos/ai-engineering-fluency` with the repo logo mark in the centre on a dark tile.
-4. QR code to `https://linkedin.com/in/bosrob`, with a labelled placeholder until the official LinkedIn logo is added.
+4. QR code to the wearer's LinkedIn profile from `CONTACT_LINKEDIN` in `secrets.py` (a username or a full link), made on the badge. The screen is left out when it is not set.
 5. Sync status, shown on demand with MENU (and automatically when there is no data yet).
 
 The score and history screens come in three looks the wearer switches on the badge (a tap on SELECT, or UP/DOWN on the sync screen). The choice is saved in `/state/fluency_look.json`.
@@ -69,7 +69,7 @@ How to install the app and sync data is in [BADGE-SETUP.md](BADGE-SETUP.md).
 **Assets**
 
 - Repo mark: `assets/AI Engineering Fluency - Transparent.png`, cropped to the robot head and bars, 28x28 on the dark tile.
-- LinkedIn logo: still to collect. Save the official "in" bug PNG from LinkedIn's brand site and run `python badge-app/tools/make_qr.py --linkedin-logo <png>`.
+- LinkedIn mark: drawn by `make_qr.py` as `assets/linkedin.png`, shown beside the Connect title.
 
 ## The badge app
 
@@ -113,11 +113,9 @@ Keep it under about 4 KB (the badge's data partition is roughly 980 KiB in total
 
 **QR codes**
 
-- The app ships pre-rendered PNGs (`assets/qr_repo.png`, `assets/qr_linkedin.png`) and blits them 1:1. They are built by [`badge-app/tools/make_qr.py`](../../badge-app/tools/make_qr.py) at the high error-correction level with a 4-module quiet zone, and were checked to decode with OpenCV, also after blurring and lowering the contrast.
-- Why not `image.qr()` on the device: `contacts` uses `image.qr(url, image.QR_LOW, 2)`, and only `QR_LOW` appears in `badger/home`. A centre logo needs the high level, which may not exist on the firmware. Pre-rendering avoids that question.
-- Sizes: repo URL 41x41 modules at 4 px (196 px with quiet zone), LinkedIn 33x33 at 5 px (205 px). Both fit the 240 px screen height beside text.
+- The repo code is a pre-rendered PNG (`assets/qr_repo.png`) blitted 1:1. It is built by [`badge-app/tools/make_qr.py`](../../badge-app/tools/make_qr.py) at the high error-correction level with a 4-module quiet zone, and was checked to decode with OpenCV, also after blurring and lowering the contrast. Repo URL 41x41 modules at 4 px (196 px with quiet zone).
 - The repo mark sits on a dark rounded tile with a one-module white ring.
-- The QR codes are fixed to these two URLs. A per-user URL from `CONTACT_LINKEDIN` in `/secrets.py` would need on-device generation and is left for later.
+- The LinkedIn code is per wearer, so the app makes it on the badge from `CONTACT_LINKEDIN` in `/secrets.py`, accepting a username or a full `linkedin.com` link (the same key the stock `contacts` app reads). It calls `image.qr(url, level, 2)`: one pixel per module and, as the last argument, a 2-module quiet zone. The level is `QR_MEDIUM` where the firmware has it (the simulator does), else `QR_LOW`; there is no centre logo. The code is blitted scaled to the largest whole-pixel module that fits 200 px.
 
 ## Not built yet
 
@@ -164,7 +162,6 @@ All of them run on the badge. The simulators do not model the accelerometer, so 
 **Open items**
 
 - [ ] The URL to show for the GitHub Universe badge reference. No official badge page was found yet; until one is picked, the Badge setup view links to `badger/home`, the Tufty 2350 page and badgewa.re.
-- [ ] The official LinkedIn "in" logo PNG (see Assets).
 
 **Risks to verify on the hardware**
 

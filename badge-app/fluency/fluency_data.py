@@ -181,3 +181,20 @@ def weakest(categories):
         if best is None or stage < best[1]:
             best = (name, stage)
     return best
+
+
+def linkedin_path(value):
+    """The LinkedIn profile path from CONTACT_LINKEDIN, which holds either a bare
+    username or a full link such as https://www.linkedin.com/in/username/;
+    "" when it is empty or names another site."""
+    value = value.strip().lstrip("@").split("?")[0].split("#")[0].strip("/")
+    rest = value.split("://", 1)[-1]
+    host, _, path = rest.partition("/")
+    host = host.lower()
+    if host == "linkedin.com" or host.endswith(".linkedin.com"):
+        return path.strip("/")
+    if value.startswith("in/") and "." not in value:
+        return value
+    if "." in value or "/" in value:
+        return ""
+    return "in/" + value if value else ""
