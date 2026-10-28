@@ -135,7 +135,7 @@ local**. Clone your voice in Mistral's console, put its id in
 ```bash
 export MISTRAL_API_KEY=...        # never goes in config.json
 npm run video -- doctor --voice mistral
-npm run video -- say --text-file content/voice-test.txt --output output/test.wav
+npm run video -- say --voice mistral --text-file content/voice-test.txt --output output/test.wav
 ```
 
 `voiceId` and `model` live in `config.json`; the key is read from the
