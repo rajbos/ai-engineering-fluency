@@ -113,8 +113,14 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
-		version: '0.19.1',
+		version: '0.19.2',
 		date: null,
+		headlineKey: 'whatsNew.release.0.19.2.headline',
+		features: [],
+	},
+	{
+		version: '0.19.1',
+		date: '2026-10-27',
 		headlineKey: 'whatsNew.release.0.19.1.headline',
 		features: [
 			{

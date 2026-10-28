@@ -4,6 +4,15 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-10-28
+
+### Features
+- Badge Setup: the badge preview now shows your fluency chart with a 30/90-day range toggle and animated score bars, matching what the badge displays (#2541)
+- Badge Setup now guides you through install-then-sync: **Sync** stays disabled until the badge app is installed (#2540)
+
+### Bug Fixes
+- Usage Analysis no longer breaks when the initial "missed potential" payload is malformed; it is now sanitized before rendering (#2539)
+
 ## [0.19.1] - 2026-10-27
 
 ### Features
