@@ -1635,4 +1635,5 @@
   ,"mcp__claude-in-chrome__tabs_close_mcp": "Claude in Chrome: Close Tabs"
   ,"mcp__terminal__run_in_terminal": "Terminal: Run In Terminal"
   ,"list_repositories": "List Repositories"
+  ,"relay_session_input": "Relay Session Input"
 }
