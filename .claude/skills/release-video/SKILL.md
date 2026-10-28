@@ -83,10 +83,13 @@ npm run video -- script            # the narration, to read before paying for TT
 npm run video -- build --since <version> --voice mistral   # shots, voice, captions, render, QA
 ```
 
-`content/manifest.json` is the editable script (git-ignored). After editing
-narration, `npm run video -- build --from voice` regenerates only what
-changed; `plan --keep-narration` re-plans without losing edited wording.
-The MP4 lands in `release-video/output/`.
+`content/manifest.json` is the editable script (git-ignored). `build` uses an
+existing manifest as it is and only plans when there is none, so the user's
+edits survive; re-running `build` regenerates only what changed. It refuses a
+manifest planned for a different `--version`/`--since`: only then add
+`--replan` (with `--keep-narration` to keep edited wording), and never run
+`plan` again after the user has edited the file, since `plan` always rewrites
+it. The MP4 lands in `release-video/output/`.
 
 ## 6. Hand it back
 

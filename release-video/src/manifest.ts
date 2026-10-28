@@ -68,6 +68,8 @@ export interface Manifest {
 	readonly project: {
 		readonly title: string;
 		readonly version: string;
+		/** `--since` the plan was made with, so `build` can tell it is still the requested video. */
+		readonly since?: string;
 		readonly width: number;
 		readonly height: number;
 		readonly fps: number;
@@ -207,6 +209,7 @@ export function validateManifest(raw: unknown, { requireAssets = false } = {}): 
 	const normalizedProject = {
 		title: asString(project.title, 'project.title', { max: 200 }),
 		version: asVersion(project.version),
+		...(project.since !== undefined ? { since: asVersion(project.since) } : {}),
 		width: asNumber(project.width, 'project.width', 320, 7680, 1920),
 		height: asNumber(project.height, 'project.height', 240, 4320, 1080),
 		fps: asNumber(project.fps, 'project.fps', 10, 120, 30),

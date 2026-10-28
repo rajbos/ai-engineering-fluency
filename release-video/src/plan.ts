@@ -174,6 +174,7 @@ export async function plan(config: Config, options: PlanOptions = {}): Promise<M
 		project: {
 			title: `${config.project.productName} ${release.version}`,
 			version: release.version,
+			...(release.since !== undefined ? { since: release.since } : {}),
 			width: config.project.width,
 			height: config.project.height,
 			fps: config.project.fps,

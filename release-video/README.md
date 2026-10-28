@@ -260,15 +260,21 @@ by hand.** Reword narration, reorder scenes, change a transition, nudge a focus
 point — then:
 
 ```bash
-npm run video -- build --from voice
+npm run video -- build --voice mistral
 ```
 
-Only what you changed is regenerated. To re-plan from the catalog without
-losing wording you have already tuned:
+`build` only plans when there is no manifest yet; an existing one is rendered
+as you left it, and only what you changed is regenerated. A manifest planned
+for a different `--version`/`--since` is refused rather than overwritten. To
+re-plan from the catalog on purpose:
 
 ```bash
-npm run video -- plan --keep-narration
+npm run video -- build --since 0.18.0 --replan                    # fresh, replaces your edits
+npm run video -- build --since 0.18.0 --replan --keep-narration   # keeps wording for scenes that still exist
 ```
+
+`plan` on its own always rewrites the manifest (add `--keep-narration` to
+keep your wording).
 
 ### Stages
 

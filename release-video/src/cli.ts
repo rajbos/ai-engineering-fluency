@@ -49,6 +49,7 @@ interface Args {
 	readonly textFile?: string;
 	readonly force: boolean;
 	readonly keepNarration: boolean;
+	readonly replan: boolean;
 	readonly llm?: boolean;
 	readonly from?: Stage;
 }
@@ -95,6 +96,7 @@ function parseArgs(argv: readonly string[]): Args {
 		...(asString('text-file') !== undefined ? { textFile: asString('text-file') } : {}),
 		force: flags.force === true,
 		keepNarration: flags['keep-narration'] === true,
+		replan: flags.replan === true,
 		...(flags.llm !== undefined ? { llm: flags.llm !== 'false' && flags.llm !== false } : {}),
 		...(from !== undefined ? { from: from as Stage } : {}),
 	};
@@ -106,7 +108,8 @@ Local release-video generator.
   npm run video -- <command> [options]
 
 Commands
-  build              Run every stage: plan, shots, voice, subs, render, qa
+  build              Run every stage: plan (only without a manifest), shots,
+                     voice, subs, render, qa
   plan               Release catalog -> content/manifest.json
   shots              Capture the screenshots the manifest points at
   voice              Generate narration WAVs and measure them
@@ -130,6 +133,9 @@ Options
                      voicebox, sapi or silence
   --max-features <n> Only cover the first n features
   --keep-narration   Re-plan but keep narration you have already edited
+  --replan           With "build", rewrite content/manifest.json from the
+                     catalog. Without it, build renders an existing manifest
+                     as you left it
   --llm              Polish narration with the local model (overrides config)
   --output <file>    Where to write the MP4, or the WAV for "say"
   --text <words>     Text for "say"
@@ -284,10 +290,13 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 
 	let manifest: Manifest;
 
-	if (shouldRun('plan')) {
+	if (shouldRun('plan') && needsPlan(args)) {
 		manifest = await plan(config, await planOptions(args));
 	} else {
 		manifest = requireManifest();
+		if (shouldRun('plan')) {
+			log.info(`Using ${path.relative(process.cwd(), paths.manifest)} as it is — pass --replan to rebuild it from the catalog`);
+		}
 	}
 
 	if (shouldRun('shots')) {
@@ -325,6 +334,31 @@ async function build(args: Args, config: ReturnType<typeof loadConfig>): Promise
 	log.step(`Done — ${formatClock(timeline.totalSeconds)}, ${manifest.scenes.length} scenes`);
 	log.info(path.resolve(output));
 	return 0;
+}
+
+/**
+ * Whether `build` should (re)write the manifest.
+ *
+ * The manifest is the hand-edited script, so `build` never overwrites one
+ * that already exists unless asked to. One planned for a different release
+ * is refused rather than silently rendered or silently replaced.
+ */
+function needsPlan(args: Args): boolean {
+	if (args.replan || args.from === 'plan' || !fs.existsSync(paths.manifest)) { return true; }
+
+	const { project } = requireManifest();
+	const wantedSince = args.since === 'none' ? undefined : args.since;
+	const versionDiffers = args.version !== undefined && args.version !== project.version;
+	const sinceDiffers = args.since !== undefined && wantedSince !== project.since;
+	if (versionDiffers || sinceDiffers) {
+		const planned = `${project.version}${project.since ? ` since ${project.since}` : ''}`;
+		throw new Error(
+			`content/manifest.json was planned for ${planned}, not what you asked for. ` +
+			'Add --replan to rebuild it from the catalog (this replaces your edits; ' +
+			'--keep-narration keeps them for scenes that still exist).',
+		);
+	}
+	return false;
 }
 
 async function planOptions(args: Args) {
