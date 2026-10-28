@@ -19,7 +19,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
-import { loadConfig, paths } from './config';
+import { loadConfig, paths, type Config, type VoiceEngine } from './config';
 import { doctor } from './doctor';
 import { loadManifest, type Manifest } from './manifest';
 import { plan } from './plan';
@@ -35,12 +35,14 @@ import { formatClock, generateVoice, speakOnce } from './voice';
 import { log, PROJECT_ROOT, resolveInProject, run, writeJson } from './util';
 
 const STAGES = ['plan', 'shots', 'voice', 'subs', 'render', 'qa'] as const;
+const VOICE_ENGINES: readonly VoiceEngine[] = ['mistral', 'voicebox', 'sapi', 'command', 'silence'];
 type Stage = (typeof STAGES)[number];
 
 interface Args {
 	readonly command: string;
 	readonly version?: string;
 	readonly since?: string;
+	readonly voice?: VoiceEngine;
 	readonly output?: string;
 	readonly maxFeatures?: number;
 	readonly text?: string;
@@ -77,8 +79,14 @@ function parseArgs(argv: readonly string[]): Args {
 		throw new Error(`--from must be one of ${STAGES.join(', ')}`);
 	}
 
+	const voice = asString('voice');
+	if (voice !== undefined && !VOICE_ENGINES.includes(voice as VoiceEngine)) {
+		throw new Error(`--voice must be one of ${VOICE_ENGINES.join(', ')}`);
+	}
+
 	return {
 		command: positional[0] ?? 'build',
+		...(voice !== undefined ? { voice: voice as VoiceEngine } : {}),
 		...(asString('version') !== undefined ? { version: asString('version') } : {}),
 		...(asString('since') !== undefined ? { since: asString('since') } : {}),
 		...(asString('output') !== undefined ? { output: asString('output') } : {}),
@@ -117,6 +125,9 @@ Options
   --since <x.y.z>    Also cover every release after this one: the last version
                      an earlier video covered. "none" = only --version. When
                      omitted in a terminal, plan asks; otherwise it is "none"
+  --voice <engine>   Voice engine for this run, overriding config.json:
+                     mistral (your cloned voice, billed), command (Piper),
+                     voicebox, sapi or silence
   --max-features <n> Only cover the first n features
   --keep-narration   Re-plan but keep narration you have already edited
   --llm              Polish narration with the local model (overrides config)
@@ -130,14 +141,14 @@ Examples
   npm run video -- doctor
   npm run video -- build
   npm run video -- releases
-  npm run video -- build --since 0.17.2
+  npm run video -- build --since 0.17.2 --voice mistral
   npm run video -- build --version 0.18.0 --llm
   npm run video -- build --from render --force
 `;
 
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
-	const config = loadConfig();
+	const config = withVoiceOverride(loadConfig(), args.voice);
 
 	switch (args.command) {
 		case 'help':
@@ -325,6 +336,17 @@ async function planOptions(args: Args) {
 		keepNarration: args.keepNarration,
 		...(args.llm !== undefined ? { useLlm: args.llm } : {}),
 	};
+}
+
+/**
+ * `--voice` picks the engine for one run without editing the committed
+ * config. The engine's own settings (Mistral voiceId, Piper argv) still come
+ * from `config.json`, and the narration cache key follows the engine, so
+ * switching back and forth never mixes voices in one soundtrack.
+ */
+function withVoiceOverride(config: Config, engine: VoiceEngine | undefined): Config {
+	if (engine === undefined || engine === config.voice.engine) { return config; }
+	return { ...config, voice: { ...config.voice, engine } };
 }
 
 /**

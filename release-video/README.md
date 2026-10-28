@@ -128,15 +128,13 @@ pipeline, not to narrate anything you would publish.
 #### Your own voice (Mistral, hosted)
 
 The fastest route to a cloned voice, and the only engine here that is **not
-local**. Clone your voice in Mistral's console, then:
-
-```json
-"voice": { "engine": "mistral" }
-```
+local**. Clone your voice in Mistral's console, put its id in
+`voice.mistral.voiceId`, then pick it per run with `--voice mistral` (or set
+`"voice": { "engine": "mistral" }` to make it the default):
 
 ```bash
 export MISTRAL_API_KEY=...        # never goes in config.json
-npm run video -- doctor
+npm run video -- doctor --voice mistral
 npm run video -- say --text-file content/voice-test.txt --output output/test.wav
 ```
 

@@ -53,7 +53,9 @@ versions, which `npm install` rejects with `EUNSUPPORTEDPROTOCOL`).
 
 ## 4. Pick the voice
 
-`voice.engine` in `release-video/config.json`:
+Pass `--voice <engine>` on each command (it overrides `voice.engine` in
+`release-video/config.json` for that run, so the committed config never
+changes):
 
 - `mistral` — **the maintainer's cloned voice.** The `voiceId` is already in
   the config; the key comes from the `MISTRAL_API_KEY` environment variable
@@ -66,10 +68,11 @@ versions, which `npm install` rejects with `EUNSUPPORTEDPROTOCOL`).
 Audition before rendering everything:
 
 ```bash
-npm run video -- say --text-file content/voice-test.txt --output output/test.wav
+npm run video -- say --voice mistral --text-file content/voice-test.txt --output output/test.wav
 ```
 
-Do not commit a changed `voice.engine` unless the user asks.
+Use the same `--voice` on `doctor`, `build` and `build --from voice`; a run
+without it falls back to the committed engine.
 
 ## 5. Plan, review, render
 
@@ -77,7 +80,7 @@ Do not commit a changed `voice.engine` unless the user asks.
 npm run video -- plan --since <version>
 npm run video -- timeline          # running order and length
 npm run video -- script            # the narration, to read before paying for TTS
-npm run video -- build             # shots, voice, captions, render, QA
+npm run video -- build --since <version> --voice mistral   # shots, voice, captions, render, QA
 ```
 
 `content/manifest.json` is the editable script (git-ignored). After editing
