@@ -4760,7 +4760,7 @@
       "hash": "013794c3af7a",
       "count": 1,
       "line": 386,
-      "sample": "⚡ HydraFusion Routing"
+      "sample": "⚡ Copilot Fusion Routing"
     },
     {
       "file": "vscode-extension/src/webview/logviewer/hydraFusionSection.ts",
@@ -4774,7 +4774,7 @@
       "hash": "56eea2b27d0b",
       "count": 1,
       "line": 390,
-      "sample": "HydraFusion answers one prompt with several models — drafting, reviewing and esc"
+      "sample": "Copilot Fusion answers one prompt with several models — drafting, reviewing and esc"
     },
     {
       "file": "vscode-extension/src/webview/logviewer/hydraFusionSection.ts",
@@ -5908,7 +5908,7 @@
       "hash": "f56a00b3c7eb",
       "count": 2,
       "line": 1322,
-      "sample": "Show only sessions that used HydraFusion"
+      "sample": "Show only sessions that used Copilot Fusion"
     },
     {
       "file": "vscode-extension/src/webview/usage/main.ts",
@@ -5922,7 +5922,7 @@
       "hash": "07a2513b00f4",
       "count": 2,
       "line": 1385,
-      "sample": "This session used HydraFusion"
+      "sample": "This session used Copilot Fusion"
     },
     {
       "file": "vscode-extension/src/webview/usage/main.ts",

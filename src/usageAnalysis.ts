@@ -1425,7 +1425,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeVendorStats(period, analysis);
 }
 
-/** Sum the session's HydraFusion routing rollup into the period (additive; absent for sessions that never routed). */
+/** Sum the session's Copilot Fusion routing rollup into the period (additive; absent for sessions that never routed). */
 function _muaMergeHydraFusion(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	if (!analysis.hydraFusion) { return; }
 	period.hydraFusion = addHydraFusionRollup(period.hydraFusion ?? createEmptyHydraFusionRollup(), analysis.hydraFusion);
@@ -2842,7 +2842,7 @@ async function _asuProcessJsonlUsage(
 	await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
 }
 
-/** Records the session's numeric HydraFusion routing rollup (Copilot CLI sessions that routed through it). */
+/** Records the session's numeric Copilot Fusion routing rollup (Copilot CLI sessions that routed through it). */
 function _asuAttachHydraFusion(fileContent: string, analysis: SessionUsageAnalysis): void {
 	const hydraFusion = analyzeHydraFusionSession(fileContent);
 	if (hydraFusion) { analysis.hydraFusion = toHydraFusionRollup(hydraFusion); }

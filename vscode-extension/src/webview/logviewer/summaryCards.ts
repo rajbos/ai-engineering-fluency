@@ -65,7 +65,7 @@ export type SessionCostInput = {
 };
 
 /**
- * Session total in USD. HydraFusion's reported AIU is the authoritative spend for the
+ * Session total in USD. Copilot Fusion's reported AIU is the authoritative spend for the
  * primary calls (its synthetic router model has no ordinary pricing), so it replaces the
  * per-turn estimates there; sub-agent costs are separate calls and are always added.
  * Returns 0 when nothing is known.

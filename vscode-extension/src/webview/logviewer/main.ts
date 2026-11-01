@@ -118,7 +118,7 @@ truncationCount?: number;
 messagesRemovedByTruncation?: number;
 /** Optional editor-specific note. When present, an info panel is rendered at the top of the viewer. */
 editorNote?: { items: string[] };
-/** Per-leg HydraFusion routing detail (Copilot CLI sessions that used the `hydrafusion` model). */
+/** Per-leg Copilot Fusion routing detail (Copilot CLI sessions that used the `hydrafusion` model). */
 hydraFusion?: HydraFusionSummary;
 compactNumbers?: boolean;
 };
@@ -1062,7 +1062,7 @@ function computeTurnsOverviewTableFlags(rows: TurnOverviewRow[]): TurnsOverviewT
 }
 
 // Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
-// row can reuse the exact same leg table the HydraFusion section renders above
+// row can reuse the exact same leg table the Copilot Fusion section renders above
 // (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
 // same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
 // which `analyzeHydraFusionSession` can legitimately differ from (it prefers
@@ -1089,7 +1089,7 @@ type TurnsOverviewItem = {
 
 const TURNS_OVERVIEW_TABLE_ID = 'logviewer-turns-overview';
 
-/** Steps whose HydraFusion legs are expanded, kept here so a sort or page change keeps them open. */
+/** Steps whose Copilot Fusion legs are expanded, kept here so a sort or page change keeps them open. */
 const expandedOverviewLegs = new Set<number>();
 
 /** What the overview was last rendered with, to find the page that shows a given step. */
@@ -1204,9 +1204,9 @@ function buildTurnsOverviewColumns(flags: TurnsOverviewTableFlags): DataTableCol
  * Rows start in chronological step order; sub-agent rows and expandable legs
  * travel with their step when the table is sorted or paged.
  *
- * When a turn was routed through HydraFusion (`hydraTurnMatches` places it), its
+ * When a turn was routed through Copilot Fusion (`hydraTurnMatches` places it), its
  * row also gets a ⚡ toggle that expands the same leg-by-leg table shown in the
- * HydraFusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
+ * Copilot Fusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
  * only difference from a plain session's table: everything else here runs exactly
  * as before for the overwhelming majority of sessions, which never used the router.
  */
@@ -1324,7 +1324,7 @@ function handleLogViewerClick(e: MouseEvent): void {
 	}
 }
 
-/** Clicking (or activating with the keyboard) a HydraFusion turn's "jump to step" link scrolls to and expands its row in the Session Steps Overview table below. */
+/** Clicking (or activating with the keyboard) a Copilot Fusion turn's "jump to step" link scrolls to and expands its row in the Session Steps Overview table below. */
 function wireUpHydraFusionHandlers(): void {
 document.querySelectorAll<HTMLElement>('.hydra-jump-to-step').forEach(link => {
 const activate = (e: Event): void => {
@@ -1453,10 +1453,10 @@ function _renderLayoutBody(
 	totalTokens: number,
 	actualStats: ActualUsageStats<ChatTurn>,
 ): void {
-	// Computed once and shared by both renderers below so the HydraFusion section's
+	// Computed once and shared by both renderers below so the Copilot Fusion section's
 	// "jump to step" links and the Session Steps Overview table's expandable legs
 	// agree on which turn is which. `undefined` for the overwhelming majority of
-	// sessions, which never used HydraFusion — both renderers treat that as "no legs".
+	// sessions, which never used Copilot Fusion — both renderers treat that as "no legs".
 	const hydraTurnMatches = data.hydraFusion ? matchHydraFusionTurnsToChatTurns(data.turns, data.hydraFusion.turns) : undefined;
 
 	setHtml(root, `
@@ -1510,7 +1510,7 @@ function scrollAndFocusTurn(turnNumber: number): void {
 	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
 }
 
-/** Shows or hides the HydraFusion legs nested under a Session Steps Overview row, syncing its toggle button. */
+/** Shows or hides the Copilot Fusion legs nested under a Session Steps Overview row, syncing its toggle button. */
 function setOverviewLegsExpanded(turnNumber: string, expanded: boolean): void {
 	const step = Number(turnNumber);
 	if (expanded) { expandedOverviewLegs.add(step); } else { expandedOverviewLegs.delete(step); }

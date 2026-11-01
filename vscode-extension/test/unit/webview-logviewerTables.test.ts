@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom';
  * Drives the *real* bundled Log Viewer (`src/webview/logviewer/main.ts`) in jsdom to check the
  * behaviour its shared data tables must keep: the tool pills filter the whole tool list (not just
  * the visible page), clicks inside rows keep working after a sort or page re-render, the steps
- * overview starts in chronological order, and a HydraFusion "jump to step" link reaches a step
+ * overview starts in chronological order, and a Copilot Fusion "jump to step" link reaches a step
  * on another page with its legs expanded — and they stay expanded through a re-sort.
  */
 
@@ -37,7 +37,7 @@ function bundleLogViewer(): Promise<string> {
 }
 
 const TURN_COUNT = 12;
-/** The step the single HydraFusion turn matches — on the overview's second page. */
+/** The step the single Copilot Fusion turn matches — on the overview's second page. */
 const HYDRA_STEP = 11;
 
 function minute(n: number): string {
@@ -179,7 +179,7 @@ describe('Log Viewer tables (bundled webview in jsdom)', () => {
 		} finally { h.close(); }
 	});
 
-	test('a HydraFusion jump-to-step link pages the overview to its step and expands the legs', async () => {
+	test('a Copilot Fusion jump-to-step link pages the overview to its step and expands the legs', async () => {
 		const h = await bootLogViewer();
 		try {
 			assert.ok(!overviewSteps(h).includes(HYDRA_STEP), 'the step starts off-page');

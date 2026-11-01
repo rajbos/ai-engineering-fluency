@@ -102,7 +102,7 @@ describe('sumSessionCost', () => {
 		assert.equal(total, 0.875);
 	});
 
-	test('HydraFusion AIU replaces turn estimates but sub-agent costs are still added', () => {
+	test('Copilot Fusion AIU replaces turn estimates but sub-agent costs are still added', () => {
 		const total = sumSessionCost({
 			turns: [{ estimatedCost: 99, toolCalls: [{ subAgentCost: 0.5 }] }],
 			hydraFusion: { totalAiu: 200 },

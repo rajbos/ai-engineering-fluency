@@ -62,7 +62,7 @@ Documentation and JSON schemas for Copilot session log file formats across diffe
 | [logFilesSchema/codex-cli-session-format.md](logFilesSchema/codex-cli-session-format.md) | OpenAI Codex CLI session files under `$CODEX_HOME` |
 | [logFilesSchema/devin-cli-session-format.md](logFilesSchema/devin-cli-session-format.md) | Devin CLI (ACP-based, separate from the desktop app) SQLite `sessions.db` |
 | [logFilesSchema/devin-windsurf-session-format.md](logFilesSchema/devin-windsurf-session-format.md) | Devin desktop app and Windsurf shared Cascade storage format |
-| [logFilesSchema/hydrafusion-routing-events.md](logFilesSchema/hydrafusion-routing-events.md) | HydraFusion routing events in Copilot CLI logs — which models ran behind one answer, and what each leg cost |
+| [logFilesSchema/hydrafusion-routing-events.md](logFilesSchema/hydrafusion-routing-events.md) | Copilot Fusion routing events in Copilot CLI logs — which models ran behind one answer, and what each leg cost |
 | [logFilesSchema/claude-code-session-schema.json](logFilesSchema/claude-code-session-schema.json) | Claude Code session file schema (JSON) |
 | [logFilesSchema/jetbrains-session-schema.json](logFilesSchema/jetbrains-session-schema.json) | JetBrains Copilot session file schema (JSON) |
 | [logFilesSchema/session-file-schema.json](logFilesSchema/session-file-schema.json) | Manual schema documentation (JSON) |

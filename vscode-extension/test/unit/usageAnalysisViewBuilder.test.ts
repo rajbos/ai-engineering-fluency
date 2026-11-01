@@ -216,7 +216,7 @@ test('buildUsageAnalysisViewData carries the recent-session buckets for every ho
 	assert.equal(buildUsageAnalysisViewData(stats(), inputs()).recentSessions, undefined, 'absent when the host has none');
 });
 
-// ── HydraFusion router aggregate ──────────────────────────────────────────
+// ── Copilot Fusion router aggregate ──────────────────────────────────────────
 
 test('buildUsageAnalysisViewData: hydraFusion is null for every period when nothing routed', () => {
 	const data = buildUsageAnalysisViewData(stats(), inputs());

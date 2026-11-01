@@ -39,7 +39,7 @@ const UNKNOWN_MODEL_KEY = 'unknown';
  * `modelUsage` only lists models that produced an attributable usage record, so a model
  * that served turns without one is missing there while still being counted per turn in
  * `modelEfficiency`. The Recent Sessions Models column, its pill filters and the
- * HydraFusion badge all read this list, so both sources are unioned — otherwise a model
+ * Copilot Fusion badge all read this list, so both sources are unioned — otherwise a model
  * can rank in "Most used models locally" while no session row ever mentions it. The
  * `unknown` placeholder is dropped from the efficiency side: it is not a model anyone can
  * look up or filter on.

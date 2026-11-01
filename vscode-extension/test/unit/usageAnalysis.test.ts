@@ -174,7 +174,7 @@ test('mergeUsageAnalysis: accumulates tool call counts across sessions', () => {
     assert.equal(period.toolCalls.byTool['listFiles'], 1);
 });
 
-test('mergeUsageAnalysis: sums HydraFusion rollups across sessions and merges the pattern mix', () => {
+test('mergeUsageAnalysis: sums Copilot Fusion rollups across sessions and merges the pattern mix', () => {
     const period = emptyPeriod();
     const rollup = (turns: number, aiu: number, pattern: string) => ({
         sessions: 1, totalTurns: turns, compoundTurns: 1, judgeAccepts: 0, judgeRejects: 1, escalatedTurns: 1,

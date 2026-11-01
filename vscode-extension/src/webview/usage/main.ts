@@ -231,7 +231,7 @@ type UsageAnalysisStats = {
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Compact projection of the memory-files hygiene analysis (counts/rollup scalars only — no per-file paths). Null when none found. */
 	memoryFilesAnalysis?: MemoryFilesAnalysisView | null;
-	/** HydraFusion router aggregate per period; a period is null when no session routed through it. */
+	/** Copilot Fusion router aggregate per period; a period is null when no session routed through it. */
 	hydraFusion?: RouterPayload;
 	/**
 	 * Compact projection of this repository's server-side Copilot memory store. Unlike
@@ -1020,7 +1020,7 @@ function formatCompactSessionNumber(value: number): { html: string; title: strin
 }
 
 /**
- * Whether a raw model id refers to HydraFusion.
+ * Whether a raw model id refers to Copilot Fusion.
  *
  * Ids arrive in several shapes (`hydrafusion`, `copilot/hydrafusion`, `hydra-fusion`,
  * a dated/preview suffix), so separators are stripped and the name must start the id —
@@ -1111,14 +1111,14 @@ let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS
 /** Columns a navigation preset turned on; re-applied whenever saved settings replace the set above. */
 const presetForcedColumns = new Set<SessionColumnId>();
 
-// --- Recent Sessions pill filters (Editor / Model / Model vendor / HydraFusion) ---
+// --- Recent Sessions pill filters (Editor / Model / Model vendor / Copilot Fusion) ---
 /** Active editor pill filters. Empty set means "no filter" (show all editors). */
 const sessionFilterEditors: Set<string> = new Set();
 /** Active model-vendor pill filters (e.g. "Anthropic", "OpenAI"). Empty set means "no filter". */
 const sessionFilterVendors: Set<string> = new Set();
 /** Active model pill filters. Empty set means "no filter". */
 const sessionFilterModels: Set<string> = new Set();
-/** Quick toggle: when true, only show sessions that used a HydraFusion model. */
+/** Quick toggle: when true, only show sessions that used a Copilot Fusion model. */
 let sessionFilterHydraFusionOnly = false;
 /** Quick toggle: when true, only show sessions that nearly filled their context window. */
 let sessionFilterNearContextLimitOnly = false;
@@ -1184,7 +1184,7 @@ function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
 	};
 }
 
-/** Renders the pill filter bar above the Recent Sessions table (Editor / Vendor / Model / HydraFusion). */
+/** Renders the pill filter bar above the Recent Sessions table (Editor / Vendor / Model / Copilot Fusion). */
 function buildSessionFilterBarHtml(sessions: TodaySessionSummary[]): string {
 	if (!sessions || sessions.length === 0) { return ''; }
 	const opts = computeSessionFilterOptions(sessions);
@@ -1201,7 +1201,7 @@ function buildSessionFilterBarHtml(sessions: TodaySessionSummary[]): string {
 	}
 	if (opts.hydraFusionCount > 0) {
 		const isActive = sessionFilterHydraFusionOnly;
-		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill session-filter-pill-hydrafusion${isActive ? ' active' : ''}" data-filter-type="hydrafusion" data-filter-value="true" aria-pressed="${isActive}" title="Show only sessions that used HydraFusion">⚡ HydraFusion <span class="session-filter-pill-count">${opts.hydraFusionCount}</span></button></div>`);
+		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill session-filter-pill-hydrafusion${isActive ? ' active' : ''}" data-filter-type="hydrafusion" data-filter-value="true" aria-pressed="${isActive}" title="Show only sessions that used Copilot Fusion">⚡ Copilot Fusion <span class="session-filter-pill-count">${opts.hydraFusionCount}</span></button></div>`);
 	}
 	groups.push(buildFilterPillGroupHtml('Editor', 'editor', opts.editors, sessionFilterEditors));
 	groups.push(buildFilterPillGroupHtml('Vendor', 'vendor', opts.vendors, sessionFilterVendors));
@@ -1264,7 +1264,7 @@ function toSessionDataColumn(col: SessionColumnDef): DataTableColumn<TodaySessio
 function sessionTitleCellHtml(s: TodaySessionSummary): string {
 	const title = escapeHtml(s.title || 'Untitled session');
 	const hydraFusionBadge = s.models.some(isHydraFusionModel)
-		? '<span class="hydrafusion-session-badge" title="This session used HydraFusion" style="display:inline-block; margin-right:4px; padding:1px 5px; border:1px solid var(--vscode-badge-background, var(--accent-color)); border-radius:999px; background:var(--vscode-badge-background, var(--accent-color)); color:var(--vscode-badge-foreground, var(--bg-primary)); font-size:10px; font-weight:600; line-height:14px; vertical-align:middle;">HydraFusion</span>'
+		? '<span class="hydrafusion-session-badge" title="This session used Copilot Fusion" style="display:inline-block; margin-right:4px; padding:1px 5px; border:1px solid var(--vscode-badge-background, var(--accent-color)); border-radius:999px; background:var(--vscode-badge-background, var(--accent-color)); color:var(--vscode-badge-foreground, var(--bg-primary)); font-size:10px; font-weight:600; line-height:14px; vertical-align:middle;">Copilot Fusion</span>'
 		: '';
 	return `<a href="#" class="session-title-link" data-file="${escapeHtml(s.filePath || '')}" title="Open viewer for session &quot;${title}&quot;" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${hydraFusionBadge}${title}</a>`;
 }

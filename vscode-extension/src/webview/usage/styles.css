@@ -927,7 +927,7 @@ background: var(--bg-tertiary);
 	white-space: nowrap;
 }
 
-/* Recent Sessions pill filter bar (Editor / Vendor / Model / HydraFusion) */
+/* Recent Sessions pill filter bar (Editor / Vendor / Model / Copilot Fusion) */
 .session-filter-bar {
 	display: flex;
 	flex-direction: column;

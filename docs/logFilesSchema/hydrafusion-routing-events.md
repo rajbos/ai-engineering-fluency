@@ -1,6 +1,6 @@
-# HydraFusion routing events (Copilot CLI)
+# Copilot Fusion routing events (Copilot CLI)
 
-HydraFusion is a synthetic model: you pick `hydrafusion` in the Copilot CLI, and for each
+Copilot Fusion is a synthetic model: you pick `hydrafusion` in the Copilot CLI, and for each
 turn a router decides how many real models to spend on the answer — sometimes one, sometimes
 a draft plus a review plus a repair. The CLI hands you a single coherent answer and a single
 credit number, so the interesting part (which models ran, what they cost, who rejected whom)
@@ -16,7 +16,7 @@ Copilot CLI session. Fusion events sit alongside the normal `user.message` /
 
 **Parsed by:** [`src/hydrafusion.ts`](../../src/hydrafusion.ts) →
 `analyzeHydraFusionSession(content)`, surfaced in the Session Log Viewer's
-"⚡ HydraFusion Routing" section.
+"⚡ Copilot Fusion Routing" section.
 
 **Efficiency attribution:** the CLI keys a routed session's per-turn counters by the
 synthetic id (`hydrafusion`, likewise `auto`) but its `session.shutdown` model metrics by

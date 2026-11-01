@@ -28,7 +28,7 @@ export type TurnOverviewSourceToolCall = {
 
 export type TurnOverviewSourceTurn = {
 	turnNumber: number;
-	/** ISO timestamp of the turn's user message, used only to match it against HydraFusion legs. */
+	/** ISO timestamp of the turn's user message, used only to match it against Copilot Fusion legs. */
 	timestamp?: string | null;
 	model: string | null;
 	mode: string;
@@ -52,7 +52,7 @@ export type TurnOverviewChildRow = {
 	cost: number | null;
 };
 
-/** One HydraFusion leg nested under the turn whose prompt it answered — see `buildTurnLegRows`. */
+/** One Copilot Fusion leg nested under the turn whose prompt it answered — see `buildTurnLegRows`. */
 export type TurnOverviewLegRow = {
 	kind: string;
 	model: string;
@@ -76,7 +76,7 @@ export type TurnOverviewRow = {
 	isActual: boolean;
 	cost: number | null;
 	children: TurnOverviewChildRow[];
-	/** HydraFusion legs behind this turn, when `matchHydraFusionTurnsToChatTurns` could place it. Empty otherwise. */
+	/** Copilot Fusion legs behind this turn, when `matchHydraFusionTurnsToChatTurns` could place it. Empty otherwise. */
 	legs: TurnOverviewLegRow[];
 };
 
@@ -110,7 +110,7 @@ export function buildTurnChildRows(turn: TurnOverviewSourceTurn): TurnOverviewCh
 		});
 }
 
-/** Builds the leg rows for one HydraFusion turn, converting each leg's AIU cost to USD. */
+/** Builds the leg rows for one Copilot Fusion turn, converting each leg's AIU cost to USD. */
 export function buildTurnLegRows(hydraTurn: HydraFusionTurn): TurnOverviewLegRow[] {
 	return hydraTurn.phases.map(p => ({
 		kind: p.kind, model: p.model, verdict: p.verdict, isFinalSource: p.isFinalSource,
@@ -122,7 +122,7 @@ export function buildTurnLegRows(hydraTurn: HydraFusionTurn): TurnOverviewLegRow
 /**
  * Builds one overview row per turn, preferring actual API usage over the text-based estimate when available.
  *
- * @param hydraFusion The session's HydraFusion summary, when it used the router. Absent for the
+ * @param hydraFusion The session's Copilot Fusion summary, when it used the router. Absent for the
  *   overwhelming majority of sessions, in which case every row's `legs` is simply empty.
  * @param hydraTurnMatches Fusion turn index → matching `ChatTurn.turnNumber`, from
  *   `matchHydraFusionTurnsToChatTurns`. Callers compute this once and pass it to both this

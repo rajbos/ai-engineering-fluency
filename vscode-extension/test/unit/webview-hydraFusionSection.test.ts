@@ -107,7 +107,7 @@ describe('barWidthPercent', () => {
 });
 
 describe('renderHydraFusionSection', () => {
-	test('renders nothing for a session that never routed through HydraFusion', () => {
+	test('renders nothing for a session that never routed through Copilot Fusion', () => {
 		assert.equal(renderHydraFusionSection(undefined), '');
 	});
 
@@ -280,7 +280,7 @@ describe('renderLegsTable', () => {
 	});
 });
 
-describe('HydraFusion summary tables', () => {
+describe('Copilot Fusion summary tables', () => {
 	test('render through the shared data table with ids unique in the document', () => {
 		const html = renderCascade();
 		for (const id of ['hydra-models', 'hydra-phases', hydraTurnLegsTableId(0)]) {

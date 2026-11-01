@@ -485,7 +485,7 @@ export interface ThinkingEffortUsage {
 }
 
 export interface SessionUsageAnalysis {
-  /** Numeric HydraFusion routing rollup (Copilot CLI sessions that routed through it). Absent otherwise. */
+  /** Numeric Copilot Fusion routing rollup (Copilot CLI sessions that routed through it). Absent otherwise. */
   hydraFusion?: HydraFusionRollup;
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
@@ -1306,7 +1306,7 @@ export interface AutomaticCompactionStats {
 
 export interface UsageAnalysisPeriod {
   sessions: number;
-  /** Summed HydraFusion routing rollup across the period's sessions. Absent when none routed. */
+  /** Summed Copilot Fusion routing rollup across the period's sessions. Absent when none routed. */
   hydraFusion?: HydraFusionRollup;
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
@@ -1563,7 +1563,7 @@ export interface SessionLogData {
    */
   editorNote?: { items: string[] };
   /**
-   * Per-leg HydraFusion routing detail (Copilot CLI sessions that used the
+   * Per-leg Copilot Fusion routing detail (Copilot CLI sessions that used the
    * `hydrafusion` model). Absent for every other session, including CLI sessions
    * that never routed through it. See `analyzeHydraFusionSession` in `hydrafusion.ts`.
    */
