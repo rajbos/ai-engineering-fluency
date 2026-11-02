@@ -12,6 +12,28 @@ import { WHATS_NEW_RELEASES } from '../../src/whatsNew/catalog';
 
 const mock = (vscode as any).__mock;
 
+test('l10n: Copilot Fusion view labels resolve in English and zh-cn', () => {
+	const translations = [
+		['logviewer.hydrafusion.title', 'Copilot Fusion Routing', 'Copilot Fusion 路由'],
+		['logviewer.hydrafusion.intro',
+			'Copilot Fusion answers one prompt with several models — drafting, reviewing and escalating — then hands back a single answer and a single credit figure. The chat above shows that answer; this section shows the legs behind it, reconstructed from the routing decisions the CLI records for its own resume and rewind.',
+			'Copilot Fusion 使用多个模型回答一个提示词，完成起草、评审和升级处理，然后返回一个答案和一个积分数值。上方的聊天显示该答案；本节根据 CLI 为恢复和回退会话而记录的路由决策，还原答案背后的各个环节。'],
+		['usage.sessions.fusion.label', 'Copilot Fusion', 'Copilot Fusion'],
+		['usage.sessions.fusion.filterTooltip', 'Show only sessions that used Copilot Fusion', '仅显示使用了 Copilot Fusion 的会话'],
+		['usage.sessions.fusion.badgeTooltip', 'This session used Copilot Fusion', '此会话使用了 Copilot Fusion'],
+	];
+	try {
+		for (const [language, column] of [['en', 1], ['zh-cn', 2]] as const) {
+			mock.setLanguage(language);
+			for (const entry of translations) {
+				assert.equal(t(entry[0]), entry[column]);
+			}
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 // The shim's default l10n.t returns the raw key — exactly what real VS Code
 // does for key-based calls on the default (English) display language.
 

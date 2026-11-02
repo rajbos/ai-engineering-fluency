@@ -946,6 +946,20 @@ test('marks Copilot Fusion sessions in the recent sessions list', async () => {
 	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
 	// The table has no per-cell attributes, so the tooltip sits on the cell's content.
 	assert.equal(costCell?.querySelector('[title]')?.title, '$12.3450');
+
+	stats.localization = {
+		'usage.sessions.fusion.label': 'Fusion <标签>',
+		'usage.sessions.fusion.filterTooltip': '仅显示 "Fusion" 会话',
+		'usage.sessions.fusion.badgeTooltip': '此会话使用了 "Fusion"',
+	};
+	const localized = await bootWebview(stats);
+	const localizedBadge = localized.window.document.querySelector('.hydrafusion-session-badge');
+	const localizedPill = localized.window.document.querySelector('[data-filter-type="hydrafusion"]');
+	assert.equal(localizedBadge.textContent, 'Fusion <标签>');
+	assert.equal(localizedBadge.getAttribute('title'), '此会话使用了 "Fusion"');
+	assert.ok(localizedPill.textContent.includes('Fusion <标签>'));
+	assert.equal(localizedPill.getAttribute('title'), '仅显示 "Fusion" 会话');
+	assert.equal(localizedBadge.children.length, 0, 'localized text must not become markup');
 });
 
 test('Recent Sessions Duration column falls back to wall-clock time when activeDurationMs is zero', async () => {

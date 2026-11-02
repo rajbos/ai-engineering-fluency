@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 
 import { analyzeHydraFusionSession, matchHydraFusionTurnsToChatTurns } from '../../../src/hydrafusion';
 import { setFormatLocale } from '../../src/webview/shared/formatUtils';
+import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 import {
 	barWidthPercent,
 	formatFusionCost,
@@ -107,6 +108,21 @@ describe('barWidthPercent', () => {
 });
 
 describe('renderHydraFusionSection', () => {
+	test('localizes and escapes the routing heading and introduction', () => {
+		initializeWebviewLocalization({
+			'logviewer.hydrafusion.title': 'Fusion <路由>',
+			'logviewer.hydrafusion.intro': '介绍 <script>example</script>',
+		});
+		try {
+			const html = renderCascade();
+			assert.ok(html.includes('Fusion &lt;路由&gt;'));
+			assert.ok(html.includes('介绍 &lt;script&gt;example&lt;/script&gt;'));
+			assert.ok(!html.includes('Copilot Fusion answers one prompt'));
+		} finally {
+			initializeWebviewLocalization({});
+		}
+	});
+
 	test('renders nothing for a session that never routed through Copilot Fusion', () => {
 		assert.equal(renderHydraFusionSection(undefined), '');
 	});

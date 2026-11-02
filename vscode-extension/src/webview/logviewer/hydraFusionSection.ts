@@ -383,11 +383,11 @@ export function renderHydraFusionSection(summary: HydraFusionSummary | undefined
 	const modelCount = summary.models.length;
 	return `<div class="hydra-section" id="section-hydrafusion-routing">
 <div class="hydra-header">
-<span class="hydra-header-title">⚡ Copilot Fusion Routing</span>
+<span class="hydra-header-title">⚡ ${escapeHtml(localize('logviewer.hydrafusion.title'))}</span>
 <span class="hydra-header-sub">${summary.totalTurns} turn${summary.totalTurns === 1 ? '' : 's'} · ${summary.totalLegs} legs · ${modelCount} model${modelCount === 1 ? '' : 's'}</span>
 </div>
 <div class="hydra-intro">
-Copilot Fusion answers one prompt with several models — drafting, reviewing and escalating — then hands back a single answer and a single credit figure. The chat above shows that answer; this section shows the legs behind it, reconstructed from the routing decisions the CLI records for its own resume and rewind.
+${escapeHtml(localize('logviewer.hydrafusion.intro'))}
 </div>
 ${renderHeadlineCards(summary)}
 ${renderPatternPills(summary)}
