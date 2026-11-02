@@ -623,7 +623,7 @@
   "dependencies": {
     "@azure/arm-resources": "^8.0.0",
     "@azure/arm-resources-subscriptions": "^3.0.0",
-    "@azure/arm-storage": "^20.2.0",
+    "@azure/arm-storage": "^21.0.0",
     "@azure/arm-subscriptions": "^6.0.0",
     "@azure/core-auth": "^1.11.0",
     "@azure/data-tables": "^13.3.2",
