@@ -68,8 +68,8 @@ documents:
 - Why the logs are sufficient for token totals, session lists, and chat turn rendering
 
 ### hydrafusion-routing-events.md
-**Schema documentation** of the HydraFusion routing events the Copilot CLI writes into its
-own `~/.copilot/session-state/{id}/events.jsonl`. HydraFusion is a synthetic model that runs
+**Schema documentation** of the Copilot Fusion routing events the Copilot CLI writes into its
+own `~/.copilot/session-state/{id}/events.jsonl`. Copilot Fusion is a synthetic model that runs
 several real models per turn; the CLI shows you one answer and one credit number, and these
 events are the only record of what ran behind it. This file documents:
 - The four event types (`session.fusion_resolved`, `assistant.fusion_phase_completed`,
@@ -81,7 +81,7 @@ events are the only record of what ran behind it. This file documents:
 - Which fields are deliberately discarded (all model output: `content`, `projectionMessage`,
   handoff `message`)
 
-Parsed by [`src/hydrafusion.ts`](../../src/hydrafusion.ts); rendered as the "⚡ HydraFusion
+Parsed by [`src/hydrafusion.ts`](../../src/hydrafusion.ts); rendered as the "⚡ Copilot Fusion
 Routing" section of the Session Log Viewer.
 
 

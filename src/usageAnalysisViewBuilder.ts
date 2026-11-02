@@ -83,7 +83,7 @@ export interface UsageAnalysisViewData {
 	curationAnalysis: ToolCurationAnalysis | null;
 	memoryFilesAnalysis: MemoryFilesAnalysisView | null;
 	/**
-	 * HydraFusion router aggregate per period (Copilot CLI sessions only). Each value is
+	 * Copilot Fusion router aggregate per period (Copilot CLI sessions only). Each value is
 	 * `null` when no session in that period routed through it, so the Router card hides.
 	 */
 	hydraFusion: Record<'today' | 'last30Days' | 'month' | 'lastMonth', HydraFusionAggregate | null>;

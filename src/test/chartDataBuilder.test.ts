@@ -77,7 +77,7 @@ test('getModelBillingProvider: mai- maps to Microsoft', () => {
 	assert.equal(getModelBillingProvider('mai-ds-r1'), 'Microsoft');
 });
 
-test('getModelBillingProvider: HydraFusion belongs to GitHub Copilot, not to any model vendor', () => {
+test('getModelBillingProvider: Copilot Fusion belongs to GitHub Copilot, not to any model vendor', () => {
 	// The models behind hydrafusion vary per turn, so the only honest provider is
 	// the one running the router — and the Efficiency view's vendor filter must
 	// not file it under "Other".

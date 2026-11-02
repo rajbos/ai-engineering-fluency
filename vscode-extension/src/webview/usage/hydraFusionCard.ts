@@ -1,4 +1,4 @@
-// The Usage Analysis "Router" card: HydraFusion routing aggregated across the Copilot
+// The Usage Analysis "Router" card: Copilot Fusion routing aggregated across the Copilot
 // CLI sessions of a period. Numeric only — see `aggregateHydraFusionSummaries` in
 // `src/hydrafusion.ts`, which builds the data every host receives.
 import { escapeHtml, formatFixed, formatNumber } from '../shared/formatUtils';
@@ -72,7 +72,7 @@ function periodBlock(period: RouterPeriod, agg: HydraFusionAggregate): string {
 		</div>`;
 }
 
-/** The card, or an empty string when no period has a routed HydraFusion turn. */
+/** The card, or an empty string when no period has a routed Copilot Fusion turn. */
 export function buildRouterSectionHtml(router: RouterPayload | undefined): string {
 	const blocks = ROUTER_PERIODS.flatMap(period => {
 		const agg = router?.[period];

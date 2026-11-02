@@ -3016,7 +3016,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async openViewSurface(view: FeatureViewId, nav: ViewIndexNavigation): Promise<void> {
 		if (view === 'logviewer') {
 			// The log viewer only opens on a specific session file, so a catalog feature
-			// living there (e.g. HydraFusion routing) lands where sessions are opened from:
+			// living there (e.g. Copilot Fusion routing) lands where sessions are opened from:
 			// Recent Sessions, with a pointer to what to do next.
 			await this.showUsageAnalysisOnTab('sessions');
 			void vscode.window.showInformationMessage(l10n.t('whatsNew.logviewerHint'));

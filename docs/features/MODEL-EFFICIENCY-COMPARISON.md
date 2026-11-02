@@ -175,7 +175,7 @@ mixed-model and outlier filters). A side with any session lacking it renders "�
 the cost rows and a caveat says so, rather than mixing exact figures with estimates.
 The usual sample floors and the 10% noise band still apply.
 
-**HydraFusion needs this basis.** The router row (`hydrafusion`) has no list price —
+**Copilot Fusion needs this basis.** The router row (`hydrafusion`) has no list price —
 its cost is the sum of whatever legs ran — so it has no entry in `modelPricing.json`.
 For a routed session the whole session's exact cost lands on the router row (the real
 models behind it are re-keyed onto the router, see `attributeRoutedModelUsage`). To
@@ -189,13 +189,13 @@ The drift chart below the comparison keeps plotting provider-rate cost.
 ### Router card (Usage Analysis)
 
 `aggregateHydraFusionSummaries()` in `src/hydrafusion.ts` produces period totals for
-Copilot CLI sessions that routed through HydraFusion: turns, compound rate, judge
+Copilot CLI sessions that routed through Copilot Fusion: turns, compound rate, judge
 accept/reject and rejection rate, escalation rate, AIU per turn, review overhead
 share, total spend and the pattern mix. Numbers only. Each session's rollup
 (`SessionUsageAnalysis.hydraFusion`) is summed into `UsageAnalysisPeriod.hydraFusion`
 and `buildUsageAnalysisViewData()` ships the derived aggregate as `hydraFusion`
 (one entry per period, `null` when nothing routed) to every host, including the
-CLI's `usage-analysis --json`. The Usage Analysis view renders it as a "HydraFusion
+CLI's `usage-analysis --json`. The Usage Analysis view renders it as a "Copilot Fusion
 Router" card under Multi-Model Usage.
 
 ## Guardrails against false conclusions

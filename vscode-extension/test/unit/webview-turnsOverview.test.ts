@@ -23,7 +23,7 @@ function turn(overrides: Partial<TurnOverviewSourceTurn> = {}): TurnOverviewSour
 	};
 }
 
-/** A minimal one-leg HydraFusion turn for testing the legs correlation, independent of the parser. */
+/** A minimal one-leg Copilot Fusion turn for testing the legs correlation, independent of the parser. */
 function hydraTurn(overrides: Partial<HydraFusionTurn> = {}): HydraFusionTurn {
 	return {
 		fusionId: 'f', pattern: 'single', outcome: 'completed', degradedReason: null, policy: null,
@@ -174,7 +174,7 @@ describe('buildTurnOverviewRows', () => {
 		assert.deepEqual(rows[0].children[1], { toolName: 'task', model: 'gpt-4o', input: 100, output: 40, total: 140, cost: null });
 	});
 
-	test('every row has an empty legs array for a plain session that never used HydraFusion', () => {
+	test('every row has an empty legs array for a plain session that never used Copilot Fusion', () => {
 		const rows = buildTurnOverviewRows([turn({ turnNumber: 1 }), turn({ turnNumber: 2 })]);
 		assert.deepEqual(rows[0].legs, []);
 		assert.deepEqual(rows[1].legs, []);
@@ -193,7 +193,7 @@ describe('buildTurnOverviewRows', () => {
 		assert.equal(rows[1].legs[0].model, 'gpt-4o');
 	});
 
-	test('leaves every row without legs when hydraTurnMatches is omitted, even with a HydraFusion summary present', () => {
+	test('leaves every row without legs when hydraTurnMatches is omitted, even with a Copilot Fusion summary present', () => {
 		const summary = hydraSummary([hydraTurn()]);
 		const rows = buildTurnOverviewRows([turn({ turnNumber: 1 })], summary);
 		assert.deepEqual(rows[0].legs, []);

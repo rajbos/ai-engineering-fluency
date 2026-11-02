@@ -1,4 +1,4 @@
-// Renders the log viewer's "HydraFusion Routing" section: the per-leg story behind a
+// Renders the log viewer's "Copilot Fusion Routing" section: the per-leg story behind a
 // turn that the CLI deliberately collapses into one answer and one credit figure.
 //
 // Pure string builders with no CSS/DOM imports (same contract as turnsOverview.ts) so
@@ -150,7 +150,7 @@ ${escapeHtml(p.pattern)} <strong>${p.turns}</strong> <span class="hydra-pattern-
 	return `<div class="hydra-pattern-row"><span class="hydra-pattern-row-label">Patterns chosen</span>${pills}</div>`;
 }
 
-/** Table classes shared by every HydraFusion table: one line per row, like the rest of the section. */
+/** Table classes shared by every Copilot Fusion table: one line per row, like the rest of the section. */
 const HYDRA_TABLE_CLASS = 'data-table--compact data-table--nowrap';
 
 /** A visually hidden header for the bar column, so the bar still has an accessible column name. */
@@ -302,7 +302,7 @@ function legColumns(maxDurationMs: number): DataTableColumn<HydraFusionPhase>[] 
 	];
 }
 
-/** The `tableId` of the leg table inside the HydraFusion section's `index`-th turn row. */
+/** The `tableId` of the leg table inside the Copilot Fusion section's `index`-th turn row. */
 export function hydraTurnLegsTableId(index: number): string {
 	return `hydra-turn-legs-${index}`;
 }
@@ -321,7 +321,7 @@ export function renderLegsTable(phases: HydraFusionPhase[], tableId: string): st
 	// A turn only has the few legs its plan allows, and the waterfall reads best whole.
 	return renderDataTable({
 		tableId,
-		ariaLabel: 'HydraFusion legs',
+		ariaLabel: 'Copilot Fusion legs',
 		rows: phases,
 		columns: legColumns(maxDurationMs),
 		pageSize: false,
@@ -369,8 +369,8 @@ ${renderLegsTable(turn.phases, hydraTurnLegsTableId(index))}
 }
 
 /**
- * Renders the whole HydraFusion section, or an empty string when the session never
- * routed through it — which is the case for every session except HydraFusion CLI ones.
+ * Renders the whole Copilot Fusion section, or an empty string when the session never
+ * routed through it — which is the case for every session except Copilot Fusion CLI ones.
  *
  * @param chatTurnMatches Fusion turn index → matching `ChatTurn.turnNumber`, from
  *   `matchHydraFusionTurnsToChatTurns`. Optional so direct callers (and existing
@@ -383,11 +383,11 @@ export function renderHydraFusionSection(summary: HydraFusionSummary | undefined
 	const modelCount = summary.models.length;
 	return `<div class="hydra-section" id="section-hydrafusion-routing">
 <div class="hydra-header">
-<span class="hydra-header-title">⚡ HydraFusion Routing</span>
+<span class="hydra-header-title">⚡ ${escapeHtml(localize('logviewer.hydrafusion.title'))}</span>
 <span class="hydra-header-sub">${summary.totalTurns} turn${summary.totalTurns === 1 ? '' : 's'} · ${summary.totalLegs} legs · ${modelCount} model${modelCount === 1 ? '' : 's'}</span>
 </div>
 <div class="hydra-intro">
-HydraFusion answers one prompt with several models — drafting, reviewing and escalating — then hands back a single answer and a single credit figure. The chat above shows that answer; this section shows the legs behind it, reconstructed from the routing decisions the CLI records for its own resume and rewind.
+${escapeHtml(localize('logviewer.hydrafusion.intro'))}
 </div>
 ${renderHeadlineCards(summary)}
 ${renderPatternPills(summary)}

@@ -21,7 +21,7 @@ for (const [modelId, pricing] of Object.entries((_pricingData?.pricing ?? {}) as
  * (each turn is billed at the rate of whichever real model served it).
  */
 const ROUTER_DISPLAY_NAMES: Record<string, string> = Object.assign(Object.create(null), {
-    hydrafusion: 'HydraFusion',
+    hydrafusion: 'Copilot Fusion',
     auto: 'Auto',
 });
 

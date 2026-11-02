@@ -43,7 +43,7 @@ describe('buildRouterSectionHtml', () => {
 		assert.match(html, /id="section-router"/);
 		assert.match(html, /data-router-period="last30Days"/);
 		assert.doesNotMatch(html, /data-router-period="today"/);
-		assert.match(html, /HydraFusion Router/);
+		assert.match(html, /Copilot Fusion Router/);
 		assert.match(html, /50\.0%/);
 		assert.match(html, /cascade 3 · single 1/);
 		assert.match(html, /10\.00/);

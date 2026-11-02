@@ -35,7 +35,7 @@ test('getModelDisplayName: returns display name for known models', () => {
 });
 
 test('getModelDisplayName: Copilot routers have a display name without a pricing entry', () => {
-	assert.equal(getModelDisplayName('hydrafusion'), 'HydraFusion');
+	assert.equal(getModelDisplayName('hydrafusion'), 'Copilot Fusion');
 	assert.equal(getModelDisplayName('auto'), 'Auto');
 });
 
