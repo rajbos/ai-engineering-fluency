@@ -25,7 +25,7 @@ importers:
         version: 0.28.2
       sql.js:
         specifier: ^1.12.0
-        version: 1.15.1
+        version: 1.15.2
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -328,8 +328,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  sql.js@1.15.1:
-    resolution: {integrity: sha512-i0M/6s+lcl67Flm/1m8/AeVU5caDramlILXU/udUwpTQym2qKMSe2sJiXB5d5WXFB272aj4B2v1JbtQ93ID3Pg==}
+  sql.js@1.15.2:
+    resolution: {integrity: sha512-ZmMYFsZPZWDKIJUh3A5rdnpRV3hB/r7AijwAzSzLnfv/9CSx4obUmDtA8brAjWJWjGtUVh43nIEJ+6nl6HuOUg==}
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -518,7 +518,7 @@ snapshots:
       '@esbuild/win32-ia32': 0.28.2
       '@esbuild/win32-x64': 0.28.2
 
-  sql.js@1.15.1: {}
+  sql.js@1.15.2: {}
 
   typescript@7.0.2:
     optionalDependencies:
