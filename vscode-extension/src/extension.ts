@@ -13548,6 +13548,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (this.handleLocalViewRegressionMessage(message)) { return; }
     if (await this.dispatchSharedCommand(message)) { return; }
     const simpleCommands: Record<string, () => Promise<void>> = {
+      refresh: () => this.dispatch('refresh:diagnostics', () => this.refreshDiagnosticsPanel()),
       copyReport: () => this.dispatch('copyReport:diagnostics', () => this.diagHandleCopyReport()),
       openIssue: () => this.dispatch('openIssue:diagnostics', () => this.diagHandleOpenIssue()),
       clearCache: () => this.dispatch('clearCache:diagnostics', () => this.diagHandleClearCache()),
@@ -13568,6 +13569,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
+  }
+
+  private async refreshDiagnosticsPanel(): Promise<void> {
+    const panel = this.diagnosticsPanel;
+    if (!panel) { return; }
+    this.log("🔄 Refreshing Diagnostic Report");
+    await this.updateTokenStats();
+    await this.loadDiagnosticDataInBackground(panel);
   }
 
   private async handleDiagnosticConditionalCommand(message: any): Promise<void> {

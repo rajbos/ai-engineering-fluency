@@ -15,7 +15,9 @@
  * directions of the contract:
  *
  *   A. webview -> extension  — every `command` a bundle under src/webview/**
- *      can post is matched by a branch on the extension side.
+ *      can post is matched by a branch on the extension side. For the panels in
+ *      PANEL_MESSAGE_HOSTS this also holds per panel: a branch in another panel's
+ *      handler does nothing for a click in this one.
  *   B. extension -> webview  — every `command`/`type` the extension posts into
  *      a panel is matched by a branch on the webview side.
  *
@@ -52,6 +54,28 @@ const ALLOWED_UNHANDLED = {
     // e.g. 'someCommand': 'why it is fine that nothing handles this',
   },
 };
+
+/**
+ * Webview folder -> the extension.ts panel property whose `onDidReceiveMessage`
+ * receives that folder's messages. Without this a generic command such as
+ * 'refresh' passes as long as *any* panel handles it.
+ */
+const PANEL_MESSAGE_HOSTS = {
+  chart: 'chartPanel',
+  dashboard: 'dashboardPanel',
+  details: 'detailsPanel',
+  diagnostics: 'diagnosticsPanel',
+  efficiency: 'efficiencyPanel',
+  environmental: 'environmentalPanel',
+  'fluency-level-viewer': 'fluencyLevelViewerPanel',
+  logviewer: 'logViewerPanel',
+  maturity: 'maturityPanel',
+  usage: 'analysisPanel',
+  whatsnew: 'whatsNewPanel',
+};
+
+/** dispatchSharedCommand forwards these to the VS Code command of the same name. */
+const FORWARDED_COMMAND_PREFIX = 'aiEngineeringFluency.';
 
 function loadTypeScript() {
   for (const base of [process.cwd(), EXT_DIR, REPO_ROOT]) {
@@ -260,6 +284,144 @@ function collectHandledCommandsFromAst(files) {
   return handled;
 }
 
+/** Names one AST subtree can handle, using the same dispatch shapes as a whole-file scan. */
+function collectHandledCommandsInNode(root, sourceFile, handled) {
+  const collectKeys = (objectLiteral) => {
+    for (const prop of objectLiteral.properties) {
+      if (prop.name) {
+        handled.add(ts.isStringLiteralLike(prop.name) ? prop.name.text : prop.name.getText(sourceFile).replace(/['"]/g, ''));
+      }
+    }
+  };
+  const visit = (node) => {
+    if (ts.isSwitchStatement(node) && /\.(command|type)$/.test(node.expression.getText(sourceFile))) {
+      for (const clause of node.caseBlock.clauses) {
+        if (ts.isCaseClause(clause) && ts.isStringLiteralLike(clause.expression)) {
+          handled.add(clause.expression.text);
+        }
+      }
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken) &&
+      /\.(command|type)$/.test(node.left.getText(sourceFile)) &&
+      ts.isStringLiteralLike(node.right)
+    ) {
+      handled.add(node.right.text);
+    }
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.type &&
+      /Record<\s*string/.test(node.type.getText(sourceFile)) &&
+      node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      collectKeys(node.initializer);
+    }
+    if (returnsHandlerMap(root, sourceFile) && ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
+      collectKeys(node.expression);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+}
+
+/** True for a method such as `_getHandlers(): Record<string, Handler>`, whose keys are the commands. */
+function returnsHandlerMap(node, sourceFile) {
+  return ts.isMethodDeclaration(node) && Boolean(node.type) && /Record<\s*string/.test(node.type.getText(sourceFile));
+}
+
+/**
+ * For one extension source file, returns panel property -> every message name that
+ * panel's `onDidReceiveMessage` callback can reach, following `this.method(message)`
+ * calls so split-up handlers and dispatchSharedCommand count for the panels using them.
+ *
+ * @returns {Map<string, Set<string>>}
+ */
+function collectPanelHandledCommands(file) {
+  const sourceFile = parseFile(file);
+  const methods = new Map();
+  const listeners = new Map();
+
+  const index = (node) => {
+    if (ts.isMethodDeclaration(node) && node.name && node.body) {
+      methods.set(node.name.getText(sourceFile), node);
+    }
+    if (ts.isCallExpression(node)) {
+      const match = /^this\.(\w+)\.webview\.onDidReceiveMessage$/.exec(node.expression.getText(sourceFile));
+      if (match && node.arguments[0]) {
+        listeners.set(match[1], node.arguments[0]);
+      }
+    }
+    ts.forEachChild(node, index);
+  };
+  index(sourceFile);
+
+  const result = new Map();
+  for (const [panel, listener] of listeners) {
+    const handled = new Set();
+    const seen = new Set();
+    const walk = (root) => {
+      collectHandledCommandsInNode(root, sourceFile, handled);
+      const followCalls = (node) => {
+        if (ts.isCallExpression(node)) {
+          const callee = /^this\.(\w+)$/.exec(node.expression.getText(sourceFile));
+          const passesMessage = node.arguments.some((arg) => arg.getText(sourceFile) === 'message');
+          const target = callee && methods.get(callee[1]);
+          if (target && (passesMessage || returnsHandlerMap(target, sourceFile)) && !seen.has(callee[1])) {
+            seen.add(callee[1]);
+            walk(methods.get(callee[1]));
+          }
+        }
+        ts.forEachChild(node, followCalls);
+      };
+      followCalls(root);
+    };
+    walk(listener);
+    result.set(panel, handled);
+  }
+  return result;
+}
+
+/**
+ * Commands a registered panel's webview posts that its own host listener cannot reach.
+ *
+ * @param {Record<string, string>} panelHosts webview folder -> panel property
+ * @param {string} webviewDir root holding one folder per webview
+ * @param {string} hostFile file holding the panel listeners
+ */
+function findPanelScopedGaps(panelHosts, webviewDir, hostFile, allowList = {}) {
+  const panelHandled = collectPanelHandledCommands(hostFile);
+  const findings = [];
+  for (const [folder, panel] of Object.entries(panelHosts)) {
+    const handled = panelHandled.get(panel);
+    if (!handled) {
+      findings.push({
+        command: `(${folder})`,
+        locations: [{ file: path.relative(REPO_ROOT, hostFile), line: 1 }],
+        detail: `no this.${panel}.webview.onDidReceiveMessage listener found; update PANEL_MESSAGE_HOSTS`,
+      });
+      continue;
+    }
+    const posted = collectPostedCommands(collectTsFiles(path.join(webviewDir, folder)));
+    for (const [command, locations] of posted) {
+      if (
+        !handled.has(command) &&
+        !command.startsWith(FORWARDED_COMMAND_PREFIX) &&
+        !Object.prototype.hasOwnProperty.call(allowList, command)
+      ) {
+        findings.push({
+          command,
+          locations,
+          detail: `posted by the ${folder} webview, but this.${panel}'s message handler has no branch for it — the click does nothing`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 /**
  * Widens the handled set with a plain-text scan.
  *
@@ -335,6 +497,15 @@ function main() {
       ALLOWED_UNHANDLED.webviewToExtension,
       () => 'posted by a webview, but no branch on the extension side handles it — the click does nothing'
     );
+    const reported = new Set(findings.webviewToExtension.map((finding) => finding.command));
+    findings.webviewToExtension.push(
+      ...findPanelScopedGaps(
+        PANEL_MESSAGE_HOSTS,
+        WEBVIEW_DIR,
+        path.join(EXT_DIR, 'src', 'extension.ts'),
+        ALLOWED_UNHANDLED.webviewToExtension
+      ).filter((finding) => !reported.has(finding.command))
+    );
   }
 
   if (direction === 'both' || direction === 'b') {
@@ -399,6 +570,9 @@ module.exports = {
   collectPostedCommands,
   collectHandledCommandsFromAst,
   widenHandledFromText,
+  collectPanelHandledCommands,
+  findPanelScopedGaps,
+  PANEL_MESSAGE_HOSTS,
   collectTsFiles,
   unwrapExpression,
   ts,
