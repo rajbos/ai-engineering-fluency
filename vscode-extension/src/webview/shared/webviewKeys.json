@@ -346,6 +346,7 @@
   "efficiency.models.headToHead.title",
   "efficiency.models.headToHead.note",
   "efficiency.models.drift.title",
+  "efficiency.models.drift.note",
   "efficiency.models.controls.mode",
   "efficiency.models.controls.modelA",
   "efficiency.models.controls.modelB",

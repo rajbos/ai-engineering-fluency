@@ -1428,7 +1428,7 @@ function renderModelsTab(d: EfficiencyViewData, s: ScopedData): string {
 		${comparison}
 		<h3>${escapeHtml(localize('efficiency.models.drift.title'))}</h3>
 		${renderDriftScopeBar(d, s)}
-		<p class="eff-section-note">${escapeHtml(resolutionLabel(s.resolution))} values for each side's model over ${escapeHtml(s.range.label.toLowerCase())}, so a model getting better — or quietly getting worse — is visible. Gaps are buckets where the model was not used. This range only drives this chart and its selected period; the head-to-head comparison above keeps its own window pickers.</p>
+		<p class="eff-section-note">${escapeHtml(localizeFormat('efficiency.models.drift.note', resolutionLabel(s.resolution), s.range.label.toLowerCase()))}</p>
 		<div class="model-trend-controls"><label>Metric ${selectHtml('model-trend-metric', metricOptions, modelState.trendMetric)}</label></div>
 		${renderBucketSection(d, s, 'models')}
 		<div class="model-trend-wrap"><canvas id="model-trend"></canvas></div>`;

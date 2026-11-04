@@ -1936,6 +1936,7 @@ test('l10n: efficiency Models section labels resolve in English and zh-CN', () =
 		'efficiency.models.headToHead.title': 'Head-to-head comparison',
 		'efficiency.models.headToHead.note': 'Compared over the periods you pick in this section. The time range under Drift over time does not change it.',
 		'efficiency.models.drift.title': 'Drift over time',
+		'efficiency.models.drift.note': "{0} values for each side's model over {1}, so a model getting better — or quietly getting worse — is visible. Gaps are buckets where the model was not used. This range only drives this chart and its selected period; the head-to-head comparison above keeps its own window pickers.",
 	};
 	for (const [key, english] of Object.entries(en)) {
 		assert.equal(t(key), english, `en value for ${key}`);
@@ -1947,6 +1948,7 @@ test('l10n: efficiency Models section labels resolve in English and zh-CN', () =
 			'efficiency.models.headToHead.title': '正面对比',
 			'efficiency.models.headToHead.note': '按你在本节选择的时段进行对比。“随时间的漂移”下的时间范围不会改变它。',
 			'efficiency.models.drift.title': '随时间的漂移',
+			'efficiency.models.drift.note': '{1}内双方模型的{0}数值，便于看出模型是在变好，还是在悄悄变差。空缺表示该模型在对应时间段内未被使用。此范围只影响这张图表及其所选周期；上方的正面对比保留各自的时间窗口选择器。',
 		};
 		for (const [key, chinese] of Object.entries(zh)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
