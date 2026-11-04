@@ -3508,29 +3508,26 @@ function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter:
 	</div>`;
 }
 
-function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
+/** The Corrections tab's contents, without the panel element: a filter click re-renders just this into the live panel. */
+function buildCorrectionsTabContentHtml(report: CorrectionReport | null | undefined): string {
 	if (typeof report === 'undefined') {
 		return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
-				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
-					⏳ Scanning recent sessions for correction moments…
-				</div>
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+			<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				⏳ Scanning recent sessions for correction moments…
 			</div>
 		</div>`;
 	}
 
 	if (!report || report.repos.length === 0) {
 		return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
-				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
-					✨ No correction moments detected in your recent sessions — nice and smooth!
-				</div>
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+			<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				✨ No correction moments detected in your recent sessions — nice and smooth!
 			</div>
 		</div>`;
 	}
@@ -3547,22 +3544,24 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		: '';
 
 	return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">
-					Moments where the agent corrected itself after an error, or you had to correct the agent —
-					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
-					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
-					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
-				</div>
-				<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
-				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
-				${statusBar}
-				${repoSections}
-				${emptyFilteredState}
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">
+				Moments where the agent corrected itself after an error, or you had to correct the agent —
+				heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
+				sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
+				Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 			</div>
+			<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
+			<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
+			${statusBar}
+			${repoSections}
+			${emptyFilteredState}
 		</div>`;
+}
+
+function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
+	return `<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>${buildCorrectionsTabContentHtml(report)}</div>`;
 }
 
 /** Finds the repo group backing a correction "Ask Copilot"/"Copy prompt" button, and builds its prompt. */
@@ -3598,7 +3597,8 @@ function handleCorrectionPromptButtonClick(target: HTMLElement): boolean {
 
 function wireCorrectionInteractions(): void {
 	const panel = document.getElementById('tab-panel-corrections');
-	if (!panel) { return; }
+	if (!panel || panel.dataset.correctionInteractionsWired === 'true') { return; }
+	panel.dataset.correctionInteractionsWired = 'true';
 	panel.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
 		if (target.closest('button.correction-clear-filter')) {
@@ -3628,8 +3628,8 @@ function wireCorrectionInteractions(): void {
 function renderCorrectionsPanel(): void {
 	const panel = document.getElementById('tab-panel-corrections');
 	if (!panel) { return; }
-	setHtml(panel, buildCorrectionsTabPanelHtml(currentCorrectionReport));
-	wireCorrectionInteractions();
+	// The delegated click listener lives on the panel itself, which this keeps in place.
+	setHtml(panel, buildCorrectionsTabContentHtml(currentCorrectionReport));
 }
 
 
