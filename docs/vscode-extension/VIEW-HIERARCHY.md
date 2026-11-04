@@ -70,6 +70,7 @@ not user settings.
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
+| | **Billing** | AI Billing Coverage (API balance · account budgets · coverage analysis · link to Details › Cost by Provider) |
 | 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
 | | **Corrections** | Corrections report · Skill Suggestions (repeated-task clusters) |
 
@@ -79,7 +80,7 @@ The **My Activity** tab is itself banded, via section-group headings
 | Band | Sections |
 |---|---|
 | 📊 Overview | Sessions Summary · Interaction Modes |
-| 💵 Spend & models | AI Billing Coverage · Model Cost Usage · Multi-Model Usage · Local Model Leaderboard · Thinking Effort (Reasoning) |
+| 💵 Spend & models | Model Cost Usage · Multi-Model Usage · Local Model Leaderboard · Thinking Effort (Reasoning) |
 | 🧠 Context | Context References · Context Window & Long-Context Pricing (incl. context compaction) |
 
 All tab switching goes through one `activateUsageTab()`, whether the user clicked a tab, the
