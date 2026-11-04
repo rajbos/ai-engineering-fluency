@@ -2685,7 +2685,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see AI PR activity across your repositories.
+				${escapeHtml(localize('usage.repos.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -2817,7 +2817,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see Copilot cloud agent session data.
+				${escapeHtml(localize('usage.agent.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -3788,9 +3788,7 @@ function buildUsageRootHtml(
 					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
 				</div>
 				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
-					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
-					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
-					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
+					${escapeHtml(localize('usage.about.body'))}
 				</div>
 			</div>
 

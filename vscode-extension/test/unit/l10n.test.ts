@@ -567,7 +567,7 @@ test('l10n: usage tab-group, band and context-reference keys resolve in English'
 		'usage.tab.billing': 'Billing',
 		'usage.billing.title': 'AI Billing Coverage',
 		'usage.billing.signInRequired': 'GitHub authentication required',
-		'usage.billing.signInHint': 'Sign in with GitHub (via the Diagnostics tab) to see your Copilot AI credit balance and budgets.',
+		'usage.billing.signInHint': 'Sign in with GitHub (Diagnostics › Settings › GitHub Auth) to see your Copilot AI credit balance and budgets.',
 		'usage.tab.worktrees': 'Worktrees',
 		'usage.tab.insights': 'Insights',
 		'usage.tab.corrections': 'Corrections',
@@ -621,7 +621,7 @@ test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', 
 			'usage.tab.billing': '计费',
 			'usage.billing.title': 'AI 计费覆盖',
 			'usage.billing.signInRequired': '需要 GitHub 身份验证',
-			'usage.billing.signInHint': '通过 GitHub 登录（在“诊断”选项卡中）以查看 Copilot AI 额度余额和预算。',
+			'usage.billing.signInHint': '通过 GitHub 登录（Diagnostics › Settings › GitHub Auth）以查看 Copilot AI 额度余额和预算。',
 			'usage.tab.worktrees': '工作树',
 			'usage.tab.insights': '洞察',
 			'usage.tab.corrections': '纠正',
@@ -2360,6 +2360,45 @@ test('l10n: Session Cache rename resolves in English and zh-cn', () => {
 		assert.equal(t('command.clearCache.title'), '清除会话缓存');
 		assert.equal(t('diagnostics.cache.clearButton'), '清除会话缓存');
 		assert.equal(t('diagnostics.cache.clearedButton'), '会话缓存已清除');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: GitHub sign-in, About and Team Server text resolves in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const signInPath = 'Sign in with GitHub (Diagnostics › Settings › GitHub Auth)';
+	assert.equal(t('usage.repos.signInHint'), `${signInPath} to see AI PR activity across your repositories.`);
+	assert.equal(t('usage.agent.signInHint'), `${signInPath} to see Copilot cloud agent session data.`);
+	assert.match(t('usage.about.body'), /GitHub Copilot and Claude Code/);
+	assert.equal(t('diagnostics.teamServer.getStartedTitle'), 'Get Started with Team Server');
+	assert.equal(t('diagnostics.teamServer.getStartedBody'), 'Deploy the sharing server and configure its URL in the Team Server panel.');
+	assert.equal(t('diagnostics.teamServer.getStartedDeployStep'), 'Deploy the sharing server (see the sharing-server/ folder in the repository)');
+	assert.equal(t('diagnostics.teamServer.getStartedSyncStep'), 'Data syncs automatically every 5 minutes once configured');
+	assert.equal(t('diagnostics.teamServer.getStartedUrlStep'), "Enter the server's base URL in the Team Server panel");
+	assert.equal(t('diagnostics.teamServer.configureButton'), 'Configure Team Server');
+	assert.equal(t('diagnostics.teamServer.manageButton'), 'Manage Team Server');
+	assert.equal(t('diagnostics.githubAuth.intro'), 'Sign in with GitHub to connect the features below to your account.');
+	assert.equal(t('diagnostics.githubAuth.signedInLead'), 'You are signed in with GitHub, which enables:');
+	assert.match(t('diagnostics.githubAuth.signedOutLead'), /built-in authentication/);
+	assert.match(t('diagnostics.githubAuth.featureRepoPrs'), /Repository PRs/);
+	assert.match(t('diagnostics.githubAuth.featureCloudAgent'), /Cloud Agent/);
+	assert.match(t('diagnostics.githubAuth.featureBilling'), /Billing/);
+	assert.equal(t('diagnostics.githubAuth.featureTeamServer'), 'Syncing your usage to a team server');
+
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.repos.signInHint'), '通过 GitHub 登录（Diagnostics › Settings › GitHub Auth）以查看各仓库中的 AI PR 活动。');
+		assert.equal(t('usage.agent.signInHint'), '通过 GitHub 登录（Diagnostics › Settings › GitHub Auth）以查看 Copilot 云代理会话数据。');
+		assert.match(t('usage.about.body'), /本地会话日志/);
+		assert.equal(t('diagnostics.teamServer.getStartedTitle'), '开始使用团队服务器');
+		assert.equal(t('diagnostics.teamServer.getStartedBody'), '部署共享服务器，并在团队服务器面板中配置其 URL。');
+		assert.equal(t('diagnostics.teamServer.getStartedDeployStep'), '部署共享服务器（请参阅仓库中的 sharing-server/ 文件夹）');
+		assert.equal(t('diagnostics.teamServer.getStartedSyncStep'), '配置后，数据每 5 分钟自动同步一次');
+		assert.equal(t('diagnostics.teamServer.configureButton'), '配置团队服务器');
+		assert.equal(t('diagnostics.teamServer.manageButton'), '管理团队服务器');
+		assert.equal(t('diagnostics.githubAuth.intro'), '使用 GitHub 登录，将以下功能连接到你的账户。');
+		assert.equal(t('diagnostics.githubAuth.featureTeamServer'), '将你的使用情况同步到团队服务器');
 	} finally {
 		mock.setLanguage('en');
 	}
