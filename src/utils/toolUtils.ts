@@ -324,3 +324,39 @@ export function lookupKnownToolName(id: string, toolNameMap: Record<string, stri
 	if (toolNameMap[lower]) { return toolNameMap[lower]; }
 	return getCanonicalIndex(toolNameMap).get(canonicalizeToolId(id));
 }
+
+/** The tool and MCP server counts of one usage period that friendly names are checked against. */
+export interface ToolNamePeriod {
+	mcpTools: { byTool: Record<string, number>; byServer: Record<string, number> };
+	toolCalls: { byTool: Record<string, number> };
+}
+
+/**
+ * The tool ids and MCP server names, across every usage period, that have no friendly name and
+ * are not suppressed. The single definition behind both the host's "found N tools" notification
+ * and the Usage Analysis banner it opens, so the count and the list always agree.
+ *
+ * Server names are included because the "By Server" tables render them through the same
+ * friendly-name lookup. Ids resolved via `isMcpFamilyResolvedTool` are a recognized MCP tool under
+ * a new server-registration spelling (issue #1760), so they are not reported as missing.
+ */
+export function getUnknownToolNames(
+	stats: { today: ToolNamePeriod; last30Days: ToolNamePeriod; month: ToolNamePeriod; lastMonth: ToolNamePeriod },
+	toolNameMap: Record<string, string>,
+	suppressedTools: readonly string[],
+): string[] {
+	const allTools = new Set<string>();
+	for (const period of [stats.today, stats.last30Days, stats.month, stats.lastMonth]) {
+		Object.keys(period.mcpTools.byTool).forEach(tool => allTools.add(tool));
+		Object.keys(period.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(period.toolCalls.byTool).forEach(tool => allTools.add(tool));
+	}
+	const suppressed = new Set(suppressedTools);
+	return Array.from(allTools).filter(tool =>
+		!lookupKnownToolName(tool, toolNameMap)
+		&& !isKnownToolDisplayName(tool, toolNameMap)
+		&& !isGuidMcpTool(tool)
+		&& !isMcpFamilyResolvedTool(tool)
+		&& !suppressed.has(tool)
+	).sort();
+}

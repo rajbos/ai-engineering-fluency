@@ -651,7 +651,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName, isKnownToolDisplayName } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName, getUnknownToolNames } from '../../../../src/utils/toolUtils';
 import { preferredScrollBehavior } from '../shared/surfaceNavigation';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
@@ -677,33 +677,7 @@ function lookupMcpToolName(id: string): string {
 }
 
 function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
-	const allTools = new Set<string>();
-	
-	// Collect all MCP tools from all periods
-	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.lastMonth.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	// Also collect MCP server names — the "By Server" tables render them through the
-	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
-	// would otherwise show raw without ever being flagged as missing.
-	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.lastMonth.mcpTools.byServer).forEach(server => allTools.add(server));
-	// Also collect all general tool calls so non-MCP tools without friendly names are caught
-	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.lastMonth.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-
-	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
-	
-	// Filter to only unknown tools (not a key in the map, case-insensitively or canonically, and not
-	// resolvable via a known GUID/family pattern) and not suppressed. Tools resolved via
-	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
-	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
-	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+	return getUnknownToolNames(stats, TOOL_NAME_MAP ?? {}, stats.suppressedUnknownTools ?? []);
 }
 
 function createMcpToolIssueUrl(unknownTools: string[], toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
