@@ -1899,7 +1899,8 @@ function handleDebugFlagSetClick(target: HTMLElement): void {
 }
 
 function handleGlobalClickEvent(event: MouseEvent): void {
-  const target = event.target as HTMLElement;
+  // Resolve to the button: these have <span> children, and a click usually lands on one of them.
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>("button");
   if (!target) { return; }
   if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
     handleClearCacheClick(target);
@@ -1978,34 +1979,6 @@ function setupButtonHandlers(): void {
   document.getElementById("btn-issue")?.addEventListener("click", () => {
     vscode.postMessage({ command: "openIssue" });
   });
-
-  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
-    const btn = document.getElementById(
-      "btn-clear-cache",
-    ) as HTMLButtonElement | null;
-    if (btn) {
-      btn.style.background = "#d97706";
-      setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
-      btn.disabled = true;
-    }
-    updateCacheNumbers();
-    vscode.postMessage({ command: "clearCache" });
-  });
-
-  document
-    .getElementById("btn-clear-cache-tab")
-    ?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btn) {
-        btn.style.background = "#d97706";
-        setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
-        btn.disabled = true;
-      }
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
 
   document.addEventListener("click", handleGlobalClickEvent);
 

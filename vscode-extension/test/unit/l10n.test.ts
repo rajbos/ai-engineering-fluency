@@ -2299,6 +2299,40 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 	}
 });
 
+test('l10n: Usage Analysis month labels name the period their data covers', () => {
+	mock.setLanguage('en');
+	assert.equal(t('usage.toolPeriod.colPreviousMonth'), 'Previous Month');
+	assert.equal(t('usage.router.period.month'), 'This month');
+	assert.equal(t('usage.router.period.lastMonth'), 'Last month');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolPeriod.colPreviousMonth'), '上月');
+		assert.equal(t('usage.router.period.month'), '本月');
+		assert.equal(t('usage.router.period.lastMonth'), '上个月');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: the skill suggestions path in the insight names the real tab and section', () => {
+	const sectionTitle = (): string => t('usage.skillSuggestions.title', '').replace(/\s*[(（].*$/, '');
+	const assertPath = (): void => {
+		const expected = `${t('usage.tab.tools')} → ${sectionTitle()}`;
+		assert.ok(t('insight.repeatedTaskSkillCandidate.seeDetails').includes(expected), `seeDetails names ${expected}`);
+		assert.ok(t('insight.repeatedTaskSkillCandidate.more.one', 1).includes(expected), `more.one names ${expected}`);
+		assert.ok(t('insight.repeatedTaskSkillCandidate.more.other', 2).includes(expected), `more.other names ${expected}`);
+	};
+	mock.setLanguage('en');
+	assert.equal(sectionTitle(), 'Skill Suggestions');
+	assertPath();
+	mock.setLanguage('zh-cn');
+	try {
+		assertPath();
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	const english: Record<string, string> = {

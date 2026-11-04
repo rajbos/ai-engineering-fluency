@@ -185,6 +185,50 @@ async function preloadBundle(): Promise<void> {
 	syncBundle ??= await bundleDiagnosticsWebview();
 }
 
+test('diagnostics action buttons post exactly once, whether the click lands on the button or a child span', async () => {
+	await preloadBundle();
+	const buttons: Array<{ id: string; command: string }> = [
+		{ id: 'btn-clear-cache', command: 'clearCache' },
+		{ id: 'btn-clear-cache-tab', command: 'clearCache' },
+		{ id: 'btn-reset-insights', command: 'resetInsightsState' },
+		{ id: 'btn-reset-insights-tab', command: 'resetInsightsState' },
+		{ id: 'btn-reset-debug-counters', command: 'resetDebugCounters' },
+		{ id: 'btn-reset-discovered-editors', command: 'resetDiscoveredEditors' },
+	];
+	for (const { id, command } of buttons) {
+		for (const clickOn of ['button', 'span']) {
+			const harness = bootWebviewUnsettled(buildInitialData({ isDebugMode: true }));
+			await harness.settle();
+			const button = harness.window.document.getElementById(id);
+			assert.ok(button, `${id} must render`);
+			const clickTarget = clickOn === 'span' ? button.querySelector('span') : button;
+			assert.ok(clickTarget, `${id} must have a ${clickOn}`);
+			clickTarget.click();
+			assert.equal(
+				harness.posted.filter((message) => message.command === command).length,
+				1,
+				`${id}: a click on the ${clickOn} must post ${command} exactly once`,
+			);
+		}
+	}
+});
+
+test('clear cache shows progress on the clicked button and recovers when the host confirms', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+	await harness.settle();
+	const button = harness.window.document.getElementById('btn-clear-cache');
+	button.querySelector('span').click();
+	assert.equal(button.disabled, true);
+	assert.match(button.textContent, /Clearing/);
+	assert.ok(button.querySelector('span'), 'the progress state keeps its child spans');
+
+	harness.post({ command: 'cacheCleared' });
+	await harness.settle();
+	assert.equal(button.disabled, false);
+	assert.match(button.textContent, /Cache Cleared/);
+});
+
 test('Backend Storage tab renders normally when no early message arrives', async () => {
 	await preloadBundle();
 	const harness = bootWebviewUnsettled(buildInitialData({ backendStorageInfo: configuredBackendStorageInfo() }));

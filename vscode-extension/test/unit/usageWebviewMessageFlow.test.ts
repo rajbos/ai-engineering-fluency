@@ -1642,6 +1642,114 @@ test('corrections filter reports how many moments are shown and can be cleared',
 	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 2);
 });
 
+test('Previous Month columns show the previous full month, not the current month to date', async () => {
+	const stats = buildStats();
+	const period = (requests: number, effort: string): Record<string, unknown> => {
+		const base = emptyPeriod();
+		return {
+			...base,
+			modelSwitching: {
+				...(base.modelSwitching as Record<string, unknown>),
+				totalRequests: requests, lowCostRequests: requests, totalSessions: 1, averageModelsPerSession: 1,
+				lowCostModels: [`model-${effort}`],
+			},
+			thinkingEffortUsage: { byEffort: { [effort]: requests }, sessionCount: 1, switchCount: 0, byModel: {} },
+		};
+	};
+	stats.month = period(111, 'minimal');
+	stats.lastMonth = period(222, 'xhigh');
+	const harness = await bootWebview(stats);
+	const document = harness.window.document;
+
+	const previousMonthColumn = (sectionId: string): string => {
+		const heading = Array.from<any>(document.querySelectorAll(`#${sectionId} h4`))
+			.find((h4) => /Previous Month/.test(h4.textContent));
+		assert.ok(heading, `${sectionId} must have a Previous Month column`);
+		return heading.parentElement.textContent;
+	};
+	for (const sectionId of ['section-model-cost', 'section-multi-model', 'section-thinking-effort']) {
+		const column = previousMonthColumn(sectionId);
+		assert.match(column, /222/, `${sectionId} shows lastMonth`);
+		assert.doesNotMatch(column, /111/, `${sectionId} must not show month-to-date`);
+	}
+	assert.match(document.getElementById('section-multi-model').textContent, /model-xhigh/, 'the cost levels list the models used last month');
+});
+
+test('every insight deep-link anchor resolves to its section inside the destination tab', async () => {
+	const stats = buildStats();
+	stats.repeatedTasks = {
+		minClusterSize: 2,
+		sessionsScanned: 20,
+		clusters: [{
+			representativePrompt: 'run the tests and fix the failures',
+			sessionCount: 3,
+			repositories: ['o/r1'],
+			sessions: [],
+			sharedKeywords: ['run', 'tests'],
+		}],
+	};
+	stats.curationAnalysis = {
+		windowDays: 30,
+		availableTools: [{ name: 'old-skill', source: 'skill' }],
+		unusedTools: [],
+		underusedMcpServers: [],
+		estimatedPromptBloat: { totalTokens: 0, byServer: {} },
+		recommendations: [],
+	};
+	const harness = await bootWebview(stats);
+	const targets = [
+		{ tab: 'tools', anchor: 'section-skill-suggestions', title: /Skill Suggestions/ },
+		{ tab: 'tools', anchor: 'section-tool-curation', title: /Tool Curation/i },
+		{ tab: 'activity', anchor: 'section-interaction-modes', title: /Interaction Modes/i },
+		{ tab: 'activity', anchor: 'section-model-efficiency', title: /Model/i },
+	];
+	for (const { tab, anchor, title } of targets) {
+		harness.scrolledTo.length = 0;
+		harness.post({ command: 'switchTab', tab, anchor });
+		await harness.settleScroll();
+		assert.deepEqual(harness.scrolledTo, [anchor], `${anchor} must be the scroll target`);
+		const section = harness.window.document.getElementById(anchor);
+		assert.ok(section.closest(`#tab-panel-${tab}`), `${anchor} must live in the ${tab} tab`);
+		assert.match(section.textContent, title);
+	}
+});
+
+test('repeated corrections re-renders keep one panel, one listener and a working filter toggle', async () => {
+	const harness = await bootWebview(buildStatsWithCorrections());
+	const document = harness.window.document;
+	document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+	const panel = document.getElementById('tab-panel-corrections');
+	const pill = (): any => document.querySelector('button[data-correction-filter="tool-error"]');
+	const assertSinglePanel = (): void => {
+		assert.equal(document.querySelectorAll('[id="tab-panel-corrections"]').length, 1, 'the panel id must stay unique');
+		assert.equal(document.getElementById('tab-panel-corrections'), panel, 'the panel element must survive a re-render');
+	};
+
+	// Every toggle must land exactly once; a stacked listener would flip the filter back on itself.
+	pill().click();
+	assertSinglePanel();
+	assert.equal(pill().getAttribute('aria-pressed'), 'true');
+	assert.equal(document.querySelectorAll('button.correction-moment').length, 1);
+	pill().click();
+	assertSinglePanel();
+	assert.equal(pill().getAttribute('aria-pressed'), 'false');
+	assert.equal(document.querySelectorAll('button.correction-moment').length, 2);
+	pill().click();
+	assertSinglePanel();
+	assert.equal(pill().getAttribute('aria-pressed'), 'true');
+
+	// One listener posts one message, however many re-renders came before it.
+	const before = harness.posted.length;
+	document.querySelector('button.correction-moment')?.click();
+	assert.equal(harness.posted.slice(before).filter((message) => message.command === 'openSessionFile').length, 1);
+
+	// Leaving and returning must not strand the content inside a hidden nested panel.
+	document.querySelector('.tab-button[data-tab="tools"]')?.click();
+	document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+	assert.equal(panel.style.display, 'block');
+	assert.ok(panel.querySelector('button.correction-moment'), 'the tab must not come back blank');
+});
+
 test('the escalating pill is a filter that narrows the list to escalated moments', async () => {
 	const harness = await bootWebview(buildStatsWithEscalatingCorrection());
 	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();

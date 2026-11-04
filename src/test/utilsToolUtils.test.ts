@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, canonicalizeToolId, lookupKnownToolName, isKnownToolDisplayName } from '../utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, canonicalizeToolId, lookupKnownToolName, isKnownToolDisplayName, getUnknownToolNames, type ToolNamePeriod } from '../utils/toolUtils';
 import toolNamesData from '../toolNames.json';
 
 // ── resolveGuidMcpToolName ───────────────────────────────────────────────────
@@ -230,4 +230,42 @@ test('isKnownToolDisplayName: issue #2223 server names are recognized in the rea
 	for (const id of ['ccd_host', 'mcp__ccd_host__sync_with_base_branch', 'mcp__ccd_pr__bind_pr', 'mcp__ccd_pr__set_monitor']) {
 		assert.equal(isKnownToolDisplayName(id, toolNamesData as Record<string, string>), false, id);
 	}
+});
+
+// ── getUnknownToolNames ──────────────────────────────────────────────────────
+
+function toolNamePeriod(overrides: { tools?: string[]; mcpTools?: string[]; servers?: string[] } = {}): ToolNamePeriod {
+	const counts = (ids: string[] = []): Record<string, number> => Object.fromEntries(ids.map(id => [id, 1]));
+	return {
+		toolCalls: { byTool: counts(overrides.tools) },
+		mcpTools: { byTool: counts(overrides.mcpTools), byServer: counts(overrides.servers) },
+	};
+}
+
+test('getUnknownToolNames: covers tools, MCP tools and servers in every period, lastMonth included', () => {
+	const unknown = getUnknownToolNames({
+		today: toolNamePeriod({ tools: ['unknown_today'] }),
+		last30Days: toolNamePeriod({ mcpTools: ['unknown_last30'] }),
+		month: toolNamePeriod({ servers: ['unknown_month_server'] }),
+		lastMonth: toolNamePeriod({ tools: ['unknown_last_month'], mcpTools: ['unknown_last_month_mcp'], servers: ['unknown_last_month_server'] }),
+	}, {}, []);
+	assert.deepEqual(unknown, [
+		'unknown_last30',
+		'unknown_last_month',
+		'unknown_last_month_mcp',
+		'unknown_last_month_server',
+		'unknown_month_server',
+		'unknown_today',
+	]);
+});
+
+test('getUnknownToolNames: leaves out known, display-name, GUID and suppressed ids, and de-duplicates', () => {
+	const empty = toolNamePeriod();
+	const unknown = getUnknownToolNames({
+		today: toolNamePeriod({ tools: ['known_tool', 'still_unknown', 'muted_tool'], servers: ['Friendly Server'] }),
+		last30Days: toolNamePeriod({ tools: ['still_unknown'], mcpTools: ['mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__sharepoint_search'] }),
+		month: empty,
+		lastMonth: empty,
+	}, { known_tool: 'Friendly Server: Known Tool' }, ['muted_tool']);
+	assert.deepEqual(unknown, ['still_unknown']);
 });
