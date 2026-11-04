@@ -1397,6 +1397,28 @@ test('a deep link to Insights marks its new insights as seen', async () => {
 	assert.deepEqual(seen, ['insight-a'], 'only the new insight is marked seen, and it is marked');
 });
 
+test('an insights-only update keeps the localized Insights tab label and refreshes its badge', async () => {
+	// Regression: the badge refresh rewrote the whole button with a literal English "Insights".
+	const stats = buildStats() as any;
+	stats.localization = { 'usage.tab.insights': '洞察' };
+	stats.insights = [{ id: 'insight-a', status: 'new', title: 'A', body: 'a', severity: 'tip' }];
+	const harness = await bootWebview(stats);
+	await harness.settle();
+	const label = () => harness.window.document.querySelector('.tab-button[data-tab="insights"]')?.textContent?.trim();
+	assert.equal(label(), '洞察 1', 'initial render is localized');
+
+	harness.post({
+		command: 'updateInsights',
+		insights: [
+			{ id: 'insight-a', status: 'new', title: 'A', body: 'a', severity: 'tip' },
+			{ id: 'insight-b', status: 'new', title: 'B', body: 'b', severity: 'tip' },
+		],
+	});
+	await harness.settle();
+
+	assert.equal(label(), '洞察 2', 'the refresh updates the badge and keeps the translation');
+});
+
 test('group tabs expose which one is selected to assistive technology', async () => {
 	const harness = await bootWebview(buildStats());
 	const pressed = (): string[] => [...harness.window.document.querySelectorAll('.group-tab')]

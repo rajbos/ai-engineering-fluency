@@ -3640,7 +3640,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const badgeHtml = newCount > 0
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
-	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
+	const titleOnly = `<span class="codicon codicon-lightbulb"></span> ${escapeHtml(localize('usage.tab.insights'))}`;
 	setHtml(tabButton, titleOnly + badgeHtml);
 }
 
