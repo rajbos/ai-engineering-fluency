@@ -81,7 +81,6 @@
   "usage.toolExec.empty.mcp": "No MCP server calls with a recorded outcome in this period.",
   "usage.toolExec.empty.costSpeed": "No tools have both latency and output-token data yet.",
   "nav.btnDashboard": "Team Dashboard",
-  "nav.btnLevelViewer": "Level Viewer",
   "nav.btnEnvironmental": "Environmental Impact",
   "nav.btnEfficiency": "Efficiency",
   "environmental.intro": "All figures are estimates. CO₂ and water are derived from a published benchmark of LLM inference energy, weighted by token type and scaled per model; analogies use average reference values. Treat these as order-of-magnitude indicators, not precise measurements.",

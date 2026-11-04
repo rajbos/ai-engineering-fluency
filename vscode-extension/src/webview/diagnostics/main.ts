@@ -1623,12 +1623,6 @@ function setupBackendButtonHandlers(): void {
     });
 
   document
-    .getElementById("btn-open-settings")
-    ?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openSettings" });
-    });
-
-  document
     .getElementById("btn-open-display-settings")
     ?.addEventListener("click", () => {
       vscode.postMessage({ command: "openDisplaySettings" });

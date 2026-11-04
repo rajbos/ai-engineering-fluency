@@ -254,7 +254,6 @@
   "readiness.action.selectFirst": "🤖 请先至少选择一项",
   "readiness.action.includeItem": "在 Copilot 提示词中包含 {0}",
   "nav.btnDashboard": "团队仪表板",
-  "nav.btnLevelViewer": "等级查看器",
   "nav.btnEnvironmental": "环境影响",
   "nav.btnEfficiency": "效率",
   "usage.contextPressure.compactedLabel": "🗜️ 已压缩的会话",

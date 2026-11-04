@@ -48,11 +48,6 @@
       "hiddenBy": ["#btn-configure-backend-team"],
       "reason": "Diagnostics: team-server setup is a VS Code configuration panel."
     },
-    "openSettings": {
-      "status": "hidden",
-      "hiddenBy": ["#btn-open-settings"],
-      "reason": "Diagnostics: opens VS Code settings."
-    },
     "openDisplaySettings": {
       "status": "hidden",
       "hiddenBy": ["#btn-open-display-settings"],

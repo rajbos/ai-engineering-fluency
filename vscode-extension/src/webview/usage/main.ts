@@ -5572,16 +5572,6 @@ function handleToolSuppressed(toolName: string): void {
 	}
 }
 
-function handleHighlightUnknownTools(): void {
-	clearFocusedInsightAnchor();
-	activateUsageTab('tools');
-	const el = document.getElementById('unknown-mcp-tools-section');
-	if (el) {
-		el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
-		flashAnchorHighlight(el);
-	}
-}
-
 function handleRepoPrStatsLoaded(data: any): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (isEmptyActivitySnapshot(repoPrStatsData)) { repoPrStatsLoaded = false; }
@@ -5667,8 +5657,6 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
 			handleToolSuppressed(message.toolName as string); break;
-		case 'highlightUnknownTools':
-			handleHighlightUnknownTools(); break;
 		case 'repoPrStatsLoaded':
 			handleRepoPrStatsLoaded(message.data); break;
 		case 'repoPrStatsProgress':

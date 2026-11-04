@@ -82,10 +82,9 @@ The **My Activity** tab is itself banded, via section-group headings
 | 💵 Spend & models | AI Billing Coverage · Model Cost Usage · Multi-Model Usage · Local Model Leaderboard · Thinking Effort (Reasoning) |
 | 🧠 Context | Context References · Context Window & Long-Context Pricing (incl. context compaction) |
 
-All tab switching goes through one `activateUsageTab()`, whether the user clicked a tab, the
-host sent a `switchTab` message, or the unknown-tool banner jumped here. Revealing the owning
-group, the active markers, the panel, the telemetry ping and the first-visit lazy loads all live
-there once, so a new entry point cannot implement half of it.
+All tab switching goes through one `activateUsageTab()`, whether the user clicked a tab or the
+host sent a `switchTab` message. Revealing the owning group, the active markers, the panel, the
+telemetry ping and the first-visit lazy loads all live there once, so a new entry point cannot implement half of it.
 
 ### Diagnostics (`diagnostics`)
 

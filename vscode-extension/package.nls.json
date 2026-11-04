@@ -254,7 +254,6 @@
   "readiness.action.selectFirst": "🤖 Select at least one item first",
   "readiness.action.includeItem": "Include {0} in the Copilot prompt",
   "nav.btnDashboard": "Team Dashboard",
-  "nav.btnLevelViewer": "Level Viewer",
   "nav.btnEnvironmental": "Environmental Impact",
   "nav.btnEfficiency": "Efficiency",
   "usage.contextPressure.compactedLabel": "🗜️ Sessions compacted",
