@@ -1346,10 +1346,6 @@ function wireUpEventHandlers(): void {
 document.getElementById('btn-refresh-session')?.addEventListener('click', () => {
 vscode.postMessage({ command: 'refreshSession' });
 });
-document.getElementById('file-link')?.addEventListener('click', (e) => {
-e.preventDefault();
-vscode.postMessage({ command: 'openRawFile' });
-});
 document.getElementById('open-file-link')?.addEventListener('click', () => {
 vscode.postMessage({ command: 'openRawFile' });
 });

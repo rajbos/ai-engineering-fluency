@@ -5,7 +5,7 @@
 
 import { localize } from './localization';
 
-export type ButtonId = 'btn-refresh' | 'btn-details' | 'btn-chart' | 'btn-usage' | 'btn-diagnostics' | 'btn-maturity' | 'btn-dashboard' | 'btn-level-viewer' | 'btn-environmental' | 'btn-efficiency';
+export type ButtonId = 'btn-refresh' | 'btn-details' | 'btn-chart' | 'btn-usage' | 'btn-diagnostics' | 'btn-maturity' | 'btn-dashboard' | 'btn-environmental' | 'btn-efficiency';
 
 export interface ButtonConfig {
 	id: ButtonId;
@@ -81,13 +81,6 @@ const BUTTON_DEFS: Record<ButtonId, Omit<ButtonConfig, 'label'> & { labelKey: st
 		iconColor: '#818cf8',
 		appearance: 'secondary'
   },
-	'btn-level-viewer': {
-		id: 'btn-level-viewer',
-		labelKey: 'nav.btnLevelViewer',
-		icon: 'list-tree',
-		iconColor: '#94a3b8',
-		appearance: 'secondary'
-	},
 	'btn-environmental': {
 		id: 'btn-environmental',
 		labelKey: 'nav.btnEnvironmental',

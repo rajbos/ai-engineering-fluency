@@ -2659,7 +2659,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see AI PR activity across your repositories.
+				${escapeHtml(localize('usage.repos.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -2791,7 +2791,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see Copilot cloud agent session data.
+				${escapeHtml(localize('usage.agent.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -3614,7 +3614,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const badgeHtml = newCount > 0
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
-	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
+	const titleOnly = `<span class="codicon codicon-lightbulb"></span> ${escapeHtml(localize('usage.tab.insights'))}`;
 	setHtml(tabButton, titleOnly + badgeHtml);
 }
 
@@ -3762,9 +3762,7 @@ function buildUsageRootHtml(
 					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
 				</div>
 				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
-					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
-					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
-					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
+					${escapeHtml(localize('usage.about.body'))}
 				</div>
 			</div>
 
@@ -5546,16 +5544,6 @@ function handleToolSuppressed(toolName: string): void {
 	}
 }
 
-function handleHighlightUnknownTools(): void {
-	clearFocusedInsightAnchor();
-	activateUsageTab('tools');
-	const el = document.getElementById('unknown-mcp-tools-section');
-	if (el) {
-		el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
-		flashAnchorHighlight(el);
-	}
-}
-
 function handleRepoPrStatsLoaded(data: any): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (isEmptyActivitySnapshot(repoPrStatsData)) { repoPrStatsLoaded = false; }
@@ -5641,8 +5629,6 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
 			handleToolSuppressed(message.toolName as string); break;
-		case 'highlightUnknownTools':
-			handleHighlightUnknownTools(); break;
 		case 'repoPrStatsLoaded':
 			handleRepoPrStatsLoaded(message.data); break;
 		case 'repoPrStatsProgress':

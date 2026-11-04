@@ -818,7 +818,7 @@ function renderGitHubAuthPanel(githubAuth: GitHubAuthStatus | undefined): string
 <div class="info-box">
   <div class="info-box-title">🔑 GitHub Authentication</div>
   <div>
-    Authenticate with GitHub to unlock additional features in future releases.
+    ${escapeHtml(localize('diagnostics.githubAuth.intro'))}
   </div>
 </div>
 
@@ -835,24 +835,17 @@ function renderGitHubAuthPanel(githubAuth: GitHubAuthStatus | undefined): string
   ` : ''}
 </div>
 
-${authenticated ? `
   <div style="margin-top: 24px;">
     <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-      You are currently authenticated with GitHub. This enables future features such as:
+      ${escapeHtml(localize(authenticated ? 'diagnostics.githubAuth.signedInLead' : 'diagnostics.githubAuth.signedOutLead'))}
     </p>
     <ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;">
-      <li>Repository-specific usage tracking</li>
-      <li>Team collaboration features</li>
-      <li>Advanced analytics and insights</li>
+      <li>${escapeHtml(localize('diagnostics.githubAuth.featureRepoPrs'))}</li>
+      <li>${escapeHtml(localize('diagnostics.githubAuth.featureCloudAgent'))}</li>
+      <li>${escapeHtml(localize('diagnostics.githubAuth.featureBilling'))}</li>
+      <li>${escapeHtml(localize('diagnostics.githubAuth.featureTeamServer'))}</li>
     </ul>
   </div>
-` : `
-  <div style="margin-top: 24px;">
-    <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-      Sign in with your GitHub account to unlock future features. This uses VS Code's built-in authentication.
-    </p>
-  </div>
-`}
 
 <div class="button-group">
   ${authenticated ? `
@@ -913,7 +906,7 @@ function renderTeamServerGithubAuthCard(githubAuth: GitHubAuthStatus | undefined
 
 function renderTeamServerDetailsSection(teamInfo: TeamServerInfo): string {
   if (!teamInfo.isConfigured) {
-    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 ${escapeHtml(localize('diagnostics.teamServer.getStartedTitle'))}</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">${escapeHtml(localize('diagnostics.teamServer.getStartedBody'))}</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>${escapeHtml(localize('diagnostics.teamServer.getStartedDeployStep'))}</li><li>${escapeHtml(localize('diagnostics.teamServer.getStartedUrlStep'))}</li><li>${escapeHtml(localize('diagnostics.teamServer.getStartedSyncStep'))}</li></ul></div>`;
   }
   return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 ${escapeHtml(localize('diagnostics.teamServer.configDetails'))}</h4>${renderKeyValueTable("diagnostics-team-server-config", localize('diagnostics.teamServer.configDetails'), [{ label: localize('diagnostics.teamServer.serverUrl'), value: teamInfo.endpointUrl }])}</div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 ${escapeHtml(localize('diagnostics.teamServer.localSessionStats'))}</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 ${escapeHtml(localize('diagnostics.teamServer.totalSessions'))}</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.localSessionFiles'))}</div></div><div class="summary-card"><div class="summary-label">🔄 ${escapeHtml(localize('diagnostics.teamServer.usageData'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.lastRollupUpload'))}</div></div><div class="summary-card"><div class="summary-label">🎯 ${escapeHtml(localize('diagnostics.teamServer.fluencyScore'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.fluencyLastSyncTime ? formatDate(teamInfo.fluencyLastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.uploadedSeparately'))}</div></div></div></div>`;
 }
@@ -926,7 +919,7 @@ function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuth
     ${authWarning}
     <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} ${escapeHtml(localize('diagnostics.teamServer.status'))}</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 ${escapeHtml(localize('diagnostics.teamServer.sharingProfile'))}</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 ${escapeHtml(localize('diagnostics.teamServer.usageSync'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.rollupUploadOnly'))}</div></div></div>
     ${renderTeamServerDetailsSection(teamInfo)}
-    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
+    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${escapeHtml(localize(teamInfo.isConfigured ? 'diagnostics.teamServer.manageButton' : 'diagnostics.teamServer.configureButton'))}</span></button></div>`;
 }
 
 function renderBackendStoragePanel(
@@ -1623,12 +1616,6 @@ function setupBackendButtonHandlers(): void {
     });
 
   document
-    .getElementById("btn-open-settings")
-    ?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openSettings" });
-    });
-
-  document
     .getElementById("btn-open-display-settings")
     ?.addEventListener("click", () => {
       vscode.postMessage({ command: "openDisplaySettings" });
@@ -1905,7 +1892,7 @@ function handleGlobalClickEvent(event: MouseEvent): void {
   if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
     handleClearCacheClick(target);
   }
-  if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
+  if (target.id === "btn-reset-insights-tab") {
     vscode.postMessage({ command: "resetInsightsState" });
   }
   if (target.id === "btn-reset-debug-counters") {
@@ -2357,23 +2344,23 @@ function handleCacheCleared(): void {
   ) as HTMLButtonElement | null;
   if (btnReport) {
     btnReport.style.background = "#2d6a4f";
-    setHtml(btnReport, "<span>✅</span><span>Cache Cleared</span>");
+    setHtml(btnReport, `<span>✅</span><span>${escapeHtml(localize('diagnostics.cache.clearedButton'))}</span>`);
     btnReport.disabled = false;
   }
   if (btnTab) {
     btnTab.style.background = "#2d6a4f";
-    setHtml(btnTab, "<span>✅</span><span>Cache Cleared</span>");
+    setHtml(btnTab, `<span>✅</span><span>${escapeHtml(localize('diagnostics.cache.clearedButton'))}</span>`);
     btnTab.disabled = false;
   }
 
   setTimeout(() => {
     if (btnReport) {
       btnReport.style.background = "";
-      setHtml(btnReport, "<span>🗑️</span><span>Clear Cache</span>");
+      setHtml(btnReport, `<span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span>`);
     }
     if (btnTab) {
       btnTab.style.background = "";
-      setHtml(btnTab, "<span>🗑️</span><span>Clear Cache</span>");
+      setHtml(btnTab, `<span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span>`);
     }
   }, 2000);
 }
@@ -2511,7 +2498,7 @@ Clearing the cache will force the extension to re-read and re-analyze all sessio
 This can help resolve issues with stale or incorrect data.
 </p>
 <div class="button-group" style="margin-top: 8px;">
-<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span></button>
 <button class="button secondary" id="btn-reset-insights-tab"><span>💡</span><span>Reset Insights Dismissals</span></button>
 </div>
 </div>
@@ -3370,8 +3357,7 @@ code or conversation content. You can safely share this report when reporting is
 <div class="button-group" style="margin-bottom: 12px;">
 <button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
 <button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
-<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
-<button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>
+<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span></button>
 </div>
 <div class="report-content">${escapedReport}</div>
 </div>`;

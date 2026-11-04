@@ -10609,11 +10609,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.showUsageAnalysisOnTab('repos');
 	}
 
-	/** Opens the Usage Analysis panel and activates the GitHub › Billing tab (AI Billing Coverage). */
-	public async showUsageAnalysisOnBillingTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('billing');
-	}
-
 	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
 		await this.showUsageAnalysisOnTab('corrections');
 	}
@@ -13555,7 +13550,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 			resetInsightsState: () => this.dispatch('resetInsightsState:diagnostics', () => this.resetInsightsState()),
       configureBackend: () => this.dispatch('configureBackend:diagnostics', () => this.diagHandleConfigureBackend()),
       configureTeamServer: () => this.dispatch('configureTeamServer:diagnostics', () => this.diagHandleConfigureTeamServer()),
-      openSettings: () => this.dispatch('openSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend")),
       openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
       openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.toolFamilies")),
       resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
