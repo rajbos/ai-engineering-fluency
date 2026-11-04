@@ -168,7 +168,7 @@ Generate a diagnostic report to help troubleshoot issues. The report includes:
 
 Alternatively, use the Command Palette:
 - Press `Ctrl+Shift+P` / `Cmd+Shift+P`
-- Type `AI Engineering Fluency: Generate Diagnostic Report`
+- Type `AI Engineering Fluency: Show Diagnostics`
 
 > **Note**: The diagnostic report does not include any of your code or conversation content. It only includes file locations, sizes, and aggregated statistics.
 

@@ -2403,3 +2403,20 @@ test('l10n: GitHub sign-in, About and Team Server text resolves in English and z
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: aligned command titles resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('command.generateDiagnosticReport.title'), 'Show Diagnostics');
+	assert.equal(t('command.showFluencyLevelViewer.title'), 'Show Scoring Guide');
+	assert.equal(t('command.showEfficiency.title'), 'Show Efficiency');
+	assert.equal(t('command.resetInsightsState.title'), 'Reset Insights Dismissals');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('command.generateDiagnosticReport.title'), '显示诊断');
+		assert.equal(t('command.showFluencyLevelViewer.title'), '显示评分指南');
+		assert.equal(t('command.showEfficiency.title'), '显示效率');
+		assert.equal(t('command.resetInsightsState.title'), '重置已忽略的洞察');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

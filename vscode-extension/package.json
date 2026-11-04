@@ -36,11 +36,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "aiEngineeringFluency.refresh",
-        "title": "%command.refresh.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
         "command": "aiEngineeringFluency.showDetails",
         "title": "%command.showDetails.title%",
         "category": "AI Engineering Fluency"
@@ -56,13 +51,8 @@
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.openMcpJson",
-        "title": "%command.openMcpJson.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.generateDiagnosticReport",
-        "title": "%command.generateDiagnosticReport.title%",
+        "command": "aiEngineeringFluency.showReadiness",
+        "title": "%command.showReadiness.title%",
         "category": "AI Engineering Fluency"
       },
       {
@@ -71,13 +61,38 @@
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.showReadiness",
-        "title": "%command.showReadiness.title%",
+        "command": "aiEngineeringFluency.showFluencyLevelViewer",
+        "title": "%command.showFluencyLevelViewer.title%",
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.showFluencyLevelViewer",
-        "title": "%command.showFluencyLevelViewer.title%",
+        "command": "aiEngineeringFluency.showEfficiency",
+        "title": "%command.showEfficiency.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.showEnvironmental",
+        "title": "%command.showEnvironmental.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.showRepoHeatmap",
+        "title": "%command.showRepoHeatmap.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.showDashboard",
+        "title": "%command.showDashboard.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.generateDiagnosticReport",
+        "title": "%command.generateDiagnosticReport.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.showWhatsNew",
+        "title": "%command.showWhatsNew.title%",
         "category": "AI Engineering Fluency"
       },
       {
@@ -96,8 +111,28 @@
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.runLocalViewRegression",
-        "title": "%command.runLocalViewRegression.title%",
+        "command": "aiEngineeringFluency.refresh",
+        "title": "%command.refresh.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.exportCurrentView",
+        "title": "%command.exportCurrentView.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.clearCache",
+        "title": "%command.clearCache.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.resetInsightsState",
+        "title": "%command.resetInsightsState.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.openMcpJson",
+        "title": "%command.openMcpJson.title%",
         "category": "AI Engineering Fluency"
       },
       {
@@ -116,8 +151,8 @@
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.exportCurrentView",
-        "title": "%command.exportCurrentView.title%",
+        "command": "aiEngineeringFluency.setSharingProfile",
+        "title": "%command.setSharingProfile.title%",
         "category": "AI Engineering Fluency"
       },
       {
@@ -141,48 +176,8 @@
         "category": "AI Engineering Fluency"
       },
       {
-        "command": "aiEngineeringFluency.setSharingProfile",
-        "title": "%command.setSharingProfile.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
         "command": "aiEngineeringFluency.clearAzureSettings",
         "title": "%command.clearAzureSettings.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.clearCache",
-        "title": "%command.clearCache.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.resetInsightsState",
-        "title": "%command.resetInsightsState.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.showDashboard",
-        "title": "%command.showDashboard.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.showEnvironmental",
-        "title": "%command.showEnvironmental.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.showRepoHeatmap",
-        "title": "%command.showRepoHeatmap.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.showEfficiency",
-        "title": "%command.showEfficiency.title%",
-        "category": "AI Engineering Fluency"
-      },
-      {
-        "command": "aiEngineeringFluency.showWhatsNew",
-        "title": "%command.showWhatsNew.title%",
         "category": "AI Engineering Fluency"
       },
       {
@@ -199,8 +194,21 @@
         "command": "copilot-token-tracker.checkWindsurfStatus",
         "title": "%command.checkWindsurfStatus.title%",
         "category": "AI Engineering Fluency"
+      },
+      {
+        "command": "aiEngineeringFluency.runLocalViewRegression",
+        "title": "%command.runLocalViewRegression.title%",
+        "category": "AI Engineering Fluency"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "aiEngineeringFluency.runLocalViewRegression",
+          "when": "isDevelopment"
+        }
+      ]
+    },
     "configuration": {
       "title": "%config.title%",
       "properties": {
