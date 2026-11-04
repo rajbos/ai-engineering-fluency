@@ -2350,3 +2350,51 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: strings for the tabs moved out of Diagnostics Research resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.families.title'), 'Output tokens by tool family');
+	assert.equal(t('usage.toolExec.families.configure'), 'Configure tool families ↗');
+	assert.equal(t('usage.toolExec.families.other'), 'Other Tools');
+	assert.equal(t('usage.toolExec.families.builtIn'), 'built-in');
+	assert.equal(t('usage.toolExec.families.alternative'), 'alt');
+	assert.equal(t('usage.toolExec.families.baseline'), 'baseline');
+	assert.equal(t('usage.toolExec.families.col.total'), 'Total output tokens');
+	assert.equal(t('usage.toolExec.families.col.vsBuiltIn'), 'vs Built-in');
+	assert.equal(t('usage.toolExec.empty.families'), 'No tools with output-token data and a recorded outcome in this period.');
+	assert.match(t('usage.toolExec.families.subtitle'), /per completed call/);
+	assert.equal(t('efficiency.tab.ttft'), '⏱️ TTFT');
+	assert.equal(t('efficiency.ttft.bucketBy'), 'Bucket by:');
+	assert.equal(t('efficiency.ttft.range.180d'), 'Last 6 months');
+	assert.equal(t('efficiency.ttft.empty.title'), '📭 No TTFT data found');
+	assert.match(t('efficiency.ttft.empty.body', '3'), /^Checked 3 session file/);
+	assert.equal(t('efficiency.ttft.legend.toggle', 'GPT'), 'Click to hide/show GPT');
+	assert.equal(t('efficiency.skills.table.heading'), 'Invocations per skill');
+	assert.equal(t('efficiency.skills.col.skill'), 'Skill');
+	assert.equal(t('efficiency.skills.col.description'), 'Description');
+	assert.equal(t('efficiency.skills.col.invocations'), 'Invocations');
+	assert.equal(t('diagnostics.pricingCheck.tab'), 'Pricing Check');
+	assert.equal(t('diagnostics.pricingCheck.title'), '🧮 Pricing Check');
+	assert.match(t('diagnostics.pricingCheck.body'), /Local Model Leaderboard/);
+	assert.equal(t('whatsNew.feature.diagnostics.ttft-tab.title'), 'Efficiency → TTFT');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.families.title'), '按工具系列统计输出令牌');
+		assert.equal(t('usage.toolExec.families.configure'), '配置工具系列 ↗');
+		assert.equal(t('usage.toolExec.families.other'), '其他工具');
+		assert.equal(t('usage.toolExec.families.col.vsBuiltIn'), '与内置比较');
+		assert.equal(t('usage.toolExec.empty.families'), '此期间没有同时具备输出令牌数据和已记录结果的工具。');
+		assert.equal(t('efficiency.tab.ttft'), '⏱️ 首字延迟');
+		assert.equal(t('efficiency.ttft.bucketBy'), '分组方式：');
+		assert.equal(t('efficiency.ttft.range.180d'), '最近 6 个月');
+		assert.equal(t('efficiency.ttft.empty.title'), '📭 未找到首字延迟数据');
+		assert.match(t('efficiency.ttft.empty.body', '3'), /已检查所选范围内的 3 个会话文件/);
+		assert.equal(t('efficiency.ttft.legend.toggle', 'GPT'), '单击以隐藏或显示 GPT');
+		assert.equal(t('efficiency.skills.table.heading'), '各技能调用次数');
+		assert.equal(t('efficiency.skills.col.description'), '说明');
+		assert.equal(t('diagnostics.pricingCheck.tab'), '定价检查');
+		assert.equal(t('diagnostics.pricingCheck.title'), '🧮 定价检查');
+		assert.equal(t('whatsNew.feature.diagnostics.ttft-tab.title'), '效率 → 首字延迟');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

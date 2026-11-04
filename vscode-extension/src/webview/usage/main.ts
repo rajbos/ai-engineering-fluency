@@ -53,6 +53,8 @@ import { buildCustomizationSectionHtml } from './customizationMatrixSection';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
 import { formatToolEditors, sanitizeToolCallsByEditor } from './toolEditors';
 import { buildToolExecutionSectionsHtml } from './toolExecutionHtml';
+import { buildToolFamilySectionHtml, sanitizeToolFamilies } from './toolFamilySection';
+import type { ToolFamily } from '../../../../src/toolFamilies';
 import { buildMcpPeriodTablesHtml, buildToolPeriodTableHtml, isMcpPeriodView, type McpPeriodView } from './toolPeriodTable';
 import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSanitizer';
 import { renderContextRefTable } from './contextRefTableHtml';
@@ -216,6 +218,7 @@ type UsageAnalysisStats = {
 	readinessAvailable?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
+	toolFamilies?: ToolFamily[];
 	/** Per-tool, per-editor call counts (last 30 days); used to tag unknown-tool issue reports with the editor. */
 	toolCallsByEditor?: { [tool: string]: { [editor: string]: number } };
 	todaySessions?: TodaySessionSummary[];
@@ -1798,6 +1801,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			suppressedUnknownTools: Array.isArray(raw.suppressedUnknownTools)
 				? raw.suppressedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
 				: undefined,
+			toolFamilies: sanitizeToolFamilies(raw.toolFamilies),
 			toolCallsByEditor: sanitizeToolCallsByEditor(raw.toolCallsByEditor),
 		};
 
@@ -5173,6 +5177,7 @@ function buildToolsTabPanelHtml(stats: UsageAnalysisStats): string {
 			</div>
 
 			${safeSectionHtml(localize('usage.tab.tools'), () => buildToolExecutionSectionsHtml({ toolCalls: stats.last30Days.toolCalls, mcpTools: stats.last30Days.mcpTools, resolveToolName: lookupToolName, hiddenTools: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined }))}
+			${safeSectionHtml(localize('usage.toolExec.families.title'), () => buildToolFamilySectionHtml({ toolCalls: stats.last30Days.toolCalls, families: stats.toolFamilies ?? [], resolveToolName: lookupToolName, hiddenTools: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined }))}
 			${buildMcpToolsSectionHtml(stats)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
@@ -5386,6 +5391,9 @@ function wireNavigationButtons(): void {
 	});
 	document.getElementById('btn-environmental')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showEnvironmental' });
+	});
+	document.getElementById('btn-open-tool-families-settings')?.addEventListener('click', () => {
+		vscode.postMessage({ command: 'openToolFamiliesSettings' });
 	});
 	document.getElementById('btn-efficiency')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showEfficiency' });

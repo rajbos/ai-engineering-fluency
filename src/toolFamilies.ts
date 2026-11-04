@@ -1,3 +1,5 @@
+import type { ToolCallUsage } from './types';
+
 export interface ToolFamily {
 	/** Stable identifier used for override matching (e.g. "reading"). */
 	id: string;
@@ -85,4 +87,88 @@ export function mergeToolFamilies(overrides: ToolFamily[]): ToolFamily[] {
 		}
 	}
 	return result;
+}
+
+/**
+ * Output tokens per completed call: the one divisor every "tokens per call" figure uses.
+ * `outputTokensByTool` is only recorded for calls with an explicit verdict, so its population is
+ * `completedByTool`. `byTool` also counts orphaned starts, streaming re-logs and verdict-less
+ * calls, so dividing by it understates the figure.
+ */
+export function tokensPerCompletedCall(outputTokens: number, completedCalls: number): number {
+	return completedCalls > 0 ? outputTokens / completedCalls : 0;
+}
+
+export interface ToolFamilyRow {
+	tool: string;
+	outputTokens: number;
+	completed: number;
+	tokensPerCall: number;
+	isBuiltIn: boolean;
+	/** `tokensPerCall` as a fraction of the family's built-in baseline; null without a baseline, or for a built-in. */
+	vsBuiltIn: number | null;
+}
+
+export interface ToolFamilyGroup {
+	/** The family's id, or null for the tools no family lists. */
+	id: string | null;
+	name: string | null;
+	description?: string;
+	rows: ToolFamilyRow[];
+}
+
+type ToolTotals = { outputTokens: number; completed: number };
+
+/** Takes the listed tools out of `eligible`, so the first family that lists a tool wins (see mergeToolFamilies). */
+function takeFamilyTools(names: readonly string[], isBuiltIn: boolean, eligible: Map<string, ToolTotals>): (ToolTotals & { tool: string; isBuiltIn: boolean })[] {
+	const taken = [];
+	for (const tool of names) {
+		const totals = eligible.get(tool);
+		if (!totals) { continue; }
+		eligible.delete(tool);
+		taken.push({ tool, isBuiltIn, ...totals });
+	}
+	return taken;
+}
+
+/**
+ * Groups the tools with sized output by family, in family order, followed by a catch-all group
+ * (`id: null`) for tools no family lists. An alternative is compared with the pooled average of
+ * its family's built-ins. Families without data are left out.
+ */
+export function buildToolFamilyGroups(
+	toolCalls: Pick<ToolCallUsage, 'outputTokensByTool' | 'completedByTool'>,
+	families: readonly ToolFamily[],
+	isReportable: (tool: string) => boolean = () => true,
+): ToolFamilyGroup[] {
+	const completedByTool = toolCalls.completedByTool ?? {};
+	const eligible = new Map<string, ToolTotals>();
+	for (const [tool, outputTokens] of Object.entries(toolCalls.outputTokensByTool ?? {})) {
+		const completed = completedByTool[tool] ?? 0;
+		if (completed > 0 && isReportable(tool)) { eligible.set(tool, { outputTokens, completed }); }
+	}
+
+	const groups: ToolFamilyGroup[] = [];
+	for (const family of families) {
+		const builtIns = takeFamilyTools(family.builtIn, true, eligible);
+		const alternatives = takeFamilyTools(family.alternatives, false, eligible);
+		if (builtIns.length + alternatives.length === 0) { continue; }
+		const baseline = tokensPerCompletedCall(
+			builtIns.reduce((sum, r) => sum + r.outputTokens, 0),
+			builtIns.reduce((sum, r) => sum + r.completed, 0),
+		);
+		const rows = [...builtIns, ...alternatives].map((r): ToolFamilyRow => {
+			const tokensPerCall = tokensPerCompletedCall(r.outputTokens, r.completed);
+			return { ...r, tokensPerCall, vsBuiltIn: !r.isBuiltIn && baseline > 0 ? tokensPerCall / baseline : null };
+		});
+		groups.push({ id: family.id, name: family.name, description: family.description, rows });
+	}
+	if (eligible.size > 0) {
+		const rows = [...eligible].map(([tool, totals]): ToolFamilyRow => ({
+			tool, ...totals, isBuiltIn: false, vsBuiltIn: null,
+			tokensPerCall: tokensPerCompletedCall(totals.outputTokens, totals.completed),
+		}));
+		groups.push({ id: null, name: null, rows });
+	}
+	return groups;
 }

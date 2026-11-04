@@ -41,32 +41,6 @@
   },
   "backendConfigured": false,
   "isDebugMode": false,
-  "toolCallStats": {
-    "total": 842,
-    "byTool": {
-      "read_file": 214,
-      "run_in_terminal": 186,
-      "apply_patch": 151,
-      "grep_search": 132,
-      "semantic_search": 98,
-      "create_file": 61
-    },
-    "outputTokensByTool": {
-      "read_file": 412000,
-      "run_in_terminal": 196000,
-      "apply_patch": 88000,
-      "grep_search": 74000,
-      "semantic_search": 132000,
-      "create_file": 21000
-    }
-  },
-  "skillCallStats": {
-    "total": 34,
-    "byName": {
-      "graphify": 19,
-      "code-review": 15
-    }
-  },
   "sessionFolders": [
     {
       "path": "/home/dev/.copilot/session-state",

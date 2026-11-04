@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
 	buildCacheInfo,
 	buildDiagnosticDataLoadedMessage,
+	buildDiagnosticsCliUsageFields,
 	buildDiagnosticsViewData,
 	buildSessionFolderData,
 	diagnosticsToolCallStats,
@@ -30,7 +31,7 @@ const inputs = (over: Partial<DiagnosticsViewInputs> = {}): DiagnosticsViewInput
 	isDebugMode: false,
 	globalStateCounters: { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '' },
 	displaySettings: { showTokens: true, showCost: true, monthlyBudget: 0 },
-	quotaEntitlements: null, accountBudgets: [], usageStats: null, skillCallsByEditor: null, toolFamilies: [],
+	quotaEntitlements: null, accountBudgets: [],
 	...over,
 });
 
@@ -38,25 +39,27 @@ test('buildDiagnosticsViewData emits exactly the pinned keys', () => {
 	assert.deepEqual(Object.keys(buildDiagnosticsViewData(inputs())).sort(), [...DIAGNOSTICS_VIEW_KEYS].sort());
 });
 
-test('without usage stats the tool, skill and description fields take their empty values', () => {
-	const d = buildDiagnosticsViewData(inputs());
-	assert.equal(d.toolCallStats, null);
-	assert.equal(d.skillCallStats, null);
-	assert.deepEqual(d.skillDescriptions, {});
-	assert.deepEqual(d.accountBudgets, []);
+test('the Diagnostics payload no longer carries the tool and skill analytics that moved to Usage and Efficiency', () => {
+	const d = buildDiagnosticsViewData(inputs()) as unknown as Record<string, unknown>;
+	for (const key of ['toolCallStats', 'skillCallStats', 'skillCallsByEditor', 'skillDescriptions', 'toolFamilies']) {
+		assert.ok(!(key in d), `${key} should not be in the webview payload`);
+	}
 });
 
-test('tool and skill stats come from the last-30-days period', () => {
-	const d = buildDiagnosticsViewData(inputs({ usageStats: stats }));
-	assert.equal(d.toolCallStats, toolCalls);
-	assert.deepEqual(d.skillCallStats, { total: 1, byName: { s: 1 } });
+test('the CLI usage fields keep their shape: last-30-days stats, empty values without stats', () => {
+	const families = [{ id: 'f' }];
+	assert.deepEqual(buildDiagnosticsCliUsageFields(null, families), {
+		toolCallStats: null, skillCallStats: null, skillCallsByEditor: null, skillDescriptions: {}, toolFamilies: families,
+	});
+	const fields = buildDiagnosticsCliUsageFields(stats, families);
+	assert.equal(fields.toolCallStats, toolCalls);
+	assert.deepEqual(fields.skillCallStats, { total: 1, byName: { s: 1 } });
+	assert.deepEqual(fields.skillDescriptions, { s: 'does s' });
 	assert.equal(diagnosticsToolCallStats(undefined), null);
 });
 
-test('skill descriptions: skills with a description only; host extras win', () => {
+test('skill descriptions: skills with a description only', () => {
 	assert.deepEqual(skillDescriptionsFromStats(stats), { s: 'does s' });
-	const d = buildDiagnosticsViewData(inputs({ usageStats: stats, extraSkillDescriptions: { s: 'override', x: 'extra' } }));
-	assert.deepEqual(d.skillDescriptions, { s: 'override', x: 'extra' });
 });
 
 test('buildCacheInfo reports lastUpdated only for a non-empty cache', () => {
@@ -94,18 +97,14 @@ test('Copilot CLI session-state folders collapse into one row', () => {
 	assert.equal(folders[0].count, 2);
 });
 
-test('buildDiagnosticDataLoadedMessage pins the message keys and derives stats from usage stats', () => {
+test('buildDiagnosticDataLoadedMessage pins the message keys', () => {
 	const msg = buildDiagnosticDataLoadedMessage({
 		report: 'r', sessionFiles: [], sessionFolders: [], candidatePaths: [], backendStorageInfo: null,
-		githubAuth: { authenticated: false }, accountBudgets: [], quotaEntitlements: null, usageStats: stats,
-		skillCallsByEditor: null, skillDescriptions: { s: 'does s' }, toolFamilies: [], otelComparison: null,
+		githubAuth: { authenticated: false }, accountBudgets: [], quotaEntitlements: null, otelComparison: null,
 	});
 	assert.deepEqual(Object.keys(msg).sort(), [
 		'accountBudgets', 'backendStorageInfo', 'candidatePaths', 'command', 'githubAuth', 'otelComparison',
-		'quotaEntitlements', 'report', 'sessionFiles', 'sessionFolders', 'skillCallStats', 'skillCallsByEditor',
-		'skillDescriptions', 'toolCallStats', 'toolFamilies',
+		'quotaEntitlements', 'report', 'sessionFiles', 'sessionFolders',
 	]);
 	assert.equal(msg.command, 'diagnosticDataLoaded');
-	assert.deepEqual(msg.toolCallStats, toolCalls);
-	assert.deepEqual(msg.skillCallStats, { total: 1, byName: { s: 1 } });
 });

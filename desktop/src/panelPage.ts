@@ -22,7 +22,6 @@ import { getEcosystems } from '../../cli/src/sessionProcessing';
 import { getEditorSourceFromPath, runWithConcurrency } from '../../cli/src/analysis';
 import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
-import { mergeToolFamilies } from '../../src/toolFamilies';
 import { detectEditorSource } from '../../src/workspaceHelpers';
 import { buildWebviewLocalization } from '../../vscode-extension/src/webviewLocalization';
 import { createTranslator, resolvedLocale } from '../../cli/src/l10n';
@@ -324,7 +323,6 @@ export async function buildPanelHtml(panel: PanelId, host: PanelHost, data: Pane
                 return { file: f, size: 0, modified: new Date().toISOString() };
             }
         }));
-        const toolFamilies = mergeToolFamilies([]);
         const detailedSessionFiles = await buildDetailedSessionFiles(sessionFiles);
         if (detailedSessionFiles.length === 0) {
             // The shared view reads an empty initial list as "still loading" and
@@ -334,8 +332,8 @@ export async function buildPanelHtml(panel: PanelId, host: PanelHost, data: Pane
             afterBundleScript = `window.postMessage(${JSON.stringify({ command: 'sessionFilesLoaded', detailedSessionFiles: [] })}, '*');`;
         }
         // The shared builder the extension uses. Fields that are VS Code state (backend sync,
-        // globalState counters, Copilot quota and budgets, per-editor skill counts) are passed
-        // as the builder's documented "not available in this host" values.
+        // globalState counters, Copilot quota and budgets) are passed as the builder's
+        // documented "not available in this host" values.
         const cache = getCacheStats();
         const diagData = {
             ...buildDiagnosticsViewData({
@@ -352,9 +350,6 @@ export async function buildPanelHtml(panel: PanelId, host: PanelHost, data: Pane
                 displaySettings: { showTokens: true, showCost: true, monthlyBudget: 0 },
                 quotaEntitlements: null,
                 accountBudgets: [],
-                usageStats: await data.getUsageStats(),
-                skillCallsByEditor: null,
-                toolFamilies,
             }),
             diagnosticPaths,
         };

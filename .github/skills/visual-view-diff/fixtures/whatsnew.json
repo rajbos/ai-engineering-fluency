@@ -38,7 +38,7 @@
         },
         {
           "id": "diagnostics.ttft-tab",
-          "title": "Research → TTFT",
+          "title": "Efficiency → TTFT",
           "description": "How long each model takes to start answering you, averaged by day, week, and month with a trendline. Read straight from Copilot Chat's own debug log, so there is nothing to switch on.",
           "kind": "tab",
           "isUnseen": false

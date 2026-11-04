@@ -284,6 +284,27 @@ function repoPrPayload(): Record<string, unknown> {
 	};
 }
 
+test('the tool family section renders in the Tools tab and its link opens the setting', async () => {
+	const stats = buildStats() as any;
+	stats.toolFamilies = [{ id: 'reading', name: 'File Reading', builtIn: ['read_file'], alternatives: [] }];
+	stats.last30Days = {
+		...stats.last30Days,
+		toolCalls: { total: 4, byTool: { read_file: 4 }, completedByTool: { read_file: 2 }, outputTokensByTool: { read_file: 1000 } },
+	};
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+
+	const section = doc.querySelector('#tab-panel-tools #section-tool-families');
+	assert.ok(section, 'the section belongs to the Tools tab');
+	assert.match(section.textContent, /File Reading/);
+	const row = section.querySelector('tbody tr');
+	assert.equal(row.children[1].textContent.trim(), '2', 'completed calls, not the 4 starts');
+	assert.equal(row.children[3].textContent.trim(), '500', '1,000 tokens over 2 completed calls');
+
+	doc.getElementById('btn-open-tool-families-settings').click();
+	assert.ok(harness.posted.some((m) => m.command === 'openToolFamiliesSettings'), 'the link posts its message');
+});
+
 test('Multi-Model Usage renders in the Activity tab (Spend & models band), not in Tools & Integrations', async () => {
 	const harness = await bootWebview(buildStats());
 	const doc = harness.window.document;

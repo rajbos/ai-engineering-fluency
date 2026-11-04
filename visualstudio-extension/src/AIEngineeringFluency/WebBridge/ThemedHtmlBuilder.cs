@@ -57,6 +57,8 @@ namespace AIEngineeringFluency.WebBridge
 html, body {{ margin: 0; padding: 0; height: 100%; overflow: auto; }}
 /* Hide views not supported in Visual Studio */
 #btn-diagnostics {{ display: none !important; }}
+/* Usage: tool families are a VS Code setting */
+#btn-open-tool-families-settings {{ display: none !important; }}
 /* Chart: hide By Repository toggle (no repo data) */
 #view-repository {{ display: none !important; }}
 /* Maturity: hide VS Code Marketplace MCP discovery button (not available in Visual Studio) */

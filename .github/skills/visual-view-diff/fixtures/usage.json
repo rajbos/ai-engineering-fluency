@@ -1,5 +1,27 @@
 {
   "readinessAvailable": true,
+  "toolFamilies": [
+    {
+      "id": "reading",
+      "name": "File Reading",
+      "builtIn": ["read_file"],
+      "alternatives": ["lean-ctx"],
+      "description": "Tools that read file contents into context."
+    },
+    {
+      "id": "writing",
+      "name": "File Writing",
+      "builtIn": ["create_file"],
+      "alternatives": ["apply_patch"],
+      "description": "Tools that create or modify files."
+    },
+    {
+      "id": "search",
+      "name": "Search & Discovery",
+      "builtIn": ["grep_search"],
+      "alternatives": ["semantic_search"]
+    }
+  ],
   "customizationMatrix": {
     "customizationTypes": [
       {

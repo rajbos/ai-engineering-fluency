@@ -10,7 +10,7 @@
  * before the match, so every editor-specific spelling of "read a file",
  * "search text", "run a shell command", etc. needs to be listed explicitly
  * in the family it belongs to, or it silently falls into the "Other Tools"
- * bucket in the Tool Output Token Analysis tab.
+ * bucket in the Output tokens by tool family tab.
  *
  * This script finds tool names that exist in toolNames.json (or were passed
  * in via --tools) but are not yet listed in any family's builtIn/alternatives

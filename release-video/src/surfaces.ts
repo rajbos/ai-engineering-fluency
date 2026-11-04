@@ -34,9 +34,9 @@ function registry(): Registry {
 
 /** A tab's spoken name, split into its own name and the group it sits under. */
 export interface TabName {
-	/** "TTFT" from "Research › TTFT tab". */
+	/** "Display" from "Settings › Display tab". */
 	readonly leaf: string;
-	/** "Research", when the tab is nested under a group. */
+	/** "Settings", when the tab is nested under a group. */
 	readonly parent?: string;
 }
 
@@ -52,12 +52,12 @@ export function viewName(viewId: string): string {
 }
 
 /**
- * The display name of a tab, e.g. (`diagnostics`, `ttft`) -> TTFT under Research.
+ * The display name of a tab, e.g. (`diagnostics`, `display`) -> Display under Settings.
  *
- * The registry writes nested tabs as "Research › TTFT tab". Both the trailing
+ * The registry writes nested tabs as "Settings › Display tab". Both the trailing
  * "tab" and the separator are stripped here, because the sentence being built
- * supplies its own wording for them — "on the TTFT tab, under Research" reads
- * like a person talking, and "on the Research › TTFT tab tab" does not.
+ * supplies its own wording for them — "on the Display tab, under Settings" reads
+ * like a person talking, and "on the Settings › Display tab tab" does not.
  */
 export function tabName(viewId: string, stateId: string): TabName {
 	const view = registry().views.find((candidate) => candidate.id === viewId);

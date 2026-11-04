@@ -18,3 +18,11 @@ test('diagnostics --json payload carries every field of the shared Diagnostics v
 	assert.deepEqual(payload.detailedSessionFiles, []);
 	assert.equal(payload.toolCallStats, null);
 });
+
+test('diagnostics --json keeps the usage fields scripts read, though the Diagnostics view no longer does', async () => {
+	const payload = await createDiagnosticsPayload([], null, 'report', []) as unknown as Record<string, unknown>;
+	for (const key of ['toolCallStats', 'skillCallStats', 'skillCallsByEditor', 'skillDescriptions', 'toolFamilies']) {
+		assert.ok(key in payload, `missing ${key}`);
+	}
+	assert.ok(Array.isArray(payload.toolFamilies) && payload.toolFamilies.length > 0, 'expected the default tool families');
+});

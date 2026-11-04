@@ -1939,3 +1939,65 @@ background: var(--bg-tertiary);
 .status-badge--stale { --status-badge-color: var(--warning-fg); }
 .status-badge--unknown { --status-badge-color: var(--text-muted); }
 .status-badge--missing { --status-badge-color: var(--error-fg); }
+
+/* Output tokens by tool family */
+.tool-family-configure {
+	margin-bottom: 10px;
+	font-size: 12px;
+}
+
+.tool-family-link {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--link-color);
+	cursor: pointer;
+	font-size: inherit;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.tool-family-link:hover {
+	opacity: 0.8;
+}
+
+.tool-family-group {
+	margin-bottom: 16px;
+}
+
+.tool-family-heading {
+	margin: 8px 0 4px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-secondary);
+}
+
+.tool-family-description {
+	margin-left: 6px;
+	font-size: 11px;
+	font-weight: 400;
+	color: var(--text-muted);
+}
+
+.tool-type-badge {
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-size: 10px;
+	white-space: nowrap;
+	margin-left: 4px;
+	vertical-align: middle;
+	color: var(--tool-type-color);
+	background: color-mix(in srgb, var(--tool-type-color) 20%, transparent);
+}
+
+.tool-type-badge.built-in { --tool-type-color: var(--link-color); }
+.tool-type-badge.alternative { --tool-type-color: var(--success-fg); }
+
+.tool-builtin-label {
+	opacity: 0.5;
+	font-style: italic;
+}
+
+.ratio-better { color: var(--success-fg); }
+.ratio-worse { color: var(--error-fg); }
+.ratio-neutral { color: var(--text-secondary); }

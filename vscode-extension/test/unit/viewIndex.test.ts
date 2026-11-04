@@ -158,3 +158,17 @@ test('view index: the Efficiency skills tab is labelled Skills and keeps its tab
 	assert.deepEqual(entry?.nav, { tab: 'skills' });
 	assert.doesNotMatch(entry?.node.description ?? '', /\btool use\b/i);
 });
+
+test('view index: the tabs moved out of Diagnostics Research are listed where they now live', () => {
+	assert.deepEqual(findViewIndexEntry('usage.tools.tool-families')?.nav, { tab: 'tools', anchor: 'section-tool-families' });
+	assert.equal(findViewIndexEntry('efficiency.ttft')?.view, 'efficiency');
+	assert.deepEqual(findViewIndexEntry('efficiency.ttft')?.nav, { tab: 'ttft' });
+	assert.deepEqual(findViewIndexEntry('diagnostics.model-usage')?.path, ['Diagnostic Report', 'Diagnostics', 'Pricing Check']);
+	assert.deepEqual(findViewIndexEntry('diagnostics.otel-delta')?.path, ['Diagnostic Report', 'Diagnostics', 'OTel Delta']);
+	for (const gone of ['diagnostics.group.research', 'diagnostics.tool-analysis', 'diagnostics.skill-usage', 'diagnostics.ttft']) {
+		assert.equal(findViewIndexEntry(gone), null, `${gone} should be gone`);
+	}
+	assert.ok(searchViewIndex(ENTRIES, 'tool analysis').matchedIds.includes('usage.tools.tool-families'), 'the old name still finds it');
+	assert.ok(searchViewIndex(ENTRIES, 'skill usage').matchedIds.includes('efficiency.skills'), 'the old name still finds it');
+	assert.ok(searchViewIndex(ENTRIES, 'model usage').matchedIds.includes('diagnostics.model-usage'), 'the old name still finds it');
+});

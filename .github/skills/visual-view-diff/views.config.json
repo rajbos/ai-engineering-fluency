@@ -410,6 +410,12 @@
           "noiseFloorPixels": 400
         },
         {
+          "id": "ttft",
+          "title": "TTFT tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"ttft\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"ttft\"]"
+        },
+        {
           "id": "deltas",
           "title": "Month vs Month tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"deltas\"]" }],
@@ -539,10 +545,10 @@
       "global": "__INITIAL_DIAGNOSTICS__",
       "fixture": "diagnostics.json",
       "$statesComment": [
-        "Every leaf tab across the three groups; 'report' is the initial render. The",
-        "Research and Settings leaf bars stay hidden until their group tab is clicked,",
-        "so those states click the group first. The Debug tab needs isDebugMode and",
-        "is deliberately not covered."
+        "Every leaf tab across the two groups; 'report' is the initial render. The",
+        "Settings leaf bar stays hidden until its group tab is clicked, so those states",
+        "click the group first. The Debug tab needs isDebugMode and is deliberately",
+        "not covered."
       ],
       "states": [
         {
@@ -565,33 +571,15 @@
         },
         {
           "id": "model-usage",
-          "title": "Research › Model Usage tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"model-usage\"]" }],
+          "title": "Pricing Check tab",
+          "steps": [{ "click": ".tab[data-tab=\"model-usage\"]" }],
           "expect": "#tab-model-usage"
         },
         {
-          "id": "tool-analysis",
-          "title": "Research › Tool Analysis tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"tool-analysis\"]" }],
-          "expect": "#tab-tool-analysis"
-        },
-        {
-          "id": "skill-usage",
-          "title": "Research › Skill Usage tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"skill-usage\"]" }],
-          "expect": "#tab-skill-usage"
-        },
-        {
           "id": "otel-delta",
-          "title": "Research › OTel Delta tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"otel-delta\"]" }],
+          "title": "OTel Delta tab",
+          "steps": [{ "click": ".tab[data-tab=\"otel-delta\"]" }],
           "expect": "#tab-otel-delta"
-        },
-        {
-          "id": "ttft",
-          "title": "Research › TTFT tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"ttft\"]" }],
-          "expect": "#tab-ttft"
         },
         {
           "id": "display",

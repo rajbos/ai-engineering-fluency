@@ -9,7 +9,7 @@ export interface CachedTtftScanResult {
  * In-memory cache for TTFT scans, keyed by the scan-range selector.
  *
  * Granularity-only changes can reuse the same sample set immediately; widening the range
- * loads a new entry the first time and then stays hot for the rest of the diagnostics session.
+ * loads a new entry the first time and then stays hot until the next refresh or cache clear.
  */
 export class TtftScanResultCache {
 	private readonly results = new Map<string, Promise<CachedTtftScanResult>>();

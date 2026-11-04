@@ -273,6 +273,10 @@
   },
   "skillImpact": [],
   "hasSkills": true,
+  "skillDescriptions": {
+    "graphify": "Turns any input into a persistent knowledge graph."
+  },
+  "ttftAvailable": true,
   "lastUpdated": "2026-03-14T09:30:00.000Z",
   "backendConfigured": false,
   "compactNumbers": false,
