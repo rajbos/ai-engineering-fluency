@@ -1728,8 +1728,13 @@ function render(): void {
 		<style>${themeStyles}</style><style>${dataTableStyles}</style>
 		<style>${styles}</style>
 		<div class="efficiency-root">
-			<div class="button-row">${navButtonsHtml('btn-efficiency', !!data.backendConfigured)}</div>
-			<div class="eff-header"><h1>⚡ Efficiency</h1></div>
+			<div class="header">
+				<div class="header-left">
+					<span class="header-icon">⚡</span>
+					<span class="header-title">${escapeHtml(localize('nav.btnEfficiency'))}</span>
+				</div>
+				<div class="button-row">${navButtonsHtml('btn-efficiency', !!data.backendConfigured)}</div>
+			</div>
 			<p class="eff-subtitle">Are you working more efficiently with AI over time — and is it coming from using AI differently, cheaper models, or leaner sessions? Last updated ${escapeHtml(new Date(data.lastUpdated).toLocaleString())}.</p>
 			<div class="eff-verdict ${verdict.cls}"><span class="verdict-icon">${verdict.icon}</span><span class="verdict-text">${verdict.text}</span></div>
 			<div class="eff-tabs">
