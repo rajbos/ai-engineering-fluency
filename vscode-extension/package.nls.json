@@ -1059,7 +1059,7 @@
   "usage.router.subtitle": "Copilot CLI sessions routed through Copilot Fusion: how often a second model contributed, how often the judge rejected a draft, and what the routing cost in exact AI credits.",
   "usage.router.period.today": "Today",
   "usage.router.period.last30Days": "Last 30 days",
-  "usage.router.period.month": "Previous month",
+  "usage.router.period.month": "This month",
   "usage.router.period.lastMonth": "Last month",
   "usage.router.stat.sessions": "Sessions",
   "usage.router.stat.turns": "Routed turns",

@@ -2871,7 +2871,7 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 	const p30 = stats.last30Days.modelSwitching;
 	const today = stats.today.modelSwitching;
 	// Only show if we have any request data
-	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0) { return ''; }
+	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0 && (stats.lastMonth.modelSwitching.totalRequests ?? 0) === 0) { return ''; }
 
 	function renderCostPeriod(ms: ModelSwitchingAnalysis): string {
 		const total = ms.totalRequests ?? 0;
@@ -2913,15 +2913,15 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 					${renderCostPeriod(p30)}
 				</div>
 				<div>
-					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderCostPeriod(stats.month.modelSwitching)}
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}</h4>
+					${renderCostPeriod(stats.lastMonth.modelSwitching)}
 				</div>
 			</div>
 		</div>`;
 }
 
 function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
-	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
+	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.lastMonth.thinkingEffortUsage;
 	if (!effortData) { return ''; }
 	return `
 		<!-- Thinking Effort Section -->
@@ -2938,8 +2938,8 @@ function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
 					${renderEffortPeriodHtml(stats.last30Days.thinkingEffortUsage)}
 				</div>
 				<div>
-					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderEffortPeriodHtml(stats.month.thinkingEffortUsage)}
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}</h4>
+					${renderEffortPeriodHtml(stats.lastMonth.thinkingEffortUsage)}
 				</div>
 			</div>
 		</div>`;
@@ -2976,11 +2976,11 @@ function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
 	allUnknownModels: string[];
 } {
 	return {
-		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])].sort(),
-		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.month.modelSwitching.highCostModels])].sort(),
-		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.month.modelSwitching.lowCostModels])].sort(),
-		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.month.modelSwitching.mediumCostModels])].sort(),
-		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])].sort(),
+		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.lastMonth.modelSwitching.standardModels])].sort(),
+		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.lastMonth.modelSwitching.highCostModels])].sort(),
+		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.lastMonth.modelSwitching.lowCostModels])].sort(),
+		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.lastMonth.modelSwitching.mediumCostModels])].sort(),
+		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.lastMonth.modelSwitching.unknownModels])].sort(),
 	};
 }
 
@@ -5236,7 +5236,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			<div class="three-column">
 				${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
 				${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
-				${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
+				${renderMultiModelPeriod(`📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}`, stats.lastMonth.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
 			</div>
 		</div>${buildRouterSectionHtml(stats.hydraFusion)}`);
 	const sessionsSummaryHtml = `

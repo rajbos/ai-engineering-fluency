@@ -1642,6 +1642,39 @@ test('corrections filter reports how many moments are shown and can be cleared',
 	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 2);
 });
 
+test('Previous Month columns show the previous full month, not the current month to date', async () => {
+	const stats = buildStats();
+	const period = (requests: number, effort: string): Record<string, unknown> => {
+		const base = emptyPeriod();
+		return {
+			...base,
+			modelSwitching: {
+				...(base.modelSwitching as Record<string, unknown>),
+				totalRequests: requests, lowCostRequests: requests, totalSessions: 1, averageModelsPerSession: 1,
+				lowCostModels: [`model-${effort}`],
+			},
+			thinkingEffortUsage: { byEffort: { [effort]: requests }, sessionCount: 1, switchCount: 0, byModel: {} },
+		};
+	};
+	stats.month = period(111, 'minimal');
+	stats.lastMonth = period(222, 'xhigh');
+	const harness = await bootWebview(stats);
+	const document = harness.window.document;
+
+	const previousMonthColumn = (sectionId: string): string => {
+		const heading = Array.from<any>(document.querySelectorAll(`#${sectionId} h4`))
+			.find((h4) => /Previous Month/.test(h4.textContent));
+		assert.ok(heading, `${sectionId} must have a Previous Month column`);
+		return heading.parentElement.textContent;
+	};
+	for (const sectionId of ['section-model-cost', 'section-multi-model', 'section-thinking-effort']) {
+		const column = previousMonthColumn(sectionId);
+		assert.match(column, /222/, `${sectionId} shows lastMonth`);
+		assert.doesNotMatch(column, /111/, `${sectionId} must not show month-to-date`);
+	}
+	assert.match(document.getElementById('section-multi-model').textContent, /model-xhigh/, 'the cost levels list the models used last month');
+});
+
 test('every insight deep-link anchor resolves to its section inside the destination tab', async () => {
 	const stats = buildStats();
 	stats.repeatedTasks = {

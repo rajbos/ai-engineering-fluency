@@ -1059,7 +1059,7 @@
   "usage.router.subtitle": "通过 Copilot Fusion 路由的 Copilot CLI 会话：第二个模型参与的频率、裁判拒绝草稿的频率，以及路由的精确 AI 积分成本。",
   "usage.router.period.today": "今天",
   "usage.router.period.last30Days": "最近 30 天",
-  "usage.router.period.month": "上月",
+  "usage.router.period.month": "本月",
   "usage.router.period.lastMonth": "上个月",
   "usage.router.stat.sessions": "会话",
   "usage.router.stat.turns": "路由轮次",

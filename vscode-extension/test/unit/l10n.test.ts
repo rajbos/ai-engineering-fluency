@@ -2299,6 +2299,21 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 	}
 });
 
+test('l10n: Usage Analysis month labels name the period their data covers', () => {
+	mock.setLanguage('en');
+	assert.equal(t('usage.toolPeriod.colPreviousMonth'), 'Previous Month');
+	assert.equal(t('usage.router.period.month'), 'This month');
+	assert.equal(t('usage.router.period.lastMonth'), 'Last month');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolPeriod.colPreviousMonth'), '上月');
+		assert.equal(t('usage.router.period.month'), '本月');
+		assert.equal(t('usage.router.period.lastMonth'), '上个月');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: the skill suggestions path in the insight names the real tab and section', () => {
 	const sectionTitle = (): string => t('usage.skillSuggestions.title', '').replace(/\s*[(（].*$/, '');
 	const assertPath = (): void => {
