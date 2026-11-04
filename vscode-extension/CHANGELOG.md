@@ -4,6 +4,11 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+- Efficiency: one period picker instead of two. **Selected period** replaces the toolbar's **Drill into…**, and it now sits directly above the chart it selects from on every tab
+- Efficiency, Models tab: the time range and resolution moved into **Drift over time**, the only section they affect, and the head-to-head comparison has its own heading
+- Efficiency: a mixed or falling headline now points at **Month vs Month**, the calendar months it is calculated from, and the **Cost per session** card links to that metric in **Models**
+
 ### Changes
 - Diagnostics no longer has a Research group. Usage analytics moved to where you would look for them: output tokens per tool family is now in **Usage Analysis › Tools & Integrations**, per-skill invocations and descriptions in **Efficiency › Skills**, and time to first token in **Efficiency › TTFT**. Model Usage stays in Diagnostics as **Pricing Check**, and OTel Delta joins the Diagnostics group.
 - "Tokens per call" for a tool now uses completed calls everywhere, so the tool family tables and the Cost vs speed map agree. Figures that used to appear under Tool Analysis can be higher, because they no longer divide by calls with no recorded outcome.

@@ -179,7 +179,7 @@ export function buildContextWindowSectionHtml(stats: ContextWindowSectionStats):
 					${renderContextWindowPeriodHtml(cw30, stats.last30Days.contextPressure)}
 				</div>
 				<div>
-					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}</h4>
 					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow, stats.lastMonth.contextPressure)}
 				</div>
 			</div>

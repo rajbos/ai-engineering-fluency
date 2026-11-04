@@ -1,5 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../../src/insightsEngine';
 import type { InsightContext } from '../../../src/insightsEngine';
 import { createTranslator } from '../../src/l10nCore';
@@ -972,7 +974,38 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.ok(insight, 'should fire at sessionCount = 3');
 	assert.match(insight.body, /3 sessions/);
 	assert.match(insight.body, /run the tests/);
-	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openToolsTab');
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+test('insight deep-link commands land on the section their action label names', () => {
+	// Compiled tests live at <ext>/out/vscode-extension/test/unit, so four levels up is <ext>.
+	const source = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '..', 'src', 'extension.ts'), 'utf8');
+	/** The section anchor a registered command's host method opens, as an argument or a parameter default. */
+	const anchorFor = (command: string): string | undefined => {
+		const method = new RegExp(String.raw`"${command}",.*tokenTracker\.(\w+)\(`).exec(source)?.[1];
+		assert.ok(method, `${command} must be registered`);
+		const body = new RegExp(String.raw`public async ${method}\(([^)]*)\)[^{]*\{([^}]*)\}`).exec(source);
+		assert.ok(body, `${method} must exist`);
+		return /'(section-[\w-]+)'/.exec(body[1] + body[2])?.[1];
+	};
+	assert.equal(anchorFor('aiEngineeringFluency.openSkillSuggestions'), 'section-skill-suggestions');
+	assert.equal(anchorFor('aiEngineeringFluency.openToolsTab'), 'section-tool-curation');
+	assert.equal(anchorFor('aiEngineeringFluency.openActivityTab'), 'section-interaction-modes');
+	assert.equal(anchorFor('aiEngineeringFluency.openModelEfficiency'), 'section-model-efficiency');
+});
+
+test('tool-curation insights still open the Tool Curation section', () => {
+	const ctx = makeCtx();
+	ctx.curationAnalysis = {
+		windowDays: 30,
+		unusedTools: [{ name: 'old-skill', source: 'skill' }],
+		underusedMcpServers: [],
+		estimatedPromptBloat: { totalTokens: 3000 },
+	} as unknown as InsightContext['curationAnalysis'];
+	const results = evaluateInsights(ctx, {}, 7, null);
+	for (const id of ['high-prompt-bloat', 'stale-skills']) {
+		assert.equal(results.find(i => i.id === id)?.actionCommand, 'aiEngineeringFluency.openToolsTab', id);
+	}
 });
 
 test('insight navigation actions target their destination tabs and sections', () => {

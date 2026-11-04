@@ -172,3 +172,21 @@ test('view index: the tabs moved out of Diagnostics Research are listed where th
 	assert.ok(searchViewIndex(ENTRIES, 'skill usage').matchedIds.includes('efficiency.skills'), 'the old name still finds it');
 	assert.ok(searchViewIndex(ENTRIES, 'model usage').matchedIds.includes('diagnostics.model-usage'), 'the old name still finds it');
 });
+
+test('view index: the Efficiency selected-period detail can be opened and found', () => {
+	const entry = findViewIndexEntry('efficiency.trends.selected-period');
+	assert.deepEqual(entry?.nav, { tab: 'trends', anchor: 'eff-bucket-detail' });
+	assert.ok(searchViewIndex(ENTRIES, 'drill down').matchedIds.includes('efficiency.trends.selected-period'));
+});
+
+test('view index: the radar entry says it only exists with a comparison, since model-radar renders only then', () => {
+	assert.ok(findViewIndexEntry('efficiency.models.shape')?.node.condition);
+	// The drift chart renders with or without a comparison.
+	assert.equal(findViewIndexEntry('efficiency.models.drift')?.node.condition, undefined);
+});
+
+test('view index: Efficiency descriptions cover what the tabs show today', () => {
+	assert.match(findViewIndexEntry('efficiency.trends')?.node.description ?? '', /time range, resolution and editor/);
+	assert.match(findViewIndexEntry('efficiency.models')?.node.description ?? '', /two harnesses/);
+	assert.match(findViewIndexEntry('efficiency.value')?.node.description ?? '', /lines changed per dollar/);
+});
