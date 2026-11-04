@@ -433,6 +433,8 @@
   "diagnostics.cache.infoTitle",
   "diagnostics.cache.infoBody",
   "diagnostics.cache.management",
+  "diagnostics.cache.clearButton",
+  "diagnostics.cache.clearedButton",
   "diagnostics.cache.storedIncludes",
   "serverMemories.sectionTitle",
   "serverMemories.sectionSubtitle",

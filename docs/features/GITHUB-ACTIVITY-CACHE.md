@@ -151,7 +151,7 @@ figures below are a lower bound** line with the reason.
 
 ## Clearing and sign-out
 
-- **Clear Cache** (`aiEngineeringFluency.clearCache`) removes every scope's Repository PRs and Cloud
+- **Clear Session Cache** (`aiEngineeringFluency.clearCache`) removes every scope's Repository PRs and Cloud
   Agent cache files, the in-memory snapshots and the freshness state. It never signs the user out.
 - **Sign out from GitHub** additionally purges the signing-out identity's scope specifically, so
   nothing can serve that account's data afterwards. A session revoked *outside* the extension goes

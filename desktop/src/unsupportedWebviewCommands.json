@@ -80,7 +80,7 @@
     },
     "resetInsightsState": {
       "status": "hidden",
-      "hiddenBy": ["#btn-reset-insights", "#btn-reset-insights-tab"],
+      "hiddenBy": ["#btn-reset-insights-tab"],
       "reason": "Diagnostics: insight state lives in VS Code global state."
     },
     "resetDiscoveredEditors": {

@@ -1904,7 +1904,7 @@ function handleGlobalClickEvent(event: MouseEvent): void {
   if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
     handleClearCacheClick(target);
   }
-  if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
+  if (target.id === "btn-reset-insights-tab") {
     vscode.postMessage({ command: "resetInsightsState" });
   }
   if (target.id === "btn-reset-debug-counters") {
@@ -2384,23 +2384,23 @@ function handleCacheCleared(): void {
   ) as HTMLButtonElement | null;
   if (btnReport) {
     btnReport.style.background = "#2d6a4f";
-    setHtml(btnReport, "<span>✅</span><span>Cache Cleared</span>");
+    setHtml(btnReport, `<span>✅</span><span>${escapeHtml(localize('diagnostics.cache.clearedButton'))}</span>`);
     btnReport.disabled = false;
   }
   if (btnTab) {
     btnTab.style.background = "#2d6a4f";
-    setHtml(btnTab, "<span>✅</span><span>Cache Cleared</span>");
+    setHtml(btnTab, `<span>✅</span><span>${escapeHtml(localize('diagnostics.cache.clearedButton'))}</span>`);
     btnTab.disabled = false;
   }
 
   setTimeout(() => {
     if (btnReport) {
       btnReport.style.background = "";
-      setHtml(btnReport, "<span>🗑️</span><span>Clear Cache</span>");
+      setHtml(btnReport, `<span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span>`);
     }
     if (btnTab) {
       btnTab.style.background = "";
-      setHtml(btnTab, "<span>🗑️</span><span>Clear Cache</span>");
+      setHtml(btnTab, `<span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span>`);
     }
   }, 2000);
 }
@@ -2538,7 +2538,7 @@ Clearing the cache will force the extension to re-read and re-analyze all sessio
 This can help resolve issues with stale or incorrect data.
 </p>
 <div class="button-group" style="margin-top: 8px;">
-<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span></button>
 <button class="button secondary" id="btn-reset-insights-tab"><span>💡</span><span>Reset Insights Dismissals</span></button>
 </div>
 </div>
@@ -3397,8 +3397,7 @@ code or conversation content. You can safely share this report when reporting is
 <div class="button-group" style="margin-bottom: 12px;">
 <button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
 <button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
-<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
-<button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>
+<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>${escapeHtml(localize('diagnostics.cache.clearButton'))}</span></button>
 </div>
 <div class="report-content">${escapedReport}</div>
 </div>`;

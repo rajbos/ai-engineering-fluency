@@ -2350,3 +2350,17 @@ test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+test('l10n: Session Cache rename resolves in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('command.clearCache.title'), 'Clear Session Cache');
+	assert.equal(t('diagnostics.cache.clearButton'), 'Clear Session Cache');
+	assert.equal(t('diagnostics.cache.clearedButton'), 'Session Cache Cleared');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('command.clearCache.title'), '清除会话缓存');
+		assert.equal(t('diagnostics.cache.clearButton'), '清除会话缓存');
+		assert.equal(t('diagnostics.cache.clearedButton'), '会话缓存已清除');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
