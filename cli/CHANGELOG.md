@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Bug Fixes
+- Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
+
 ## [0.7.1] - 2026-10-27
 
 ### Features

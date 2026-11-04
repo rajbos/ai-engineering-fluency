@@ -467,7 +467,7 @@ Run `ai-engineering-fluency diagnostics` to see exactly which of these locations
 
 ## Scripting and JSON output
 
-- With `--json`, progress output is suppressed and the result is written to **stdout** as a single JSON document, so `ai-engineering-fluency usage --json > usage.json` is safe. Errors go to **stderr**.
+- With `--json`, progress output is suppressed and the result is written to **stdout** as a single JSON document, so `ai-engineering-fluency usage --json > usage.json` is safe. Errors and diagnostic log lines (such as a skipped oversized session file) go to **stderr**.
 - Token counts are plain numbers; the `…Formatted` fields in `segment --json` are display strings.
 - `stats --json`, `segment --json` and `memory-files --json` have small, documented shapes (above) that are intended for scripts. The integration payloads (`chart`, `usage-analysis`, `all`, and the `usage` / `fluency` payloads) mirror the extension's views and can change between releases — pin the package version if you depend on them.
 - Exit code is `0` on success, including when no sessions are found (the JSON is then an empty object or empty payload), and when a `memory-files --json --server` read fails (see `serverMemories.error`). It is `1` when `memory-files --promote` cannot read the server memories, and on any unexpected error, which is printed to stderr.
