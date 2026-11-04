@@ -98,11 +98,10 @@ object WebviewResources {
                     /* Buttons/sections not supported in JetBrains. Loosely mirrors — but does
                        not exactly match — ThemedHtmlBuilder.cs in the VS extension: each host
                        hides only what its own build doesn't ship, and the two feature sets
-                       differ (e.g. JetBrains still hides #btn-level-viewer / .share-section /
+                       differ (e.g. JetBrains still hides .share-section /
                        .beta-footer that VS ships, while VS hides Export/Share-to-Issue that
                        JetBrains doesn't address here). */
                     #btn-diagnostics,
-                    #btn-level-viewer,
                     #view-repository,
                     .share-section,
                     .beta-footer,
