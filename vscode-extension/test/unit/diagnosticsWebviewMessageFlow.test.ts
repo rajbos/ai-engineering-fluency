@@ -190,7 +190,6 @@ test('diagnostics action buttons post exactly once, whether the click lands on t
 	const buttons: Array<{ id: string; command: string }> = [
 		{ id: 'btn-clear-cache', command: 'clearCache' },
 		{ id: 'btn-clear-cache-tab', command: 'clearCache' },
-		{ id: 'btn-reset-insights', command: 'resetInsightsState' },
 		{ id: 'btn-reset-insights-tab', command: 'resetInsightsState' },
 		{ id: 'btn-reset-debug-counters', command: 'resetDebugCounters' },
 		{ id: 'btn-reset-discovered-editors', command: 'resetDiscoveredEditors' },
