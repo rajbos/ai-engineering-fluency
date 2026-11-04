@@ -1529,7 +1529,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return ctx.translate('insight.repeatedTaskSkillCandidate.body', count, prompt, tail);
 		},
 		actionLabelKey: 'insight.action.viewSkillSuggestions',
-		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
 		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
 		weight: 60,
 	},

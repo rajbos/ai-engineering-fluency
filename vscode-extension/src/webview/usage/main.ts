@@ -652,7 +652,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName, isKnownToolDisplayName } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName, getUnknownToolNames } from '../../../../src/utils/toolUtils';
 import { preferredScrollBehavior } from '../shared/surfaceNavigation';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
@@ -678,33 +678,7 @@ function lookupMcpToolName(id: string): string {
 }
 
 function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
-	const allTools = new Set<string>();
-	
-	// Collect all MCP tools from all periods
-	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.lastMonth.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
-	// Also collect MCP server names — the "By Server" tables render them through the
-	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
-	// would otherwise show raw without ever being flagged as missing.
-	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
-	Object.keys(stats.lastMonth.mcpTools.byServer).forEach(server => allTools.add(server));
-	// Also collect all general tool calls so non-MCP tools without friendly names are caught
-	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-	Object.entries(stats.lastMonth.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
-
-	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
-	
-	// Filter to only unknown tools (not a key in the map, case-insensitively or canonically, and not
-	// resolvable via a known GUID/family pattern) and not suppressed. Tools resolved via
-	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
-	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
-	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+	return getUnknownToolNames(stats, TOOL_NAME_MAP ?? {}, stats.suppressedUnknownTools ?? []);
 }
 
 function createMcpToolIssueUrl(unknownTools: string[], toolCallsByEditor?: { [tool: string]: { [editor: string]: number } }): string {
@@ -2649,7 +2623,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see AI PR activity across your repositories.
+				${escapeHtml(localize('usage.repos.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -2781,7 +2755,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>🔒 GitHub authentication required</strong><br/>
-				Sign in with GitHub (via the Diagnostics tab) to see Copilot cloud agent session data.
+				${escapeHtml(localize('usage.agent.signInHint'))}
 			</div>`;
 	}
 	if (data.repos.length === 0) {
@@ -2861,7 +2835,7 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 	const p30 = stats.last30Days.modelSwitching;
 	const today = stats.today.modelSwitching;
 	// Only show if we have any request data
-	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0) { return ''; }
+	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0 && (stats.lastMonth.modelSwitching.totalRequests ?? 0) === 0) { return ''; }
 
 	function renderCostPeriod(ms: ModelSwitchingAnalysis): string {
 		const total = ms.totalRequests ?? 0;
@@ -2903,15 +2877,15 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 					${renderCostPeriod(p30)}
 				</div>
 				<div>
-					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderCostPeriod(stats.month.modelSwitching)}
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}</h4>
+					${renderCostPeriod(stats.lastMonth.modelSwitching)}
 				</div>
 			</div>
 		</div>`;
 }
 
 function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
-	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
+	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.lastMonth.thinkingEffortUsage;
 	if (!effortData) { return ''; }
 	return `
 		<!-- Thinking Effort Section -->
@@ -2928,8 +2902,8 @@ function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
 					${renderEffortPeriodHtml(stats.last30Days.thinkingEffortUsage)}
 				</div>
 				<div>
-					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderEffortPeriodHtml(stats.month.thinkingEffortUsage)}
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}</h4>
+					${renderEffortPeriodHtml(stats.lastMonth.thinkingEffortUsage)}
 				</div>
 			</div>
 		</div>`;
@@ -2966,11 +2940,11 @@ function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
 	allUnknownModels: string[];
 } {
 	return {
-		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])].sort(),
-		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.month.modelSwitching.highCostModels])].sort(),
-		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.month.modelSwitching.lowCostModels])].sort(),
-		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.month.modelSwitching.mediumCostModels])].sort(),
-		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])].sort(),
+		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.lastMonth.modelSwitching.standardModels])].sort(),
+		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.lastMonth.modelSwitching.highCostModels])].sort(),
+		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.lastMonth.modelSwitching.lowCostModels])].sort(),
+		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.lastMonth.modelSwitching.mediumCostModels])].sort(),
+		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.lastMonth.modelSwitching.unknownModels])].sort(),
 	};
 }
 
@@ -3472,29 +3446,26 @@ function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter:
 	</div>`;
 }
 
-function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
+/** The Corrections tab's contents, without the panel element: a filter click re-renders just this into the live panel. */
+function buildCorrectionsTabContentHtml(report: CorrectionReport | null | undefined): string {
 	if (typeof report === 'undefined') {
 		return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
-				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
-					⏳ Scanning recent sessions for correction moments…
-				</div>
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+			<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				⏳ Scanning recent sessions for correction moments…
 			</div>
 		</div>`;
 	}
 
 	if (!report || report.repos.length === 0) {
 		return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
-				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
-					✨ No correction moments detected in your recent sessions — nice and smooth!
-				</div>
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+			<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				✨ No correction moments detected in your recent sessions — nice and smooth!
 			</div>
 		</div>`;
 	}
@@ -3511,22 +3482,24 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		: '';
 
 	return `
-		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
-			<div class="section">
-				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
-				<div class="section-subtitle">
-					Moments where the agent corrected itself after an error, or you had to correct the agent —
-					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
-					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
-					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
-				</div>
-				<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
-				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
-				${statusBar}
-				${repoSections}
-				${emptyFilteredState}
+		<div class="section">
+			<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+			<div class="section-subtitle">
+				Moments where the agent corrected itself after an error, or you had to correct the agent —
+				heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
+				sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
+				Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 			</div>
+			<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
+			<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
+			${statusBar}
+			${repoSections}
+			${emptyFilteredState}
 		</div>`;
+}
+
+function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
+	return `<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>${buildCorrectionsTabContentHtml(report)}</div>`;
 }
 
 /** Finds the repo group backing a correction "Ask Copilot"/"Copy prompt" button, and builds its prompt. */
@@ -3562,7 +3535,8 @@ function handleCorrectionPromptButtonClick(target: HTMLElement): boolean {
 
 function wireCorrectionInteractions(): void {
 	const panel = document.getElementById('tab-panel-corrections');
-	if (!panel) { return; }
+	if (!panel || panel.dataset.correctionInteractionsWired === 'true') { return; }
+	panel.dataset.correctionInteractionsWired = 'true';
 	panel.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
 		if (target.closest('button.correction-clear-filter')) {
@@ -3592,8 +3566,8 @@ function wireCorrectionInteractions(): void {
 function renderCorrectionsPanel(): void {
 	const panel = document.getElementById('tab-panel-corrections');
 	if (!panel) { return; }
-	setHtml(panel, buildCorrectionsTabPanelHtml(currentCorrectionReport));
-	wireCorrectionInteractions();
+	// The delegated click listener lives on the panel itself, which this keeps in place.
+	setHtml(panel, buildCorrectionsTabContentHtml(currentCorrectionReport));
 }
 
 
@@ -3604,7 +3578,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const badgeHtml = newCount > 0
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
-	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
+	const titleOnly = `<span class="codicon codicon-lightbulb"></span> ${escapeHtml(localize('usage.tab.insights'))}`;
 	setHtml(tabButton, titleOnly + badgeHtml);
 }
 
@@ -3752,9 +3726,7 @@ function buildUsageRootHtml(
 					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
 				</div>
 				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
-					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
-					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
-					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
+					${escapeHtml(localize('usage.about.body'))}
 				</div>
 			</div>
 
@@ -5181,7 +5153,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			<div class="three-column">
 				${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
 				${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
-				${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
+				${renderMultiModelPeriod(`📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}`, stats.lastMonth.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
 			</div>
 		</div>${buildRouterSectionHtml(stats.hydraFusion)}`);
 	const sessionsSummaryHtml = `
@@ -5494,16 +5466,6 @@ function handleToolSuppressed(toolName: string): void {
 	}
 }
 
-function handleHighlightUnknownTools(): void {
-	clearFocusedInsightAnchor();
-	activateUsageTab('tools');
-	const el = document.getElementById('unknown-mcp-tools-section');
-	if (el) {
-		el.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
-		flashAnchorHighlight(el);
-	}
-}
-
 function handleRepoPrStatsLoaded(data: any): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (isEmptyActivitySnapshot(repoPrStatsData)) { repoPrStatsLoaded = false; }
@@ -5589,8 +5551,6 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
 			handleToolSuppressed(message.toolName as string); break;
-		case 'highlightUnknownTools':
-			handleHighlightUnknownTools(); break;
 		case 'repoPrStatsLoaded':
 			handleRepoPrStatsLoaded(message.data); break;
 		case 'repoPrStatsProgress':

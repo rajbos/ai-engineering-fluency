@@ -11,7 +11,7 @@
 
 import { escapeHtml, formatCompact, formatCost, formatNumber } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
-import type { EfficiencyBucket } from '../../../../src/efficiencyAnalysis';
+import type { EfficiencyBucket, ModelComparisonMetricId } from '../../../../src/efficiencyAnalysis';
 import type {
 	BucketDetail, BucketDetailMetric, BucketMetricUnit, ModelBucketDetail, SkillBucketDetail,
 } from '../../../../src/efficiencyBucketDetail';
@@ -54,7 +54,7 @@ export function bucketPickerHtml(buckets: EfficiencyBucket[], selectedKey: strin
 	if (buckets.length === 0) { return ''; }
 	const options = [`<option value=""${selectedKey ? '' : ' selected'}>${escapeHtml(localize('efficiency.detail.pickerNone'))}</option>`]
 		.concat(buckets.map(b => `<option value="${escapeHtml(b.key)}"${b.key === selectedKey ? ' selected' : ''}>${escapeHtml(b.label)}</option>`));
-	return `<label class="scope-field bucket-pick">${escapeHtml(localize('efficiency.detail.pickerLabel'))} <select id="${BUCKET_PICK_ID}">${options.join('')}</select></label>`;
+	return `<label class="scope-field bucket-pick">${escapeHtml(localize('efficiency.detail.pickerLabel'))} <select id="${BUCKET_PICK_ID}" class="model-select">${options.join('')}</select></label>`;
 }
 
 /** Shown while nothing is selected, so the region is always present and discoverable. */
@@ -177,4 +177,32 @@ export function renderModelBucketDetail(
 /** Ordinary button for Month vs Month and Cost Attribution rows. */
 export function contextButtonHtml(action: string, target: string, labelKey: string, ariaKey: string, subject: string): string {
 	return `<button type="button" class="eff-context-btn" data-ctx="${escapeHtml(action)}" data-target="${escapeHtml(target)}" aria-label="${escapeHtml(localizeFormat(ariaKey, subject))}">${escapeHtml(localize(labelKey))}</button>`;
+}
+
+/** Month vs Month metrics with a matching card on the Trends tab, by that card's id. */
+const DELTA_TREND_TARGETS: Record<string, string> = {
+	'tokens-per-session': 'tokens-per-session',
+	'turns-per-session': 'turns-per-session',
+	'active-minutes-per-session': 'active-minutes',
+	'retry-rate': 'retry-rate',
+	'apply-rate': 'apply-rate',
+};
+
+/** Month vs Month metrics with no Trends card but a per-model metric in the Models drift chart. */
+const DELTA_MODEL_METRIC_TARGETS: Record<string, ModelComparisonMetricId> = {
+	'cost-per-session': 'cost-per-session',
+};
+
+/**
+ * Where a Month vs Month card can go next, or nothing: low-cost share has no
+ * chart in this view, so it stays explanatory. The Models target is only offered
+ * when that tab has data to show.
+ */
+export function deltaContextButtonHtml(deltaId: string, label: string, hasModelData: boolean): string {
+	const trend = DELTA_TREND_TARGETS[deltaId];
+	if (trend) { return contextButtonHtml('trend', trend, 'efficiency.context.viewTrend', 'efficiency.context.viewTrendAria', label); }
+	const metric = DELTA_MODEL_METRIC_TARGETS[deltaId];
+	return metric && hasModelData
+		? contextButtonHtml('model-metric', metric, 'efficiency.context.viewModel', 'efficiency.context.viewModelAria', label)
+		: '';
 }

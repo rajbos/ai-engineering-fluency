@@ -1,7 +1,7 @@
 ---
 title: View Hierarchy
 description: The full view → sub-view → content-block map of the VS Code extension's webview panels, plus the grouping rules that keep it navigable
-lastUpdated: 2026-09-12
+lastUpdated: 2026-11-04
 status: current
 ---
 # View Hierarchy
@@ -27,27 +27,29 @@ The shared nav row (`src/webview/shared/buttonConfig.ts`, `NAV_ORDER`) is the ca
 |---|---|---|---|
 | Details | `details` | — | What are my raw token/cost numbers right now? |
 | Token Usage Over Time | `chart` | — | How has that moved over time? |
-| **Usage Analysis** | `usage` | 4 groups → 10 tabs | How do I actually work with AI, and what does it cost? |
+| **Usage Analysis** | `usage` | 4 groups → 11 tabs | How do I actually work with AI, and what does it cost? |
 | Fluency Score | `maturity` | — | How mature is my AI engineering practice? |
 | Efficiency | `efficiency` | 8 tabs | Am I getting more output per dollar over time? |
 | Environmental Impact | `environmental` | — | What is the energy/water/carbon footprint? |
-| Diagnostics | `diagnostics` | 3 groups → 14 tabs | Is the extension itself seeing my data correctly? |
+| Diagnostics | `diagnostics` | 3 groups → 13 tabs | Is the extension itself seeing my data correctly? |
 | Team Dashboard | `dashboard` | 2 tabs | How does my team compare? (only when a backend is configured) |
 
-Three further panels are reached contextually rather than from the nav row: **Log Viewer**
+Further panels are reached contextually rather than from the nav row: **Log Viewer**
 (`logviewer`, opened from a session row), **Fluency Level Viewer** (`fluency-level-viewer`,
-opened from the Fluency Score view), and **What's New** (`whatsnew`, opened on upgrade).
+opened from the Fluency Score view), **What's New** (`whatsnew`, opened on upgrade), and
+**Badge Setup** (`badge-setup`) and **Repository Heatmap** (`repo-heatmap`), which have their
+own commands.
 
 ## Level 2 & 3 — sub-views and content blocks
 
 ### Usage Analysis (`usage`) — the big one
 
-Ten tabs under four group tabs. The group strip and leaf strips are built by
+Eleven tabs under four group tabs. The group strip and leaf strips are built by
 `buildTabStripHtml`; `USAGE_TAB_GROUPS` in `usage/tabGroups.ts` owns the mapping, and each tab
 panel gets its own `build*TabPanelHtml` function.
 
-The count moves: AI Readiness joined the view in #2194 and took it from nine to ten. Rather than
-trusting this number, trust the test — `webview-usageTabGroups.test.ts` asserts `USAGE_TAB_GROUPS`
+The count moves: AI Readiness joined the view in #2194, and Billing moved in from My Activity,
+which took it to eleven. Rather than trusting this number, trust the test — `webview-usageTabGroups.test.ts` asserts `USAGE_TAB_GROUPS`
 covers *exactly* `SWITCHABLE_TABS`, so a tab added to one and not the other fails the build.
 
 Leaf tab ids are deliberately unchanged from the flat strip that preceded the groups: they are the
@@ -64,29 +66,28 @@ not user settings.
 |---|---|---|
 | 📊 **Usage** | **My Activity** | *(three bands — see below)* |
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
-| 📁 **Workspace** | **Tools & Integrations** | Tool Usage (3 periods) · MCP Tools · Tool Curation · unknown-tool banner |
-| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) |
+| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · MCP Tools · Tool Curation · Skill Suggestions (repeated-task clusters) |
+| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Repository Hygiene Analysis |
 | | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
 | | **Billing** | AI Billing Coverage (API balance · account budgets · coverage analysis · link to Details › Cost by Provider) |
 | 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
-| | **Corrections** | Corrections report · Skill Suggestions (repeated-task clusters) |
+| | **Corrections** | Corrections report |
 
 The **My Activity** tab is itself banded, via section-group headings
 (`sectionGroupHeadingHtml`) rather than further tabs:
 
 | Band | Sections |
 |---|---|
-| 📊 Overview | Sessions Summary · Interaction Modes |
+| 📊 Overview | Sessions Summary · Interaction Modes · Custom Agents (only when one was used) |
 | 💵 Spend & models | Model Cost Usage · Multi-Model Usage · Local Model Leaderboard · Thinking Effort (Reasoning) |
 | 🧠 Context | Context References · Context Window & Long-Context Pricing (incl. context compaction) |
 
-All tab switching goes through one `activateUsageTab()`, whether the user clicked a tab, the
-host sent a `switchTab` message, or the unknown-tool banner jumped here. Revealing the owning
-group, the active markers, the panel, the telemetry ping and the first-visit lazy loads all live
-there once, so a new entry point cannot implement half of it.
+All tab switching goes through one `activateUsageTab()`, whether the user clicked a tab or the
+host sent a `switchTab` message. Revealing the owning group, the active markers, the panel, the
+telemetry ping and the first-visit lazy loads all live there once, so a new entry point cannot implement half of it.
 
 ### Diagnostics (`diagnostics`)
 
@@ -97,7 +98,7 @@ Analysis. Copy it when a view outgrows one row of tabs.
 |---|---|
 | 🩺 Diagnostics | Report · Session Files · Session Cache · Path Analyzer |
 | 🔬 Research | Model Usage · Tool Analysis · Skill Usage · OTel Delta · TTFT |
-| ⚙️ Settings | Display · Backend Storage · GitHub Auth · Debug (debug mode only) |
+| ⚙️ Settings | Display · Backend Storage (Azure Storage / Team Server sub-tabs) · GitHub Auth · Debug (debug mode only) |
 
 ### Efficiency (`efficiency`)
 
@@ -139,8 +140,8 @@ no tab id. That is the point: it is the one regrouping that costs nothing to try
 ### 2. Leaf tabs under a group tab — the Diagnostics pattern
 
 Use it when a view's tab strip **wraps or exceeds ~8 tabs** and the tabs fall into groups a
-reader picks between before picking a tab. It is what keeps Diagnostics' 14 tabs and Usage
-Analysis' 10 legible.
+reader picks between before picking a tab. It is what keeps Diagnostics' 13 tabs and Usage
+Analysis' 11 legible.
 
 Keep the leaf tab ids exactly as they were and this costs no migration at all: the
 `viewTabOpened` telemetry and any deep links keep working, and the owning group is derived from

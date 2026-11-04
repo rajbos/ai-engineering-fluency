@@ -2,17 +2,34 @@
 
 .efficiency-root {
 	padding: 0 16px 24px 16px;
-	max-width: 1100px;
+	max-width: 1200px;
 	margin: 0 auto;
 }
 
-.eff-header {
+.header {
 	display: flex;
-	align-items: baseline;
 	justify-content: space-between;
-	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	margin: 12px 0 14px;
+	padding-bottom: 4px;
+}
+
+.header-left {
+	display: flex;
+	align-items: center;
 	gap: 8px;
-	margin: 12px 0 4px 0;
+}
+
+.header-icon {
+	font-size: 20px;
+}
+
+.header-title {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+	letter-spacing: 0.2px;
 }
 
 .eff-subtitle {

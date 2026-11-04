@@ -75,7 +75,7 @@ describe('billingTabBodyHtml', () => {
 		const html = billingTabBodyHtml('');
 		assert.match(html, /id="section-billing-coverage"/);
 		assert.match(html, /GitHub authentication required/);
-		assert.match(html, /Sign in with GitHub \(via the Diagnostics tab\)/);
+		assert.match(html, /Sign in with GitHub \(Diagnostics › Settings › GitHub Auth\)/);
 		assert.ok(html.includes(`id="${BILLING_DETAILS_BUTTON_ID}"`), 'local provider costs need no GitHub sign-in, so the link stays');
 	});
 
