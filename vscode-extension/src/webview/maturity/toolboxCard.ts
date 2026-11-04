@@ -1,11 +1,7 @@
 import { escapeHtml, formatCompact, getEditorIcon } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 import { PERIOD_LABELS } from '../shared/periodSelector';
-import { socialShareButtonsHtml } from '../shared/socialShare';
 import type { ShareCardPeriodData } from '../../shareCardData';
-
-/** Id prefix of the toolbox card's social buttons (the score row keeps `btn-share`). */
-export const TOOLBOX_SHARE_ID_PREFIX = 'btn-share-card';
 
 /** Phrase for use at the end of a sentence ("today", "in the last 30 days"). */
 function periodPhrase(period: ShareCardPeriodData['period']): string {
@@ -25,7 +21,7 @@ export function buildToolboxSummaryText(data: ShareCardPeriodData): string {
 		: localizeFormat('share.toolbox.summary', editorsDetected(data.editors.length), editorList, ...totals);
 }
 
-/** The card and its controls for one period. The period dropdown is mounted into `#toolbox-period-selector`. */
+/** The card and its period control for one period. The period dropdown is mounted into `#toolbox-period-selector`. */
 export function buildToolboxCardHtml(data: ShareCardPeriodData): string {
 	const pills = data.editors
 		.map((e) => `<div class="toolbox-pill"><span>${getEditorIcon(e.name)}</span><span>${escapeHtml(e.name)}</span><span class="toolbox-pill-count">${e.sessions}</span></div>`)
@@ -49,7 +45,5 @@ export function buildToolboxCardHtml(data: ShareCardPeriodData): string {
         ${stat(data.editors.length, 'share.toolbox.editors')}
       </div>
     </div>
-    ${emptyNotice}
-    <div class="toolbox-actions"><button class="inline-action-btn" id="btn-copy-toolbox-summary">${escapeHtml(localize('share.toolbox.copy'))}</button></div>
-    <div class="share-buttons toolbox-share-buttons">${socialShareButtonsHtml(TOOLBOX_SHARE_ID_PREFIX)}</div>`;
+    ${emptyNotice}`;
 }

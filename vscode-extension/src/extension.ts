@@ -11736,7 +11736,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	private async handleMaturityExportCommand(message: any): Promise<void> {
 		switch (message.command) {
-			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
+			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data, message.kind === 'toolbox')); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
 			case 'copyText': if (typeof message.text === 'string') { await this.dispatch('copyText:maturity', () => this.maturityHandleCopyText(message.text)); } break;
@@ -11904,7 +11904,7 @@ private async resetDismissedFluencyTips(): Promise<void> {
     this.log("Showed chart download instructions");
   }
 
-  private async saveChartImageData(dataUrl: string): Promise<void> {
+  private async saveChartImageData(dataUrl: string, isToolboxCard = false): Promise<void> {
     const base64Match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
     if (!base64Match) {
       void vscode.window.showErrorMessage(
@@ -11914,9 +11914,9 @@ private async resetDismissedFluencyTips(): Promise<void> {
     }
 
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file("copilot-fluency-score.png"),
+      defaultUri: vscode.Uri.file(isToolboxCard ? "ai-coding-toolbox.png" : "copilot-fluency-score.png"),
       filters: { "PNG Image": ["png"] },
-      title: "Save Fluency Score Chart",
+      title: isToolboxCard ? l10n.t('share.toolbox.saveImageTitle') : "Save Fluency Score Chart",
     });
 
     if (!uri) {

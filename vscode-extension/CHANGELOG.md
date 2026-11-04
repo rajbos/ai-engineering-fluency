@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Fluency Score: the score and AI coding toolbox share blocks are now one **Share** section with a Score/Toolbox switch, placed above the page footer. Both can copy a summary and share to social media, the toolbox card can now be exported as a PNG, and the score's share strings are localized.
+
 ## [0.19.2] - 2026-10-28
 
 ### Features
