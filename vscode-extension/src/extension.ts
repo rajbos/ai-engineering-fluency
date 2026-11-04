@@ -477,7 +477,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
-import { isGuidMcpTool, isKnownToolDisplayName, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
+import { getUnknownToolNames } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
@@ -3770,25 +3770,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private getUnknownMcpToolsFromStats(stats: UsageAnalysisStats): string[] {
-		const allTools = new Set<string>();
-		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		// MCP server names are rendered through the same friendly-name lookup in the
-		// "By Server" tables, so include them in the missing-name detection too.
-		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		const suppressed = new Set<string>(
-			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
-		);
-		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isKnownToolDisplayName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
-	}
-
 	private async showUnknownMcpToolsBanner(): Promise<void> {
 		const dismissedKey = 'news.unknownMcpTools.dismissedVersion';
 		const dismissedVersion = this.context.globalState.get<string>(dismissedKey);
@@ -3802,7 +3783,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		const stats = await this.calculateUsageAnalysisStats(true);
-		const unknownTools = this.getUnknownMcpToolsFromStats(stats);
+		const unknownTools = getUnknownToolNames(
+			stats,
+			this.toolNameMap,
+			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', []),
+		);
 		if (unknownTools.length === 0) {
 			return;
 		}
@@ -10619,11 +10604,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.showUsageAnalysisOnTab('repos');
 	}
 
-	/** Opens the Usage Analysis panel and activates the GitHub › Billing tab (AI Billing Coverage). */
-	public async showUsageAnalysisOnBillingTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('billing');
-	}
-
 	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
 		await this.showUsageAnalysisOnTab('corrections');
 	}
@@ -13554,13 +13534,13 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (this.handleLocalViewRegressionMessage(message)) { return; }
     if (await this.dispatchSharedCommand(message)) { return; }
     const simpleCommands: Record<string, () => Promise<void>> = {
+      refresh: () => this.dispatch('refresh:diagnostics', () => this.refreshDiagnosticsPanel()),
       copyReport: () => this.dispatch('copyReport:diagnostics', () => this.diagHandleCopyReport()),
       openIssue: () => this.dispatch('openIssue:diagnostics', () => this.diagHandleOpenIssue()),
       clearCache: () => this.dispatch('clearCache:diagnostics', () => this.diagHandleClearCache()),
 			resetInsightsState: () => this.dispatch('resetInsightsState:diagnostics', () => this.resetInsightsState()),
       configureBackend: () => this.dispatch('configureBackend:diagnostics', () => this.diagHandleConfigureBackend()),
       configureTeamServer: () => this.dispatch('configureTeamServer:diagnostics', () => this.diagHandleConfigureTeamServer()),
-      openSettings: () => this.dispatch('openSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend")),
       openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
       openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.toolFamilies")),
       resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
@@ -13574,6 +13554,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
+  }
+
+  private async refreshDiagnosticsPanel(): Promise<void> {
+    const panel = this.diagnosticsPanel;
+    if (!panel) { return; }
+    this.log("🔄 Refreshing Diagnostic Report");
+    await this.updateTokenStats();
+    await this.loadDiagnosticDataInBackground(panel);
   }
 
   private async handleDiagnosticConditionalCommand(message: any): Promise<void> {

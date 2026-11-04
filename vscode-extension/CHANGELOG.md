@@ -7,6 +7,11 @@ All notable changes to the VS Code extension will be documented in this file.
 ### Changes
 - Usage Analysis: **Tool Curation** moved from Tools & Integrations to Workspace → Workspace Health, and **Skill Suggestions** moved to Coaching → Insights. Tools & Integrations now shows only tool telemetry
 
+### Improvements
+- Efficiency: one period picker instead of two. **Selected period** replaces the toolbar's **Drill into…**, and it now sits directly above the chart it selects from on every tab
+- Efficiency, Models tab: the time range and resolution moved into **Drift over time**, the only section they affect, and the head-to-head comparison has its own heading
+- Efficiency: a mixed or falling headline now points at **Month vs Month**, the calendar months it is calculated from, and the **Cost per session** card links to that metric in **Models**
+
 ## [0.19.2] - 2026-10-28
 
 ### Features

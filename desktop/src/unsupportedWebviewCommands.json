@@ -48,11 +48,6 @@
       "hiddenBy": ["#btn-configure-backend-team"],
       "reason": "Diagnostics: team-server setup is a VS Code configuration panel."
     },
-    "openSettings": {
-      "status": "hidden",
-      "hiddenBy": ["#btn-open-settings"],
-      "reason": "Diagnostics: opens VS Code settings."
-    },
     "openDisplaySettings": {
       "status": "hidden",
       "hiddenBy": ["#btn-open-display-settings"],
@@ -80,7 +75,7 @@
     },
     "resetInsightsState": {
       "status": "hidden",
-      "hiddenBy": ["#btn-reset-insights", "#btn-reset-insights-tab"],
+      "hiddenBy": ["#btn-reset-insights-tab"],
       "reason": "Diagnostics: insight state lives in VS Code global state."
     },
     "resetDiscoveredEditors": {
