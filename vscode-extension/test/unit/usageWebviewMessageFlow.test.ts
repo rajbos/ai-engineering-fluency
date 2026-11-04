@@ -1642,6 +1642,45 @@ test('corrections filter reports how many moments are shown and can be cleared',
 	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 2);
 });
 
+test('every insight deep-link anchor resolves to its section inside the destination tab', async () => {
+	const stats = buildStats();
+	stats.repeatedTasks = {
+		minClusterSize: 2,
+		sessionsScanned: 20,
+		clusters: [{
+			representativePrompt: 'run the tests and fix the failures',
+			sessionCount: 3,
+			repositories: ['o/r1'],
+			sessions: [],
+			sharedKeywords: ['run', 'tests'],
+		}],
+	};
+	stats.curationAnalysis = {
+		windowDays: 30,
+		availableTools: [{ name: 'old-skill', source: 'skill' }],
+		unusedTools: [],
+		underusedMcpServers: [],
+		estimatedPromptBloat: { totalTokens: 0, byServer: {} },
+		recommendations: [],
+	};
+	const harness = await bootWebview(stats);
+	const targets = [
+		{ tab: 'tools', anchor: 'section-skill-suggestions', title: /Skill Suggestions/ },
+		{ tab: 'tools', anchor: 'section-tool-curation', title: /Tool Curation/i },
+		{ tab: 'activity', anchor: 'section-interaction-modes', title: /Interaction Modes/i },
+		{ tab: 'activity', anchor: 'section-model-efficiency', title: /Model/i },
+	];
+	for (const { tab, anchor, title } of targets) {
+		harness.scrolledTo.length = 0;
+		harness.post({ command: 'switchTab', tab, anchor });
+		await harness.settleScroll();
+		assert.deepEqual(harness.scrolledTo, [anchor], `${anchor} must be the scroll target`);
+		const section = harness.window.document.getElementById(anchor);
+		assert.ok(section.closest(`#tab-panel-${tab}`), `${anchor} must live in the ${tab} tab`);
+		assert.match(section.textContent, title);
+	}
+});
+
 test('repeated corrections re-renders keep one panel, one listener and a working filter toggle', async () => {
 	const harness = await bootWebview(buildStatsWithCorrections());
 	const document = harness.window.document;

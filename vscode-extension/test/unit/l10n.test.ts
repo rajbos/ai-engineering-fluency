@@ -2299,6 +2299,25 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 	}
 });
 
+test('l10n: the skill suggestions path in the insight names the real tab and section', () => {
+	const sectionTitle = (): string => t('usage.skillSuggestions.title', '').replace(/\s*[(（].*$/, '');
+	const assertPath = (): void => {
+		const expected = `${t('usage.tab.tools')} → ${sectionTitle()}`;
+		assert.ok(t('insight.repeatedTaskSkillCandidate.seeDetails').includes(expected), `seeDetails names ${expected}`);
+		assert.ok(t('insight.repeatedTaskSkillCandidate.more.one', 1).includes(expected), `more.one names ${expected}`);
+		assert.ok(t('insight.repeatedTaskSkillCandidate.more.other', 2).includes(expected), `more.other names ${expected}`);
+	};
+	mock.setLanguage('en');
+	assert.equal(sectionTitle(), 'Skill Suggestions');
+	assertPath();
+	mock.setLanguage('zh-cn');
+	try {
+		assertPath();
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Badge setup strings resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	const english: Record<string, string> = {

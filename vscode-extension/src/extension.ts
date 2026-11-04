@@ -10586,6 +10586,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.showUsageAnalysisOnTab('tools', anchor);
 	}
 
+	/** Opens the Tools & Integrations tab scrolled to Skill Suggestions, for the repeated-task insight. */
+	public async showUsageAnalysisOnSkillSuggestions(): Promise<void> {
+		await this.showUsageAnalysisOnToolsTab('section-skill-suggestions');
+	}
+
 	/** Opens the Usage Analysis panel and activates the Activity tab. */
 	public async showUsageAnalysisOnActivityTab(anchor = 'section-interaction-modes'): Promise<void> {
 		await this.showUsageAnalysisOnTab('activity', anchor);
@@ -16030,6 +16035,7 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
     ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
+    ["aiEngineeringFluency.openSkillSuggestions", "Open Skill Suggestions section command called", () => tokenTracker.showUsageAnalysisOnSkillSuggestions()],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
