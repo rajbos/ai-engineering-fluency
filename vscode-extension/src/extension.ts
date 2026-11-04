@@ -10570,7 +10570,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
+	public async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
 		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
 		await this.runOpenerFocused('usage', () => this.showUsageAnalysis());
 		await this.flushPendingAnalysisNavigation();
@@ -10597,7 +10597,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
-	public async showUsageAnalysisOnToolsTab(anchor = 'section-tool-curation'): Promise<void> {
+	public async showUsageAnalysisOnToolsTab(anchor?: string): Promise<void> {
 		await this.showUsageAnalysisOnTab('tools', anchor);
 	}
 
@@ -10644,10 +10644,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const prompt = _buildCorrectionImprovementPrompt(topRepo);
 		await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, isNewChat: true });
-	}
-
-	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
-		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
 	}
 
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
@@ -16045,11 +16041,13 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
     ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
+    ["aiEngineeringFluency.openToolCuration", "Open Tool Curation section command called", () => tokenTracker.showUsageAnalysisOnTab('health', 'section-tool-curation')],
+    ["aiEngineeringFluency.openSkillSuggestions", "Open Skill Suggestions section command called", () => tokenTracker.showUsageAnalysisOnTab('insights', 'section-skill-suggestions')],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
-    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnActivityTab('section-model-efficiency')],
     ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>

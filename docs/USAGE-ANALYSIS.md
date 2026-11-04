@@ -101,7 +101,7 @@ Tracks usage of MCP servers and tools:
 
 ### 5. Tool Curation
 
-The **Tools** tab includes a curation analysis section that compares the tools available in your environment against the tools actually used in the configured look-back window (default: last 30 days).
+The **Workspace Health** tab includes a curation analysis section that compares the tools available in your environment against the tools actually used in the configured look-back window (default: last 30 days).
 
 **Available tools are discovered from:**
 - MCP config files: `.vscode/mcp.json`, `.mcp.json`, `.vs/mcp.json`, `.cursor/mcp.json`, and `~/.mcp.json`

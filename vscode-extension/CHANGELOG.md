@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Changes
+- Usage Analysis: **Tool Curation** moved from Tools & Integrations to Workspace → Workspace Health, and **Skill Suggestions** moved to Coaching → Insights. Tools & Integrations now shows only tool telemetry
+
 ## [0.19.2] - 2026-10-28
 
 ### Features

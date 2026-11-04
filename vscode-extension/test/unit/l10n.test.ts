@@ -1958,6 +1958,20 @@ test('l10n: efficiency selected-period drill-down strings resolve in English and
 	}
 });
 
+test('l10n: the repeated-task insight names the Insights tab as Skill Suggestions\' location', () => {
+	assert.equal(t('insight.repeatedTaskSkillCandidate.more.one', 1), '1 more repeated task found — see Insights → Skill Suggestions.');
+	assert.equal(t('insight.repeatedTaskSkillCandidate.more.other', 2), '2 more repeated tasks found — see Insights → Skill Suggestions.');
+	assert.equal(t('insight.repeatedTaskSkillCandidate.seeDetails'), 'See Insights → Skill Suggestions for details.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('insight.repeatedTaskSkillCandidate.more.one', 1), '另外还发现 1 个重复任务——请查看洞察 → 技能建议。');
+		assert.equal(t('insight.repeatedTaskSkillCandidate.more.other', 2), '另外还发现 2 个重复任务——请查看洞察 → 技能建议。');
+		assert.equal(t('insight.repeatedTaskSkillCandidate.seeDetails'), '详情请查看洞察 → 技能建议。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Tools & Integrations tool-execution section strings resolve in both languages', () => {
 	assert.equal(t('usage.toolExec.reliability.title'), 'Tool execution reliability');
 	assert.equal(t('usage.toolExec.latency.title'), 'Tool latency profile');

@@ -64,14 +64,14 @@ not user settings.
 |---|---|---|
 | 📊 **Usage** | **My Activity** | *(three bands — see below)* |
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
-| 📁 **Workspace** | **Tools & Integrations** | Tool Usage (3 periods) · MCP Tools · Tool Curation · unknown-tool banner |
-| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) |
+| 📁 **Workspace** | **Tools & Integrations** | Tool Usage (3 periods) · tool execution stats · MCP Tools · unknown-tool banner |
+| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Tool Curation · Repository Hygiene Analysis |
 | | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
-| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
-| | **Corrections** | Corrections report · Skill Suggestions (repeated-task clusters) |
+| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) · Skill Suggestions (repeated-task clusters) |
+| | **Corrections** | Corrections report |
 
 The **My Activity** tab is itself banded, via section-group headings
 (`sectionGroupHeadingHtml`) rather than further tabs:

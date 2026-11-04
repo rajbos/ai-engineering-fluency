@@ -3022,6 +3022,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 			${customizationHtml}
 			${renderMissedPotential(stats)}
 			${buildMemorySectionsHtml(stats)}
+			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
 
 			<!-- Repository Setup Section -->
 			<div class="repo-hygiene-section" id="section-repo-hygiene" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
@@ -3314,7 +3315,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 		</div>`;
 }
 
-function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
+function buildInsightsTabPanelHtml(insights: EvaluatedInsight[], repeatedTasks: RepeatedTaskReport | null): string {
 	const applicable = insights.filter(i => i.status !== 'dismissed');
 	const newInsights = applicable.filter(i => i.status === 'new');
 	const otherInsights = applicable.filter(i => i.status !== 'new' && i.status !== 'done');
@@ -3347,6 +3348,7 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 					${allSection}
 				</div>
 			</div>
+			${safeSectionHtml('Skill Suggestions', () => buildSkillSuggestionsSectionHtml(repeatedTasks))}
 		</div>`;
 }
 
@@ -3804,7 +3806,7 @@ function buildUsageRootHtml(
 			${safeSectionHtml('AI Billing', () => buildBillingTabPanelHtml(stats))}
 			${safeSectionHtml('AI Readiness', () => darkFactoryTab.panel(activeTab))}
 			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
-			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
+			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? [], stats.repeatedTasks ?? null))}
 			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
@@ -5174,8 +5176,6 @@ function buildToolsTabPanelHtml(stats: UsageAnalysisStats): string {
 
 			${safeSectionHtml(localize('usage.tab.tools'), () => buildToolExecutionSectionsHtml({ toolCalls: stats.last30Days.toolCalls, mcpTools: stats.last30Days.mcpTools, resolveToolName: lookupToolName, hiddenTools: hideAutomaticToolCalls ? AUTOMATIC_TOOL_SET_WV : undefined }))}
 			${buildMcpToolsSectionHtml(stats)}
-			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
-			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 		</div>`;
 }
 

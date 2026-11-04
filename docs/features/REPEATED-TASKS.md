@@ -1,6 +1,6 @@
 # Skill Suggestions — repeated-task detection across sessions
 
-The **Skill Suggestions** section in the Usage Analysis view (Tools & Integrations tab) finds tasks
+The **Skill Suggestions** section in the Usage Analysis view (Coaching → Insights tab) finds tasks
 you keep prompting for manually — the same kind of request typed at the start of multiple sessions —
 and surfaces them as candidates for a reusable **skill**, prompt file, or custom agent. A repeated
 task is the strongest signal that a workflow has stabilized enough to be captured once and reused.

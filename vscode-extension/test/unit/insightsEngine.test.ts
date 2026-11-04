@@ -972,7 +972,27 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.ok(insight, 'should fire at sessionCount = 3');
 	assert.match(insight.body, /3 sessions/);
 	assert.match(insight.body, /run the tests/);
-	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openToolsTab');
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {
+	const stale = { name: 'old-skill', source: 'skill' };
+	const curation = makeCtx();
+	curation.curationAnalysis = {
+		underusedMcpServers: [],
+		unusedTools: [stale],
+		estimatedPromptBloat: { totalTokens: 3000 },
+		windowDays: 30,
+	} as unknown as typeof curation.curationAnalysis;
+	const results = evaluateInsights(curation, {}, 7, null);
+	for (const id of ['high-prompt-bloat', 'stale-skills']) {
+		assert.equal(results.find(i => i.id === id)?.actionCommand, 'aiEngineeringFluency.openToolCuration', id);
+	}
+
+	const repeated = makeCtx();
+	repeated.repeatedTasks = rtReport(3);
+	const body = evaluateInsights(repeated, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate')?.body ?? '';
+	assert.doesNotMatch(body, /Tools & Integrations/);
 });
 
 test('insight navigation actions target their destination tabs and sections', () => {
