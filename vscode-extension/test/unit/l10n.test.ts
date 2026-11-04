@@ -1854,12 +1854,10 @@ test('l10n: efficiency scope toolbar labels resolve in English', () => {
 		'efficiency.scope.allEditors': 'All editors',
 		'efficiency.scope.vendorLabel': 'Model vendor',
 		'efficiency.scope.allVendors': 'All vendors',
-		'efficiency.scope.drillLabel': 'Drill',
-		'efficiency.scope.drillPlaceholder': 'Drill into…',
 		'efficiency.scope.back': '↩ Back',
 		'efficiency.scope.backAria': 'Back to the previous range',
-		'efficiency.scope.drillHintWeekly': 'Click a week on a chart, or use the picker, to see its details',
-		'efficiency.scope.drillHintMonthly': 'Click a month on a chart, or use the picker, to see its details',
+		'efficiency.scope.drillHintWeekly': 'Click a week on a chart, or choose one under “Selected period”, to see its details',
+		'efficiency.scope.drillHintMonthly': 'Click a month on a chart, or choose one under “Selected period”, to see its details',
 		'efficiency.scope.announce': 'Showing {0}.',
 		'efficiency.scope.behaviorGap': '⚠️ Session-derived metrics (active minutes, retry rate, apply rate, skills) are only collected for the last {0} weeks, so earlier buckets in this range show gaps rather than zeros.',
 		'efficiency.scope.editorScoped': 'Scoped to {0}. Sessions whose editor could not be determined are excluded from this view.',
@@ -1895,14 +1893,12 @@ test('l10n: efficiency scope toolbar labels resolve in zh-cn', () => {
 			'efficiency.scope.allEditors': '所有编辑器',
 			'efficiency.scope.vendorLabel': '模型厂商',
 			'efficiency.scope.allVendors': '所有厂商',
-			'efficiency.scope.drillLabel': '下钻',
-			'efficiency.scope.drillPlaceholder': '下钻到…',
 			'efficiency.scope.back': '↩ 返回',
 			'efficiency.scope.backAria': '返回上一个范围',
 			'efficiency.scope.announce': '当前显示：{0}。',
 			'efficiency.scope.timeRangeGroup': '时间范围',
-			'efficiency.scope.drillHintWeekly': '点击图表中的某一周或使用选择器可查看其详情',
-			'efficiency.scope.drillHintMonthly': '点击图表中的某一月或使用选择器可查看其详情',
+			'efficiency.scope.drillHintWeekly': '点击图表中的某一周或在“所选周期”中选择，可查看其详情',
+			'efficiency.scope.drillHintMonthly': '点击图表中的某一月或在“所选周期”中选择，可查看其详情',
 			'efficiency.scope.behaviorGap': '⚠️ 会话派生指标（活跃分钟数、重试率、应用率、技能）仅收集最近 {0} 周的数据，因此该范围内较早的分桶显示为缺口而非零值。',
 			'efficiency.scope.editorScoped': '已限定为 {0}。无法确定所属编辑器的会话不计入此视图。',
 			'efficiency.scope.noDataFor': '{0}（无数据）',
@@ -1930,6 +1926,47 @@ test('l10n: efficiency placeholder templates keep their {0} slot for localizeFor
 	// The trends intro fills three slots — resolution, range and bucket count.
 	for (const slot of ['{0}', '{1}', '{2}']) {
 		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
+	}
+});
+
+// Efficiency Models tab section labels, and the toolbar drill picker they outlived.
+test('l10n: efficiency Models section labels resolve in English and zh-CN', () => {
+	const en: Record<string, string> = {
+		'efficiency.models.filtersNote': 'These filters apply to both the comparison and the drift chart below.',
+		'efficiency.models.headToHead.title': 'Head-to-head comparison',
+		'efficiency.models.headToHead.note': 'Compared over the periods you pick in this section. The time range under Drift over time does not change it.',
+		'efficiency.models.drift.title': 'Drift over time',
+		'efficiency.models.drift.note': "{0} values for each side's model over {1}, so a model getting better — or quietly getting worse — is visible. Gaps are buckets where the model was not used. This range only drives this chart and its selected period; the head-to-head comparison above keeps its own window pickers.",
+	};
+	for (const [key, english] of Object.entries(en)) {
+		assert.equal(t(key), english, `en value for ${key}`);
+	}
+	mock.setLanguage('zh-cn');
+	try {
+		const zh: Record<string, string> = {
+			'efficiency.models.filtersNote': '这些筛选条件同时作用于下方的对比和漂移图。',
+			'efficiency.models.headToHead.title': '正面对比',
+			'efficiency.models.headToHead.note': '按你在本节选择的时段进行对比。“随时间的漂移”下的时间范围不会改变它。',
+			'efficiency.models.drift.title': '随时间的漂移',
+			'efficiency.models.drift.note': '{1}内双方模型的{0}数值，便于看出模型是在变好，还是在悄悄变差。空缺表示该模型在对应时间段内未被使用。此范围只影响这张图表及其所选周期；上方的正面对比保留各自的时间窗口选择器。',
+		};
+		for (const [key, chinese] of Object.entries(zh)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: the efficiency hint names the Selected period control by its label, in both languages', () => {
+	assert.ok(t('efficiency.scope.drillHintWeekly').includes(t('efficiency.detail.pickerLabel')));
+	assert.ok(t('efficiency.scope.drillHintMonthly').includes(t('efficiency.detail.pickerLabel')));
+	mock.setLanguage('zh-cn');
+	try {
+		assert.ok(t('efficiency.scope.drillHintWeekly').includes(t('efficiency.detail.pickerLabel')));
+		assert.ok(t('efficiency.scope.drillHintMonthly').includes(t('efficiency.detail.pickerLabel')));
+	} finally {
+		mock.setLanguage('en');
 	}
 });
 

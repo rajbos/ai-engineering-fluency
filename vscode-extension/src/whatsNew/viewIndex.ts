@@ -258,13 +258,22 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 		description: 'Is AI getting cheaper and more effective for you? Trends, month-on-month changes, cost attribution and model comparisons.',
 		keywords: ['roi', 'value', 'productivity'],
 		children: [
-			{ id: 'efficiency.trends', title: 'Trends', description: 'Cost per 1K lines changed, tokens and turns per session, edit retry and apply rate over time.', nav: { tab: 'trends' } },
+			{
+				id: 'efficiency.trends',
+				title: 'Trends',
+				description: 'Cost per 1K lines, session size, retry and apply rate and lines per dollar, over a time range, resolution and editor you choose.',
+				keywords: ['filter', 'resolution', 'time range'],
+				nav: { tab: 'trends' },
+				children: [
+					{ id: 'efficiency.trends.selected-period', title: 'Selected period', description: 'One week, month or day in detail: raw volumes and each ratio against the period before. Also on Skills, Combined and Models.', keywords: ['drill down', 'bucket', 'show the days'], nav: { anchor: 'eff-bucket-detail' } },
+				],
+			},
 			{ id: 'efficiency.skills', title: 'Skills', description: 'Skill use over time, and whether skill-assisted sessions run differently.', nav: { tab: 'skills' } },
 			{ id: 'efficiency.deltas', title: 'Month vs Month', description: 'Each efficiency metric for this month against last month.', keywords: ['compare', 'delta'], nav: { tab: 'deltas' } },
 			{
 				id: 'efficiency.attribution',
 				title: 'Cost Attribution',
-				description: 'What moved your cost: volume, session size or model mix.',
+				description: 'What moved your cost between the last two 30-day windows: volume, session size or model mix.',
 				nav: { tab: 'attribution' },
 				children: [
 					{ id: 'efficiency.attribution.model-mix', title: 'Model mix movement', description: 'Which models gained or lost share between the periods, and what that did to cost.', nav: { anchor: 'attr-shift-heading' }, condition: 'When the model mix shifted' },
@@ -274,14 +283,15 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 			{
 				id: 'efficiency.models',
 				title: 'Models',
-				description: 'Head-to-head comparison of two models, or one model across two periods.',
+				description: 'Compare two models, one model across two periods, or one model across two harnesses, with outlier, mixed-session and cost-basis options.',
+				keywords: ['head-to-head', 'harness', 'editor', 'outliers', 'exact cost', 'task mix'],
 				nav: { tab: 'models' },
 				children: [
-					{ id: 'efficiency.models.shape', title: 'Shape of each side', description: 'Radar chart of how each side behaves across the comparison metrics.', nav: { anchor: 'model-radar' } },
-					{ id: 'efficiency.models.drift', title: 'Drift over time', description: 'How the compared metrics moved over the selected window.', nav: { anchor: 'model-trend' } },
+					{ id: 'efficiency.models.shape', title: 'Shape of each side', description: 'Radar chart of how each side behaves across the comparison metrics.', nav: { anchor: 'model-radar' }, condition: 'When both sides of the comparison have data' },
+					{ id: 'efficiency.models.drift', title: 'Drift over time', description: 'How one metric moved for each side\'s model, over a time range of its own that the head-to-head does not use.', nav: { anchor: 'model-trend' } },
 				],
 			},
-			{ id: 'efficiency.value', title: 'Value', description: 'Merged PRs, cost per merged PR, apply rate and work delegated to AI agents.', keywords: ['pull requests', 'roi'], nav: { tab: 'value' } },
+			{ id: 'efficiency.value', title: 'Value', description: 'What your AI use produced: apply rate and lines changed per dollar, plus merged PRs, cost per merged PR and agent-opened PRs once PR data has loaded.', keywords: ['pull requests', 'roi'], nav: { tab: 'value' } },
 			{ id: 'efficiency.combined', title: 'Combined', description: 'Several efficiency metrics on one chart.', nav: { tab: 'combined' } },
 		],
 	},

@@ -18,15 +18,17 @@ Above the scoped charts sits one compact toolbar:
 | **Resolution** | Auto, Daily, Weekly, Monthly — only the widths the range can honestly carry are offered |
 | **Editor** | Narrows to one editor/agent (VS Code, Claude Code, …) |
 | **Model vendor** | *Models tab only.* Narrows which models the A/B pickers offer |
-| **Drill** | Jumps into the days behind one week or month, with a chip and a **Back** action |
-| **Selected period** | A labelled picker (or a click on a chart point) opens a detail region for one bucket — see below |
+| **Drill chip** | While zoomed into the days behind one week or month: the range and a **Back** action |
 
 Every control is a real `<button>` or `<select>` with a label, so the toolbar is
 keyboard reachable; a live region under it announces the resulting scope
-("Showing Last 12 weeks, weekly buckets, all editors") after each change. The
-`Drill into…` picker is the keyboard equivalent of clicking a data point — a
-`<canvas>` is not focusable and its points are not in the accessibility tree,
-so without it the drill-down would be mouse-only.
+("Showing Last 12 weeks, weekly buckets, all editors") after each change.
+
+On **Models** the toolbar is split so each control sits beside what it drives.
+The editor and vendor filters stay above the head-to-head and the drift chart,
+because they narrow both; the time presets, resolution and drill chip move into
+the drift section, because the head-to-head never reads them. In harness mode the
+Editor filter is hidden, because that mode picks its own two editors.
 
 The whole scope (preset, resolution, editor, vendor, drill stack) is persisted
 through the webview state API, so reopening the panel lands you where you left.
@@ -37,8 +39,9 @@ A state blob written before this feature existed simply reads as the defaults.
 Trends, Combined, Skills and Models share one drill-down. Clicking a chart point
 **selects** that bucket; the labelled **Selected period** `<select>` does the
 same for keyboard and screen-reader users (a `<canvas>` point is not in the
-accessibility tree). The region beneath the chart is `role="region"` with
-`aria-live="polite"` and shows:
+accessibility tree). On every tab, the picker and its region sit directly above the
+chart they select from (on Models, the drift chart), and a chart click scrolls the
+region into view. The region is `role="region"` with `aria-live="polite"` and shows:
 
 - the date range, with an *in progress* marker while the bucket is still filling;
 - raw sessions, tokens, turns, lines changed and estimated cost;
