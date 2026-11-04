@@ -19,6 +19,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Diagnostics → Settings → Display: the per-account budget list now matches Billing, including its usage bars
 
 ### Changes
+- Diagnostics › Pricing Check now counts every session file in the time range you pick. It used to see only the last 14 days and at most 500 files, so All Time and Last Month totals could be far too low. A long range can take longer the first time, and the tab shows scan progress.
 - Diagnostics no longer has a Research group. Usage analytics moved to where you would look for them: output tokens per tool family is now in **Usage Analysis › Tools & Integrations**, per-skill invocations and descriptions in **Efficiency › Skills**, and time to first token in **Efficiency › TTFT**. Model Usage stays in Diagnostics as **Pricing Check**, and OTel Delta joins the Diagnostics group.
 - "Tokens per call" for a tool now uses completed calls everywhere, so the tool family tables and the Cost vs speed map agree. Figures that used to appear under Tool Analysis can be higher, because they no longer divide by calls with no recorded outcome.
 

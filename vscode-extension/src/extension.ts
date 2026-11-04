@@ -485,6 +485,7 @@ import { registerBadgeSetup, type BadgeSnapshot } from './badge/registerBadgeSet
 import { formatWindsurfDiagnosticsContent } from './windsurfDiagnosticsReport';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 import { TtftScanResultCache } from './ttftAnalysisCache';
+import { countFilesByEditor as _countFilesByEditor, scanPricingCheckFiles as _scanPricingCheckFiles } from './pricingCheckScan';
 import {
 	WHATS_NEW_RELEASES,
 	WHATS_NEW_MAX_RELEASES,
@@ -1248,6 +1249,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
 	private readonly ttftScanCache = new TtftScanResultCache();
+	// Incremented on each Pricing Check request; an in-flight scan stops once it is no longer the newest.
+	private pricingCheckScanId = 0;
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
@@ -13546,7 +13549,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
-      analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
+      analyzeModelUsage: () => this.diagHandleAnalyzeModelUsage(message),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -13792,49 +13795,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   }
 
   /**
-   * Computes [startMs, endMs) bounds for a Model Usage time-range filter, using the
-   * user's local calendar (not UTC) so "today"/"this week"/etc. match their wall clock.
-   * Returns null for 'all' (no filtering). Weeks start on Monday (ISO-8601 convention).
-   */
-  private getModelUsageTimeRangeBounds(range: string, now: Date = new Date()): { startMs: number; endMs: number } | null {
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const todayStart = startOfDay(now);
-    switch (range) {
-      case 'today':
-        return { startMs: todayStart, endMs: now.getTime() };
-      case 'yesterday': {
-        const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
-        return { startMs: yesterdayStart, endMs: todayStart };
-      }
-      case 'week': {
-        // ISO week: Monday = start. getDay() is 0=Sun..6=Sat; convert to days-since-Monday.
-        const dayOfWeek = (now.getDay() + 6) % 7;
-        const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).getTime();
-        return { startMs: weekStart, endMs: now.getTime() };
-      }
-      case 'month':
-        return { startMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(), endMs: now.getTime() };
-      case 'lastMonth':
-        return {
-          startMs: new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(),
-          endMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
-        };
-      default:
-        return null;
-    }
-  }
-
-  /** Resolves the best available timestamp (ms) for a session file, for time-range filtering. */
-  private getSessionFileTimestampMs(f: SessionFileDetails): number | null {
-    const raw = f.lastInteraction || f.firstInteraction || f.modified;
-    if (!raw) { return null; }
-    const parsed = Date.parse(raw);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-
-  /**
-   * Aggregates per-model token usage (and estimated cost) across the already-loaded
-   * diagnostics session files, optionally filtered to a single editor. Reuses the same
+   * Aggregates per-model token usage (and estimated cost) across every session file in the
+   * chosen range, optionally filtered to a single editor. Reuses the same
    * modelUsage data + calculateEstimatedCost() the dashboard uses, so the breakdown a
    * user sees here matches what drove their cost figures — useful for self-diagnosing
    * "why does my cost look wrong" reports without a separate script.
@@ -13846,28 +13808,39 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * CopilotCliAdapter.getModelUsage() legitimately returns {} for those files — see the
    * comment there for the verified schema. A mixed editor total can therefore show many
    * "matched, 0 attributed" files simply because a large fraction are DB-only sessions.
+   *
+   * Not behind dispatch(): its in-flight guard would drop a range change made during a slow scan,
+   * and the view would never get the answer it is waiting for. The newest request wins instead.
    */
   private async diagHandleAnalyzeModelUsage(message: any): Promise<void> {
     const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';
     const timeRange = typeof message?.timeRange === 'string' && message.timeRange ? message.timeRange : 'all';
-    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+    const panel = this.diagnosticsPanel;
+    if (!panel || !this.isPanelOpen(panel)) { return; }
 
     if (!this.diagnosticsHasLoadedFiles) {
-      this.diagnosticsPanel.webview.postMessage({
+      panel.webview.postMessage({
         command: 'modelUsageResult', editor, timeRange, fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0, stillLoading: true,
       });
       return;
     }
 
-    const files = this.diagnosticsCachedFiles;
-    const editorMatching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
-    const bounds = this.getModelUsageTimeRangeBounds(timeRange);
-    const matching = bounds
-      ? editorMatching.filter(f => {
-        const ts = this.getSessionFileTimestampMs(f);
-        return ts !== null && ts >= bounds.startMs && ts < bounds.endMs;
-      })
-      : editorMatching;
+    const scanId = ++this.pricingCheckScanId;
+    const isCurrent = () => scanId === this.pricingCheckScanId && this.isPanelOpen(panel);
+    const scan = await _scanPricingCheckFiles({
+      listSessionFiles: () => this.sessionDiscovery.getCopilotSessionFiles(),
+      statSessionFile: (file) => this.statSessionFile(file),
+      getSessionFileDetails: (file, stat) => this.getSessionFileDetails(file, stat),
+      isCancelled: () => !isCurrent(),
+      onProgress: (processed, total) => panel.webview.postMessage({ command: 'modelUsageScanProgress', processed, total }),
+    }, timeRange).catch((error) => {
+      this.error('Error scanning session files for the Pricing Check:', error);
+      if (isCurrent()) { panel.webview.postMessage({ command: 'modelUsageResult', editor, timeRange, scanFailed: true }); }
+      return null;
+    });
+    if (!scan) { return; }
+
+    const matching = editor === 'all' ? scan.files : scan.files.filter(f => (f.editorSource || 'Unknown') === editor);
     const { aggregated, filesWithUsage, sessionCounts } = this.aggregateModelUsage(matching);
 
     const rows = Object.entries(aggregated).map(([model, usage]) => ({
@@ -13887,7 +13860,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     // wall of zeros for this provider — hide it instead of showing dead data.
     const supportsCache1h = Object.keys(aggregated).some(model => this.modelPricing[model]?.cacheCreation1hCostPerMillion !== undefined);
 
-    this.diagnosticsPanel.webview.postMessage({
+    panel.webview.postMessage({
       command: 'modelUsageResult',
       editor,
       timeRange,
@@ -13896,6 +13869,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       rows,
       totalCost,
       supportsCache1h,
+      unreadableCount: scan.unreadableCount,
+      editorCounts: _countFilesByEditor(scan.files),
     });
   }
 

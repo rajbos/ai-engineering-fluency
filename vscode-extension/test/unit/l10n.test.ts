@@ -2506,6 +2506,12 @@ test('l10n: strings for the tabs moved out of Diagnostics Research resolve in bo
 	assert.equal(t('diagnostics.pricingCheck.tab'), 'Pricing Check');
 	assert.equal(t('diagnostics.pricingCheck.title'), '🧮 Pricing Check');
 	assert.match(t('diagnostics.pricingCheck.body'), /Local Model Leaderboard/);
+	assert.match(t('diagnostics.pricingCheck.scope'), /every session file/);
+	assert.equal(t('diagnostics.pricingCheck.scanProgress', 3, 9), '⏳ Scanning session files… (3/9)');
+	assert.equal(t('diagnostics.pricingCheck.unreadable.title'), 'Some session files are not counted');
+	assert.equal(t('diagnostics.pricingCheck.unreadable.body', 2), '2 session file(s) could not be read, so the total may be too low.');
+	assert.equal(t('diagnostics.pricingCheck.scanFailed.title'), 'Could not scan session files');
+	assert.match(t('diagnostics.pricingCheck.scanFailed.body'), /no total is shown/);
 	assert.equal(t('whatsNew.feature.diagnostics.ttft-tab.title'), 'Efficiency → TTFT');
 	mock.setLanguage('zh-cn');
 	try {
@@ -2524,6 +2530,12 @@ test('l10n: strings for the tabs moved out of Diagnostics Research resolve in bo
 		assert.equal(t('efficiency.skills.col.description'), '说明');
 		assert.equal(t('diagnostics.pricingCheck.tab'), '定价检查');
 		assert.equal(t('diagnostics.pricingCheck.title'), '🧮 定价检查');
+		assert.match(t('diagnostics.pricingCheck.scope'), /所有会话文件/);
+		assert.equal(t('diagnostics.pricingCheck.scanProgress', 3, 9), '⏳ 正在扫描会话文件…（3/9）');
+		assert.equal(t('diagnostics.pricingCheck.unreadable.title'), '部分会话文件未计入');
+		assert.equal(t('diagnostics.pricingCheck.unreadable.body', 2), '有 2 个会话文件无法读取，因此总额可能偏低。');
+		assert.equal(t('diagnostics.pricingCheck.scanFailed.title'), '无法扫描会话文件');
+		assert.match(t('diagnostics.pricingCheck.scanFailed.body'), /不显示总额/);
 		assert.equal(t('whatsNew.feature.diagnostics.ttft-tab.title'), '效率 → 首字延迟');
 	} finally {
 		mock.setLanguage('en');
