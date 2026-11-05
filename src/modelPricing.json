@@ -822,6 +822,24 @@
       ],
       "cachedInputCostPerMillion": 0.5
     },
+    "mistral-large-4-0-3": {
+      "inputCostPerMillion": 0.5,
+      "outputCostPerMillion": 1.5,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "displayNames": [
+        "Mistral Large 4"
+      ]
+    },
+    "mistral-large-4-0": {
+      "inputCostPerMillion": 0.5,
+      "outputCostPerMillion": 1.5,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "displayNames": [
+        "Mistral Large 4"
+      ]
+    },
     "mistral-large-latest": {
       "inputCostPerMillion": 0.5,
       "outputCostPerMillion": 1.5,
