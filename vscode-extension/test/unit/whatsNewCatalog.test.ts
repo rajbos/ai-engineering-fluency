@@ -151,3 +151,8 @@ test('findFeature', async (t) => {
 		assert.equal(findFeature('nope.not-a-feature'), null);
 	});
 });
+
+test('catalog: the TTFT entry keeps its id and takes the user to the tab\'s new home', () => {
+	const feature = WHATS_NEW_RELEASES.flatMap((release) => release.features).find((f) => f.id === 'diagnostics.ttft-tab');
+	assert.deepEqual(feature?.surface, { view: 'efficiency', tab: 'ttft' });
+});

@@ -85,11 +85,12 @@ the guardrail working, not a bug.
 
 ### Time and resolution
 
-The time preset and resolution drive the **Drift over time** chart at the bottom
-of the tab (daily, weekly or monthly buckets over 30 days to a year, with
-click-to-drill into a bucket's days). The head-to-head comparison keeps its own
-window pickers, because "baseline vs compared period" is a different question
-from "how far back does the drift chart go".
+The time preset and resolution sit in the **Drift over time** section at the
+bottom of the tab and drive only its chart (daily, weekly or monthly buckets over
+30 days to a year; click a point or use **Selected period** to open one bucket, and
+**Show the days** to zoom in). The head-to-head comparison keeps its own window
+pickers in its own section, because "baseline vs compared period" is a different
+question from "how far back does the drift chart go".
 
 ## What it measures
 

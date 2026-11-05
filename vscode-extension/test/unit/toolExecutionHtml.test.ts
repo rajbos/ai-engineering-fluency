@@ -9,6 +9,7 @@ import {
     formatLatencyMs,
     type ToolExecutionSectionsInput,
 } from '../../src/webview/usage/toolExecutionHtml';
+import { buildToolFamilySectionHtml, sanitizeToolFamilies } from '../../src/webview/usage/toolFamilySection';
 import type { LatencyHistogram } from '../../src/webview/shared/types';
 
 /** Mirrors formatUtils.escapeHtml for the one assertion that needs the escaped form of an id. */
@@ -170,4 +171,65 @@ test('all sections: tool ids are HTML-escaped and the four sections render in or
     assert.equal(html.includes(escapeHtmlForTest(rawId)), true, 'tool id must be rendered escaped');
     const order = ['section-tool-reliability', 'section-tool-latency', 'section-mcp-health', 'section-tool-cost-speed'].map(id => html.indexOf(`id="${id}"`));
     assert.ok(order.every((pos, i) => pos >= 0 && (i === 0 || pos > order[i - 1])), `sections out of order: ${order.join(',')}`);
+});
+
+// ── Output tokens by tool family ──────────────────────────────────────────────
+
+const FAMILIES = [
+    { id: 'reading', name: 'File Reading', builtIn: ['view'], alternatives: ['powershell'], description: 'Reads <files>.' },
+];
+
+function familySection(overrides: Partial<ToolExecutionSectionsInput> = {}, families = FAMILIES): string {
+    const input = sampleInput(overrides);
+    return buildToolFamilySectionHtml({ ...input, families });
+}
+
+test('tool family section and cost vs speed map report the same tokens per call for a tool', () => {
+    const costSpeed = rowCells(buildCostSpeedSectionHtml(sampleInput())).find(cells => cells[0] === 'View File');
+    const family = rowCells(familySection()).find(cells => cells[0].includes('View File'));
+    assert.ok(costSpeed && family);
+    assert.equal(costSpeed[4], '1,000', 'cost vs speed: 100,000 tokens over 100 completed calls');
+    assert.equal(family[3], costSpeed[4], 'the family table must not divide by the 130 starts in byTool');
+    assert.equal(family[1], '100', 'and it shows the completed calls it divides by');
+});
+
+test('tool family section: names, badges, baseline and comparison', () => {
+    const html = familySection();
+    assert.match(html, /id="section-tool-families"/);
+    assert.match(html, /id="btn-open-tool-families-settings"/);
+    assert.match(html, /File Reading/);
+    assert.match(html, /Reads &lt;files&gt;\./, 'a family description from settings is escaped');
+    assert.deepEqual(tableHeaders(html).slice(0, 5), ['Tool', 'Completed calls', 'Total output tokens', 'Tokens / call', 'vs Built-in']);
+    const rows = rowCells(html);
+    const view = rows.find(cells => cells[0].includes('View File'));
+    const shell = rows.find(cells => cells[0].includes('powershell'));
+    assert.equal(view?.[4], 'baseline');
+    assert.equal(shell?.[4], '20%', '200 tokens per call against the 1,000 baseline');
+    assert.match(html, /tool-type-badge built-in/);
+    assert.match(html, /tool-type-badge alternative/);
+});
+
+test('tool family section: tools no family lists go under Other Tools, without badges', () => {
+    const html = familySection({}, []);
+    assert.match(html, /Other Tools/);
+    assert.doesNotMatch(html, /tool-type-badge/);
+});
+
+test('tool family section: hidden tools are left out, tool ids are escaped, and no data shows the empty state', () => {
+    const hidden = familySection({ hiddenTools: new Set(['view']) });
+    assert.doesNotMatch(hidden, /View File/);
+
+    const tricky = '<img src=x>';
+    const escaped = familySection({ toolCalls: { total: 1, byTool: {}, completedByTool: { [tricky]: 1 }, outputTokensByTool: { [tricky]: 5 } }, resolveToolName: id => id });
+    assert.doesNotMatch(escaped, /<img/);
+    assert.ok(escaped.includes(escapeHtmlForTest(tricky)));
+
+    assert.match(familySection({ toolCalls: { total: 1, byTool: { view: 1 } } }), /No tools with output-token data/);
+});
+
+test('sanitizeToolFamilies keeps well-formed families and drops the rest', () => {
+    assert.deepEqual(sanitizeToolFamilies('nope'), []);
+    assert.deepEqual(sanitizeToolFamilies([null, { id: 1, name: 'x' }, { id: 'a', name: 'A', builtIn: ['x', 2], alternatives: 'y', description: 3 }]), [
+        { id: 'a', name: 'A', builtIn: ['x'], alternatives: [] },
+    ]);
 });

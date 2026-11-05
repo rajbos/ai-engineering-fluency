@@ -14,6 +14,7 @@
  */
 import type { DailyTokenStats, ModelUsage, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats } from './types';
 import { preferActualTokens } from './statsHelpers';
+import { skillDescriptionsFromStats } from './diagnosticsViewBuilder';
 import {
 	buildEfficiencyTrends,
 	buildSkillUsageTrends,
@@ -145,6 +146,10 @@ export interface EfficiencyViewInputs {
 	backendConfigured: boolean;
 	compactNumbers: boolean;
 	isDebugMode: boolean;
+	/** Extra skill descriptions the host can resolve (workspace SKILL.md files, built-ins). */
+	extraSkillDescriptions?: Record<string, string>;
+	/** True for a host that answers the TTFT tab's `analyzeTtft` request. */
+	ttftAvailable: boolean;
 }
 
 /** No PR data: the Value tab shows its "load repository PRs" hint instead of zeroes. */
@@ -209,6 +214,8 @@ export function buildEfficiencyViewData(inputs: EfficiencyViewInputs): Efficienc
 		skillTrends,
 		skillImpact,
 		hasSkills: skillTrends.totalCalls > 0,
+		skillDescriptions: { ...skillDescriptionsFromStats(usage), ...inputs.extraSkillDescriptions },
+		ttftAvailable: inputs.ttftAvailable,
 		modelDaily,
 		hasModelComparison: listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
 		dailyVolume,

@@ -4,14 +4,15 @@
  * `diagnostics --json`.
  *
  * Fields that are VS Code state (backend sync, globalState counters, Copilot quota,
- * budgets, per-editor skill counts) and the per-session detail table (the CLI has no
- * Diagnostics webview to feed) are passed as the builder's documented "not available in
- * this host" values, never omitted.
+ * budgets) and the per-session detail table (the CLI has no Diagnostics webview to feed)
+ * are passed as the builder's documented "not available in this host" values, never
+ * omitted. The usage fields the webview no longer reads stay in the JSON output through
+ * `buildDiagnosticsCliUsageFields()`.
  */
 import * as fs from 'fs';
 import * as os from 'os';
 import type { UsageAnalysisStats } from '../../src/types';
-import { buildCacheInfo, buildDiagnosticsViewData, buildSessionFolderData } from '../../src/diagnosticsViewBuilder';
+import { buildCacheInfo, buildDiagnosticsCliUsageFields, buildDiagnosticsViewData, buildSessionFolderData } from '../../src/diagnosticsViewBuilder';
 import type { DiagnosticsViewData } from '../../src/diagnosticsViewBuilder';
 import { mergeToolFamilies } from '../../src/toolFamilies';
 import { getEcosystems } from './sessionProcessing';
@@ -25,7 +26,7 @@ export async function createDiagnosticsPayload(
 	usageStats: UsageAnalysisStats | null,
 	report: string,
 	diagnosticPaths: { path: string; exists: boolean; source: string }[],
-): Promise<DiagnosticsViewData & { diagnosticPaths: { path: string; exists: boolean; source: string }[] }> {
+): Promise<DiagnosticsViewData & ReturnType<typeof buildDiagnosticsCliUsageFields> & { diagnosticPaths: { path: string; exists: boolean; source: string }[] }> {
 	const preview: { file: string; size: number; modified: string }[] = [];
 	for (const file of sessionFiles.slice(0, SESSION_FILE_PREVIEW_LIMIT)) {
 		try {
@@ -54,10 +55,8 @@ export async function createDiagnosticsPayload(
 			displaySettings: { showTokens: true, showCost: true, monthlyBudget: 0 },
 			quotaEntitlements: null,
 			accountBudgets: [],
-			usageStats,
-			skillCallsByEditor: null,
-			toolFamilies: mergeToolFamilies([]),
 		}),
+		...buildDiagnosticsCliUsageFields(usageStats, mergeToolFamilies([])),
 		diagnosticPaths,
 	};
 }

@@ -377,7 +377,7 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 // --- Time-to-first-token analysis ---
 import { buildTtftBuckets as _buildTtftBuckets, buildTtftModelSeries as _buildTtftModelSeries, type TtftGranularity } from '../../src/ttftAnalysis';
 
-/** How far back the Research > TTFT tab's scan-range picker looks for session files; 'all' skips the mtime filter entirely. */
+/** How far back the Efficiency > TTFT tab's scan-range picker looks for session files; 'all' skips the mtime filter entirely. */
 type TtftScanRange = '14d' | '30d' | '90d' | '180d' | '365d' | 'all';
 const TTFT_SCAN_RANGE_DAYS: Record<Exclude<TtftScanRange, 'all'>, number> = { '14d': 14, '30d': 30, '90d': 90, '180d': 180, '365d': 365 };
 /** Resolves a scan-range picker value to a lookback window in ms, or null for 'all' (no mtime filter). */
@@ -477,7 +477,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
-import { isGuidMcpTool, isKnownToolDisplayName, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
+import { getUnknownToolNames } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
@@ -1245,12 +1245,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private diagnosticsHasLoadedFiles: boolean = false;
 	// Cache of the last loaded detailed session files for diagnostics view
 	private diagnosticsCachedFiles: SessionFileDetails[] = [];
-	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
-	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
-	private diagnosticsAllSessionFiles: string[] = [];
 
 	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
-	private readonly diagnosticsTtftCache = new TtftScanResultCache();
+	private readonly ttftScanCache = new TtftScanResultCache();
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
@@ -1676,10 +1673,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
 	private _lastMissedPotential?: MissedPotentialWorkspace[];
-	// Per-skill, per-editor invocation counts for the last-30-days window (Skill Usage tab).
+	// Per-skill, per-editor invocation counts for the last-30-days window.
 	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
 	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
-	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
 	// Per-tool, per-editor call counts for the last-30-days window, so the "Report Unknown Tools"
 	// issue can say which editor each unknown tool was seen in. Reset at the top of each refresh.
 	private _toolCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
@@ -2608,8 +2604,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
 			this.diagnosticsHasLoadedFiles = false;
 			this.diagnosticsCachedFiles = [];
-			this.diagnosticsAllSessionFiles = [];
-			this.diagnosticsTtftCache.clear();
+			this.ttftScanCache.clear();
 
 			if (durablyCleared) {
 				this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
@@ -2801,8 +2796,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 				this.diagnosticsHasLoadedFiles = false;
 				this.diagnosticsCachedFiles = [];
-				this.diagnosticsAllSessionFiles = [];
-				this.diagnosticsTtftCache.clear();
+				this.ttftScanCache.clear();
 
 				if (this.efficiencyPanel) {
 					this.log('⚡ Rebuilding the open Efficiency view after a peer window\'s clear...');
@@ -2811,7 +2805,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 				// Resetting diagnosticsHasLoadedFiles alone only affects the *next* request a webview
 				// happens to send — it does not itself make one happen. An already-open panel's next
-				// modelUsageResult/ttftResult request would just see the reset flag and reply with
+				// modelUsageResult request would just see the reset flag and reply with
 				// stillLoading: true forever, with nothing having scheduled a real load to eventually
 				// flip it back. Proactively kicking off the same background load
 				// showDiagnosticReport() already triggers whenever the panel is revealed closes that
@@ -3770,25 +3764,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private getUnknownMcpToolsFromStats(stats: UsageAnalysisStats): string[] {
-		const allTools = new Set<string>();
-		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
-		// MCP server names are rendered through the same friendly-name lookup in the
-		// "By Server" tables, so include them in the missing-name detection too.
-		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
-		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
-		const suppressed = new Set<string>(
-			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
-		);
-		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isKnownToolDisplayName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
-	}
-
 	private async showUnknownMcpToolsBanner(): Promise<void> {
 		const dismissedKey = 'news.unknownMcpTools.dismissedVersion';
 		const dismissedVersion = this.context.globalState.get<string>(dismissedKey);
@@ -3802,7 +3777,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		const stats = await this.calculateUsageAnalysisStats(true);
-		const unknownTools = this.getUnknownMcpToolsFromStats(stats);
+		const unknownTools = getUnknownToolNames(
+			stats,
+			this.toolNameMap,
+			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', []),
+		);
 		if (unknownTools.length === 0) {
 			return;
 		}
@@ -5996,7 +5975,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Recorded *before* the panels publish, not after. _buildAnalysisUpdateData() and the
 		// initial Usage Analysis payload both read monthBillingGroupCosts through
 		// currentDetailedStats, and that accessor reads empty until this stamp lands — so
-		// publishing first dropped the Copilot Billing Coverage section from the very refresh
+		// publishing first dropped the AI Billing Coverage section from the very refresh
 		// that was holding the figure.
 		this.recordDetailedStats(detailedStats, startedAtGeneration);
 
@@ -7404,10 +7383,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days = timedStepSync(lg, 'auto-compaction stats', () => this.buildAutoCompactionStats(usageResults, now));
 			correctionReport = timedStepSync(lg, 'correction report', () => this.buildCorrectionReport(usageResults));
 			repeatedTasks = timedStepSync(lg, 'repeated-task report', () => this.buildRepeatedTaskReport(usageResults));
-			this._lastSkillCallsByEditor = {};
-			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
-				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
-			}
 			await timedStep(lg, 'workspace dedup + customization scans', () => this.deduplicateWorkspacePathsWithScans(workspaceSessionCounts, workspaceInteractionCounts));
 			timedStepSync(lg, 'customization matrix', () => this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts));
 			await timedStep(lg, 'multi-agent parent count (data.db)', () => this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey));
@@ -8694,8 +8669,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/**
 	 * Accumulate this session's skill invocations into `_skillCallsByEditorAccum`
-	 * (skillName -> editorSource -> count), powering the Skill Usage tab's per-editor
-	 * breakdown/filter. Only resolves editorSource when there's actually a skill call to
+	 * (skillName -> editorSource -> count), which names the skills to find descriptions for
+	 * and the workspaces to look in. Only resolves editorSource when there's actually a skill call to
 	 * attribute, since `detectEditorSource` does path-based work best skipped otherwise.
 	 */
 	private _accumulateSkillCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis, workspaceFolderPath?: string): void {
@@ -8741,7 +8716,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
+	 * Skill name -> description, for the Efficiency Skills tab. Covers the skills invoked in the
+	 * last 30 days plus those in `sessionInputs`, whose window is longer. Three tiers, in order:
 	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
 	 *    the currently open workspace(s)).
 	 * 2. For an invoked skill still missing a description — e.g. one invoked from a repo
@@ -8752,10 +8728,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *    baked into the binary with no SKILL.md anywhere to find. This static, hand-curated
 	 *    list (sourced from Claude Code's and Copilot CLI's official docs) is the last resort.
 	 */
-	private _buildSkillDescriptions(): Record<string, string> {
+	private _buildSkillDescriptions(sessionInputs: readonly { skillCalls?: Record<string, number> }[] = []): Record<string, string> {
 		const descriptions = skillDescriptionsFromStats(this.currentUsageAnalysisStats);
 		const builtins = builtinCommandDescriptionsData as { [key: string]: string };
-		for (const skillName of this._skillCallsByEditorAccum.keys()) {
+		const skillNames = new Set([...this._skillCallsByEditorAccum.keys(), ...sessionInputs.flatMap(s => Object.keys(s.skillCalls ?? {}))]);
+		for (const skillName of skillNames) {
 			if (descriptions[skillName]) { continue; }
 			const workspacePaths = this._skillWorkspacePathsAccum.get(skillName);
 			const found = workspacePaths && workspacePaths.size > 0
@@ -9994,18 +9971,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * null immediately with no I/O — see resolveDebugLogCandidatePaths in workspaceHelpers.ts.
 	 *
 	 * The scan result is cached per scan-range selector so granularity-only changes can reuse the
-	 * same sample set instantly. When the range changes, the first miss for that range scans
-	 * `diagnosticsAllSessionFiles` — the full, unfiltered discovery list — rather than
-	 * `diagnosticsCachedFiles`, which is capped to the last 14 days / 500 files for the rest of
-	 * the Diagnostics screen. That cap silently hid real `attrs.ttft` data that exists on disk
-	 * but is older than 14 days; the tab's own picker widens the search instead. Debug-log-shaped
+	 * same sample set instantly. When the range changes, the first miss for that range scans the
+	 * full, unfiltered discovery list rather than `diagnosticsCachedFiles`, which only the
+	 * Diagnostics panel fills and which is capped to the last 14 days / 500 files. That cap
+	 * silently hid real `attrs.ttft` data that exists on disk but is older than 14 days; the
+	 * tab's own picker widens the search instead. Debug-log-shaped
 	 * candidates are found cheaply first (no I/O — a path check), then only those are stat'd for
 	 * the requested range on a cache miss.
 	 */
 	private async collectTtftSamples(scanRange: TtftScanRange): Promise<{ samples: TtftSample[]; fileCount: number }> {
-		return this.diagnosticsTtftCache.getOrLoad(scanRange, async () => {
+		return this.ttftScanCache.getOrLoad(scanRange, async () => {
 			const scanRangeMs = ttftScanRangeToMs(scanRange);
-			const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
+			const candidates = (await this.sessionDiscovery.getCopilotSessionFiles()).filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
 			const CONCURRENCY = 20;
 			let inRange = candidates;
 			if (scanRangeMs !== null) {
@@ -10570,7 +10547,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
+	public async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
 		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
 		await this.runOpenerFocused('usage', () => this.showUsageAnalysis());
 		await this.flushPendingAnalysisNavigation();
@@ -10597,7 +10574,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
-	public async showUsageAnalysisOnToolsTab(anchor = 'section-tool-curation'): Promise<void> {
+	public async showUsageAnalysisOnToolsTab(anchor?: string): Promise<void> {
 		await this.showUsageAnalysisOnTab('tools', anchor);
 	}
 
@@ -10617,11 +10594,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	public async showUsageAnalysisOnReposTab(): Promise<void> {
 		await this.showUsageAnalysisOnTab('repos');
-	}
-
-	/** Opens the Usage Analysis panel and activates the GitHub › Billing tab (AI Billing Coverage). */
-	public async showUsageAnalysisOnBillingTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('billing');
 	}
 
 	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
@@ -10644,10 +10616,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const prompt = _buildCorrectionImprovementPrompt(topRepo);
 		await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, isNewChat: true });
-	}
-
-	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
-		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
 	}
 
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
@@ -10689,6 +10657,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _getAnalysisMessageHandlers(): Record<string, (message: any) => Promise<void> | void> {
 		return {
 			refresh: () => this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel()),
+			openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:analysis', () => vscode.commands.executeCommand('workbench.action.openSettings', 'aiEngineeringFluency.toolFamilies')),
 			analyseRepository: (message) => this.dispatch('analyseRepository', () => this.handleAnalyseRepository(message.workspacePath)),
 			analyseAllRepositories: () => this.dispatch('analyseAllRepositories', () => this.handleAnalyseAllRepositories()),
 			openCopilotChatWithPrompt: (message) => this.dispatch('openCopilotChatWithPrompt', () =>
@@ -10838,6 +10807,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 			use24HourTime: this.getUse24HourTimeSetting(),
 			suppressedUnknownTools: vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', []),
+			toolFamilies: getToolFamilies(),
 			insights: this.insightEvaluationState(),
 		});
 	}
@@ -11736,7 +11706,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	private async handleMaturityExportCommand(message: any): Promise<void> {
 		switch (message.command) {
-			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
+			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data, message.kind === 'toolbox')); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
 			case 'copyText': if (typeof message.text === 'string') { await this.dispatch('copyText:maturity', () => this.maturityHandleCopyText(message.text)); } break;
@@ -11904,7 +11874,7 @@ private async resetDismissedFluencyTips(): Promise<void> {
     this.log("Showed chart download instructions");
   }
 
-  private async saveChartImageData(dataUrl: string): Promise<void> {
+  private async saveChartImageData(dataUrl: string, isToolboxCard = false): Promise<void> {
     const base64Match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
     if (!base64Match) {
       void vscode.window.showErrorMessage(
@@ -11914,9 +11884,9 @@ private async resetDismissedFluencyTips(): Promise<void> {
     }
 
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file("copilot-fluency-score.png"),
+      defaultUri: vscode.Uri.file(isToolboxCard ? "ai-coding-toolbox.png" : "copilot-fluency-score.png"),
       filters: { "PNG Image": ["png"] },
-      title: "Save Fluency Score Chart",
+      title: isToolboxCard ? l10n.t('share.toolbox.saveImageTitle') : "Save Fluency Score Chart",
     });
 
     if (!uri) {
@@ -12255,6 +12225,7 @@ private async resetDismissedFluencyTips(): Promise<void> {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
 			if (message.command === 'refresh') { await this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()); }
+			if (message.command === 'analyzeTtft') { await this.handleAnalyzeTtft(message); }
 			if (message.command === 'efficiencyWebviewReady') {
 				const replayed = await this.efficiencyMessageReplay.markReady();
 				this.log(`📨 Efficiency webview ready (${message.reason ?? 'unknown'}); replayed: ${replayed.length ? replayed.join(', ') : 'nothing buffered'}`);
@@ -12310,6 +12281,7 @@ private async resetDismissedFluencyTips(): Promise<void> {
 		const panel = this.efficiencyPanel;
 		if (!panel) { return; }
 		this.log('🔄 Refreshing Efficiency view');
+		this.ttftScanCache.clear();
 		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
 		// show the same loading screen with live progress rather than a frozen view.
 		let data: EfficiencyViewData;
@@ -12679,6 +12651,8 @@ private async resetDismissedFluencyTips(): Promise<void> {
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
 			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
+			extraSkillDescriptions: this._buildSkillDescriptions(sessionInputs),
+			ttftAvailable: true,
 		});
 	}
 
@@ -13558,15 +13532,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (this.handleLocalViewRegressionMessage(message)) { return; }
     if (await this.dispatchSharedCommand(message)) { return; }
     const simpleCommands: Record<string, () => Promise<void>> = {
+      refresh: () => this.dispatch('refresh:diagnostics', () => this.refreshDiagnosticsPanel()),
       copyReport: () => this.dispatch('copyReport:diagnostics', () => this.diagHandleCopyReport()),
       openIssue: () => this.dispatch('openIssue:diagnostics', () => this.diagHandleOpenIssue()),
       clearCache: () => this.dispatch('clearCache:diagnostics', () => this.diagHandleClearCache()),
 			resetInsightsState: () => this.dispatch('resetInsightsState:diagnostics', () => this.resetInsightsState()),
       configureBackend: () => this.dispatch('configureBackend:diagnostics', () => this.diagHandleConfigureBackend()),
       configureTeamServer: () => this.dispatch('configureTeamServer:diagnostics', () => this.diagHandleConfigureTeamServer()),
-      openSettings: () => this.dispatch('openSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend")),
       openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
-      openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.toolFamilies")),
       resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
       resetDiscoveredEditors: () => this.dispatch('resetDiscoveredEditors:diagnostics', () => this.diagHandleResetDiscoveredEditors()),
       authenticateGitHub: () => this.dispatch('authenticateGitHub:diagnostics', () => this.diagHandleGitHubAuth(true)),
@@ -13574,10 +13547,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
-      analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
+  }
+
+  private async refreshDiagnosticsPanel(): Promise<void> {
+    const panel = this.diagnosticsPanel;
+    if (!panel) { return; }
+    this.log("🔄 Refreshing Diagnostic Report");
+    await this.updateTokenStats();
+    await this.loadDiagnosticDataInBackground(panel);
   }
 
   private async handleDiagnosticConditionalCommand(message: any): Promise<void> {
@@ -13921,34 +13901,33 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
   /**
    * Computes time-to-first-token averages (overall and per model) bucketed by day/week/month,
-   * for the Research > TTFT diagnostics tab. Reads every session's debug log fresh on each
-   * request rather than persisting samples in the session cache — TTFT is a Research-tab
-   * curiosity, not something the dashboard's cost/token numbers depend on, so it doesn't
-   * warrant a session-cache schema change. The scan range comes from the tab's own picker
-   * (default 14 days, up to "all time") rather than the Diagnostics screen's 14-day/500-file
-   * discovery cap, which would otherwise silently hide real `attrs.ttft` data on older sessions.
-   * See collectTtftSamples() for the scan and docs/logFilesSchema/vscode-chat-debug-log-format.md
+   * for the Efficiency > TTFT tab. Reads every session's debug log fresh on each request rather
+   * than persisting samples in the session cache — TTFT is not something the dashboard's
+   * cost/token numbers depend on, so it doesn't warrant a session-cache schema change. The scan
+   * range comes from the tab's own picker (default 14 days, up to "all time"). See
+   * collectTtftSamples() for the scan and docs/logFilesSchema/vscode-chat-debug-log-format.md
    * for what attrs.ttft is and isn't.
+   *
+   * Not behind dispatch(): its in-flight guard would drop a range change made during a slow scan,
+   * and the view would never get the answer it is waiting for.
    */
-  private async diagHandleAnalyzeTtft(message: any): Promise<void> {
+  private async handleAnalyzeTtft(message: any): Promise<void> {
     const granularity: TtftGranularity = message?.granularity === 'week' || message?.granularity === 'month' ? message.granularity : 'day';
     const scanRange: TtftScanRange = message?.scanRange === '30d' || message?.scanRange === '90d' || message?.scanRange === '180d' || message?.scanRange === '365d' || message?.scanRange === 'all'
       ? message.scanRange
       : '14d';
-    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
-
-    if (!this.diagnosticsHasLoadedFiles) {
-      this.diagnosticsPanel.webview.postMessage({ command: 'ttftResult', granularity, buckets: [], series: [], sampleCount: 0, fileCount: 0, stillLoading: true });
-      return;
-    }
-
-    const { samples, fileCount } = await this.collectTtftSamples(scanRange);
+    const { samples, fileCount } = await this.collectTtftSamples(scanRange).catch((error) => {
+      this.error('Error scanning debug logs for TTFT:', error);
+      return { samples: [] as TtftSample[], fileCount: 0 };
+    });
     const buckets = _buildTtftBuckets(samples, granularity);
     const series = _buildTtftModelSeries(buckets);
 
-    this.diagnosticsPanel.webview.postMessage({
+    // The view drops an answer for a selection it no longer shows, so a replaced document is safe.
+    this.efficiencyPanel?.webview.postMessage({
       command: 'ttftResult',
       granularity,
+      scanRange,
       buckets: buckets.map(b => ({ key: b.key, label: b.label, avgSeconds: b.avgSeconds, count: b.count })),
       series,
       sampleCount: samples.length,
@@ -14990,8 +14969,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       this.lastDiagnosticReport = report;
 
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-      this.diagnosticsAllSessionFiles = sessionFiles;
-      this.diagnosticsTtftCache.clear();
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
@@ -15014,10 +14991,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         githubAuth: githubAuthStatus,
         accountBudgets: this._accountBudgets,
         quotaEntitlements: this._copilotQuotaEntitlements,
-        usageStats: this.currentUsageAnalysisStats,
-        skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
-        skillDescriptions: this._buildSkillDescriptions(),
-        toolFamilies: getToolFamilies(),
         otelComparison,
       }));
 
@@ -15493,10 +15466,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
         quotaEntitlements: this._copilotQuotaEntitlements,
         accountBudgets: this._accountBudgets,
-        usageStats: this.currentUsageAnalysisStats,
-        skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
-        extraSkillDescriptions: this._buildSkillDescriptions(),
-        toolFamilies: getToolFamilies(),
       }),
       ...this.getWebviewLocaleFields(),
     }).replace(/</g, "\\u003c");
@@ -16045,11 +16014,13 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
     ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
+    ["aiEngineeringFluency.openToolCuration", "Open Tool Curation section command called", () => tokenTracker.showUsageAnalysisOnTab('health', 'section-tool-curation')],
+    ["aiEngineeringFluency.openSkillSuggestions", "Open Skill Suggestions section command called", () => tokenTracker.showUsageAnalysisOnTab('insights', 'section-skill-suggestions')],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
-    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnActivityTab('section-model-efficiency')],
     ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>

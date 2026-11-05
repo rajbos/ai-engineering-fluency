@@ -5,9 +5,10 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { buildShareCardHeaderHtml, shareCardContainerStyle } from './shareCard';
-import { buildToolboxCardHtml, buildToolboxSummaryText, TOOLBOX_SHARE_ID_PREFIX } from './toolboxCard';
+import { applyShareKind, buildScoreSummaryText, buildShareSectionHtml, SHARE_ID_PREFIX, type ShareKind, type ShareScore } from './shareSection';
+import { buildToolboxCardHtml, buildToolboxSummaryText } from './toolboxCard';
 import { createPeriodSelector, type Period } from '../shared/periodSelector';
-import { socialShareButtonsHtml, wireSocialShareButtons, type SocialPlatform } from '../shared/socialShare';
+import { wireSocialShareButtons, type SocialPlatform } from '../shared/socialShare';
 import type { ShareCardPeriodData } from '../../shareCardData';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
@@ -78,7 +79,7 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 	getState: () => TState | undefined;
 };
 
-type MaturityViewState = { toolboxPeriod: ShareCardPeriodData['period'] };
+type MaturityViewState = { toolboxPeriod: ShareCardPeriodData['period']; shareKind: ShareKind };
 
 const vscode = acquireVsCodeApi<MaturityViewState>();
 installSurfaceNavigation(vscode, 'maturity');
@@ -429,49 +430,22 @@ function buildCategoryCard(
       ` : ''}${hookButton}${mcpButton}</div>`;
 }
 
-function buildShareSectionHtml(): string {
-  return `
-  <div class="share-section">
-    <div class="share-header"><span class="share-icon">📢</span><span class="share-title">Share Your AI Engineering Fluency Score</span></div>
-    <div class="share-description">Share your progress with the community and inspire others to level up their AI engineering skills!</div>
-    <div class="share-buttons">
-      ${socialShareButtonsHtml('btn-share')}
-      <div class="export-dropdown-container">
-        <button id="btn-export-toggle" class="share-btn share-btn-download"><span class="share-btn-icon">💾</span><span>Export Fluency Score</span><span class="dropdown-arrow">▼</span></button>
-        <div id="export-dropdown" class="export-dropdown-menu" style="display: none;">
-          <button class="export-menu-item" data-export-type="png"><span class="export-menu-icon">🖼️</span><span>Export as PNG Image</span></button>
-          <button class="export-menu-item" data-export-type="pdf"><span class="export-menu-icon">📄</span><span>Export as PDF Report</span></button>
-          <button class="export-menu-item" data-export-type="pptx"><span class="export-menu-icon">📊</span><span>Export as PowerPoint</span></button>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
+// ── Share section (score and "My AI Coding Toolbox") ───────────────────
 
-// ── "My AI Coding Toolbox" share card ──────────────────────────────────
-
-// Selected toolbox period survives the panel being hidden (retainContextWhenHidden is false).
-const viewState = createViewStateManager<MaturityViewState>(vscode, { toolboxPeriod: 'last30' });
+// Selected kind and toolbox period survive the panel being hidden (retainContextWhenHidden is false).
+const viewState = createViewStateManager<MaturityViewState>(vscode, { toolboxPeriod: 'last30', shareKind: 'score' });
 let toolboxPeriod: ShareCardPeriodData['period'] = viewState.restore().toolboxPeriod;
+let activeShareKind: ShareKind = viewState.restore().shareKind;
 
 function currentToolboxData(data: MaturityData): ShareCardPeriodData | undefined {
   return data.shareCard?.find(p => p.period === toolboxPeriod) ?? data.shareCard?.[0];
 }
 
-function buildToolboxSectionHtml(data: MaturityData): string {
-  const current = currentToolboxData(data);
-  const body = current
-    ? buildToolboxCardHtml(current)
-    : `<div class="share-description">${escapeHtml(localize('share.toolbox.unavailable'))}</div>`;
-  return `
-  <div class="share-section toolbox-section">
-    <div class="share-header"><span class="share-icon">📸</span><span class="share-title">${escapeHtml(localize('share.toolbox.title'))}</span></div>
-    <div class="share-description">${escapeHtml(localize('share.toolbox.description'))}</div>
-    <div id="toolbox-body">${body}</div>
-  </div>`;
+function shareScore(data: MaturityData): ShareScore {
+  return { stage: data.overallStage, label: data.overallLabel, description: STAGE_DESCRIPTIONS[data.overallStage] || '' };
 }
 
-/** Wires the toolbox card's period dropdown, copy button and social buttons (re-run after each re-render). */
+/** Mounts the toolbox card's period dropdown (re-run after each re-render). */
 function wireToolboxCard(data: MaturityData, current: ShareCardPeriodData): void {
   document.getElementById('toolbox-period-selector')?.appendChild(createPeriodSelector({
     id: 'toolbox-period-select',
@@ -484,10 +458,29 @@ function wireToolboxCard(data: MaturityData, current: ShareCardPeriodData): void
       renderToolboxBody(data);
     },
   }).wrapper);
-  document.getElementById('btn-copy-toolbox-summary')?.addEventListener('click', () => {
-    vscode.postMessage({ command: 'copyText', text: buildToolboxSummaryText(current) });
+}
+
+/** Wires the Score/Toolbox switch and the actions, which read the selected kind and period when clicked. */
+function wireShareSection(data: MaturityData): void {
+  const toolbox = currentToolboxData(data);
+  document.querySelectorAll<HTMLElement>('.share-kind-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeShareKind = btn.dataset.shareKind === 'toolbox' ? 'toolbox' : 'score';
+      viewState.patch({ shareKind: activeShareKind });
+      applyShareKind(activeShareKind, Boolean(toolbox));
+    });
   });
-  wireSocialShareButtons(TOOLBOX_SHARE_ID_PREFIX, (platform) => { void handleShareToSocial(platform, 'toolbox'); });
+  document.getElementById('btn-share-copy')?.addEventListener('click', () => {
+    const current = currentToolboxData(data);
+    if (activeShareKind === 'score') {
+      vscode.postMessage({ command: 'copyText', text: buildScoreSummaryText(shareScore(data)) });
+    } else if (current) {
+      vscode.postMessage({ command: 'copyText', text: buildToolboxSummaryText(current) });
+    }
+  });
+  wireSocialShareButtons(SHARE_ID_PREFIX, (platform) => { void handleShareToSocial(platform, activeShareKind); });
+  if (toolbox) { wireToolboxCard(data, toolbox); }
+  applyShareKind(activeShareKind, Boolean(toolbox));
 }
 
 /** Re-renders the toolbox card for the selected period. */
@@ -554,12 +547,11 @@ function buildMaturityRootHtml(
         </div>
       </div>
       <div class="category-grid">${categoryCards}</div>
+      ${buildShareSectionHtml(shareScore(data), currentToolboxData(data))}
       <div class="footer">
         <span class="footer-info">Based on last 30 days of activity &middot; Last updated: ${new Date(data.lastUpdated).toLocaleString()} &middot; Updates every 5 minutes</span>
         ${dismissedTips.length > 0 ? `<button id="btn-reset-tips" class="reset-tips-btn" title="Show all dismissed improvement suggestions again">🔄 Reset Dismissed Tips</button>` : ''}
       </div>
-      ${buildShareSectionHtml()}
-      ${buildToolboxSectionHtml(data)}
       <div class="beta-footer">
         <span class="beta-footer-icon">⚠️</span>
         <div class="beta-footer-content"><strong>Beta</strong> — This screen is still in beta. If you have feedback or suggestions for improvements, please <a href="https://github.com/rajbos/ai-engineering-fluency/issues" class="beta-link">create an issue</a> on the repository.</div>
@@ -567,6 +559,43 @@ function buildMaturityRootHtml(
       </div>
     </div>
   `;
+}
+
+/** The standard 1200x630 canvas the social images and the toolbox PNG are drawn on. */
+function createShareCanvas(): HTMLElement {
+  const card = document.createElement('div');
+  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;height:630px;background:#1b1b1e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+  return card;
+}
+
+/** Frames the live toolbox card (same markup the user sees) on a share canvas. False if it is not rendered. */
+function frameToolboxCard(canvas: HTMLElement): boolean {
+  const toolboxCard = document.querySelector('.toolbox-card');
+  if (!toolboxCard) { return false; }
+  const clone = toolboxCard.cloneNode(true) as HTMLElement;
+  clone.style.cssText = 'width:900px;max-width:none;box-sizing:border-box;';
+  canvas.appendChild(clone);
+  return true;
+}
+
+async function handleToolboxPngExport(): Promise<void> {
+  const html2canvasModule = await import('html2canvas');
+  const html2canvas = (html2canvasModule.default ?? html2canvasModule) as unknown as (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+  const card = createShareCanvas();
+  if (!frameToolboxCard(card)) {
+    vscode.postMessage({ command: 'exportImageFailed' });
+    return;
+  }
+  document.body.appendChild(card);
+  try {
+    const canvas = await html2canvas(card, { backgroundColor: '#1b1b1e', scale: 2, useCORS: true, width: 1200, height: 630 });
+    vscode.postMessage({ command: 'saveChartImage', data: canvas.toDataURL('image/png'), kind: 'toolbox' });
+  } catch {
+    vscode.postMessage({ command: 'exportImageFailed' });
+  } finally {
+    document.body.removeChild(card);
+  }
 }
 
 async function handlePngExport(): Promise<void> {
@@ -625,7 +654,7 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
 
   const titleEl = document.createElement('div');
   titleEl.style.cssText = 'text-align:center;margin-bottom:20px;';
-  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${new Date().toLocaleDateString()}</div>`);
+  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">${escapeHtml(localize('share.exportTitle'))}</div><div style="font-size:16px;color:#b8b8c8;">${escapeHtml(localize('share.exportReportLabel'))} &middot; ${new Date().toLocaleDateString()}</div>`);
   coverContainer.appendChild(titleEl);
 
   if (stageBanner) { coverContainer.appendChild(stageBanner.cloneNode(true)); }
@@ -658,34 +687,32 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
   vscode.postMessage({ command, data: images });
 }
 
-async function handleShareToSocial(platform: SocialPlatform, kind: 'score' | 'toolbox' = 'score'): Promise<void> {
+async function handleShareToSocial(platform: SocialPlatform, kind: ShareKind): Promise<void> {
   const data = initialData;
   if (!data) { return; }
 
   const html2canvasModule = await import('html2canvas');
   const html2canvas = (html2canvasModule.default ?? html2canvasModule) as unknown as (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
 
-  const card = document.createElement('div');
-  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;height:630px;background:#1b1b1e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+  const card = createShareCanvas();
 
   const stageColors = ['#93c5fd', '#a78bfa', '#3b82f6', '#22d3ee'];
   const stageColor = stageColors[data.overallStage - 1] || '#58a6ff';
 
-  const toolboxCard = kind === 'toolbox' ? document.querySelector('.toolbox-card') : null;
-  if (toolboxCard) {
-    // Frame the live toolbox card (same markup the user sees) on the standard 1200x630 share canvas.
-    const clone = toolboxCard.cloneNode(true) as HTMLElement;
-    clone.style.cssText = 'width:900px;max-width:none;box-sizing:border-box;';
-    card.appendChild(clone);
+  if (kind === 'toolbox') {
+    if (!frameToolboxCard(card)) {
+      vscode.postMessage({ command: 'shareToSocialFailed', platform });
+      return;
+    }
   } else {
     setHtml(card, `
     <div style="text-align:center;color:#fff;padding:48px;">
-      <div style="font-size:28px;margin-bottom:12px;">🎯 AI Engineering Fluency Score</div>
-      <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">Overall AI Engineering Fluency</div>
+      <div style="font-size:28px;margin-bottom:12px;">🎯 ${escapeHtml(localize('share.exportTitle'))}</div>
+      <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">${escapeHtml(localize('share.score.overallLabel'))}</div>
       <div style="font-size:56px;font-weight:800;color:${stageColor};margin-bottom:12px;">${escapeHtml(data.overallLabel)}</div>
       <div style="font-size:20px;color:#b8b8c8;margin-bottom:40px;">${escapeHtml(STAGE_DESCRIPTIONS[data.overallStage] || '')}</div>
       <div style="font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:8px;">#AIEngineeringFluency</div>
-      <div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>
+      <div style="font-size:14px;color:#7a7a8a;">${escapeHtml(localize('share.score.tagline'))}</div>
     </div>
   `);
   }
@@ -734,7 +761,6 @@ function wireMaturityActionButtons(): void {
     });
   });
   document.getElementById('btn-reset-tips')?.addEventListener('click', () => { vscode.postMessage({ command: 'resetDismissedTips' }); });
-  wireSocialShareButtons('btn-share', (platform) => { void handleShareToSocial(platform); });
 }
 
 function wireExportHandlers(): void {
@@ -760,7 +786,7 @@ function wireExportHandlers(): void {
       const exportType = target.getAttribute('data-export-type');
       if (exportDropdown) { exportDropdown.style.display = 'none'; }
       if (exportType === 'png') {
-        void handlePngExport();
+        void (activeShareKind === 'toolbox' ? handleToolboxPngExport() : handlePngExport());
       } else if (exportType === 'pdf') {
         void handleScreenshotExport('exportPdf');
       } else if (exportType === 'pptx') {
@@ -785,8 +811,7 @@ function renderLayout(data: MaturityData): void {
   wireMaturityNavButtons();
   wireMaturityActionButtons();
   wireExportHandlers();
-  const toolbox = currentToolboxData(data);
-  if (toolbox) { wireToolboxCard(data, toolbox); }
+  wireShareSection(data);
 
   if (data.isDebugMode) {
     wireDemoControls(data);

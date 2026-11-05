@@ -1091,6 +1091,27 @@ export function buildSkillUsageSeries(
 	};
 }
 
+/** One row of the Skills tab's per-skill table. */
+export interface SkillUsageRow {
+	name: string;
+	count: number;
+	description: string;
+}
+
+/** Invocations per skill across a series' buckets, with descriptions where known. */
+export function buildSkillUsageRows(
+	trends: Pick<SkillUsageTrends, 'weeks'>,
+	descriptions: Record<string, string> | undefined,
+): SkillUsageRow[] {
+	const totals = new Map<string, number>();
+	for (const week of trends.weeks) {
+		for (const [name, count] of Object.entries(week.byName)) {
+			totals.set(name, (totals.get(name) ?? 0) + count);
+		}
+	}
+	return [...totals].map(([name, count]) => ({ name, count, description: descriptions?.[name] ?? '' }));
+}
+
 /**
  * Builds the weekly agent-skill usage series for the trailing `weeksBack` weeks
  * — the view's default, unfiltered scope.
@@ -2175,6 +2196,10 @@ export interface EfficiencyViewData {
 	skillImpact: SkillImpact[];
 	/** True when any skill invocation was detected in the trend window. */
 	hasSkills: boolean;
+	/** Skill name -> description, for the Skills tab's per-skill table. */
+	skillDescriptions: Record<string, string>;
+	/** True when this host can scan debug logs for time to first token; the TTFT tab is hidden otherwise. */
+	ttftAvailable: boolean;
 	/**
 	 * Trimmed per-day, per-model efficiency data backing the Models tab. The tab
 	 * recomputes comparisons client-side from this so switching models or windows

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../../src/insightsEngine';
 import type { InsightContext } from '../../../src/insightsEngine';
 import { createTranslator } from '../../src/l10nCore';
@@ -972,7 +974,45 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.ok(insight, 'should fire at sessionCount = 3');
 	assert.match(insight.body, /3 sessions/);
 	assert.match(insight.body, /run the tests/);
-	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openToolsTab');
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {
+	const stale = { name: 'old-skill', source: 'skill' };
+	const curation = makeCtx();
+	curation.curationAnalysis = {
+		underusedMcpServers: [],
+		unusedTools: [stale],
+		estimatedPromptBloat: { totalTokens: 3000 },
+		windowDays: 30,
+	} as unknown as typeof curation.curationAnalysis;
+	const results = evaluateInsights(curation, {}, 7, null);
+	for (const id of ['high-prompt-bloat', 'stale-skills']) {
+		assert.equal(results.find(i => i.id === id)?.actionCommand, 'aiEngineeringFluency.openToolCuration', id);
+	}
+
+	const repeated = makeCtx();
+	repeated.repeatedTasks = rtReport(3);
+	const body = evaluateInsights(repeated, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate')?.body ?? '';
+	assert.doesNotMatch(body, /Tools & Integrations/);
+});
+
+test('insight deep-link commands land on the section their action label names', () => {
+	// Compiled tests live at <ext>/out/vscode-extension/test/unit, so four levels up is <ext>.
+	const source = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '..', 'src', 'extension.ts'), 'utf8');
+	const registrationOf = (command: string): string => {
+		const line = new RegExp(String.raw`"${command}",.*`).exec(source)?.[0];
+		assert.ok(line, `${command} must be registered`);
+		return line;
+	};
+	assert.match(registrationOf('aiEngineeringFluency.openSkillSuggestions'), /showUsageAnalysisOnTab\('insights', 'section-skill-suggestions'\)/);
+	assert.match(registrationOf('aiEngineeringFluency.openToolCuration'), /showUsageAnalysisOnTab\('health', 'section-tool-curation'\)/);
+	assert.match(registrationOf('aiEngineeringFluency.openModelEfficiency'), /showUsageAnalysisOnActivityTab\('section-model-efficiency'\)/);
+	// These two name no section at the call site: Tools opens at the top, Activity on its parameter default.
+	assert.match(registrationOf('aiEngineeringFluency.openToolsTab'), /showUsageAnalysisOnToolsTab\(\)/);
+	assert.match(source, /showUsageAnalysisOnToolsTab\(anchor\?: string\)/);
+	assert.match(registrationOf('aiEngineeringFluency.openActivityTab'), /showUsageAnalysisOnActivityTab\(\)/);
+	assert.match(source, /showUsageAnalysisOnActivityTab\(anchor = 'section-interaction-modes'\)/);
 });
 
 test('insight navigation actions target their destination tabs and sections', () => {

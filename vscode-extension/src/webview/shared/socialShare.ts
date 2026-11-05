@@ -12,7 +12,7 @@ const PLATFORMS: ReadonlyArray<{ platform: SocialPlatform; icon: string; cls: st
 
 /**
  * LinkedIn / Bluesky / Mastodon share buttons. Each button is `<idPrefix>-<platform>`, so one panel can
- * host several rows (the score and the toolbox card) without clashing ids.
+ * host several rows without clashing ids.
  */
 export function socialShareButtonsHtml(idPrefix: string): string {
 	return PLATFORMS.map(({ platform, icon, cls }) =>

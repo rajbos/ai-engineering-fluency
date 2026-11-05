@@ -1,5 +1,5 @@
 /**
- * Skill Suggestions section (Usage Analysis → Tools & Integrations tab).
+ * Skill Suggestions section (Usage Analysis → Coaching → Insights tab).
  *
  * Renders the repeated-task clusters as a paged list of cards. Each card has a
  * "Create skill with Copilot" action that drafts (never submits) a Copilot Chat
@@ -201,7 +201,7 @@ export function buildSkillSuggestionsBodyHtml(report: RepeatedTaskReport): strin
 		${renderSuggestionList(report)}`;
 }
 
-/** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
+/** "Skill suggestions" section for the Insights tab (empty string when no candidates). */
 export function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
 	if (!report || report.clusters.length === 0) { return ''; }
 	// Announces copy feedback; paging and sorting are announced by each data table's own region.

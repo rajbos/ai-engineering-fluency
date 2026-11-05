@@ -120,7 +120,30 @@
       "bundle": "maturity",
       "global": "__INITIAL_MATURITY__",
       "fixture": "maturity.json",
-      "noiseFloorPixels": 400
+      "noiseFloorPixels": 400,
+      "states": [
+        {
+          "id": "share-toolbox",
+          "title": "Share section, AI Coding Toolbox",
+          "steps": [{ "click": "#share-kind-toolbox" }],
+          "expect": "#share-kind-toolbox.active"
+        }
+      ],
+      "scenarios": [
+        {
+          "name": "Score/Toolbox switch swaps the panel and the copy action follows it",
+          "expect": ".share-section",
+          "steps": [
+            { "click": "#btn-share-copy", "expectPosted": "copyText", "expect": "#share-panel-score", "expectHidden": "#share-panel-toolbox" },
+            { "click": "#share-kind-toolbox", "expect": ".toolbox-card", "expectHidden": "#share-panel-score" },
+            { "click": "#btn-share-copy", "expectPosted": "copyText", "expect": ".toolbox-card" },
+            { "click": "#btn-share-linkedin", "expectPosted": "shareToSocial" },
+            { "click": "#btn-export-toggle", "expect": ".export-menu-item[data-export-type=\"png\"]", "expectHidden": ".export-menu-item[data-export-type=\"pdf\"]" },
+            { "click": ".export-menu-item[data-export-type=\"png\"]", "expectPosted": "saveChartImage" },
+            { "click": "#share-kind-score", "expect": "#share-panel-score", "expectHidden": "#share-panel-toolbox" }
+          ]
+        }
+      ]
     },
     {
       "id": "usage",
@@ -169,20 +192,20 @@
         },
         {
           "id": "tools-curation-expanded",
-          "title": "Workspace tools with built-in curation table expanded",
+          "title": "Workspace Health with built-in curation table expanded",
           "steps": [
             { "click": ".group-tab[data-group=\"workspace\"]" },
-            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": ".tab-button[data-tab=\"health\"]" },
             { "click": "#builtin-tools-details > summary" }
           ],
           "expect": "#builtin-tools-details[open] #data-table-root-builtin"
         },
         {
           "id": "tools-skill-suggestions-expanded",
-          "title": "Workspace tools with a Skill Suggestions sessions table expanded",
+          "title": "Coaching › Insights with a Skill Suggestions sessions table expanded",
           "steps": [
-            { "click": ".group-tab[data-group=\"workspace\"]" },
-            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": ".group-tab[data-group=\"coaching\"]" },
+            { "click": ".tab-button[data-tab=\"insights\"]" },
             { "click": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details > summary" }
           ],
           "expect": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details[open] #data-table-root-skill-sessions-0"
@@ -387,6 +410,24 @@
             { "click": "button[data-mcp-view=\"tool\"]", "expect": "#mcp-period-tool", "expectHidden": "#mcp-period-server" },
             { "click": "button[data-mcp-view=\"server\"]", "expect": "#mcp-period-server", "expectHidden": "#mcp-period-tool" }
           ]
+        },
+        {
+          "name": "Workspace Health: Tool Curation open link posts openFile",
+          "expect": ".group-tab[data-group=\"workspace\"]",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
+            { "click": ".tab-button[data-tab=\"health\"]", "expect": "#section-tool-curation" },
+            { "click": "#section-tool-curation .curation-file-btn[data-command=\"openFile\"]", "expectPosted": "openFile" }
+          ]
+        },
+        {
+          "name": "Insights: Skill Suggestions Create skill posts draftCopilotChatWithPrompt",
+          "expect": "#section-skill-suggestions",
+          "steps": [
+            { "click": ".group-tab[data-group=\"coaching\"]" },
+            { "click": ".tab-button[data-tab=\"insights\"]" },
+            { "click": "#section-skill-suggestions .skill-suggestion-create", "expectPosted": "draftCopilotChatWithPrompt" }
+          ]
         }
       ]
     },
@@ -408,6 +449,12 @@
           "expect": ".eff-tab.active[data-tab=\"skills\"]",
           "settleMs": 3000,
           "noiseFloorPixels": 400
+        },
+        {
+          "id": "ttft",
+          "title": "TTFT tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"ttft\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"ttft\"]"
         },
         {
           "id": "deltas",
@@ -539,10 +586,10 @@
       "global": "__INITIAL_DIAGNOSTICS__",
       "fixture": "diagnostics.json",
       "$statesComment": [
-        "Every leaf tab across the three groups; 'report' is the initial render. The",
-        "Research and Settings leaf bars stay hidden until their group tab is clicked,",
-        "so those states click the group first. The Debug tab needs isDebugMode and",
-        "is deliberately not covered."
+        "Every leaf tab across the two groups; 'report' is the initial render. The",
+        "Settings leaf bar stays hidden until its group tab is clicked, so those states",
+        "click the group first. The Debug tab needs isDebugMode and is deliberately",
+        "not covered."
       ],
       "states": [
         {
@@ -565,33 +612,15 @@
         },
         {
           "id": "model-usage",
-          "title": "Research › Model Usage tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"model-usage\"]" }],
+          "title": "Pricing Check tab",
+          "steps": [{ "click": ".tab[data-tab=\"model-usage\"]" }],
           "expect": "#tab-model-usage"
         },
         {
-          "id": "tool-analysis",
-          "title": "Research › Tool Analysis tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"tool-analysis\"]" }],
-          "expect": "#tab-tool-analysis"
-        },
-        {
-          "id": "skill-usage",
-          "title": "Research › Skill Usage tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"skill-usage\"]" }],
-          "expect": "#tab-skill-usage"
-        },
-        {
           "id": "otel-delta",
-          "title": "Research › OTel Delta tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"otel-delta\"]" }],
+          "title": "OTel Delta tab",
+          "steps": [{ "click": ".tab[data-tab=\"otel-delta\"]" }],
           "expect": "#tab-otel-delta"
-        },
-        {
-          "id": "ttft",
-          "title": "Research › TTFT tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"ttft\"]" }],
-          "expect": "#tab-ttft"
         },
         {
           "id": "display",

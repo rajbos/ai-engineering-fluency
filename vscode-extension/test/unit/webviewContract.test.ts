@@ -34,6 +34,12 @@ const contract = requireFromHere(
 	collectPostedCommands: (files: string[]) => Map<string, { file: string; line: number }[]>;
 	collectHandledCommandsFromAst: (files: string[]) => Set<string>;
 	widenHandledFromText: (files: string[], handled: Set<string>) => Set<string>;
+	collectPanelHandledCommands: (file: string) => Map<string, Set<string>>;
+	findPanelScopedGaps: (
+		panelHosts: Record<string, string>,
+		webviewDir: string,
+		hostFile: string,
+	) => { command: string; detail: string }[];
 };
 
 /** Writes `source` to a throwaway .ts file and returns its path. */
@@ -43,6 +49,83 @@ function fixture(source: string): string {
 	fs.writeFileSync(file, source);
 	return file;
 }
+
+const PANEL_HOST_SOURCE = `
+	class Host {
+		open() {
+			this.goodPanel.webview.onDidReceiveMessage(async (message) => {
+				if (await this.shared(message)) { return; }
+				if (message.command === 'refresh') { this.reload(); }
+			});
+			this.splitPanel.webview.onDidReceiveMessage(async (message) => { await this.handleSplit(message); });
+			this.mapPanel.webview.onDidReceiveMessage(async (message) => {
+				const handler = this.getHandlers()[message.command];
+				if (handler) { await handler(message); }
+			});
+			this.gapPanel.webview.onDidReceiveMessage(async (message) => {
+				if (await this.shared(message)) { return; }
+			});
+		}
+		shared(message: any) {
+			const handlers: Record<string, () => void> = { showDetails: () => undefined };
+			return handlers[message.command];
+		}
+		handleSplit(message: any) {
+			switch (message.command) { case 'refresh': return; default: return this.handleSplitRest(message); }
+		}
+		handleSplitRest(message: any) { if (message.command === 'copyReport') { return; } }
+		getHandlers(): Record<string, () => void> { return { refresh: () => undefined }; }
+		reload() { /* no-op */ }
+	}
+`;
+
+test('collectPanelHandledCommands: scopes handlers to the panel whose listener reaches them', () => {
+	const handled = contract.collectPanelHandledCommands(fixture(PANEL_HOST_SOURCE));
+	assert.deepEqual([...handled.get('goodPanel')!].sort(), ['refresh', 'showDetails']);
+	assert.deepEqual([...handled.get('splitPanel')!].sort(), ['copyReport', 'refresh']);
+	assert.deepEqual([...handled.get('mapPanel')!], ['refresh']);
+	assert.deepEqual([...handled.get('gapPanel')!], ['showDetails'], "another panel's refresh must not count");
+});
+
+test('findPanelScopedGaps: flags a command only another panel handles', () => {
+	const dir = makeTmpFixtureDir('contract-panels-');
+	const write = (folder: string, source: string): void => {
+		fs.mkdirSync(path.join(dir, folder));
+		fs.writeFileSync(path.join(dir, folder, 'main.ts'), source);
+	};
+	const refresh = `declare const vscode: any; vscode.postMessage({ command: 'refresh' });`;
+	write('good', refresh);
+	write('gap', `${refresh} vscode.postMessage({ command: 'showDetails' }); vscode.postMessage({ command: 'aiEngineeringFluency.openToolsTab' });`);
+	const hostFile = path.join(makeTmpFixtureDir('contract-host-'), 'host.ts');
+	fs.writeFileSync(hostFile, PANEL_HOST_SOURCE);
+
+	const findings = contract.findPanelScopedGaps({ good: 'goodPanel', gap: 'gapPanel' }, dir, hostFile);
+	assert.deepEqual(findings.map(finding => finding.command), ['refresh']);
+	assert.match(findings[0].detail, /gap webview/);
+	assert.match(findings[0].detail, /gapPanel/);
+});
+
+test('findPanelScopedGaps: a registered panel with no listener is reported, not skipped', () => {
+	const dir = makeTmpFixtureDir('contract-panels-');
+	const hostFile = path.join(makeTmpFixtureDir('contract-host-'), 'host.ts');
+	fs.writeFileSync(hostFile, PANEL_HOST_SOURCE);
+	const findings = contract.findPanelScopedGaps({ renamed: 'renamedPanel' }, dir, hostFile);
+	assert.equal(findings.length, 1);
+	assert.match(findings[0].detail, /PANEL_MESSAGE_HOSTS/);
+});
+
+test('every panel the extension hosts has its messages handled by its own listener', () => {
+	const scripts = requireFromHere(path.join(REPO_ROOT, 'scripts', 'validate-webview-contract.js')) as {
+		PANEL_MESSAGE_HOSTS: Record<string, string>;
+	};
+	const findings = contract.findPanelScopedGaps(
+		scripts.PANEL_MESSAGE_HOSTS,
+		path.join(REPO_ROOT, 'vscode-extension', 'src', 'webview'),
+		path.join(REPO_ROOT, 'vscode-extension', 'src', 'extension.ts'),
+	);
+	assert.deepEqual(findings.map(finding => `${finding.command}: ${finding.detail}`), []);
+	assert.ok(contract.collectPanelHandledCommands(path.join(REPO_ROOT, 'vscode-extension', 'src', 'extension.ts')).get('diagnosticsPanel')?.has('refresh'));
+});
 
 test('collectPostedCommands: finds commands posted from a webview', () => {
 	const file = fixture(`

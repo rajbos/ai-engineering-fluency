@@ -2,7 +2,7 @@
  * Pure data-sanitization helpers for the Copilot billing / quota fields received via postMessage.
  * Extracted into its own module (no DOM / CSS dependencies) so it can be unit-tested in Node.js.
  *
- * These fields (copilotApiBalance, monthBillingGroupCosts) feed the "Copilot Billing Coverage"
+ * These fields (copilotApiBalance, monthBillingGroupCosts) feed the "AI Billing Coverage"
  * section of the usage panel. They live here — rather than inline in sanitizeStats — so a
  * regression test can guarantee they survive the periodic `updateStats` refresh. They used to be
  * dropped on the first timer refresh because sanitizeStats rebuilds the stats object field-by-field
@@ -108,7 +108,7 @@ export function sanitizeBillingGroupCosts(raw: unknown): Record<string, number> 
  *
  * sanitizeStats() rebuilds the stats object field-by-field on every `updateStats` (timer) refresh.
  * Calling this keeps the billing-coverage data alive across refreshes; without it the whole
- * "Copilot Billing Coverage" section disappeared after the first refresh.
+ * "AI Billing Coverage" section disappeared after the first refresh.
  */
 export function applyBillingFields(target: BillingStatsFields, raw: unknown): void {
 	if (!raw || typeof raw !== 'object') { return; }

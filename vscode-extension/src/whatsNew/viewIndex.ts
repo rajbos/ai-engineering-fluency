@@ -153,7 +153,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 						children: [
 							{ id: 'usage.activity.sessions-summary', title: 'Sessions Summary', description: 'Session counts for today, the last 30 days, this month and last month.', nav: { anchor: 'section-sessions-summary' } },
 							{ id: 'usage.activity.interaction-modes', title: 'Interaction Modes', description: 'How often you use Ask, Edit, Agent, Plan and CLI modes, today and over the last 30 days.', keywords: ['ask', 'edit', 'agent', 'plan'], nav: { anchor: 'section-interaction-modes' } },
-							{ id: 'usage.activity.model-cost', title: 'Model Cost Usage', description: 'Share of requests on low, medium and high cost models for three periods.', keywords: ['tier', 'expensive'], nav: { anchor: 'section-model-cost' } },
+							{ id: 'usage.activity.custom-agents', title: 'Custom Agents', description: 'Which custom agents you used, today and over the last 30 days.', keywords: ['agent', 'mode'], nav: { anchor: 'section-custom-agents' }, condition: 'When a custom agent was used today or in the last 30 days' },
+							{ id: 'usage.activity.model-cost', title: 'Model Cost Usage', description: 'Share of requests on low, medium and high cost models, and mixed-cost sessions, for three periods.', keywords: ['tier', 'expensive', 'mixed cost'], nav: { anchor: 'section-model-cost' } },
 							{ id: 'usage.activity.multi-model', title: 'Multi-Model Usage', description: 'How many models you use and how often you switch between them within a conversation.', keywords: ['switching'], nav: { anchor: 'section-multi-model' } },
 							{ id: 'usage.activity.model-leaderboard', title: 'Local Model Leaderboard', description: 'Efficiency frontier and a per-model table: one-shot edit rate, cost, tokens and tool steps.', keywords: ['model efficiency', 'compare models'], nav: { anchor: 'section-model-efficiency' } },
 							{ id: 'usage.activity.thinking-effort', title: 'Thinking Effort (Reasoning)', description: 'Requests per reasoning-effort level for three periods.', keywords: ['reasoning'], nav: { anchor: 'section-thinking-effort' }, condition: 'When effort data exists' },
@@ -179,7 +180,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 					{
 						id: 'usage.tools',
 						title: 'Tools & Integrations',
-						description: 'Which tools and MCP servers the agent calls, how reliable and fast they are, and which you could drop.',
+						description: 'Which tools and MCP servers the agent calls, and how reliable and fast they are.',
 						keywords: ['mcp'],
 						nav: { tab: 'tools' },
 						children: [
@@ -188,21 +189,21 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 							{ id: 'usage.tools.latency', title: 'Tool latency profile', description: 'p50 and p95 duration per tool.', keywords: ['slow', 'duration', 'performance'], nav: { anchor: 'section-tool-latency' } },
 							{ id: 'usage.tools.mcp-health', title: 'MCP server health', description: 'Calls and failure share per MCP server.', nav: { anchor: 'section-mcp-health' } },
 							{ id: 'usage.tools.cost-speed', title: 'Cost vs speed map', description: 'Bubble chart of tool latency against the tokens each tool returns.', nav: { anchor: 'section-tool-cost-speed' } },
+							{ id: 'usage.tools.tool-families', title: 'Output tokens by tool family', description: 'Tokens per completed call for each tool, grouped by family and compared with the built-in baseline.', keywords: ['tool families', 'tool analysis', 'built-in'], nav: { anchor: 'section-tool-families' } },
 							{ id: 'usage.tools.mcp-tools', title: 'MCP Tools', description: 'MCP calls by server and by tool for three periods, and any unknown tools you can report.', keywords: ['unknown tools'], nav: { anchor: 'section-mcp-tools' } },
-							{ id: 'usage.tools.curation', title: 'Tool Curation', description: 'Available versus used tools, the prompt overhead they cost, and unused MCP servers, plugins, built-ins and skills.', keywords: ['unused', 'overhead', 'trim'], nav: { anchor: 'section-tool-curation' }, condition: 'When tool definitions were captured' },
-							{ id: 'usage.tools.skill-suggestions', title: 'Skill Suggestions', description: 'Prompts you keep repeating that would make good reusable skills.', keywords: ['repeated prompts'], nav: { anchor: 'section-skill-suggestions' }, condition: 'When repeated prompts are found' },
 						],
 					},
 					{
 						id: 'usage.health',
 						title: 'Workspace Health',
-						description: 'Customization files per workspace, missed potential from other AI tools, and repository hygiene checks.',
+						description: 'Customization files per workspace, missed potential from other AI tools, memories, tools you could drop, and repository hygiene checks.',
 						nav: { tab: 'health' },
 						children: [
 							{ id: 'usage.health.customization', title: 'Copilot Customization Files', description: 'Which workspaces have instructions, prompts, agents and skills set up for Copilot.', keywords: ['instructions', 'agents.md', 'copilot-instructions'], nav: { anchor: 'section-customization-files' } },
 							{ id: 'usage.health.missed-potential', title: 'Missed Potential', description: 'Workspaces with instruction files for other AI tools but no Copilot equivalent.', keywords: ['claude.md', 'cursor rules'], nav: { anchor: 'section-missed-potential' } },
 							{ id: 'usage.tools.memory-files', title: 'Copilot Memory Files', description: 'Memory files per workspace with size, stale entries and last update.', keywords: ['memories', 'hygiene'], nav: { anchor: 'section-memory-files' }, condition: 'When memory files exist' },
 							{ id: 'usage.tools.server-memories', title: 'Copilot Repository Memories', description: 'Server-side agent memories for this repository and candidates to promote into instructions.', nav: { anchor: 'section-server-memories' }, condition: 'When the workspace is a GitHub repository' },
+							{ id: 'usage.tools.curation', title: 'Tool Curation', description: 'Available versus used tools, the prompt overhead they cost, and unused MCP servers, plugins, built-ins and skills.', keywords: ['unused', 'overhead', 'trim'], nav: { anchor: 'section-tool-curation' }, condition: 'When tool definitions were captured' },
 							{ id: 'usage.health.repo-hygiene', title: 'Repository Hygiene Analysis', description: 'Per-repository checks for the setup that helps agents do good work.', nav: { anchor: 'section-repo-hygiene' } },
 						],
 					},
@@ -235,16 +236,25 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 				children: [
 					{ id: 'usage.repos', title: 'Repository PRs', description: 'Pull requests from the last 30 days that AI authored or was asked to review.', keywords: ['pull requests', 'review'], nav: { tab: 'repos' } },
 					{ id: 'usage.agent', title: 'Cloud Agent', description: 'Copilot cloud agent tasks and sessions from the last 30 days, with credits and premium requests.', keywords: ['coding agent', 'copilot agent'], nav: { tab: 'agent' } },
-					{ id: 'usage.billing', title: 'AI Billing Coverage', description: 'Copilot API credit balance against locally tracked cost, plus costs from other providers.', keywords: ['budget', 'credits', 'premium requests'], nav: { tab: 'billing' } },
+					{ id: 'usage.billing', title: 'AI Billing Coverage', description: 'Copilot API credit balance and per-account budgets against locally tracked Copilot cost.', keywords: ['budget', 'credits', 'premium requests'], nav: { tab: 'billing' } },
 				],
 			},
 			{
 				id: 'usage.group.coaching',
 				title: 'Coaching',
-				description: 'Personal tips based on your usage, and the moments where you had to correct the AI.',
+				description: 'Personal tips based on your usage, repeated prompts worth turning into skills, and the moments where you had to correct the AI.',
 				nav: { tab: 'insights' },
 				children: [
-					{ id: 'usage.insights', title: 'Insights', description: 'New tips picked for you, and the full list of tips.', keywords: ['tips', 'recommendations', 'for you'], nav: { tab: 'insights' } },
+					{
+						id: 'usage.insights',
+						title: 'Insights',
+						description: 'New tips picked for you, the full list of tips, and prompts worth turning into skills.',
+						keywords: ['tips', 'recommendations', 'for you'],
+						nav: { tab: 'insights' },
+						children: [
+							{ id: 'usage.tools.skill-suggestions', title: 'Skill Suggestions', description: 'Prompts you keep repeating that would make good reusable skills.', keywords: ['repeated prompts'], nav: { anchor: 'section-skill-suggestions' }, condition: 'When repeated prompts are found' },
+						],
+					},
 					{ id: 'usage.corrections', title: 'Corrections', description: 'Moments where you corrected the AI, per repository and session, with filters.', keywords: ['mistakes', 'retries'], nav: { tab: 'corrections' } },
 				],
 			},
@@ -257,13 +267,23 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 		description: 'Is AI getting cheaper and more effective for you? Trends, month-on-month changes, cost attribution and model comparisons.',
 		keywords: ['roi', 'value', 'productivity'],
 		children: [
-			{ id: 'efficiency.trends', title: 'Trends', description: 'Cost per 1K lines changed, tokens and turns per session, edit retry and apply rate over time.', nav: { tab: 'trends' } },
-			{ id: 'efficiency.skills', title: 'Skills', description: 'Skill use over time, and whether skill-assisted sessions run differently.', nav: { tab: 'skills' } },
+			{
+				id: 'efficiency.trends',
+				title: 'Trends',
+				description: 'Cost per 1K lines, session size, retry and apply rate and lines per dollar, over a time range, resolution and editor you choose.',
+				keywords: ['filter', 'resolution', 'time range'],
+				nav: { tab: 'trends' },
+				children: [
+					{ id: 'efficiency.trends.selected-period', title: 'Selected period', description: 'One week, month or day in detail: raw volumes and each ratio against the period before. Also on Skills, Combined and Models.', keywords: ['drill down', 'bucket', 'show the days'], nav: { anchor: 'eff-bucket-detail' } },
+				],
+			},
+			{ id: 'efficiency.skills', title: 'Skills', description: 'Skill use over time, invocations and descriptions per skill, and whether skill-assisted sessions run differently.', keywords: ['skill usage'], nav: { tab: 'skills' } },
+			{ id: 'efficiency.ttft', title: 'TTFT', description: 'Time to first token per model, as a chart and a table.', keywords: ['latency', 'time to first token', 'speed'], nav: { tab: 'ttft' }, condition: 'In VS Code, for sessions with the Copilot debug log on' },
 			{ id: 'efficiency.deltas', title: 'Month vs Month', description: 'Each efficiency metric for this month against last month.', keywords: ['compare', 'delta'], nav: { tab: 'deltas' } },
 			{
 				id: 'efficiency.attribution',
 				title: 'Cost Attribution',
-				description: 'What moved your cost: volume, session size or model mix.',
+				description: 'What moved your cost between the last two 30-day windows: volume, session size or model mix.',
 				nav: { tab: 'attribution' },
 				children: [
 					{ id: 'efficiency.attribution.model-mix', title: 'Model mix movement', description: 'Which models gained or lost share between the periods, and what that did to cost.', nav: { anchor: 'attr-shift-heading' }, condition: 'When the model mix shifted' },
@@ -273,14 +293,15 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 			{
 				id: 'efficiency.models',
 				title: 'Models',
-				description: 'Head-to-head comparison of two models, or one model across two periods.',
+				description: 'Compare two models, one model across two periods, or one model across two harnesses, with outlier, mixed-session and cost-basis options.',
+				keywords: ['head-to-head', 'harness', 'editor', 'outliers', 'exact cost', 'task mix'],
 				nav: { tab: 'models' },
 				children: [
-					{ id: 'efficiency.models.shape', title: 'Shape of each side', description: 'Radar chart of how each side behaves across the comparison metrics.', nav: { anchor: 'model-radar' } },
-					{ id: 'efficiency.models.drift', title: 'Drift over time', description: 'How the compared metrics moved over the selected window.', nav: { anchor: 'model-trend' } },
+					{ id: 'efficiency.models.shape', title: 'Shape of each side', description: 'Radar chart of how each side behaves across the comparison metrics.', nav: { anchor: 'model-radar' }, condition: 'When both sides of the comparison have data' },
+					{ id: 'efficiency.models.drift', title: 'Drift over time', description: 'How one metric moved for each side\'s model, over a time range of its own that the head-to-head does not use.', nav: { anchor: 'model-trend' } },
 				],
 			},
-			{ id: 'efficiency.value', title: 'Value', description: 'Merged PRs, cost per merged PR, apply rate and work delegated to AI agents.', keywords: ['pull requests', 'roi'], nav: { tab: 'value' } },
+			{ id: 'efficiency.value', title: 'Value', description: 'What your AI use produced: apply rate and lines changed per dollar, plus merged PRs, cost per merged PR and agent-opened PRs once PR data has loaded.', keywords: ['pull requests', 'roi'], nav: { tab: 'value' } },
 			{ id: 'efficiency.combined', title: 'Combined', description: 'Several efficiency metrics on one chart.', nav: { tab: 'combined' } },
 		],
 	},
@@ -305,8 +326,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 			{ id: 'maturity.overall', title: 'Overall fluency', description: 'Your overall stage and what it means.', nav: { selector: '.stage-banner' } },
 			{ id: 'maturity.radar', title: 'Radar chart', description: 'Your stage per category on one chart, with the stage reference.', nav: { selector: '.radar-wrapper' } },
 			{ id: 'maturity.categories', title: 'Categories', description: 'Prompt engineering, context engineering, agentic, tool usage, customization and workflow integration, each with evidence and next steps.', keywords: ['next steps', 'tips'], nav: { selector: '.category-grid' } },
-			{ id: 'maturity.share', title: 'Share your score', description: 'Share to social media or export your score as an image or presentation.', keywords: ['export', 'png', 'pptx'], nav: { selector: '.share-section' } },
-				{ id: 'maturity.toolbox', title: 'Share your AI coding toolbox', description: 'A shareable card of the editors you use, with sessions, interactions and tokens for today, the last 30 days, this month or last month.', keywords: ['social', 'image', 'editors', 'share card'], nav: { selector: '.toolbox-section' } },
+			{ id: 'maturity.share', title: 'Share your score', description: 'Copy a summary, share to social media, or export your score as an image, PDF or presentation.', keywords: ['export', 'png', 'pdf', 'pptx', 'copy'], nav: { anchor: 'share-panel-score' } },
+			{ id: 'maturity.toolbox', title: 'Share your AI coding toolbox', description: 'A shareable card of the editors you use, with sessions, interactions and tokens for today, the last 30 days, this month or last month. Copy a summary, share it, or export it as an image.', keywords: ['social', 'image', 'editors', 'share card', 'png', 'copy'], nav: { selector: '.toolbox-section' } },
 		],
 	},
 	{
@@ -349,7 +370,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 		id: 'diagnostics',
 		view: 'diagnostics',
 		title: 'Diagnostic Report',
-		description: 'Everything about how the extension sees your machine: session files, cache, research tools and settings.',
+		description: 'Everything about how the extension sees your machine: session files, cache, accuracy checks and settings.',
 		keywords: ['debug', 'troubleshoot', 'settings'],
 		children: [
 			{
@@ -362,19 +383,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 					{ id: 'diagnostics.sessions', title: 'Session Files', description: 'Every session file found, per editor, with interactions and tokens. Open one in the Session Log Viewer.', keywords: ['logs', 'files', 'session log viewer'], nav: { tab: 'sessions' } },
 					{ id: 'diagnostics.cache', title: 'Session Cache', description: "The extension's own session-parse cache: size, age and location, and buttons to clear or reset it (not LLM prompt caching).", nav: { tab: 'cache' } },
 					{ id: 'diagnostics.path-analyzer', title: 'Path Analyzer', description: 'Point at a folder to see which session files the extension finds there and how it reads them.', keywords: ['folder', 'scan'], nav: { tab: 'path-analyzer' } },
-				],
-			},
-			{
-				id: 'diagnostics.group.research',
-				title: 'Research',
-				description: 'Deeper analyses you run on demand.',
-				nav: { tab: 'model-usage' },
-				children: [
-					{ id: 'diagnostics.model-usage', title: 'Model Usage', description: 'Tokens and cost per model for a chosen editor and time range.', nav: { tab: 'model-usage' } },
-					{ id: 'diagnostics.tool-analysis', title: 'Tool Analysis', description: 'Output tokens per tool, grouped by tool family, against the built-in baseline.', keywords: ['tool families'], nav: { tab: 'tool-analysis' } },
-					{ id: 'diagnostics.skill-usage', title: 'Skill Usage', description: 'Which skills were invoked over the last 30 days, per editor.', nav: { tab: 'skill-usage' } },
+					{ id: 'diagnostics.model-usage', title: 'Pricing Check', description: 'The tokens per price tier and estimated cost behind a total, for a chosen editor and time range. Spots model and pricing mismatches.', keywords: ['model usage', 'cost', 'unexpected cost'], nav: { tab: 'model-usage' } },
 					{ id: 'diagnostics.otel-delta', title: 'OTel Delta', description: 'Estimated against exact Copilot CLI token counts from OpenTelemetry export.', keywords: ['opentelemetry', 'accuracy'], nav: { tab: 'otel-delta' } },
-					{ id: 'diagnostics.ttft', title: 'TTFT', description: 'Time to first token per model, as a chart and a table.', keywords: ['latency', 'time to first token', 'speed'], nav: { tab: 'ttft' } },
 				],
 			},
 			{

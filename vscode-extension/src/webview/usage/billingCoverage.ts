@@ -1,16 +1,15 @@
 /**
- * Pure helpers for the "AI Billing Coverage" provider-cost table in the usage panel.
+ * Pure helpers for the "AI Billing Coverage" section in the usage panel.
  * Extracted from main.ts (no DOM / CSS dependencies) so they can be unit-tested in Node.js.
  *
  * billingOtherSessionsCostUsd() computes the Copilot spend the API reports but the extension
  * has no local session data for (github.com/copilot web chat, cloud agent, review agent, or a
- * different device/environment). billingExtGroupCostsHtml() renders the extension-tracked
- * provider→cost table, injecting an "other sessions" row when that gap exceeds the display
- * threshold.
+ * different device/environment). The per-provider cost breakdown lives in Details › Cost by
+ * Provider; billingDetailsLinkHtml() points there, so this GitHub tab holds only GitHub API data
+ * and the Copilot figures needed to compare against it.
  */
 
-import { renderDataTable } from '../shared/dataTable';
-import { escapeHtml, formatFixed } from '../shared/formatUtils';
+import { escapeHtml } from '../shared/formatUtils';
 import { localize } from '../shared/localization';
 import type { CopilotApiBalance } from './billingStatsSanitizer';
 
@@ -22,52 +21,22 @@ export function billingOtherSessionsCostUsd(groupCosts: Record<string, number>, 
 	return Math.max(0, (api.usedAiCredits * 0.01) - copilotCostUsd);
 }
 
-export const BILLING_EXT_GROUP_COSTS_TABLE_ID = 'billing-ext-group-costs';
+export const BILLING_DETAILS_BUTTON_ID = 'btn-billing-details';
 
-interface BillingCostRow { label: string; cost: number; muted: boolean; }
-
-/** Provider rows by descending cost, with the "other sessions" row right after the local Copilot row. */
-function billingCostRows(groupCosts: Record<string, number>, otherSessionsCostUsd: number): BillingCostRow[] {
-	const otherSessions: BillingCostRow[] = otherSessionsCostUsd > 0.001
-		? [{ label: 'GitHub Copilot - other sessions (remote or different environment)', cost: otherSessionsCostUsd, muted: true }]
-		: [];
-	const rows = Object.entries(groupCosts)
-		.sort(([, a], [, b]) => b - a)
-		.flatMap(([group, cost]) => group === 'GitHub Copilot'
-			? [{ label: 'GitHub Copilot - local sessions', cost, muted: false }, ...otherSessions]
-			: [{ label: group, cost, muted: false }]);
-	return 'GitHub Copilot' in groupCosts ? rows : [...rows, ...otherSessions];
-}
-
-export function billingExtGroupCostsHtml(groupCosts: Record<string, number>, api: CopilotApiBalance | null | undefined): string {
-	const otherSessionsCostUsd = billingOtherSessionsCostUsd(groupCosts, api);
-	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0) + otherSessionsCostUsd;
-	const title = 'Extension tracked (this calendar month, IDE sessions only)';
-	// A bounded summary whose row order is meaningful (the other-sessions row sits under the
-	// local Copilot row it complements), so it is neither paged nor sortable.
-	const table = renderDataTable<BillingCostRow>({
-		tableId: BILLING_EXT_GROUP_COSTS_TABLE_ID,
-		ariaLabel: title,
-		rows: billingCostRows(groupCosts, otherSessionsCostUsd),
-		columns: [
-			{ id: 'provider', label: 'Provider', render: row => row.label },
-			{ id: 'cost', label: 'Estimated cost', align: 'right', render: row => `$${formatFixed(row.cost, 2)}` },
-		],
-		pageSize: false,
-		rowOptions: row => row.muted ? { className: 'data-table-muted' } : undefined,
-		footerRows: [{ cells: { provider: 'Total', cost: `$${formatFixed(totalCostUsd, 2)}` } }],
-	});
+/** Points at Details › Cost by Provider, which owns the per-provider cost breakdown. */
+export function billingDetailsLinkHtml(): string {
 	return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(title)}</div>
-			${table}
+		<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+			${escapeHtml(localize('usage.billing.providerCostsHint'))}
+			<button type="button" id="${BILLING_DETAILS_BUTTON_ID}" style="background:none; border:none; padding:0; font:inherit; color:var(--link-color); text-decoration:underline; cursor:pointer;">${escapeHtml(localize('usage.billing.openDetails'))}</button>
 		</div>`;
 }
 
 /**
  * Body of the GitHub › Billing tab. `sectionHtml` is the data-gated AI Billing Coverage section;
- * it is empty when there is no API balance, no multi-account budgets and no month group costs,
- * in which case the tab shows the same sign-in hint as the Repository PRs and Cloud Agent tabs.
+ * it is empty when there is no API balance and no multi-account budgets, in which case the tab
+ * shows the same sign-in hint as the Repository PRs and Cloud Agent tabs. Locally tracked provider
+ * costs do not need GitHub, so the hint still links to them.
  */
 export function billingTabBodyHtml(sectionHtml: string): string {
 	if (sectionHtml) { return sectionHtml; }
@@ -78,5 +47,6 @@ export function billingTabBodyHtml(sectionHtml: string): string {
 				<strong>🔒 ${escapeHtml(localize('usage.billing.signInRequired'))}</strong><br/>
 				${escapeHtml(localize('usage.billing.signInHint'))}
 			</div>
+			${billingDetailsLinkHtml()}
 		</div>`;
 }

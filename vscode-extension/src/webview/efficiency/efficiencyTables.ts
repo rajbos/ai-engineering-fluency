@@ -11,15 +11,39 @@
 
 import { renderDataTable, type DataTableColumn } from '../shared/dataTable';
 import { escapeHtml, formatCompact } from '../shared/formatUtils';
+import { localize } from '../shared/localization';
 import type {
 	EfficiencyDelta,
 	ModelComparison,
 	ModelComparisonRow,
 	SkillImpact,
 	SkillImpactMetric,
+	SkillUsageRow,
 } from '../../../../src/efficiencyAnalysis';
 
 export const MODEL_COMPARE_TABLE_ID = 'efficiency-model-compare';
+export const SKILL_USAGE_TABLE_ID = 'efficiency-skill-usage';
+
+/** Invocations per skill for the current scope, most-used first, with what each skill does. */
+export function renderSkillUsageTable(rows: readonly SkillUsageRow[]): string {
+	return renderDataTable<SkillUsageRow>({
+		tableId: SKILL_USAGE_TABLE_ID,
+		ariaLabel: localize('efficiency.skills.table.heading'),
+		rows,
+		columns: [
+			{ id: 'skill', label: localize('efficiency.skills.col.skill'), sortValue: r => r.name, render: r => r.name },
+			{
+				id: 'description',
+				label: localize('efficiency.skills.col.description'),
+				sortValue: r => r.description || null,
+				cellClassName: () => 'skill-usage-description',
+				render: r => r.description || '—',
+			},
+			{ id: 'invocations', label: localize('efficiency.skills.col.invocations'), align: 'right', sortValue: r => r.count, render: r => formatCompact(r.count) },
+		],
+		initialSort: { columnId: 'invocations', direction: 'desc' },
+	});
+}
 
 /** Stable per skill, so each card keeps its own sort across re-renders. */
 export function skillImpactTableId(skill: string): string {

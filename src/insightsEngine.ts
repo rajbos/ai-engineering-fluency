@@ -1399,7 +1399,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				tokens.toLocaleString(), unusedCount, ctx.curationAnalysis?.windowDays ?? 30);
 		},
 		actionLabelKey: 'insight.action.viewToolCuration',
-		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		actionCommand: 'aiEngineeringFluency.openToolCuration',
 		appliesTo: (ctx) => {
 			if (!ctx.curationAnalysis) { return false; }
 			return ctx.curationAnalysis.estimatedPromptBloat.totalTokens > 2500;
@@ -1418,7 +1418,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				stale.length, names, moreSuffix(ctx, stale.length, 3), ctx.curationAnalysis?.windowDays ?? 30);
 		},
 		actionLabelKey: 'insight.action.viewToolCuration',
-		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		actionCommand: 'aiEngineeringFluency.openToolCuration',
 		appliesTo: (ctx) => {
 			if (!ctx.curationAnalysis) { return false; }
 			const stale = ctx.curationAnalysis.unusedTools.filter(t => t.source === 'skill');
@@ -1529,7 +1529,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return ctx.translate('insight.repeatedTaskSkillCandidate.body', count, prompt, tail);
 		},
 		actionLabelKey: 'insight.action.viewSkillSuggestions',
-		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
 		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
 		weight: 60,
 	},

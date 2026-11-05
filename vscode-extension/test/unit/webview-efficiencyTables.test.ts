@@ -10,7 +10,9 @@ import {
 	MODEL_COMPARE_TABLE_ID,
 	renderModelComparisonTable,
 	renderSkillImpactTable,
+	renderSkillUsageTable,
 	skillImpactTableId,
+	SKILL_USAGE_TABLE_ID,
 } from '../../src/webview/efficiency/efficiencyTables';
 
 setFormatLocale('en-US');
@@ -145,4 +147,16 @@ test('fmtValue: turn latency units render with their suffix, null as an em dash'
 	assert.equal(fmtValue(41.26, 'tokensPerSecond'), '41.3 tok/s');
 	assert.equal(fmtValue(null, 'seconds'), '—');
 	assert.equal(fmtValue(null, 'tokensPerSecond'), '—');
+});
+
+test('skill usage table: most invoked first, description cell escaped, a dash when unknown', () => {
+	resetDataTableState(SKILL_USAGE_TABLE_ID);
+	const html = renderSkillUsageTable([
+		{ name: 'alpha', count: 1, description: '' },
+		{ name: 'beta', count: 5, description: 'Does <b>beta</b>' },
+	]);
+	assert.ok(html.indexOf('beta') < html.indexOf('alpha'));
+	assert.ok(html.includes('Does &lt;b&gt;beta&lt;/b&gt;'));
+	assert.ok(!html.includes('<b>beta'));
+	assert.ok(html.includes('—'));
 });

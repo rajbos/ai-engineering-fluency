@@ -57,6 +57,9 @@ test('view index: navigation is inherited from the tab and reset by a new tab', 
 	assert.deepEqual(findViewIndexEntry('dashboard.azure')?.nav, { anchor: 'section-personal-summary' });
 	assert.deepEqual(findViewIndexEntry('dashboard.team')?.nav, { anchor: 'section-team-comparison' });
 	assert.deepEqual(findViewIndexEntry('usage.tools.latency')?.path, ['AI Usage Analysis', 'Workspace', 'Tools & Integrations', 'Tool latency profile']);
+	assert.deepEqual(findViewIndexEntry('usage.tools.curation')?.nav, { tab: 'health', anchor: 'section-tool-curation' });
+	assert.deepEqual(findViewIndexEntry('usage.tools.skill-suggestions')?.nav, { tab: 'insights', anchor: 'section-skill-suggestions' });
+	assert.deepEqual(findViewIndexEntry('usage.tools.skill-suggestions')?.path, ['AI Usage Analysis', 'Coaching', 'Insights', 'Skill Suggestions']);
 	assert.equal(findViewIndexEntry('no-such-entry'), null);
 });
 
@@ -157,4 +160,36 @@ test('view index: the Efficiency skills tab is labelled Skills and keeps its tab
 	assert.deepEqual(entry?.path, ['AI Efficiency Trends', 'Skills']);
 	assert.deepEqual(entry?.nav, { tab: 'skills' });
 	assert.doesNotMatch(entry?.node.description ?? '', /\btool use\b/i);
+});
+
+test('view index: the tabs moved out of Diagnostics Research are listed where they now live', () => {
+	assert.deepEqual(findViewIndexEntry('usage.tools.tool-families')?.nav, { tab: 'tools', anchor: 'section-tool-families' });
+	assert.equal(findViewIndexEntry('efficiency.ttft')?.view, 'efficiency');
+	assert.deepEqual(findViewIndexEntry('efficiency.ttft')?.nav, { tab: 'ttft' });
+	assert.deepEqual(findViewIndexEntry('diagnostics.model-usage')?.path, ['Diagnostic Report', 'Diagnostics', 'Pricing Check']);
+	assert.deepEqual(findViewIndexEntry('diagnostics.otel-delta')?.path, ['Diagnostic Report', 'Diagnostics', 'OTel Delta']);
+	for (const gone of ['diagnostics.group.research', 'diagnostics.tool-analysis', 'diagnostics.skill-usage', 'diagnostics.ttft']) {
+		assert.equal(findViewIndexEntry(gone), null, `${gone} should be gone`);
+	}
+	assert.ok(searchViewIndex(ENTRIES, 'tool analysis').matchedIds.includes('usage.tools.tool-families'), 'the old name still finds it');
+	assert.ok(searchViewIndex(ENTRIES, 'skill usage').matchedIds.includes('efficiency.skills'), 'the old name still finds it');
+	assert.ok(searchViewIndex(ENTRIES, 'model usage').matchedIds.includes('diagnostics.model-usage'), 'the old name still finds it');
+});
+
+test('view index: the Efficiency selected-period detail can be opened and found', () => {
+	const entry = findViewIndexEntry('efficiency.trends.selected-period');
+	assert.deepEqual(entry?.nav, { tab: 'trends', anchor: 'eff-bucket-detail' });
+	assert.ok(searchViewIndex(ENTRIES, 'drill down').matchedIds.includes('efficiency.trends.selected-period'));
+});
+
+test('view index: the radar entry says it only exists with a comparison, since model-radar renders only then', () => {
+	assert.ok(findViewIndexEntry('efficiency.models.shape')?.node.condition);
+	// The drift chart renders with or without a comparison.
+	assert.equal(findViewIndexEntry('efficiency.models.drift')?.node.condition, undefined);
+});
+
+test('view index: Efficiency descriptions cover what the tabs show today', () => {
+	assert.match(findViewIndexEntry('efficiency.trends')?.node.description ?? '', /time range, resolution and editor/);
+	assert.match(findViewIndexEntry('efficiency.models')?.node.description ?? '', /two harnesses/);
+	assert.match(findViewIndexEntry('efficiency.value')?.node.description ?? '', /lines changed per dollar/);
 });

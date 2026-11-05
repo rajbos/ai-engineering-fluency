@@ -20,6 +20,7 @@ import { localize, localizeFormat } from '../shared/localization';
 import type { LatencyHistogram, McpToolUsage, ToolCallUsage } from '../shared/types';
 import { latencyPercentileMs } from '../../../../src/latencyHistogram';
 import { classifyToolKind, type ToolKind } from '../../../../src/toolKind';
+import { tokensPerCompletedCall } from '../../../../src/toolFamilies';
 
 export interface ToolExecutionSectionsInput {
 	toolCalls: ToolCallUsage;
@@ -72,7 +73,7 @@ function ceilToTick(value: number, ticks: readonly number[]): number {
 	return ticks.find(t => t >= value) ?? ticks[ticks.length - 1];
 }
 
-function sectionHtml(id: string, icon: string, titleKey: string, subtitleKey: string, body: string): string {
+export function sectionHtml(id: string, icon: string, titleKey: string, subtitleKey: string, body: string): string {
 	return `<div class="section" id="${id}">
 		<div class="section-title"><span>${icon}</span><span>${escapeHtml(localize(titleKey))}</span></div>
 		<div class="section-subtitle">${escapeHtml(localize(subtitleKey))}</div>
@@ -80,11 +81,11 @@ function sectionHtml(id: string, icon: string, titleKey: string, subtitleKey: st
 	</div>`;
 }
 
-function emptyHtml(key: string): string {
+export function emptyHtml(key: string): string {
 	return `<div class="tool-exec-empty">${escapeHtml(localize(key))}</div>`;
 }
 
-function isReportableTool(id: string, hidden: ReadonlySet<string> | undefined): boolean {
+export function isReportableTool(id: string, hidden: ReadonlySet<string> | undefined): boolean {
 	// `__slash__…` / `__auto_compact__` markers live in byTool but are not tool calls.
 	return !id.startsWith('__') && !(hidden?.has(id.toLowerCase()) ?? false);
 }
@@ -304,7 +305,7 @@ function costSpeedRows(input: ToolExecutionSectionsInput): CostSpeedRow[] {
 		if (!isReportableTool(id, input.hiddenTools) || !h || h.count <= 0 || out <= 0 || completed <= 0) { continue; }
 		const p50 = latencyPercentileMs(h, 0.5);
 		if (p50 === null) { continue; }
-		rows.push({ id, name: input.resolveToolName(id), completed, p50: Math.max(1, p50), tokensPerCall: Math.max(1, out / completed), kind: classifyToolKind(id) });
+		rows.push({ id, name: input.resolveToolName(id), completed, p50: Math.max(1, p50), tokensPerCall: Math.max(1, tokensPerCompletedCall(out, completed)), kind: classifyToolKind(id) });
 	}
 	return rows.sort((a, b) => b.completed - a.completed);
 }

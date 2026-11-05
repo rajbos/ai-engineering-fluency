@@ -341,7 +341,7 @@ export interface CliEfficiencyInputs {
 /**
  * The Efficiency webview's payload, built by the same shared `buildEfficiencyViewData()` the
  * extension uses. The CLI has no PR data, team backend or display settings, so those take
- * their "not configured" values.
+ * their "not configured" values. Nothing here answers the TTFT tab's request, so it is hidden.
  */
 export function buildEfficiencyPayload(inputs: CliEfficiencyInputs): EfficiencyViewData {
 	return buildEfficiencyViewData({
@@ -355,6 +355,7 @@ export function buildEfficiencyPayload(inputs: CliEfficiencyInputs): EfficiencyV
 		backendConfigured: false,
 		compactNumbers: false,
 		isDebugMode: false,
+		ttftAvailable: false,
 	});
 }
 

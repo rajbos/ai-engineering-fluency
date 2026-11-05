@@ -102,6 +102,8 @@ function buildEfficiencyData(value: ValueSignals, localization?: Record<string, 
 		skillTrends: { weeks: [], topSkills: [], totalCalls: 0 },
 		skillImpact: [],
 		hasSkills: false,
+		skillDescriptions: {},
+		ttftAvailable: true,
 		modelDaily: [],
 		hasModelComparison: false,
 		cacheBreakage: null,
@@ -125,7 +127,7 @@ interface Harness {
 
 async function bootWebview(
 	value: ValueSignals,
-	options: { postBeforeSettle?: Record<string, unknown>; localization?: Record<string, string> } = {},
+	options: { postBeforeSettle?: Record<string, unknown>; localization?: Record<string, string>; data?: Record<string, unknown> } = {},
 ): Promise<Harness> {
 	const bundle = await bundleEfficiencyWebview();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
@@ -144,7 +146,7 @@ async function bootWebview(
 	window.HTMLElement.prototype.attachInternals = () => ({
 		setFormValue() { /* no-op */ }, setValidity() { /* no-op */ }, form: null, states: new Set(), role: null,
 	});
-	window.__INITIAL_EFFICIENCY__ = buildEfficiencyData(value, options.localization);
+	window.__INITIAL_EFFICIENCY__ = { ...buildEfficiencyData(value, options.localization), ...options.data };
 
 	const postFromHost = (message: Record<string, unknown>): void => {
 		const event = new window.MessageEvent('message', { data: message, origin: window.location.origin });
@@ -355,4 +357,148 @@ test('a Value update that fills the cards retires the empty-state action', async
 	harness.postFromHost({ command: 'valueSignalsUpdated', value: neverLoadedValue() });
 	await harness.settle();
 	assert.ok(harness.window.document.getElementById('btn-open-repo-prs'), 'and returns on sign-out');
+});
+
+// --- TTFT tab ---------------------------------------------------------------------------------
+
+const ttftAnswer = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+	command: 'ttftResult',
+	granularity: 'day',
+	scanRange: '14d',
+	buckets: [{ key: '2026-03-01', label: 'Mar 1', avgSeconds: 1.5, count: 4 }],
+	series: [{ model: 'gpt-4o', data: [1.5] }],
+	sampleCount: 4,
+	fileCount: 2,
+	...overrides,
+});
+
+const ttftRequests = (harness: Harness): any[] => harness.posted.filter((m) => m.command === 'analyzeTtft');
+
+function changeSelect(harness: Harness, id: string, value: string): void {
+	const select = harness.window.document.getElementById(id);
+	assert.ok(select, `select ${id} exists`);
+	select.value = value;
+	select.dispatchEvent(new harness.window.Event('change', { bubbles: true }));
+}
+
+test('TTFT: stays lazy until opened, then asks the host once and renders its answer', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	assert.equal(ttftRequests(harness).length, 0, 'nothing scans before the tab is opened');
+
+	harness.clickTab('ttft');
+	assert.deepEqual({ ...ttftRequests(harness)[0] }, { command: 'analyzeTtft', granularity: 'day', scanRange: '14d' });
+	assert.ok(harness.posted.some((m) => m.command === 'viewTabOpened' && m.view === 'efficiency' && m.tab === 'ttft'), 'reports the tab for the What\'s New bookkeeping');
+	assert.match(harness.tabText(), /Scanning debug logs/);
+
+	harness.postFromHost(ttftAnswer());
+	await harness.settle();
+	assert.match(harness.tabText(), /Overall Avg TTFT/);
+	assert.ok(harness.window.document.querySelector('.ttft-chart'), 'draws the chart');
+	assert.equal(ttftRequests(harness).length, 1);
+});
+
+test('TTFT: the result survives a tab switch without another scan', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	harness.clickTab('ttft');
+	harness.postFromHost(ttftAnswer());
+	await harness.settle();
+
+	harness.clickTab('value');
+	harness.clickTab('ttft');
+	assert.match(harness.tabText(), /Overall Avg TTFT/);
+	assert.equal(ttftRequests(harness).length, 1);
+});
+
+test('TTFT: leaving the tab while a scan runs does not start a second one, and its answer is kept', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	harness.clickTab('ttft');
+	harness.clickTab('value');
+	harness.clickTab('ttft');
+	assert.equal(ttftRequests(harness).length, 1);
+
+	harness.clickTab('value');
+	harness.postFromHost(ttftAnswer());
+	await harness.settle();
+	harness.clickTab('ttft');
+	assert.match(harness.tabText(), /Overall Avg TTFT/);
+	assert.equal(ttftRequests(harness).length, 1);
+});
+
+test('TTFT: a late answer for the previous selection does not replace the one being waited for', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	harness.clickTab('ttft');
+	changeSelect(harness, 'ttft-scan-range', '90d');
+	assert.deepEqual(ttftRequests(harness).map((m) => m.scanRange), ['14d', '90d']);
+
+	harness.postFromHost(ttftAnswer({ scanRange: '14d', sampleCount: 111 }));
+	await harness.settle();
+	assert.match(harness.tabText(), /Scanning debug logs/, 'still waiting for the 90-day scan');
+
+	harness.postFromHost(ttftAnswer({ scanRange: '90d', sampleCount: 222 }));
+	await harness.settle();
+	assert.match(harness.tabText(), /222/);
+});
+
+test('TTFT: an answer with no samples explains the setting that gates the data', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	harness.clickTab('ttft');
+	harness.postFromHost(ttftAnswer({ buckets: [], series: [], sampleCount: 0, fileCount: 3 }));
+	await harness.settle();
+	assert.match(harness.tabText(), /No TTFT data found/);
+	assert.match(harness.tabText(), /Checked 3 session file/);
+});
+
+test('TTFT: clicking a legend entry hides that model, and it stays hidden after a tab switch', async () => {
+	const harness = await bootWebview(neverLoadedValue());
+	harness.clickTab('ttft');
+	harness.postFromHost(ttftAnswer());
+	await harness.settle();
+
+	const doc = harness.window.document;
+	doc.querySelector('.ttft-legend-item').dispatchEvent(new harness.window.MouseEvent('click', { bubbles: true }));
+	assert.ok(doc.querySelector('.ttft-series').classList.contains('ttft-hidden'));
+
+	harness.clickTab('value');
+	harness.clickTab('ttft');
+	assert.ok(doc.querySelector('.ttft-series').classList.contains('ttft-hidden'));
+	assert.equal(doc.querySelector('.ttft-legend-item').getAttribute('aria-pressed'), 'true');
+});
+
+test('TTFT: a host that cannot scan does not get the tab', async () => {
+	const harness = await bootWebview(neverLoadedValue(), { data: { ttftAvailable: false } });
+	assert.equal(harness.window.document.querySelector('.eff-tab[data-tab="ttft"]'), null);
+});
+
+// --- Skills tab: per-skill table ---------------------------------------------------------------
+
+test('Skills: lists invocations per skill with descriptions, escaped, and follows the editor filter', async () => {
+	const dayKey = new Date().toISOString().slice(0, 10);
+	const harness = await bootWebview(neverLoadedValue(), {
+		data: {
+			lastUpdated: new Date().toISOString(),
+			hasSkills: true,
+			skillDescriptions: { graphify: 'Builds a <b>graph</b>' },
+			editors: ['VS Code', 'Claude Code'],
+			dailyVolume: [{ date: dayKey, tokens: 1, sessions: 2, interactions: 1, cost: 0, loc: 0, byEditor: {} }],
+			sessionSamples: [
+				{ dayKey, editTurns: 0, retries: 0, interactions: 1, totalTokens: 1, editor: 'Claude Code', skillCalls: { graphify: 3, 'no-desc': 1 } },
+				{ dayKey, editTurns: 0, retries: 0, interactions: 1, totalTokens: 1, editor: 'VS Code', skillCalls: { 'no-desc': 5 } },
+			],
+		},
+	});
+	harness.clickTab('skills');
+	await harness.settle();
+
+	const doc = harness.window.document;
+	const rows = (): string[][] => Array.from(doc.querySelectorAll('#data-table-root-efficiency-skill-usage tbody tr'))
+		.map((row: any) => Array.from(row.children).map((cell: any) => cell.textContent.trim()));
+	assert.deepEqual(rows(), [['no-desc', '—', '6'], ['graphify', 'Builds a <b>graph</b>', '3']]);
+	assert.equal(doc.querySelector('#data-table-root-efficiency-skill-usage td b'), null, 'a description never becomes markup');
+
+	const editor = doc.getElementById('eff-editor');
+	assert.ok(editor, 'the scope toolbar offers the editor filter');
+	editor.value = 'Claude Code';
+	editor.dispatchEvent(new harness.window.Event('change', { bubbles: true }));
+	await harness.settle();
+	assert.deepEqual(rows(), [['graphify', 'Builds a <b>graph</b>', '3'], ['no-desc', '—', '1']]);
 });
