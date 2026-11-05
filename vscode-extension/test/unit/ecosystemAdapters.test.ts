@@ -622,11 +622,13 @@ test('ClaudeCodeAdapter.getCandidatePaths: returns Claude Code projects director
     assert.equal(paths[0].source, 'Claude Code');
 });
 
-test('MistralVibeAdapter.getCandidatePaths: returns session log directory', () => {
+test('MistralVibeAdapter.getCandidatePaths: returns session log and unified store directories', () => {
     const paths = mistralVibeAdapter.getCandidatePaths();
-    assert.equal(paths.length, 1);
+    assert.equal(paths.length, 2);
     assert.ok(paths[0].path.includes('.vibe'));
     assert.equal(paths[0].source, 'Mistral Vibe');
+    assert.ok(paths[1].path.includes('unified'));
+    assert.equal(paths[1].source, 'Mistral Vibe (unified store)');
 });
 
 test('GeminiCliAdapter.getCandidatePaths: returns Gemini session and index paths', () => {
