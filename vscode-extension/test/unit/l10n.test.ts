@@ -2142,7 +2142,6 @@ test('worktree cleanup delete-feedback keys resolve in zh-cn', () => {
 // resurfacing in the panel and in the copied summary for every locale.
 const TOOLBOX_KEYS_EN: Record<string, string> = {
 	'share.summaryCopied': 'Summary copied to clipboard',
-	'share.toolbox.title': 'Share Your AI Coding Toolbox',
 	'share.toolbox.cardTitle': 'My AI Coding Toolbox',
 	'share.toolbox.period': 'Period:',
 	'share.toolbox.editorsDetectedOne': '1 editor detected',
@@ -2166,13 +2165,46 @@ test('l10n: toolbox card keys resolve in zh-cn and differ from English', () => {
 	try {
 		const expected: Record<string, string> = {
 			'share.summaryCopied': '摘要已复制到剪贴板',
-			'share.toolbox.title': '分享您的 AI 编码工具箱',
 			'share.toolbox.cardTitle': '我的 AI 编码工具箱',
 			'share.toolbox.period': '时间段：',
 			'share.toolbox.phrase.today': '今天',
 			'share.linkedin': '在 LinkedIn 上分享',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// Fluency Score Share section: the score block's strings used to be hard-coded English.
+const SHARE_SECTION_KEYS: Record<string, [string, string]> = {
+	'share.section.title': ['Share Your AI Engineering Fluency', '分享您的 AI 工程熟练度'],
+	'share.section.switchLabel': ['What to share', '要分享的内容'],
+	'share.kind.score': ['Fluency Score', '熟练度评分'],
+	'share.kind.toolbox': ['AI Coding Toolbox', 'AI 编码工具箱'],
+	'share.score.description': ['Share your progress with the community and inspire others to level up their AI engineering skills!', '与社区分享您的进展，激励他人提升 AI 工程技能！'],
+	'share.score.overallLabel': ['Overall AI Engineering Fluency', '总体 AI 工程熟练度'],
+	'share.score.tagline': ['Track your AI usage with AI Engineering Fluency', '使用 AI Engineering Fluency 跟踪您的 AI 使用情况'],
+	'share.score.summary': ['My AI Engineering Fluency Score — {0}. {1}. Based on the last 30 days. #AIEngineeringFluency', '我的 AI 工程熟练度评分 — {0}。{1}。基于最近 30 天的数据。#AIEngineeringFluency'],
+	'share.export.button': ['Export', '导出'],
+	'share.export.png': ['Export as PNG Image', '导出为 PNG 图片'],
+	'share.export.pdf': ['Export as PDF Report', '导出为 PDF 报告'],
+	'share.export.pptx': ['Export as PowerPoint', '导出为 PowerPoint'],
+	'share.toolbox.saveImageTitle': ['Save AI Coding Toolbox Card', '保存 AI 编码工具箱卡片'],
+};
+
+test('l10n: Share section keys resolve in English', () => {
+	for (const [key, [english]] of Object.entries(SHARE_SECTION_KEYS)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Share section keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, [, chinese]] of Object.entries(SHARE_SECTION_KEYS)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
 		}
 	} finally {

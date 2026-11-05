@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { buildShareCardData } from '../../src/shareCardData';
 import { buildToolboxCardHtml, buildToolboxSummaryText } from '../../src/webview/maturity/toolboxCard';
+import { buildScoreSummaryText, buildShareSectionHtml } from '../../src/webview/maturity/shareSection';
 import type { DetailedStats, PeriodStats } from '../../../src/types';
 import { aggregatePeriodStats, type SessionAggregateInput, type UtcDateRanges } from '../../../src/statsHelpers';
 
@@ -67,13 +68,47 @@ describe('toolbox card rendering', () => {
 		const html = buildToolboxCardHtml({ ...last30, editors: [{ name: '<img src=x>', sessions: 1 }] });
 		assert.match(html, /Last 30 days · 1 editor detected/);
 		assert.ok(!html.includes('<img src=x>'), 'editor names must be escaped');
-		assert.match(html, /id="btn-share-card-linkedin"/);
-		assert.match(html, /id="btn-copy-toolbox-summary"/);
+		assert.match(html, /id="toolbox-period-selector"/);
+		assert.ok(!html.includes('share-btn'), 'actions live in the Share section, not on the card');
 	});
 
 	test('an empty period shows a notice instead of a blank card', () => {
 		const html = buildToolboxCardHtml({ period: 'today', sessions: 0, interactions: 0, tokens: 0, editors: [] });
 		assert.match(html, /No session activity in this period/);
+	});
+});
+
+describe('share section rendering', () => {
+	const score = { stage: 3, label: 'Stage 3: <AI> Collaborator', description: 'Regular use' };
+	const last30 = buildShareCardData(stats)!.find((d) => d.period === 'last30')!;
+
+	test('has one switch, one panel per kind and one row of actions', () => {
+		const html = buildShareSectionHtml(score, last30);
+		assert.match(html, /id="share-kind-score"[^>]*aria-controls="share-panel-score"/);
+		assert.match(html, /id="share-kind-toolbox"[^>]*aria-controls="share-panel-toolbox"/);
+		assert.match(html, /id="share-panel-toolbox" class="share-panel toolbox-section"/);
+		assert.equal(html.match(/class="share-btn share-btn-linkedin"/g)?.length, 1);
+		assert.equal(html.match(/id="btn-share-copy"/g)?.length, 1);
+		assert.equal(html.match(/id="btn-export-toggle"/g)?.length, 1);
+	});
+
+	test('PDF and PowerPoint exports are marked score-only, PNG is not', () => {
+		const html = buildShareSectionHtml(score, last30);
+		assert.match(html, /data-export-type="png">/);
+		assert.match(html, /data-export-type="pdf" data-score-only>/);
+		assert.match(html, /data-export-type="pptx" data-score-only>/);
+	});
+
+	test('escapes the score label and explains a missing toolbox', () => {
+		const html = buildShareSectionHtml(score, undefined);
+		assert.ok(!html.includes('<AI>'), 'score label must be escaped');
+		assert.match(html, /Usage totals are not available yet/);
+		assert.ok(!html.includes('toolbox-card'));
+	});
+
+	test('score summary names the stage and the fixed 30-day period', () => {
+		const text = buildScoreSummaryText({ stage: 3, label: 'Stage 3: AI Collaborator', description: 'Regular use' });
+		assert.equal(text, 'My AI Engineering Fluency Score — Stage 3: AI Collaborator. Regular use. Based on the last 30 days. #AIEngineeringFluency');
 	});
 });
 

@@ -92,7 +92,7 @@
       "status": "hidden",
       "hiddenBy": [".share-btn-linkedin", ".share-btn-bluesky", ".share-btn-mastodon"],
       "unresolvedControlSites": {
-        "vscode-extension/src/webview/maturity/main.ts#handleShareToSocial": "Both share rows (the score and the AI coding toolbox card) get their buttons from shared/socialShare.ts, whose ids are built per row; every one carries a .share-btn-<platform> class, which is what hides them."
+        "vscode-extension/src/webview/maturity/main.ts#handleShareToSocial": "The share row (acting on the score or the AI coding toolbox card) gets its buttons from shared/socialShare.ts, whose ids are built per row; every one carries a .share-btn-<platform> class, which is what hides them."
       },
       "reason": "Fluency Score: social sharing (score and toolbox card) is not wired up in the desktop app."
     },

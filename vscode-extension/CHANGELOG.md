@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Fluency Score: the score and AI coding toolbox share blocks are now one **Share** section with a Score/Toolbox switch, placed above the page footer. Both can copy a summary and share to social media, the toolbox card can now be exported as a PNG, and the score's share strings are localized.
+
 ### Improvements
 - Efficiency: one period picker instead of two. **Selected period** replaces the toolbar's **Drill into…**, and it now sits directly above the chart it selects from on every tab
 - Efficiency, Models tab: the time range and resolution moved into **Drift over time**, the only section they affect, and the head-to-head comparison has its own heading
