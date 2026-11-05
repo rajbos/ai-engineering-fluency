@@ -1648,4 +1648,8 @@
   ,"mcp_gitkraken_cli_git_branch": "GitKraken: Branch"
   ,"mcp_gitkraken_cli_git_worktree": "GitKraken: Worktree"
   ,"openFile": "Open File"
+  ,"add_repository": "Add Repository"
+  ,"mcp__ccd_pr__set_auto_merge": "CCD PR: Set Auto Merge"
+  ,"publish_chat_update": "Publish Chat Update"
+  ,"set_regular_project_onboarding": "Set Regular Project Onboarding"
 }
