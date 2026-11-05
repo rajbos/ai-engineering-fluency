@@ -566,6 +566,77 @@ test('scanFile: a genuine /* ... */ block comment carrying the marker is also re
 	});
 });
 
+// ── exempt-comment detection must stay in sync after an interpolated template literal ──────
+
+test('scanFile: same-line i18n-exempt comment still works after an earlier template literal with an interpolation', () => {
+	withTempFile(
+		[
+			'const greeting = `Hello ${name}, welcome`;',
+			"el.title = 'Refresh'; // i18n-exempt: brand-specific label",
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected the exemption to apply, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: preceding-line i18n-exempt comment still works after an earlier template literal with an interpolation', () => {
+	withTempFile(
+		[
+			'const greeting = `Hello ${name}, welcome`;',
+			'// i18n-exempt: brand-specific label',
+			"el.title = 'Refresh';",
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected the exemption to apply, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: i18n-exempt still works after nested, multiple and multiline interpolated templates, and does not attach to the wrong line', () => {
+	withTempFile(
+		[
+			'const a = `one ${`inner ${x} text`} two ${y}',
+			'  three`;',
+			'const b = `${{ k: 1 }.k} tail`;',
+			"el.title = 'Exempted one'; // i18n-exempt: fixture",
+			'const spacer = 1;',
+			"el.placeholder = 'Still flagged';",
+			'// i18n-exempt: fixture',
+			"el.textContent = 'Exempted two';",
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.deepEqual(violations.map((v) => v.text), ['Still flagged'], `got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: a marker inside an interpolated template\'s own text after an earlier interpolation is still not a real comment', () => {
+	withTempFile(
+		[
+			'const a = `x ${y} z`;',
+			'const html = `<button>',
+			'  Refresh // i18n-exempt: not a comment',
+			'</button>`;',
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 1, `got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
 // ── round-5 fix: independent per-run reporting (own-text split, not one combined blob) ──────
 
 test('scanFile: two direct-text runs in the same tag body on different lines are reported as two independent violations', () => {
