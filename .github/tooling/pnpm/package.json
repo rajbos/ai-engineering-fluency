@@ -1,0 +1,9 @@
+{
+  "name": "ci-pnpm-bootstrap",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pins the pnpm version installed via `npm ci` on runners where pnpm/action-setup cannot run. Bump here (Dependabot) instead of in workflow files.",
+  "dependencies": {
+    "pnpm": "11.28.9"
+  }
+}

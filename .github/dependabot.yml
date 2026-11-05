@@ -2,7 +2,7 @@ version: 2
 updates:
   # Enable version updates for npm dependencies
   - package-ecosystem: "npm"
-    directories: ["/vscode-extension", "/sharing-server"]
+    directories: ["/vscode-extension", "/sharing-server", "/.github/tooling/pnpm"]
     schedule:
       interval: "weekly"
       day: "monday"

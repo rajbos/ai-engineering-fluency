@@ -172,9 +172,12 @@ jobs:
 
       # pnpm/action-setup's self-installer fails on the Intel runner (pnpm 11.2.2
       # ERR_PNPM_ENGINE_IDENTITY_UNVERIFIABLE for @pnpm/exe.darwin-x64), so install
-      # the same version through npm here and skip the pnpm store cache.
+      # the same version through npm here and skip the pnpm store cache. The
+      # version is pinned (with an integrity hash) in .github/tooling/pnpm/.
       - name: Setup pnpm
-        run: npm install -g pnpm@11.2.2
+        run: |
+          npm ci --ignore-scripts --prefix .github/tooling/pnpm
+          echo "$GITHUB_WORKSPACE/.github/tooling/pnpm/node_modules/.bin" >> "$GITHUB_PATH"
 
       # The CLI type-check resolves shared src/ typings (e.g. @types/sql.js) from
       # vscode-extension/node_modules, same as cli-publish.yml.
