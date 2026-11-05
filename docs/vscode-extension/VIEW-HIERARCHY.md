@@ -72,7 +72,7 @@ not user settings.
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
-| | **Billing** | AI Billing Coverage |
+| | **Billing** | AI Billing Coverage (API balance · account budgets · coverage analysis · link to Details › Cost by Provider) |
 | 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
 | | **Corrections** | Corrections report |
 

@@ -284,6 +284,77 @@ function repoPrPayload(): Record<string, unknown> {
 	};
 }
 
+/** `buildStats()` with cost-tier request counts and models in `last30Days`. */
+function buildStatsWithCostTiers(): Record<string, unknown> {
+	const stats = buildStats();
+	const period = stats.last30Days as { modelSwitching: Record<string, unknown> };
+	period.modelSwitching = {
+		...period.modelSwitching,
+		lowCostModels: ['low-model'], mediumCostModels: ['medium-model'], highCostModels: ['high-model'], unknownModels: ['unknown-model'],
+		lowCostRequests: 11, mediumCostRequests: 22, highCostRequests: 33, unknownRequests: 44, totalRequests: 110, mixedCostSessions: 7,
+	};
+	return stats;
+}
+
+test('cost-tier request counts and mixed-cost sessions render only in Model Cost Usage, with one icon per tier', async () => {
+	const harness = await bootWebview(buildStatsWithCostTiers());
+	const doc = harness.window.document;
+	const modelCost = doc.getElementById('section-model-cost');
+	const multiModel = doc.getElementById('section-multi-model');
+
+	for (const count of ['11', '22', '33', '44']) {
+		assert.ok(modelCost.textContent.includes(count), `Model Cost Usage shows ${count}`);
+	}
+	assert.match(modelCost.textContent, /7 mixed-cost sessions/);
+	assert.doesNotMatch(multiModel.textContent, /Request Count|Mixed cost sessions/);
+
+	assert.ok(multiModel.textContent.includes('medium-model'), 'Multi-Model Usage still names the models per tier');
+	for (const tier of ['💚 Low cost', '🔵 Medium cost', '💸 High cost', '❓ Unknown']) {
+		assert.ok(modelCost.textContent.includes(tier), `Model Cost Usage: ${tier}`);
+		assert.ok(multiModel.textContent.includes(tier), `Multi-Model Usage: ${tier}`);
+	}
+	assert.ok(!doc.getElementById('tab-panel-activity').innerHTML.includes('🟡'));
+});
+
+const BILLING_API_BALANCE = { budgetUsd: 39, budgetAiCredits: 3900, remainingAiCredits: 2900, usedAiCredits: 1000, pctAvailable: 74.4 };
+
+test('Billing holds GitHub API data and the coverage analysis, and links to Details for per-provider costs', async () => {
+	const harness = await bootWebview({
+		...buildStats(),
+		copilotApiBalance: BILLING_API_BALANCE,
+		monthBillingGroupCosts: { 'GitHub Copilot': 6, 'Claude Code': 3 },
+	});
+	const doc = harness.window.document;
+	const section = doc.querySelector('#tab-panel-billing #section-billing-coverage');
+
+	assert.ok(section.textContent.includes('AI Billing Coverage'));
+	assert.equal(section.querySelector('table'), null, 'the per-provider table lives in Details only');
+	assert.ok(!section.textContent.includes('Claude Code'));
+	assert.ok(section.textContent.includes('$10.00 (1,000 credits)'), 'API total');
+	assert.ok(section.textContent.includes('$6.00 (600 credits)'), 'extension tracked');
+	assert.ok(section.textContent.includes('$4.00 (400 credits)'), 'gap');
+	assert.ok(section.textContent.includes('$3.00'), 'other providers total');
+
+	doc.getElementById('btn-billing-details').click();
+	assert.ok(harness.posted.some((m) => m.command === 'showDetails'), 'the link opens Details');
+});
+
+test('Billing still reports the gap when there is no local Copilot cost', async () => {
+	const harness = await bootWebview({ ...buildStats(), copilotApiBalance: BILLING_API_BALANCE, monthBillingGroupCosts: { 'Claude Code': 3 } });
+	const section = harness.window.document.getElementById('section-billing-coverage');
+	assert.ok(section.textContent.includes('Gap (untracked Copilot usage)'));
+	assert.ok(section.textContent.includes('$10.00 (1,000 credits)'));
+});
+
+test('Billing with only local provider costs shows the sign-in hint and keeps the working Details link', async () => {
+	const harness = await bootWebview({ ...buildStats(), monthBillingGroupCosts: { 'Claude Code': 3 } });
+	const doc = harness.window.document;
+	const section = doc.getElementById('section-billing-coverage');
+	assert.ok(section.textContent.includes('GitHub authentication required'));
+	doc.getElementById('btn-billing-details').click();
+	assert.ok(harness.posted.some((m) => m.command === 'showDetails'));
+});
+
 test('Multi-Model Usage renders in the Activity tab (Spend & models band), not in Tools & Integrations', async () => {
 	const harness = await bootWebview(buildStats());
 	const doc = harness.window.document;
@@ -1673,6 +1744,8 @@ test('Previous Month columns show the previous full month, not the current month
 			modelSwitching: {
 				...(base.modelSwitching as Record<string, unknown>),
 				totalRequests: requests, lowCostRequests: requests, totalSessions: 1, averageModelsPerSession: 1,
+				// Multi-Model Usage shows no request counts, so this is its per-period figure.
+				maxModelsPerSession: requests,
 				lowCostModels: [`model-${effort}`],
 			},
 			thinkingEffortUsage: { byEffort: { [effort]: requests }, sessionCount: 1, switchCount: 0, byModel: {} },

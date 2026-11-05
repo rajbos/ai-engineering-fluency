@@ -5981,7 +5981,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Recorded *before* the panels publish, not after. _buildAnalysisUpdateData() and the
 		// initial Usage Analysis payload both read monthBillingGroupCosts through
 		// currentDetailedStats, and that accessor reads empty until this stamp lands — so
-		// publishing first dropped the Copilot Billing Coverage section from the very refresh
+		// publishing first dropped the AI Billing Coverage section from the very refresh
 		// that was holding the figure.
 		this.recordDetailedStats(detailedStats, startedAtGeneration);
 

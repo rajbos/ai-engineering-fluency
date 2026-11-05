@@ -154,7 +154,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 							{ id: 'usage.activity.sessions-summary', title: 'Sessions Summary', description: 'Session counts for today, the last 30 days, this month and last month.', nav: { anchor: 'section-sessions-summary' } },
 							{ id: 'usage.activity.interaction-modes', title: 'Interaction Modes', description: 'How often you use Ask, Edit, Agent, Plan and CLI modes, today and over the last 30 days.', keywords: ['ask', 'edit', 'agent', 'plan'], nav: { anchor: 'section-interaction-modes' } },
 							{ id: 'usage.activity.custom-agents', title: 'Custom Agents', description: 'Which custom agents you used, today and over the last 30 days.', keywords: ['agent', 'mode'], nav: { anchor: 'section-custom-agents' }, condition: 'When a custom agent was used today or in the last 30 days' },
-							{ id: 'usage.activity.model-cost', title: 'Model Cost Usage', description: 'Share of requests on low, medium and high cost models for three periods.', keywords: ['tier', 'expensive'], nav: { anchor: 'section-model-cost' } },
+							{ id: 'usage.activity.model-cost', title: 'Model Cost Usage', description: 'Share of requests on low, medium and high cost models, and mixed-cost sessions, for three periods.', keywords: ['tier', 'expensive', 'mixed cost'], nav: { anchor: 'section-model-cost' } },
 							{ id: 'usage.activity.multi-model', title: 'Multi-Model Usage', description: 'How many models you use and how often you switch between them within a conversation.', keywords: ['switching'], nav: { anchor: 'section-multi-model' } },
 							{ id: 'usage.activity.model-leaderboard', title: 'Local Model Leaderboard', description: 'Efficiency frontier and a per-model table: one-shot edit rate, cost, tokens and tool steps.', keywords: ['model efficiency', 'compare models'], nav: { anchor: 'section-model-efficiency' } },
 							{ id: 'usage.activity.thinking-effort', title: 'Thinking Effort (Reasoning)', description: 'Requests per reasoning-effort level for three periods.', keywords: ['reasoning'], nav: { anchor: 'section-thinking-effort' }, condition: 'When effort data exists' },
@@ -236,7 +236,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 				children: [
 					{ id: 'usage.repos', title: 'Repository PRs', description: 'Pull requests from the last 30 days that AI authored or was asked to review.', keywords: ['pull requests', 'review'], nav: { tab: 'repos' } },
 					{ id: 'usage.agent', title: 'Cloud Agent', description: 'Copilot cloud agent tasks and sessions from the last 30 days, with credits and premium requests.', keywords: ['coding agent', 'copilot agent'], nav: { tab: 'agent' } },
-					{ id: 'usage.billing', title: 'AI Billing Coverage', description: 'Copilot API credit balance against locally tracked cost, plus costs from other providers.', keywords: ['budget', 'credits', 'premium requests'], nav: { tab: 'billing' } },
+					{ id: 'usage.billing', title: 'AI Billing Coverage', description: 'Copilot API credit balance and per-account budgets against locally tracked Copilot cost.', keywords: ['budget', 'credits', 'premium requests'], nav: { tab: 'billing' } },
 				],
 			},
 			{

@@ -185,6 +185,28 @@ async function preloadBundle(): Promise<void> {
 	syncBundle ??= await bundleDiagnosticsWebview();
 }
 
+test('API Quota lists account budgets through the shared renderer and follows live updates', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({
+		accountBudgets: [
+			{ accountId: '1', label: 'octo-personal', status: 'ok', balance: { budgetUsd: 39, budgetAiCredits: 3900, remainingAiCredits: 1500, usedAiCredits: 2400, pctAvailable: 38.5 } },
+			{ accountId: '2', label: 'octo-work', status: 'unavailable', reason: 'no-session' },
+		],
+	}));
+	await harness.settle();
+
+	const list = (): any => harness.window.document.getElementById('diag-account-budgets');
+	assert.ok(list().textContent.includes('GitHub accounts in VS Code'));
+	assert.ok(list().textContent.includes('$24.00 / $39.00 used'));
+	assert.ok(list().textContent.includes('Sign in with this account from the Accounts menu'));
+	assert.ok(list().innerHTML.includes('width:61.50%'), 'same usage bar as the Billing tab');
+
+	harness.post({ command: 'accountBudgetsUpdated', accountBudgets: [{ accountId: '3', label: 'octo-new', status: 'no-quota' }] });
+	await harness.settle();
+	assert.ok(list().textContent.includes('octo-new'));
+	assert.ok(!list().textContent.includes('octo-personal'));
+});
+
 test('diagnostics action buttons post exactly once, whether the click lands on the button or a child span', async () => {
 	await preloadBundle();
 	const buttons: Array<{ id: string; command: string }> = [

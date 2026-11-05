@@ -58,7 +58,8 @@ import { sanitizeToolOutcomeMaps, sanitizeMcpOutcomeMaps } from './toolOutcomeSa
 import { renderContextRefTable } from './contextRefTableHtml';
 import { shouldListAccountBudgets } from '../../githubAccountBudgets';
 import { applyBillingFields, sanitizeAccountBudgets, sanitizeCopilotApiBalance, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
-import { billingExtGroupCostsHtml, billingTabBodyHtml } from './billingCoverage';
+import { accountBudgetsHtml } from '../shared/accountBudgets';
+import { BILLING_DETAILS_BUTTON_ID, billingDetailsLinkHtml, billingOtherSessionsCostUsd, billingTabBodyHtml } from './billingCoverage';
 import { type ContextRefRow } from './contextRefRows';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
@@ -799,6 +800,17 @@ return `
 </div>`;
 }
 
+/** Icon and escaped label per cost tier, shared by Model Cost Usage and Multi-Model Usage so they cannot disagree. */
+function modelCostTierLabelHtml(tier: 'low' | 'medium' | 'high' | 'unknown'): string {
+	const labels = {
+		low: `💚 ${localize('usage.modelCost.tier.low')}`,
+		medium: `🔵 ${localize('usage.modelCost.tier.medium')}`,
+		high: `💸 ${localize('usage.modelCost.tier.high')}`,
+		unknown: `❓ ${localize('usage.modelCost.tier.unknown')}`,
+	};
+	return escapeHtml(labels[tier]);
+}
+
 /** Renders the "Models by Cost Level" breakdown listing model names per cost tier. */
 function _renderMultiModelCostLevelBreakdown(
 allLowCostModels: readonly string[],
@@ -810,74 +822,28 @@ return `
 <div style="min-height: 110px;">
 ${allLowCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: #4ade80;">💚 Low cost:</span>
+<span style="color: #4ade80;">${modelCostTierLabelHtml('low')}:</span>
 <span style="font-size: 11px; color: var(--text-primary);">${allLowCostModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
 ${allMediumCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--link-color);">🟡 Medium cost:</span>
+<span style="color: var(--link-color);">${modelCostTierLabelHtml('medium')}:</span>
 <span style="font-size: 11px; color: var(--text-primary);">${allMediumCostModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
 ${allHighCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--warning-fg);">💸 High cost:</span>
+<span style="color: var(--warning-fg);">${modelCostTierLabelHtml('high')}:</span>
 <span style="font-size: 11px; color: var(--text-primary);">${allHighCostModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
 ${allUnknownModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--text-muted);">❓ Unknown:</span>
+<span style="color: var(--text-muted);">${modelCostTierLabelHtml('unknown')}:</span>
 <span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : ''}
-</div>`;
-}
-
-/** Renders the "Request Count" breakdown by cost tier, or an empty string if there were no requests. */
-function _renderMultiModelRequestCountBreakdown(switching: ModelSwitchingAnalysis): string {
-if (switching.totalRequests <= 0) {
-return '';
-}
-return `
-<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
-<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-${switching.lowCostRequests > 0 ? `
-<div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: #4ade80;">💚 Low cost: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.lowCostRequests)} (${formatPercent((switching.lowCostRequests / switching.totalRequests) * 100)})</span>
-</div>
-` : ''}
-${switching.mediumCostRequests > 0 ? `
-<div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--link-color);">🟡 Medium cost: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.mediumCostRequests)} (${formatPercent((switching.mediumCostRequests / switching.totalRequests) * 100)})</span>
-</div>
-` : ''}
-${switching.highCostRequests > 0 ? `
-<div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--warning-fg);">💸 High cost: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.highCostRequests)} (${formatPercent((switching.highCostRequests / switching.totalRequests) * 100)})</span>
-</div>
-` : ''}
-${switching.unknownRequests > 0 ? `
-<div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--text-muted);">❓ Unknown: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
-</div>
-` : ''}
-</div>`;
-}
-
-/** Renders the mixed-cost-sessions callout line, or an empty string if there were none. */
-function _renderMultiModelMixedCostSessions(switching: ModelSwitchingAnalysis): string {
-if (switching.mixedCostSessions <= 0) {
-return '';
-}
-return `
-<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>
 </div>`;
 }
 
@@ -897,8 +863,6 @@ ${_renderMultiModelStatCards(switching)}
 <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
 <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
 ${_renderMultiModelCostLevelBreakdown(allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
-${_renderMultiModelRequestCountBreakdown(switching)}
-${_renderMultiModelMixedCostSessions(switching)}
 </div>
 </div>`;
 }
@@ -1801,7 +1765,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 
 		// Pass through the Copilot API quota balance and current-month billing costs.
 		// Without this, periodic updateStats refreshes rebuild the stats object without
-		// these fields, so the "Copilot Billing Coverage" section disappears after the
+		// these fields, so the "AI Billing Coverage" section disappears after the
 		// first refresh even though the extension still has the data.
 		applyBillingFields(sanitized, raw);
 
@@ -2877,10 +2841,10 @@ function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
 		const total = ms.totalRequests ?? 0;
 		if (total === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
 		const buckets: { label: string; count: number; color: string }[] = [
-			{ label: '💚 Low cost', count: ms.lowCostRequests ?? 0, color: '#4ade80' },
-			{ label: '🔵 Medium cost', count: ms.mediumCostRequests ?? 0, color: 'var(--link-color)' },
-			{ label: '💸 High cost', count: ms.highCostRequests ?? 0, color: 'var(--warning-fg)' },
-			{ label: '❓ Unknown', count: ms.unknownRequests ?? 0, color: 'var(--text-muted)' },
+			{ label: modelCostTierLabelHtml('low'), count: ms.lowCostRequests ?? 0, color: '#4ade80' },
+			{ label: modelCostTierLabelHtml('medium'), count: ms.mediumCostRequests ?? 0, color: 'var(--link-color)' },
+			{ label: modelCostTierLabelHtml('high'), count: ms.highCostRequests ?? 0, color: 'var(--warning-fg)' },
+			{ label: modelCostTierLabelHtml('unknown'), count: ms.unknownRequests ?? 0, color: 'var(--text-muted)' },
 		].filter(b => b.count > 0);
 		const rows = buckets.map(b => {
 			const pct = total > 0 ? Math.round((b.count / total) * 100) : 0;
@@ -4396,7 +4360,7 @@ function _billingApiBalanceHtml(api: CopilotApiBalance, copilotCostUsd: number):
 		</div>`;
 }
 
-function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined, copilotCostUsd: number, nonCopilotCostUsd: number): string {
+function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined, copilotCostUsd: number, nonCopilotCostUsd: number, gapUsd: number): string {
 	if (!api) {
 		return `
 			<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;">
@@ -4404,9 +4368,8 @@ function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined,
 				The extension only tracks local IDE sessions — it cannot see web chat, cloud agent, or review agent usage.
 			</div>`;
 	}
-	if (copilotCostUsd <= 0) { return ''; }
+	if (copilotCostUsd <= 0 && api.usedAiCredits <= 0) { return ''; }
 	const apiUsedUsd = api.usedAiCredits * 0.01;
-	const gapUsd = apiUsedUsd - copilotCostUsd;
 	const gapCredits = Math.round(gapUsd * 100);
 	const gapRow = gapCredits > 0
 		? `<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (untracked Copilot usage)</span><span>$${formatFixed(gapUsd, 2)} (${formatNumber(gapCredits)} credits)</span></div>`
@@ -4429,55 +4392,12 @@ function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined,
 		</div>`;
 }
 
-/** Localized explanation for an account that has no usable budget figure. */
-function accountBudgetNote(b: AccountBudgetView): string {
-	if (b.status === 'no-quota') { return localize('accountBudgets.noQuota'); }
-	if (b.reason === 'no-session') { return localize('accountBudgets.noSession'); }
-	if (b.reason === 'lookup-failed') { return localizeFormat('accountBudgets.lookupFailed', b.detail ?? ''); }
-	return b.detail ?? localize('accountBudgets.unavailable');
-}
-
 /** The last stats handed to renderLayout(), so a live account update can re-render when no mount point exists. */
 let lastRenderedStats: UsageAnalysisStats | null = null;
 
-/** One account's row in the per-account budget list. */
-function _accountBudgetRowHtml(b: AccountBudgetView): string {
-	const plan = b.planName ? ` <span style="color:var(--text-muted);">(${escapeHtml(b.planName)})</span>` : '';
-	const name = `<span style="font-weight:600;">${escapeHtml(b.label)}</span>${plan}`;
-	if (b.status !== 'ok' || !b.balance) {
-		const note = escapeHtml(accountBudgetNote(b));
-		return `<div style="display:flex; justify-content:space-between; gap:12px; font-size:12px;"><span>${name}</span><span style="color:var(--text-muted);">${note}</span></div>`;
-	}
-	const usedPct = Math.min(100, Math.max(0, 100 - b.balance.pctAvailable));
-	const color = usedPct > 90 ? 'var(--error-color, #f14c4c)' : usedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
-	const reset = b.resetDate ? ` · ${escapeHtml(localizeFormat('accountBudgets.resets', b.resetDate.slice(0, 10)))}` : '';
-	return `
-		<div style="font-size:12px;">
-			<div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:4px;">
-				<span>${name}</span>
-				<span>${escapeHtml(localizeFormat('accountBudgets.usedLeft', '$' + formatFixed(b.balance.usedAiCredits / 100, 2), '$' + formatFixed(b.balance.budgetUsd, 2), formatFixed(b.balance.pctAvailable, 1)))}${reset}</span>
-			</div>
-			<div style="height:6px; border-radius:3px; background:var(--border-subtle); overflow:hidden;"><div style="height:100%; width:${formatFixed(usedPct, 2)}%; background:${color};"></div></div>
-		</div>`;
-}
-
-/** Budget per GitHub account. Omitted only for a lone account with a balance, which the API balance card already shows. */
-function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined, apiBalanceShown: boolean): string {
-	const list = accounts ?? [];
-	if (!shouldListAccountBudgets(list, apiBalanceShown)) { return ''; }
-	return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(localize('accountBudgets.title'))}</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; color:var(--text-primary);">
-				${list.map(_accountBudgetRowHtml).join('')}
-			</div>
-		</div>`;
-}
-
 /** Whether the AI Billing Coverage section has anything to show for these stats. */
 function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
-	const groupCosts = stats.monthBillingGroupCosts;
-	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? [], !!stats.copilotApiBalance) || (!!groupCosts && Object.keys(groupCosts).length > 0);
+	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? [], !!stats.copilotApiBalance);
 }
 
 /**
@@ -4486,7 +4406,7 @@ function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
  * nothing to display; the section itself stays gated on data presence.
  */
 function buildBillingTabPanelHtml(stats: UsageAnalysisStats): string {
-	const sectionHtml = safeSectionHtml('AI Billing Coverage', () => buildBillingComparisonSectionHtml(stats));
+	const sectionHtml = safeSectionHtml(localize('usage.billing.title'), () => buildBillingComparisonSectionHtml(stats));
 	const body = billingTabBodyHtml(sectionHtml);
 	return `<div id="tab-panel-billing" class="tab-panel"${activeTab !== 'billing' ? ' style="display:none"' : ''}>${body}</div>`;
 }
@@ -4495,24 +4415,23 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	if (!billingSectionHasContent(stats)) { return ''; }
 	const api = stats.copilotApiBalance;
 	const groupCosts = stats.monthBillingGroupCosts;
-	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets, !!api);
+	const accountsHtml = accountBudgetsHtml(stats.accountBudgets, !!api);
 
 	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
 	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
 
 	const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : '';
-	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? billingExtGroupCostsHtml(groupCosts, api) : '';
-	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
+	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd, billingOtherSessionsCostUsd(groupCosts ?? {}, api));
 
 	return `
 		<div class="section" id="section-billing-coverage">
-			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
-			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
+			<div class="section-title"><span>💳</span><span>${escapeHtml(localize('usage.billing.title'))}</span></div>
+			<div class="section-subtitle">${escapeHtml(localize('usage.billing.subtitle'))}</div>
 			${apiHtml}
 			<div id="account-budgets">${accountsHtml}</div>
-			${extHtml}
 			${deltaHtml}
+			${billingDetailsLinkHtml()}
 		</div>`;
 }
 
@@ -5344,6 +5263,9 @@ function wireNavigationButtons(): void {
 	document.getElementById('btn-details')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showDetails' });
 	});
+	document.getElementById(BILLING_DETAILS_BUTTON_ID)?.addEventListener('click', () => {
+		vscode.postMessage({ command: 'showDetails' });
+	});
 	document.getElementById('btn-chart')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showChart' });
 	});
@@ -5508,7 +5430,7 @@ function handleUpdateAccountBudgets(message: { accountBudgets?: unknown; copilot
 	const accounts = sanitizeAccountBudgets(message.accountBudgets);
 	const container = document.getElementById('account-budgets');
 	if (!lastRenderedStats) {
-		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts, true)); }
+		if (container) { setHtml(container, accountBudgetsHtml(accounts, true)); }
 		return;
 	}
 	const wasShown = billingSectionHasContent(lastRenderedStats);
@@ -5526,7 +5448,7 @@ function handleUpdateAccountBudgets(message: { accountBudgets?: unknown; copilot
 		renderLayout(lastRenderedStats);
 		setupSessionsTableHandlers();
 	} else if (container) {
-		setHtml(container, buildAccountBudgetsHtml(accounts, !!lastRenderedStats.copilotApiBalance));
+		setHtml(container, accountBudgetsHtml(accounts, !!lastRenderedStats.copilotApiBalance));
 	}
 }
 
