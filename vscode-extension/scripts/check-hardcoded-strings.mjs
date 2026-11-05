@@ -422,8 +422,24 @@ const EXEMPT_MARKER_RE = /^(?:\/\/|\/\*)\s*i18n-exempt\b/i;
 function findExemptCommentLines(sourceFile) {
 	const lines = new Set();
 	const scanner = ts.createScanner(ts.ScriptTarget.Latest, /* skipTrivia */ false, ts.LanguageVariant.Standard, sourceFile.text);
+	// A bare scanner does not know a `}` closes a template `${` hole: it would lex the rest of the
+	// template (`...tail text`) as code and then treat the tail's closing backtick as the START of a
+	// new template, inverting code/string state for the remainder of the file — so a real
+	// `// i18n-exempt` comment after the first interpolated template was swallowed as template text.
+	// Tracking open braces and re-scanning the `}` as a template middle/tail keeps state in sync.
+	const braceIsTemplateHole = [];
 	let kind = scanner.scan();
 	while (kind !== ts.SyntaxKind.EndOfFileToken) {
+		if (kind === ts.SyntaxKind.TemplateHead) {
+			braceIsTemplateHole.push(true);
+		} else if (kind === ts.SyntaxKind.OpenBraceToken) {
+			braceIsTemplateHole.push(false);
+		} else if (kind === ts.SyntaxKind.CloseBraceToken && braceIsTemplateHole.length > 0) {
+			if (braceIsTemplateHole.pop()) {
+				kind = scanner.reScanTemplateToken(/* isTaggedTemplate */ false);
+				if (kind === ts.SyntaxKind.TemplateMiddle) { braceIsTemplateHole.push(true); }
+			}
+		}
 		if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
 			if (EXEMPT_MARKER_RE.test(scanner.getTokenText())) {
 				const startLine = ts.getLineAndCharacterOfPosition(sourceFile, scanner.getTokenPos()).line;
