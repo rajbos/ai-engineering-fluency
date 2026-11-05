@@ -14,7 +14,7 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { localize, localizeFormat } from "../shared/localization";
 import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
-import { shouldListAccountBudgets } from "../../githubAccountBudgets";
+import { accountBudgetsHtml } from "../shared/accountBudgets";
 import { applyWebviewLocale } from "../shared/webviewLocale";
 import { installSurfaceNavigation } from "../shared/surfaceNavigation";
 
@@ -2410,31 +2410,12 @@ function sel(current: string, value: string): string {
   return current === value ? 'selected' : '';
 }
 
-function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
-  const plan = b.planName ? ` (${escapeHtml(b.planName)})` : "";
-  let detail: string;
-  if (b.status === "ok" && b.balance) {
-    const reset = b.resetDate ? `, ${escapeHtml(localizeFormat("accountBudgets.resets", b.resetDate.slice(0, 10)))}` : "";
-    detail = `${escapeHtml(localizeFormat("accountBudgets.usedLeft", "$" + (b.balance.usedAiCredits / 100).toFixed(2), "$" + b.balance.budgetUsd.toFixed(2), b.balance.pctAvailable.toFixed(1)))}${reset}`;
-  } else if (b.status === "no-quota") {
-    detail = escapeHtml(localize("accountBudgets.noQuota"));
-  } else if (b.reason === "no-session") {
-    detail = escapeHtml(localize("accountBudgets.noSession"));
-  } else if (b.reason === "lookup-failed") {
-    detail = escapeHtml(localizeFormat("accountBudgets.lookupFailed", b.detail ?? ""));
-  } else {
-    detail = escapeHtml(b.detail ?? localize("accountBudgets.unavailable"));
-  }
-  return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
-}
-
 /** Whether the quota card above already shows the budget a lone account would repeat. */
 let quotaFigureShown = false;
 
 function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
   // Same rule as the other surfaces: skip only a lone account with a balance, which the quota figures above already show.
-  if (!accounts || !shouldListAccountBudgets(accounts, quotaFigureShown)) { return ""; }
-  return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
+  return accountBudgetsHtml(accounts, quotaFigureShown);
 }
 
 /** The "API-driven budget" hint under the Monthly Budget input; empty without a premium quota. */

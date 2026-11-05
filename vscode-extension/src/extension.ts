@@ -5975,7 +5975,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Recorded *before* the panels publish, not after. _buildAnalysisUpdateData() and the
 		// initial Usage Analysis payload both read monthBillingGroupCosts through
 		// currentDetailedStats, and that accessor reads empty until this stamp lands — so
-		// publishing first dropped the Copilot Billing Coverage section from the very refresh
+		// publishing first dropped the AI Billing Coverage section from the very refresh
 		// that was holding the figure.
 		this.recordDetailedStats(detailedStats, startedAtGeneration);
 
@@ -10547,7 +10547,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
+	public async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
 		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
 		await this.runOpenerFocused('usage', () => this.showUsageAnalysis());
 		await this.flushPendingAnalysisNavigation();
@@ -10574,13 +10574,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
-	public async showUsageAnalysisOnToolsTab(anchor = 'section-tool-curation'): Promise<void> {
+	public async showUsageAnalysisOnToolsTab(anchor?: string): Promise<void> {
 		await this.showUsageAnalysisOnTab('tools', anchor);
-	}
-
-	/** Opens the Tools & Integrations tab scrolled to Skill Suggestions, for the repeated-task insight. */
-	public async showUsageAnalysisOnSkillSuggestions(): Promise<void> {
-		await this.showUsageAnalysisOnToolsTab('section-skill-suggestions');
 	}
 
 	/** Opens the Usage Analysis panel and activates the Activity tab. */
@@ -10621,10 +10616,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const prompt = _buildCorrectionImprovementPrompt(topRepo);
 		await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, isNewChat: true });
-	}
-
-	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
-		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
 	}
 
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
@@ -11715,7 +11706,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	private async handleMaturityExportCommand(message: any): Promise<void> {
 		switch (message.command) {
-			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
+			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data, message.kind === 'toolbox')); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
 			case 'copyText': if (typeof message.text === 'string') { await this.dispatch('copyText:maturity', () => this.maturityHandleCopyText(message.text)); } break;
@@ -11883,7 +11874,7 @@ private async resetDismissedFluencyTips(): Promise<void> {
     this.log("Showed chart download instructions");
   }
 
-  private async saveChartImageData(dataUrl: string): Promise<void> {
+  private async saveChartImageData(dataUrl: string, isToolboxCard = false): Promise<void> {
     const base64Match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
     if (!base64Match) {
       void vscode.window.showErrorMessage(
@@ -11893,9 +11884,9 @@ private async resetDismissedFluencyTips(): Promise<void> {
     }
 
     const uri = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file("copilot-fluency-score.png"),
+      defaultUri: vscode.Uri.file(isToolboxCard ? "ai-coding-toolbox.png" : "copilot-fluency-score.png"),
       filters: { "PNG Image": ["png"] },
-      title: "Save Fluency Score Chart",
+      title: isToolboxCard ? l10n.t('share.toolbox.saveImageTitle') : "Save Fluency Score Chart",
     });
 
     if (!uri) {
@@ -16023,12 +16014,13 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
     ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
-    ["aiEngineeringFluency.openSkillSuggestions", "Open Skill Suggestions section command called", () => tokenTracker.showUsageAnalysisOnSkillSuggestions()],
+    ["aiEngineeringFluency.openToolCuration", "Open Tool Curation section command called", () => tokenTracker.showUsageAnalysisOnTab('health', 'section-tool-curation')],
+    ["aiEngineeringFluency.openSkillSuggestions", "Open Skill Suggestions section command called", () => tokenTracker.showUsageAnalysisOnTab('insights', 'section-skill-suggestions')],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
-    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnActivityTab('section-model-efficiency')],
     ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>

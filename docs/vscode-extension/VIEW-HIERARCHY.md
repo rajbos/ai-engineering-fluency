@@ -66,14 +66,14 @@ not user settings.
 |---|---|---|
 | 📊 **Usage** | **My Activity** | *(three bands — see below)* |
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
-| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · Output tokens by tool family · MCP Tools · Tool Curation · Skill Suggestions (repeated-task clusters) |
-| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Repository Hygiene Analysis |
+| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · Output tokens by tool family · MCP Tools |
+| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Tool Curation · Repository Hygiene Analysis |
 | | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
-| | **Billing** | AI Billing Coverage |
-| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
+| | **Billing** | AI Billing Coverage (API balance · account budgets · coverage analysis · link to Details › Cost by Provider) |
+| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) · Skill Suggestions (repeated-task clusters) |
 | | **Corrections** | Corrections report |
 
 The **My Activity** tab is itself banded, via section-group headings
@@ -111,7 +111,7 @@ Combined.
 |---|---|
 | Details | plan badge · provider panel · metrics table (grouped rows) · Editor Usage (with "Other" disclosure) · Model Usage (with "Other" disclosure) · estimates footnote |
 | Chart | header · summary cards · period toggles · time-window/metric/split/rolling controls · chart canvas · editor cards · language heatmap |
-| Fluency Score | radar chart · category cards · agentic sparkline · Stage Reference · Share score · Share AI coding toolbox card · About |
+| Fluency Score | radar chart · category cards · agentic sparkline · Stage Reference · Share section (*Fluency Score* / *AI Coding Toolbox* switch, one row of copy, social and export actions) · About |
 | Environmental | impact cards (per period, with analogies) · estimates footnote |
 | Team Dashboard | *Azure Dashboard* tab: personal section · team section · model breakdown · leaderboard · fluency detail — *Team Server* tab: launch card |
 | Log Viewer | session header · turns overview · Hydra fusion section · turn detail |

@@ -210,7 +210,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				titleKey: 'whatsNew.feature.usage.skill-suggestions.title',
 				descriptionKey: 'whatsNew.feature.usage.skill-suggestions.description',
 				kind: 'section',
-				surface: { view: 'usage', tab: 'tools', anchor: 'section-skill-suggestions' },
+				surface: { view: 'usage', tab: 'insights', anchor: 'section-skill-suggestions' },
 			},
 			{
 				id: 'diagnostics.ttft-tab',

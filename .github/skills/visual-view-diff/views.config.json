@@ -120,7 +120,30 @@
       "bundle": "maturity",
       "global": "__INITIAL_MATURITY__",
       "fixture": "maturity.json",
-      "noiseFloorPixels": 400
+      "noiseFloorPixels": 400,
+      "states": [
+        {
+          "id": "share-toolbox",
+          "title": "Share section, AI Coding Toolbox",
+          "steps": [{ "click": "#share-kind-toolbox" }],
+          "expect": "#share-kind-toolbox.active"
+        }
+      ],
+      "scenarios": [
+        {
+          "name": "Score/Toolbox switch swaps the panel and the copy action follows it",
+          "expect": ".share-section",
+          "steps": [
+            { "click": "#btn-share-copy", "expectPosted": "copyText", "expect": "#share-panel-score", "expectHidden": "#share-panel-toolbox" },
+            { "click": "#share-kind-toolbox", "expect": ".toolbox-card", "expectHidden": "#share-panel-score" },
+            { "click": "#btn-share-copy", "expectPosted": "copyText", "expect": ".toolbox-card" },
+            { "click": "#btn-share-linkedin", "expectPosted": "shareToSocial" },
+            { "click": "#btn-export-toggle", "expect": ".export-menu-item[data-export-type=\"png\"]", "expectHidden": ".export-menu-item[data-export-type=\"pdf\"]" },
+            { "click": ".export-menu-item[data-export-type=\"png\"]", "expectPosted": "saveChartImage" },
+            { "click": "#share-kind-score", "expect": "#share-panel-score", "expectHidden": "#share-panel-toolbox" }
+          ]
+        }
+      ]
     },
     {
       "id": "usage",
@@ -169,20 +192,20 @@
         },
         {
           "id": "tools-curation-expanded",
-          "title": "Workspace tools with built-in curation table expanded",
+          "title": "Workspace Health with built-in curation table expanded",
           "steps": [
             { "click": ".group-tab[data-group=\"workspace\"]" },
-            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": ".tab-button[data-tab=\"health\"]" },
             { "click": "#builtin-tools-details > summary" }
           ],
           "expect": "#builtin-tools-details[open] #data-table-root-builtin"
         },
         {
           "id": "tools-skill-suggestions-expanded",
-          "title": "Workspace tools with a Skill Suggestions sessions table expanded",
+          "title": "Coaching › Insights with a Skill Suggestions sessions table expanded",
           "steps": [
-            { "click": ".group-tab[data-group=\"workspace\"]" },
-            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": ".group-tab[data-group=\"coaching\"]" },
+            { "click": ".tab-button[data-tab=\"insights\"]" },
             { "click": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details > summary" }
           ],
           "expect": "#section-skill-suggestions .skill-suggestion-card[data-cluster-index=\"0\"] details[open] #data-table-root-skill-sessions-0"
@@ -386,6 +409,24 @@
             { "click": ".tab-button[data-tab=\"tools\"]", "expect": "#mcp-period-server", "expectHidden": "#mcp-period-tool" },
             { "click": "button[data-mcp-view=\"tool\"]", "expect": "#mcp-period-tool", "expectHidden": "#mcp-period-server" },
             { "click": "button[data-mcp-view=\"server\"]", "expect": "#mcp-period-server", "expectHidden": "#mcp-period-tool" }
+          ]
+        },
+        {
+          "name": "Workspace Health: Tool Curation open link posts openFile",
+          "expect": ".group-tab[data-group=\"workspace\"]",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
+            { "click": ".tab-button[data-tab=\"health\"]", "expect": "#section-tool-curation" },
+            { "click": "#section-tool-curation .curation-file-btn[data-command=\"openFile\"]", "expectPosted": "openFile" }
+          ]
+        },
+        {
+          "name": "Insights: Skill Suggestions Create skill posts draftCopilotChatWithPrompt",
+          "expect": "#section-skill-suggestions",
+          "steps": [
+            { "click": ".group-tab[data-group=\"coaching\"]" },
+            { "click": ".tab-button[data-tab=\"insights\"]" },
+            { "click": "#section-skill-suggestions .skill-suggestion-create", "expectPosted": "draftCopilotChatWithPrompt" }
           ]
         }
       ]

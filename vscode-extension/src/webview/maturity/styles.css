@@ -1042,7 +1042,86 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
 	color: var(--text-muted);
 }
 
-.toolbox-actions,
-.toolbox-share-buttons {
-	margin-top: 12px;
+/* Share section: Score/Toolbox switch and the score's card, which mirrors the toolbox card */
+.share-header {
+	flex-wrap: wrap;
+}
+
+.share-kind-switch {
+	display: inline-flex;
+	margin-left: auto;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.share-kind-btn {
+	padding: 6px 14px;
+	border: none;
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.2s ease;
+}
+
+.share-kind-btn:hover {
+	background: var(--list-hover-bg);
+}
+
+.share-kind-btn.active {
+	background: var(--button-bg);
+	color: var(--button-fg);
+}
+
+.share-panel {
+	margin-bottom: 14px;
+}
+
+.share-period-fixed {
+	font-size: 12px;
+	color: var(--text-primary);
+}
+
+.score-share-card {
+	background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+	border: 1px solid var(--border-color);
+	border-radius: 16px;
+	padding: 24px 28px;
+	max-width: 640px;
+	box-shadow: 0 8px 32px var(--shadow-color);
+}
+
+.score-share-stage {
+	font-size: 24px;
+	font-weight: 800;
+	margin-bottom: 4px;
+}
+
+.score-share-description {
+	font-size: 13px;
+	color: var(--text-secondary);
+}
+
+.share-btn-copy {
+	color: var(--button-secondary-fg);
+	border-color: var(--border-color);
+}
+
+.share-btn-copy:hover {
+	background: var(--button-secondary-hover-bg);
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px var(--shadow-color);
+}
+
+.share-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+	transform: none;
+	box-shadow: none;
+}
+
+.export-menu-item[hidden] {
+	display: none;
 }

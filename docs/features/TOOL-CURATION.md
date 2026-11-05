@@ -115,7 +115,7 @@ The curation logic lives in `src/toolCuration.ts`. The module is intentionally p
 | `analyzeToolCuration(available, usage, windowDays)` | Runs the full curation analysis |
 
 Results are surfaced through:
-- The **Tools tab** in the Usage Analysis webview (`src/webview/usage/main.ts`)
+- The **Workspace Health tab** in the Usage Analysis webview (`src/webview/usage/main.ts`)
 - The **Insights engine** (`src/insightsEngine.ts`) — adds `unused-mcp-servers` and `stale-skills` insight cards
 - The **CLI** `curation` command (`cli/src/commands/curation.ts`)
 

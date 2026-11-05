@@ -565,7 +565,14 @@ test('l10n: usage tab-group, band and context-reference keys resolve in English'
 		'usage.tab.repos': 'Repository PRs',
 		'usage.tab.agent': 'Cloud Agent',
 		'usage.tab.billing': 'Billing',
+		'usage.modelCost.tier.low': 'Low cost',
+		'usage.modelCost.tier.medium': 'Medium cost',
+		'usage.modelCost.tier.high': 'High cost',
+		'usage.modelCost.tier.unknown': 'Unknown',
 		'usage.billing.title': 'AI Billing Coverage',
+		'usage.billing.subtitle': 'Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.',
+		'usage.billing.providerCostsHint': 'Estimated costs per provider are in the Details view.',
+		'usage.billing.openDetails': 'Open Cost by Provider',
 		'usage.billing.signInRequired': 'GitHub authentication required',
 		'usage.billing.signInHint': 'Sign in with GitHub (Diagnostics › Settings › GitHub Auth) to see your Copilot AI credit balance and budgets.',
 		'usage.tab.worktrees': 'Worktrees',
@@ -619,7 +626,14 @@ test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', 
 			'usage.tab.repos': '仓库 PR',
 			'usage.tab.agent': '云端代理',
 			'usage.tab.billing': '计费',
+			'usage.modelCost.tier.low': '低成本',
+			'usage.modelCost.tier.medium': '中等成本',
+			'usage.modelCost.tier.high': '高成本',
+			'usage.modelCost.tier.unknown': '未知',
 			'usage.billing.title': 'AI 计费覆盖',
+			'usage.billing.subtitle': '比较 GitHub Copilot API 报告的所有渠道用量与扩展可从本地 IDE 会话日志跟踪的用量。',
+			'usage.billing.providerCostsHint': '各提供商的估算费用位于“详细信息”视图中。',
+			'usage.billing.openDetails': '打开“按提供商划分的费用”',
 			'usage.billing.signInRequired': '需要 GitHub 身份验证',
 			'usage.billing.signInHint': '通过 GitHub 登录（Diagnostics › Settings › GitHub Auth）以查看 Copilot AI 额度余额和预算。',
 			'usage.tab.worktrees': '工作树',
@@ -1995,6 +2009,20 @@ test('l10n: efficiency selected-period drill-down strings resolve in English and
 	}
 });
 
+test('l10n: the repeated-task insight names the Insights tab as Skill Suggestions\' location', () => {
+	assert.equal(t('insight.repeatedTaskSkillCandidate.more.one', 1), '1 more repeated task found — see Insights → Skill Suggestions.');
+	assert.equal(t('insight.repeatedTaskSkillCandidate.more.other', 2), '2 more repeated tasks found — see Insights → Skill Suggestions.');
+	assert.equal(t('insight.repeatedTaskSkillCandidate.seeDetails'), 'See Insights → Skill Suggestions for details.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('insight.repeatedTaskSkillCandidate.more.one', 1), '另外还发现 1 个重复任务——请查看洞察 → 技能建议。');
+		assert.equal(t('insight.repeatedTaskSkillCandidate.more.other', 2), '另外还发现 2 个重复任务——请查看洞察 → 技能建议。');
+		assert.equal(t('insight.repeatedTaskSkillCandidate.seeDetails'), '详情请查看洞察 → 技能建议。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Tools & Integrations tool-execution section strings resolve in both languages', () => {
 	assert.equal(t('usage.toolExec.reliability.title'), 'Tool execution reliability');
 	assert.equal(t('usage.toolExec.latency.title'), 'Tool latency profile');
@@ -2128,7 +2156,6 @@ test('worktree cleanup delete-feedback keys resolve in zh-cn', () => {
 // resurfacing in the panel and in the copied summary for every locale.
 const TOOLBOX_KEYS_EN: Record<string, string> = {
 	'share.summaryCopied': 'Summary copied to clipboard',
-	'share.toolbox.title': 'Share Your AI Coding Toolbox',
 	'share.toolbox.cardTitle': 'My AI Coding Toolbox',
 	'share.toolbox.period': 'Period:',
 	'share.toolbox.editorsDetectedOne': '1 editor detected',
@@ -2152,13 +2179,46 @@ test('l10n: toolbox card keys resolve in zh-cn and differ from English', () => {
 	try {
 		const expected: Record<string, string> = {
 			'share.summaryCopied': '摘要已复制到剪贴板',
-			'share.toolbox.title': '分享您的 AI 编码工具箱',
 			'share.toolbox.cardTitle': '我的 AI 编码工具箱',
 			'share.toolbox.period': '时间段：',
 			'share.toolbox.phrase.today': '今天',
 			'share.linkedin': '在 LinkedIn 上分享',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// Fluency Score Share section: the score block's strings used to be hard-coded English.
+const SHARE_SECTION_KEYS: Record<string, [string, string]> = {
+	'share.section.title': ['Share Your AI Engineering Fluency', '分享您的 AI 工程熟练度'],
+	'share.section.switchLabel': ['What to share', '要分享的内容'],
+	'share.kind.score': ['Fluency Score', '熟练度评分'],
+	'share.kind.toolbox': ['AI Coding Toolbox', 'AI 编码工具箱'],
+	'share.score.description': ['Share your progress with the community and inspire others to level up their AI engineering skills!', '与社区分享您的进展，激励他人提升 AI 工程技能！'],
+	'share.score.overallLabel': ['Overall AI Engineering Fluency', '总体 AI 工程熟练度'],
+	'share.score.tagline': ['Track your AI usage with AI Engineering Fluency', '使用 AI Engineering Fluency 跟踪您的 AI 使用情况'],
+	'share.score.summary': ['My AI Engineering Fluency Score — {0}. {1}. Based on the last 30 days. #AIEngineeringFluency', '我的 AI 工程熟练度评分 — {0}。{1}。基于最近 30 天的数据。#AIEngineeringFluency'],
+	'share.export.button': ['Export', '导出'],
+	'share.export.png': ['Export as PNG Image', '导出为 PNG 图片'],
+	'share.export.pdf': ['Export as PDF Report', '导出为 PDF 报告'],
+	'share.export.pptx': ['Export as PowerPoint', '导出为 PowerPoint'],
+	'share.toolbox.saveImageTitle': ['Save AI Coding Toolbox Card', '保存 AI 编码工具箱卡片'],
+};
+
+test('l10n: Share section keys resolve in English', () => {
+	for (const [key, [english]] of Object.entries(SHARE_SECTION_KEYS)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Share section keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, [, chinese]] of Object.entries(SHARE_SECTION_KEYS)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
 		}
 	} finally {
@@ -2354,7 +2414,7 @@ test('l10n: Usage Analysis month labels name the period their data covers', () =
 test('l10n: the skill suggestions path in the insight names the real tab and section', () => {
 	const sectionTitle = (): string => t('usage.skillSuggestions.title', '').replace(/\s*[(（].*$/, '');
 	const assertPath = (): void => {
-		const expected = `${t('usage.tab.tools')} → ${sectionTitle()}`;
+		const expected = `${t('usage.tab.insights')} → ${sectionTitle()}`;
 		assert.ok(t('insight.repeatedTaskSkillCandidate.seeDetails').includes(expected), `seeDetails names ${expected}`);
 		assert.ok(t('insight.repeatedTaskSkillCandidate.more.one', 1).includes(expected), `more.one names ${expected}`);
 		assert.ok(t('insight.repeatedTaskSkillCandidate.more.other', 2).includes(expected), `more.other names ${expected}`);

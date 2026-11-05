@@ -55,6 +55,8 @@
     "o3-mini": 0.25,
     "o4-mini": 0.25,
     "gpt-5.5": 0.25,
+    "mistral-large-4-0-3": 0.25,
+    "mistral-large-4-0": 0.25,
     "mistral-large-latest": 0.25,
     "mistral-large-2512": 0.25,
     "mistral-large-2411": 0.25,
