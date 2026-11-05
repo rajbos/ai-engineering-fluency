@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { after as nodeTestAfter } from 'node:test';
 import Module = require('module');
 
 type ConfigStore = Record<string, unknown>;
@@ -383,18 +384,34 @@ try {
 	// ignore
 }
 
-// Safety net: force exit after 30 s if open handles (e.g. timers from
+// Safety net: force exit after the limit if open handles (e.g. timers from
 // imported extension code) prevent the process from exiting after tests.
 // The timer is unref()'d so it won't keep the process alive on its own.
 //
+// A file still running its tests at the limit must fail: exiting 0 there made
+// the runner report PASS with every remaining test silently dropped. The root
+// after() hook is what tells the two cases apart, because it only runs once
+// all of the file's tests have finished.
+//
 // Not armed in the `node --test` runner process itself: that process also
-// `--require`s this shim, and a 30 s exit(0) there silently ends a multi-file
-// run after ~30 s with exit code 0 - everything not yet finished is dropped,
-// and no summary or coverage report (or coverage threshold) is ever reached.
+// `--require`s this shim, and an exit there silently ends a multi-file run -
+// everything not yet finished is dropped, and no summary or coverage report
+// (or coverage threshold) is ever reached.
 // The per-file child processes node:test spawns carry NODE_TEST_CONTEXT.
 const isTestRunnerParent = process.execArgv.includes('--test') && !process.env.NODE_TEST_CONTEXT;
 if (!isTestRunnerParent) {
-	setTimeout(() => process.exit(process.exitCode ?? 0), 30_000).unref();
+	const limitMs = Number(process.env.TEST_FILE_WATCHDOG_MS) || 120_000;
+	let testsFinished = false;
+	nodeTestAfter(() => {
+		testsFinished = true;
+	});
+	setTimeout(() => {
+		if (testsFinished) {
+			process.exit(process.exitCode ?? 0);
+		}
+		process.stderr.write(`Test file watchdog: ${process.argv[1]} did not finish its tests within ${limitMs} ms; failing it. Speed up or split the file, or fix the hanging test.\n`);
+		process.exit(1);
+	}, limitMs).unref();
 }
 
 // Set up a minimal browser-like `window` global so webview utilities that

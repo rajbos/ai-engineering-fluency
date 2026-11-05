@@ -56,7 +56,7 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		try {
 			const files = await this.mistralVibe.discoverSessions();
 			if (files.length > 0) {
-				log(`📄 Found ${files.length} session file(s) in Mistral Vibe (~/.vibe/logs/session)`);
+				log(`📄 Found ${files.length} session file(s) in Mistral Vibe (~/.vibe/logs/session, incl. unified store)`);
 				sessionFiles.push(...files);
 			}
 		} catch (e) {
@@ -66,7 +66,10 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 	}
 
 	getCandidatePaths(): CandidatePath[] {
-		return [{ path: this.mistralVibe.getSessionLogDir(), source: 'Mistral Vibe' }];
+		return [
+			{ path: this.mistralVibe.getSessionLogDir(), source: 'Mistral Vibe' },
+			{ path: this.mistralVibe.getUnifiedSessionLogDir(), source: 'Mistral Vibe (unified store)' },
+		];
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
