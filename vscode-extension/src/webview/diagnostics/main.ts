@@ -12,8 +12,6 @@ import dataTableStyles from "../shared/dataTable.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
-import { getModelColor } from "../../../../src/chartDataBuilder";
-import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { localize, localizeFormat } from "../shared/localization";
 import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
 import { accountBudgetsHtml } from "../shared/accountBudgets";
@@ -190,35 +188,15 @@ type DiagnosticsData = {
   quotaEntitlements?: QuotaEntitlements;
   /** Copilot budget per GitHub account signed in to VS Code. */
   accountBudgets?: AccountBudgetView[];
-  toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
-  skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
-  /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
-  skillCallsByEditor?: { [skillName: string]: { [editorSource: string]: number } } | null;
-  /** Skill name -> description, sourced from discovered SKILL.md frontmatter. */
-  skillDescriptions?: { [skillName: string]: string };
-  toolFamilies?: ToolFamilyConfig[];
   otelComparison?: CopilotCliOtelComparison | null;
 };
 
-type ToolFamilyConfig = {
-  id: string;
-  name: string;
-  builtIn: string[];
-  alternatives: string[];
-  description?: string;
-};
-
 type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
-type TtftGranularity = "day" | "week" | "month";
-type TtftScanRange = "14d" | "30d" | "90d" | "180d" | "365d" | "all";
 
 type DiagnosticsViewState = {
   activeTab?: string;
   activeSubtab?: string;
   otelDeltaPeriod?: OtelDeltaPeriod;
-  skillUsageEditorFilter?: string;
-  ttftGranularity?: TtftGranularity;
-  ttftScanRange?: TtftScanRange;
 };
 
 type FolderFileResult = {
@@ -247,29 +225,16 @@ const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
   activeSubtab: undefined,
   otelDeltaPeriod: "all",
-  skillUsageEditorFilter: "all",
-  ttftGranularity: "day",
-  ttftScanRange: "14d",
 });
 
 let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
 let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
-let currentTtftGranularity: TtftGranularity = diagState.restore().ttftGranularity ?? "day";
-let currentTtftScanRange: TtftScanRange = diagState.restore().ttftScanRange ?? "14d";
 
 // Session table filtering state (sorting and paging live in the shared data table)
 let currentEditorFilter: string | null = null; // null = show all
 let currentContextRefFilter: keyof ContextReferenceUsage | null = null; // null = show all
 let hideEmptySessions = true; // hide sessions with 0 interactions by default
 let showOnlyUnattributed = false; // filter to only sessions with unattributed tokens
-
-let storedToolFamilies: ToolFamilyConfig[] | undefined;
-
-// Skill usage tab state
-let currentSkillCallStats: DiagnosticsData['skillCallStats'];
-let currentSkillCallsByEditor: DiagnosticsData['skillCallsByEditor'];
-let currentSkillDescriptions: DiagnosticsData['skillDescriptions'];
-let skillUsageEditorFilter: string = diagState.restore().skillUsageEditorFilter ?? "all";
 
 // Render state (promoted to module level so all setup functions can be top-level)
 let storedDetailedFiles: SessionFileDetails[] = [];
@@ -1144,13 +1109,8 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
   const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
   return `
     <div class="info-box">
-      <div class="info-box-title">🧮 Model Usage Breakdown</div>
-      <div>
-        Aggregates the exact per-model token usage and estimated cost the dashboard uses,
-        for a single editor or across all of them. Handy for spotting model/pricing
-        mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
-        Updates automatically when you change the editor or time range below.
-      </div>
+      <div class="info-box-title">${escapeHtml(localize('diagnostics.pricingCheck.title'))}</div>
+      <div>${escapeHtml(localize('diagnostics.pricingCheck.body'))}</div>
     </div>
     <div class="section">
       <div class="section-title">🎯 Select Editor &amp; Time Range</div>
@@ -1467,13 +1427,12 @@ function activateTab(tabId: string): boolean {
   return false;
 }
 
-/** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
+/** Which group tab (Diagnostics / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
   // Keep in step with the leaf-tab bars in renderTabBars: a tab rendered in a bar but missing
   // here can never be picked by firstAvailableTabInGroup, and groupOfTab only resolves it by
   // falling through to the "diagnostics" default rather than by actually knowing its group.
-  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
+  diagnostics: ["report", "sessions", "cache", "path-analyzer", "model-usage", "otel-delta"],
   settings: ["display", "backend", "github", "debug"],
 };
 
@@ -1680,12 +1639,6 @@ function reRenderTable(): void {
   }
 }
 
-function setupToolAnalysisHandlers(): void {
-  document.getElementById("btn-open-tool-families-settings")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "openToolFamiliesSettings" });
-  });
-}
-
 const FILE_LINK_SELECTOR = ".session-file-link, .view-formatted-link, .reveal-link, .report-editor-link";
 let fileLinksDelegated = false;
 
@@ -1845,9 +1798,6 @@ function setupTabHandlers(): void {
         if (tabId === "model-usage") {
           const resultsDiv = document.getElementById("model-usage-results");
           if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
-        } else if (tabId === "ttft") {
-          const resultsDiv = document.getElementById("ttft-results");
-          if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerTtftAnalysis(); }
         }
       }
     });
@@ -2066,43 +2016,6 @@ function handleGithubAuthSection(message: DiagMessage): void {
   }
 }
 
-function handleToolAnalysisSection(message: DiagMessage): void {
-  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
-  if (message.toolCallStats === undefined) { return; }
-  const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
-  replaceTabContent("tool-analysis", newContent, setupToolAnalysisHandlers);
-}
-
-/** Re-renders the Skill Usage tab body from the cached data + current editor filter, preserving active/tab state. */
-function rerenderSkillUsageTab(): void {
-  replaceTabContent(
-    "skill-usage",
-    renderSkillUsageTab(currentSkillCallStats, currentSkillCallsByEditor, currentSkillDescriptions, skillUsageEditorFilter),
-    setupSkillUsageFilterHandler
-  );
-}
-
-function setupSkillUsageFilterHandler(): void {
-  document.querySelectorAll<HTMLElement>(".skill-usage-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const editor = chip.getAttribute("data-editor");
-      if (!editor) { return; }
-      skillUsageEditorFilter = editor;
-      diagState.patch({ skillUsageEditorFilter: editor });
-      setDataTableState(SKILL_USAGE_TABLE_ID, { page: 1 });
-      rerenderSkillUsageTab();
-    });
-  });
-}
-
-function handleSkillUsageSection(message: DiagMessage): void {
-  if (message.skillCallStats !== undefined) { currentSkillCallStats = message.skillCallStats as DiagnosticsData['skillCallStats']; }
-  if (message.skillCallsByEditor !== undefined) { currentSkillCallsByEditor = message.skillCallsByEditor as DiagnosticsData['skillCallsByEditor']; }
-  if (message.skillDescriptions !== undefined) { currentSkillDescriptions = message.skillDescriptions as DiagnosticsData['skillDescriptions']; }
-  if (message.skillCallStats === undefined) { return; }
-  rerenderSkillUsageTab();
-}
-
 /** Re-renders the OTel Delta tab body from currentOtelComparison + currentOtelDeltaPeriod, preserving active/tab state. */
 function rerenderOtelDeltaTab(): void {
   replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
@@ -2132,8 +2045,6 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleSessionFoldersSection(message);
   handleCandidatePathsSection(message);
   handleGithubAuthSection(message);
-  handleToolAnalysisSection(message);
-  handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
 }
 
@@ -2292,9 +2203,6 @@ function handleSessionFilesLoadProgress(message: DiagMessage): void {
   const reportSubtext = document.getElementById("report-loading-subtext");
   if (reportSubtext) { reportSubtext.textContent = progressText; }
 
-  const ttftLoadingStatus = document.getElementById("ttft-loading-status");
-  if (ttftLoadingStatus) { ttftLoadingStatus.textContent = progressText; }
-
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) {
     modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
@@ -2324,13 +2232,6 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
   triggerModelUsageAnalysis();
-
-  // Only re-run TTFT if the user already opened that tab (or changed granularity) while
-  // files were still loading — its results div would be non-empty in that case (holding
-  // either the initial spinner or the "still loading" notice). A user who never opened the
-  // tab has an empty div here, and TTFT stays lazy for them as designed.
-  const ttftResultsDiv = document.getElementById("ttft-results");
-  if (ttftResultsDiv && ttftResultsDiv.innerHTML.trim()) { triggerTtftAnalysis(); }
 
   reRenderTable();
 }
@@ -2430,7 +2331,6 @@ const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
   folderPicked: handleFolderPicked,
   folderAnalysisResult: handleFolderAnalysisResult,
   modelUsageResult: handleModelUsageResult,
-  ttftResult: handleTtftResult,
   switchTab: handleSwitchTab,
 };
 
@@ -2637,240 +2537,6 @@ for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,2
 </div>`;
 }
 
-type ToolAnalysisRow = { tool: string; totalTokens: number; calls: number; isBuiltIn: boolean };
-
-/** Compute pooled avg tokens/call across a set of rows (built-in baseline). Returns NaN if no data. */
-function pooledAvg(rows: ToolAnalysisRow[]): number {
-  const totalCalls = rows.reduce((s, r) => s + r.calls, 0);
-  const totalTokens = rows.reduce((s, r) => s + r.totalTokens, 0);
-  return totalCalls > 0 ? totalTokens / totalCalls : NaN;
-}
-
-function toolAvgTokens(r: ToolAnalysisRow): number {
-  return r.calls > 0 ? r.totalTokens / r.calls : 0;
-}
-
-/** An alternative tool's avg tokens/call relative to the family's built-in baseline, or null when not comparable. */
-function toolBaselineRatio(r: ToolAnalysisRow, builtInBaseline: number): number | null {
-  if (r.isBuiltIn || isNaN(builtInBaseline) || builtInBaseline <= 0 || r.calls <= 0) { return null; }
-  return toolAvgTokens(r) / builtInBaseline;
-}
-
-function toolRatioClass(r: ToolAnalysisRow, builtInBaseline: number): string | undefined {
-  if (r.isBuiltIn) { return "tool-builtin-label"; }
-  const ratio = toolBaselineRatio(r, builtInBaseline);
-  if (ratio === null) { return undefined; }
-  return ratio < 0.85 ? "ratio-better" : ratio > 1.15 ? "ratio-worse" : "ratio-neutral";
-}
-
-function renderToolRatioCell(r: ToolAnalysisRow, builtInBaseline: number): string {
-  if (r.isBuiltIn) { return "baseline"; }
-  const ratio = toolBaselineRatio(r, builtInBaseline);
-  if (ratio === null) { return "—"; }
-  const pct = Number(Math.round(ratio * 100)) || 0;
-  return `<span title="${pct}% of built-in average">${pct}%</span>`;
-}
-
-function buildToolAnalysisColumns(builtInBaseline: number): DataTableColumn<ToolAnalysisRow>[] {
-  return [
-    {
-      id: "tool",
-      label: "Tool",
-      sortValue: (r) => r.tool,
-      render: (r) => {
-        const badge = r.isBuiltIn ? ' <span class="tool-type-badge built-in">built-in</span>' : ' <span class="tool-type-badge alternative">alt</span>';
-        return { html: `${escapeHtml(r.tool)}${badge}` };
-      },
-    },
-    { id: "calls", label: "Calls", align: "right", sortValue: (r) => r.calls, render: (r) => String(r.calls) },
-    { id: "total", label: "Total Output Tokens", align: "right", sortValue: (r) => r.totalTokens, render: (r) => formatTokenCount(r.totalTokens) },
-    { id: "avg", label: "Avg Tokens / Call", align: "right", sortValue: toolAvgTokens, render: (r) => formatTokenCount(Math.round(toolAvgTokens(r))) },
-    {
-      id: "ratio",
-      label: "vs Built-in",
-      align: "right",
-      className: "tool-ratio",
-      sortValue: (r) => toolBaselineRatio(r, builtInBaseline),
-      cellClassName: (r) => toolRatioClass(r, builtInBaseline),
-      render: (r) => ({ html: renderToolRatioCell(r, builtInBaseline) }),
-    },
-  ];
-}
-
-/** One sortable, paged table per tool family; each keeps its own sort and page. */
-function renderToolAnalysisTable(tableId: string, ariaLabel: string, rows: ToolAnalysisRow[], builtInBaseline: number): string {
-  return renderDataTable({
-    tableId,
-    ariaLabel,
-    rows,
-    columns: buildToolAnalysisColumns(builtInBaseline),
-    initialSort: { columnId: "avg", direction: "desc" },
-    className: "tool-analysis-table",
-  });
-}
-
-/** Render one family section. Returns empty string if the family has no data. */
-function renderToolFamilySection(
-  family: ToolFamilyConfig,
-  outputTokensByTool: { [key: string]: number },
-  byTool: { [key: string]: number },
-  assignedTools: Set<string>
-): { html: string; rows: ToolAnalysisRow[] } {
-  const buildRows = (names: string[], isBuiltIn: boolean): ToolAnalysisRow[] =>
-    names
-      .filter(t => outputTokensByTool[t] !== undefined && (byTool[t] || 0) > 0 && !assignedTools.has(t))
-      .map(t => { assignedTools.add(t); return { tool: t, totalTokens: outputTokensByTool[t], calls: byTool[t] || 0, isBuiltIn }; });
-
-  const builtInRows = buildRows(family.builtIn, true);
-  const altRows = buildRows(family.alternatives, false);
-  const allRows = [...builtInRows, ...altRows];
-  if (allRows.length === 0) { return { html: '', rows: [] }; }
-
-  const baseline = pooledAvg(builtInRows);
-  const desc = family.description ? ` <span class="hint">${escapeHtml(family.description)}</span>` : '';
-  const html = `
-<div class="tool-family-section">
-<h4 class="tool-family-heading">${escapeHtml(family.name)}${desc}</h4>
-${renderToolAnalysisTable(`diagnostics-tool-family-${family.id}`, family.name, allRows, baseline)}
-</div>`;
-  return { html, rows: allRows };
-}
-
-function renderToolAnalysisTab(toolCallStats: DiagnosticsData['toolCallStats'], families?: ToolFamilyConfig[]): string {
-  if (!toolCallStats || !toolCallStats.outputTokensByTool || Object.keys(toolCallStats.outputTokensByTool).length === 0) {
-    return `<div id="tab-tool-analysis" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">🔧 Tool Output Token Analysis</div>
-<div>Track how many tokens each tool produces as output over the last 30 days. Data is collected as you use the extension — no output token data has been recorded yet.</div>
-</div>
-</div>`;
-  }
-  const outputTokensByTool = toolCallStats.outputTokensByTool;
-  const byTool = toolCallStats.byTool;
-  const assignedTools = new Set<string>();
-  let sectionsHtml = '';
-
-  if (families && families.length > 0) {
-    for (const family of families) {
-      const { html } = renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools);
-      sectionsHtml += html;
-    }
-  }
-
-  // Remaining tools not in any family
-  const otherRows: ToolAnalysisRow[] = Object.entries(outputTokensByTool)
-    .filter(([t]) => !assignedTools.has(t) && (byTool[t] || 0) > 0)
-    .map(([t, tokens]) => ({ tool: t, totalTokens: tokens, calls: byTool[t] || 0, isBuiltIn: false }));
-  if (otherRows.length > 0) {
-    sectionsHtml += `
-<div class="tool-family-section">
-<h4 class="tool-family-heading">Other Tools</h4>
-${renderToolAnalysisTable("diagnostics-tool-other", "Other Tools", otherRows, NaN)}
-</div>`;
-  }
-
-  return `<div id="tab-tool-analysis" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">🔧 Tool Output Token Analysis</div>
-<div>Tokens produced by each tool's output over the last 30 days. Tools are grouped by family. <strong>vs Built-in</strong> shows how an alternative compares to the pooled baseline — green is more token-efficient. Click column headers to sort within each group. <button class="inline-link" id="btn-open-tool-families-settings">Configure tool families ↗</button></div>
-</div>
-${sectionsHtml}
-</div>`;
-}
-
-/** Sum every editor's count for one skill's byEditor map. */
-function _sumSkillEditorCounts(byEditor: { [editorSource: string]: number } | undefined): number {
-  return Object.values(byEditor ?? {}).reduce((s, n) => s + n, 0);
-}
-
-/** Build the "All" + per-editor filter chip row, with each chip's own total invocation count. */
-function _renderSkillUsageFilterPanel(
-  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
-  totalAll: number,
-  activeFilter: string
-): string {
-  const editorTotals = new Map<string, number>();
-  for (const byEditor of Object.values(skillCallsByEditor ?? {})) {
-    for (const [editor, count] of Object.entries(byEditor)) {
-      editorTotals.set(editor, (editorTotals.get(editor) ?? 0) + count);
-    }
-  }
-  const editors = [...editorTotals.entries()].sort((a, b) => b[1] - a[1]);
-  if (editors.length === 0) { return ''; }
-  const allChip = `<button class="skill-usage-chip${activeFilter === 'all' ? ' active' : ''}" data-editor="all">All <span class="skill-usage-chip-count">${formatTokenCount(totalAll)}</span></button>`;
-  const editorChips = editors.map(([editor, count]) =>
-    `<button class="skill-usage-chip${activeFilter === editor ? ' active' : ''}" data-editor="${escapeHtml(editor)}">${escapeHtml(editor)} <span class="skill-usage-chip-count">${formatTokenCount(count)}</span></button>`
-  ).join('');
-  return `<div class="skill-usage-filter-panel">${allChip}${editorChips}</div>`;
-}
-
-type SkillUsageRow = { name: string; count: number; description: string };
-
-const SKILL_USAGE_TABLE_ID = "diagnostics-skill-usage";
-
-const SKILL_USAGE_COLUMNS: DataTableColumn<SkillUsageRow>[] = [
-  { id: "skill", label: "Skill", sortValue: (r) => r.name, render: (r) => r.name },
-  {
-    id: "description",
-    label: "Description",
-    sortValue: (r) => r.description || null,
-    cellClassName: () => "skill-usage-description",
-    render: (r) => ({ html: r.description ? escapeHtml(r.description) : '<span class="hint">—</span>' }),
-  },
-  { id: "invocations", label: "Invocations", align: "right", sortValue: (r) => r.count, render: (r) => formatTokenCount(r.count) },
-];
-
-/**
- * Renders per-skill invocation counts (e.g. Claude Code's `/graphify`, custom SKILL.md
- * workflows) over the last 30 days, filterable by editor. Adapter-agnostic by design —
- * populated only for editors whose session logs expose a distinguishable skill name
- * (currently Claude Code, Claude Desktop, and Copilot CLI); other editors show the empty
- * state until their format is mapped.
- */
-function renderSkillUsageTab(
-  skillCallStats: DiagnosticsData['skillCallStats'],
-  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
-  skillDescriptions: DiagnosticsData['skillDescriptions'],
-  editorFilter: string = 'all'
-): string {
-  const byName = skillCallStats?.byName ?? {};
-  if (Object.keys(byName).length === 0) {
-    return `<div id="tab-skill-usage" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">🧩 Skill Usage</div>
-<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last 30 days. No skill invocations have been recorded yet. Skill usage is currently detected for Claude Code, Claude Desktop, and Copilot CLI sessions — support for other editors depends on whether their session logs expose a distinguishable skill name.</div>
-</div>
-</div>`;
-  }
-  const totalAll = Object.values(byName).reduce((s, n) => s + n, 0);
-  const filterPanel = _renderSkillUsageFilterPanel(skillCallsByEditor, totalAll, editorFilter);
-  const rows = Object.keys(byName)
-    .map(name => ({
-      name,
-      count: editorFilter === 'all' ? byName[name] : (skillCallsByEditor?.[name]?.[editorFilter] ?? 0),
-      description: skillDescriptions?.[name] ?? '',
-    }))
-    .filter(r => r.count > 0);
-  const shownTotal = rows.reduce((s, r) => s + r.count, 0);
-  const table = renderDataTable({
-    tableId: SKILL_USAGE_TABLE_ID,
-    ariaLabel: "Skill Usage",
-    rows,
-    columns: SKILL_USAGE_COLUMNS,
-    initialSort: { columnId: "invocations", direction: "desc" },
-    className: "skill-usage-table",
-  });
-  const scopeLabel = editorFilter === 'all' ? 'across all editors' : `for ${escapeHtml(editorFilter)}`;
-  return `<div id="tab-skill-usage" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">🧩 Skill Usage</div>
-<div>${formatTokenCount(shownTotal)} skill invocation(s) across ${rows.length} skill(s) ${scopeLabel} in the last 30 days. Currently detected for Claude Code / Claude Desktop / Copilot CLI sessions.</div>
-</div>
-${filterPanel}
-${table}
-</div>`;
-}
-
 function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
   if (comparison === undefined) {
     return `<div class="info-box">
@@ -3066,265 +2732,6 @@ ${tableOrEmpty}
 </div>`;
 }
 
-// --- TTFT (time to first token) tab -----------------------------------------------------
-
-type TtftBucketView = { key: string; label: string; avgSeconds: number; count: number };
-type TtftModelSeriesView = { model: string; data: (number | null)[] };
-
-const TTFT_GRANULARITY_LABELS: Record<TtftGranularity, string> = { day: "Day", week: "Week", month: "Month" };
-const TTFT_SCAN_RANGE_LABELS: Record<TtftScanRange, string> = {
-  "14d": "Last 14 days",
-  "30d": "Last 30 days",
-  "90d": "Last 90 days",
-  "180d": "Last 6 months",
-  "365d": "Last year",
-  "all": "All time",
-};
-
-/** Values arrive already normalized to seconds (see extractTtftSamplesFromDebugLog); this only picks the more readable unit for display. */
-function formatTtftSeconds(seconds: number): string {
-  return seconds >= 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`;
-}
-
-function renderTtftGranularitySelector(granularity: TtftGranularity): string {
-  const options = (Object.keys(TTFT_GRANULARITY_LABELS) as TtftGranularity[])
-    .map(g => `<option value="${g}"${g === granularity ? ' selected' : ''}>${TTFT_GRANULARITY_LABELS[g]}</option>`)
-    .join('');
-  return `<div class="otel-delta-period-row">
-<label for="ttft-granularity">Bucket by:</label>
-<select id="ttft-granularity" class="otel-delta-period-select">${options}</select>
-</div>`;
-}
-
-function renderTtftScanRangeSelector(range: TtftScanRange): string {
-  const options = (Object.keys(TTFT_SCAN_RANGE_LABELS) as TtftScanRange[])
-    .map(r => `<option value="${r}"${r === range ? ' selected' : ''}>${TTFT_SCAN_RANGE_LABELS[r]}</option>`)
-    .join('');
-  return `<div class="otel-delta-period-row">
-<label for="ttft-scan-range">Scan session files from:</label>
-<select id="ttft-scan-range" class="otel-delta-period-select">${options}</select>
-</div>`;
-}
-
-const TTFT_CHART_WIDTH = 760;
-const TTFT_CHART_HEIGHT = 220;
-const TTFT_CHART_PAD_LEFT = 48;
-const TTFT_CHART_PAD_RIGHT = 32;
-const TTFT_CHART_PAD_TOP = 12;
-const TTFT_CHART_PAD_BOTTOM = 28;
-
-/** Renders one SVG line chart with one path per model series, breaking the line across buckets where a model has no samples (null) rather than interpolating over the gap. */
-function renderTtftChartSvg(buckets: TtftBucketView[], series: TtftModelSeriesView[]): string {
-  if (buckets.length === 0 || series.length === 0) { return ''; }
-  const innerW = TTFT_CHART_WIDTH - TTFT_CHART_PAD_LEFT - TTFT_CHART_PAD_RIGHT;
-  const innerH = TTFT_CHART_HEIGHT - TTFT_CHART_PAD_TOP - TTFT_CHART_PAD_BOTTOM;
-  const allValues = series.flatMap(s => s.data.filter((v): v is number => v !== null));
-  const maxValue = allValues.length > 0 ? Math.max(...allValues) : 1;
-  const yMax = (maxValue || 1) * 1.15;
-  const xStep = buckets.length > 1 ? innerW / (buckets.length - 1) : 0;
-  const xAt = (i: number) => TTFT_CHART_PAD_LEFT + i * xStep;
-  const yAt = (v: number) => TTFT_CHART_PAD_TOP + innerH - (v / yMax) * innerH;
-
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => {
-    const value = yMax * f;
-    const y = yAt(value);
-    return `<line x1="${TTFT_CHART_PAD_LEFT}" y1="${y.toFixed(1)}" x2="${TTFT_CHART_WIDTH - TTFT_CHART_PAD_RIGHT}" y2="${y.toFixed(1)}" class="ttft-gridline" />
-<text x="${TTFT_CHART_PAD_LEFT - 6}" y="${(y + 3).toFixed(1)}" class="ttft-axis-label" text-anchor="end">${escapeHtml(formatTtftSeconds(value))}</text>`;
-  }).join('');
-
-  // Thin out x-axis labels so they don't overlap when there are many buckets. The first/last
-  // labels are anchored inward (start/end instead of middle) so they render within the
-  // viewBox instead of overflowing past its edges and getting clipped.
-  const labelEvery = Math.max(1, Math.ceil(buckets.length / 8));
-  const xLabels = buckets.map((b, i) => {
-    if (i % labelEvery !== 0 && i !== buckets.length - 1) { return ''; }
-    const anchor = i === buckets.length - 1 ? 'end' : i === 0 ? 'start' : 'middle';
-    return `<text x="${xAt(i).toFixed(1)}" y="${TTFT_CHART_HEIGHT - 8}" class="ttft-axis-label" text-anchor="${anchor}">${escapeHtml(b.label)}</text>`;
-  }).join('');
-
-  const paths = series.map((s, idx) => {
-    const color = getModelColor(idx);
-    let d = '';
-    let drawing = false;
-    s.data.forEach((v, i) => {
-      if (v === null) { drawing = false; return; }
-      const x = xAt(i).toFixed(1);
-      const y = yAt(v).toFixed(1);
-      d += drawing ? ` L ${x} ${y}` : `${d ? ' ' : ''}M ${x} ${y}`;
-      drawing = true;
-    });
-    const dots = s.data.map((v, i) => v === null ? '' : `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="2.5" fill="${color.border}" />`).join('');
-    return `<g class="ttft-series" data-model="${escapeHtml(s.model)}"><path d="${d}" fill="none" stroke="${color.border}" stroke-width="2" />${dots}</g>`;
-  }).join('');
-
-  const legend = series.map((s, idx) => {
-    const color = getModelColor(idx);
-    const name = escapeHtml(getModelDisplayName(s.model));
-    return `<span class="ttft-legend-item" data-model="${escapeHtml(s.model)}" role="button" tabindex="0" aria-pressed="false" title="Click to hide/show ${name}"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${name}</span>`;
-  }).join('');
-
-  return `<div class="ttft-chart-wrap">
-<svg viewBox="0 0 ${TTFT_CHART_WIDTH} ${TTFT_CHART_HEIGHT}" class="ttft-chart" role="img" aria-label="Average time to first token per model over time">
-${yTicks}
-${xLabels}
-${paths}
-</svg>
-<div class="ttft-legend">${legend}</div>
-</div>`;
-}
-
-const TTFT_BUCKET_TABLE_ID = "diagnostics-ttft-buckets";
-
-/** Newest bucket first. */
-function renderTtftBucketTable(granularity: TtftGranularity, buckets: TtftBucketView[]): string {
-  setDataTableState(TTFT_BUCKET_TABLE_ID, { page: 1 });
-  return renderDataTable({
-    tableId: TTFT_BUCKET_TABLE_ID,
-    ariaLabel: "Time to First Token",
-    rows: buckets.slice().reverse(),
-    columns: [
-      { id: "bucket", label: TTFT_GRANULARITY_LABELS[granularity], sortValue: (b) => b.key, render: (b) => b.label },
-      { id: "avg", label: "Avg TTFT", align: "right", sortValue: (b) => b.avgSeconds, render: (b) => formatTtftSeconds(b.avgSeconds) },
-      { id: "samples", label: "Samples", align: "right", sortValue: (b) => b.count, render: (b) => b.count.toLocaleString() },
-    ],
-  });
-}
-
-function renderTtftResults(granularity: TtftGranularity, buckets: TtftBucketView[], series: TtftModelSeriesView[], sampleCount: number, fileCount: number): string {
-  if (sampleCount === 0) {
-    return `<div class="info-box">
-<div class="info-box-title">📭 No TTFT data found</div>
-<div>
-Checked ${fileCount.toLocaleString()} session file(s) in the selected range; none had a debug log
-with a populated <code>attrs.ttft</code>. Try widening "Scan session files from" above, but also
-check VS Code's <b>GitHub › Copilot › Chat › Agent Debug Log › File Logging: Enabled</b> setting
-(Experimental) — it's off by default, and this data only exists for sessions that ran while it
-was on (a window reload is needed after enabling it).
-</div>
-</div>`;
-  }
-  const overallAvg = buckets.reduce((sum, b) => sum + b.avgSeconds * b.count, 0) / Math.max(1, sampleCount);
-  return `<div class="summary-cards">
-<div class="summary-card">
-<div class="summary-label">⏱️ Overall Avg TTFT</div>
-<div class="summary-value">${escapeHtml(formatTtftSeconds(overallAvg))}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">🧩 Models Shown</div>
-<div class="summary-value">${series.length}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">📊 Samples</div>
-<div class="summary-value">${sampleCount.toLocaleString()}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">📄 Session Files Checked</div>
-<div class="summary-value">${fileCount.toLocaleString()}</div>
-</div>
-</div>
-${renderTtftChartSvg(buckets, series)}
-<div style="margin-top: 12px;">${renderTtftBucketTable(granularity, buckets)}</div>`;
-}
-
-function renderTtftTab(): string {
-  return `<div id="tab-ttft" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">⏱️ Time to First Token</div>
-<div>
-How long a chat model takes to start streaming a response, averaged per model over time.
-Read from VS Code Copilot Chat's own debug log (<code>attrs.ttft</code> on <code>llm_request</code>
-events) — the same file this extension already reads for exact per-session billing. This only
-exists for sessions that ran while VS Code's experimental <b>GitHub › Copilot › Chat › Agent Debug
-Log › File Logging: Enabled</b> setting was on (off by default, requires a window reload after
-enabling) — nothing in this extension's own settings. The unit isn't documented upstream, so
-values are auto-detected as seconds or milliseconds by magnitude.
-</div>
-</div>
-${renderTtftGranularitySelector(currentTtftGranularity)}
-${renderTtftScanRangeSelector(currentTtftScanRange)}
-<div id="ttft-results"></div>
-</div>`;
-}
-
-function triggerTtftAnalysis(): void {
-  const resultsDiv = document.getElementById("ttft-results");
-  if (resultsDiv) {
-    setHtml(resultsDiv, `
-        <div class="analyzer-loading">
-          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
-          <span>Scanning debug logs for TTFT…</span>
-        </div>`);
-  }
-  vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function setupTtftHandlers(): void {
-  document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
-    currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
-    diagState.patch({ ttftGranularity: currentTtftGranularity });
-    triggerTtftAnalysis();
-  });
-  document.getElementById("ttft-scan-range")?.addEventListener("change", (e) => {
-    currentTtftScanRange = (e.target as HTMLSelectElement).value as TtftScanRange;
-    diagState.patch({ ttftScanRange: currentTtftScanRange });
-    triggerTtftAnalysis();
-  });
-  const resultsDiv = document.getElementById("ttft-results");
-  const toggleTtftModel = (item: HTMLElement) => {
-    const model = item.dataset.model;
-    if (!model) { return; }
-    const hidden = item.classList.toggle("ttft-hidden");
-    item.setAttribute("aria-pressed", String(hidden));
-    document.querySelectorAll(".ttft-series").forEach((el) => {
-      if ((el as HTMLElement).dataset.model === model) { (el as HTMLElement).classList.toggle("ttft-hidden", hidden); }
-    });
-  };
-  resultsDiv?.addEventListener("click", (e) => {
-    const item = (e.target as HTMLElement)?.closest(".ttft-legend-item") as HTMLElement | null;
-    if (item) { toggleTtftModel(item); }
-  });
-  resultsDiv?.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" && e.key !== " ") { return; }
-    const item = (e.target as HTMLElement)?.closest(".ttft-legend-item") as HTMLElement | null;
-    if (item) { e.preventDefault(); toggleTtftModel(item); }
-  });
-}
-
-function handleTtftResult(message: DiagMessage): void {
-  const resultsDiv = document.getElementById("ttft-results");
-  if (!resultsDiv) { return; }
-  if (message.stillLoading) {
-    setHtml(resultsDiv, `
-        <div class="analyzer-loading">
-          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
-          <span id="ttft-loading-status">Waiting for session files to finish loading…</span>
-        </div>`);
-    // No manual retry needed: handleSessionFilesLoaded() re-triggers this analysis as soon
-    // as the background scan completes, since this results div is now non-empty.
-    return;
-  }
-  setHtml(resultsDiv, renderTtftResults(
-    (message.granularity || currentTtftGranularity) as TtftGranularity,
-    (message.buckets || []) as TtftBucketView[],
-    (message.series || []) as TtftModelSeriesView[],
-    Number(message.sampleCount || 0),
-    Number(message.fileCount || 0),
-  ));
-}
-
 function buildDiagReportTabHtml(escapedReport: string): string {
   return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
@@ -3344,12 +2751,11 @@ code or conversation content. You can safely share this report when reporting is
 </div>`;
 }
 
-/** The three group-tab bars (Diagnostics / Research / Settings) atop the diagnostics panel. */
+/** The group-tab bars (Diagnostics / Settings) atop the diagnostics panel. */
 function renderTabBars(data: DiagnosticsData, detailedFiles: SessionFileDetails[]): string {
   return `
 <div class="tabs group-tabs">
 <button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>
-<button class="group-tab" data-group="research">🔬 Research</button>
 <button class="group-tab" data-group="settings">⚙️ Settings</button>
 </div>
 
@@ -3358,14 +2764,8 @@ function renderTabBars(data: DiagnosticsData, detailedFiles: SessionFileDetails[
 <button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
 <button class="tab" data-tab="cache">💾 ${escapeHtml(localize('diagnostics.cache.tab'))}</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
-</div>
-
-<div class="tabs leaf-tabs" data-group="research" style="display: none;">
-<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
-<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
-<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
+<button class="tab" data-tab="model-usage">🧮 ${escapeHtml(localize('diagnostics.pricingCheck.tab'))}</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
-<button class="tab" data-tab="ttft">⏱️ TTFT</button>
 </div>
 
 <div class="tabs leaf-tabs" data-group="settings" style="display: none;">
@@ -3423,10 +2823,7 @@ ${renderFolderAnalyzerTab()}
 <div id="tab-model-usage" class="tab-content">
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
-${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
-${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
-${renderTtftTab()}
 </div>
 `;
 }
@@ -3459,10 +2856,6 @@ function renderLayout(data: DiagnosticsData): void {
   isLoading = detailedFiles.length === 0;
   const earlyBackendState = resolveEarlyBackendState(data);
   currentOtelComparison = data.otelComparison;
-  if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
-  currentSkillCallStats = data.skillCallStats;
-  currentSkillCallsByEditor = data.skillCallsByEditor;
-  currentSkillDescriptions = data.skillDescriptions;
 
   const reportIsLoading = data.report === LOADING_PLACEHOLDER;
   const escapedReport = reportIsLoading
@@ -3497,10 +2890,7 @@ function renderLayout(data: DiagnosticsData): void {
   renderModelUsageTimeSelector(isLoading);
   setupButtonHandlers();
   setupDisplaySettingHandlers();
-  setupToolAnalysisHandlers();
-  setupSkillUsageFilterHandler();
   setupOtelDeltaPeriodHandler();
-  setupTtftHandlers();
 
   restoreActiveTabAndSubtab();
 }

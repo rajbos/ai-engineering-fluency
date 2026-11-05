@@ -56,7 +56,7 @@
     "openToolFamiliesSettings": {
       "status": "hidden",
       "hiddenBy": ["#btn-open-tool-families-settings"],
-      "reason": "Diagnostics: opens VS Code settings."
+      "reason": "Usage Analysis: opens VS Code settings."
     },
     "pickFolder": {
       "status": "hidden",
@@ -123,7 +123,7 @@
     },
 
     "analyzeModelUsage": { "status": "gap", "reason": "Diagnostics: model-usage analysis action is visible and unhandled." },
-    "analyzeTtft": { "status": "gap", "reason": "Diagnostics: TTFT analysis action is visible and unhandled." },
+    "analyzeTtft": { "status": "no-op", "reason": "Efficiency: the desktop payload sets ttftAvailable to false, so the TTFT tab that posts this is not rendered." },
     "updateDisplaySetting": { "status": "gap", "reason": "Diagnostics: display-setting inputs are visible and unhandled." },
     "setDebugCounter": { "status": "gap", "reason": "Diagnostics debug tab; only rendered in debug mode, which the desktop never enables." },
     "setDebugFlag": { "status": "gap", "reason": "Diagnostics debug tab; only rendered in debug mode, which the desktop never enables." },

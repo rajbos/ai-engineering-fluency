@@ -102,6 +102,7 @@ object WebviewResources {
                        .beta-footer that VS ships, while VS hides Export/Share-to-Issue that
                        JetBrains doesn't address here). */
                     #btn-diagnostics,
+                    #btn-open-tool-families-settings,
                     #view-repository,
                     .share-section,
                     .beta-footer,

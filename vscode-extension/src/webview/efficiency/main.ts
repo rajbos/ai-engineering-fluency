@@ -39,6 +39,7 @@ import {
 	buildEfficiencyBuckets,
 	buildEfficiencyBucketSeries,
 	buildModelBucketSeries,
+	buildSkillUsageRows,
 	buildSkillUsageSeries,
 	DEFAULT_MODEL_SESSION_FILTER,
 	compareModelAcrossHarnesses,
@@ -82,7 +83,8 @@ import { applyWebviewLocale } from '../shared/webviewLocale';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { createEfficiencyWebviewReadyNotifier, isValueSignalsPayload } from './valueUpdate';
 import { renderModelMixTable } from './modelMixTable';
-import { fmtValue, renderModelComparisonTable, renderSkillImpactTable } from './efficiencyTables';
+import { fmtValue, renderModelComparisonTable, renderSkillImpactTable, renderSkillUsageTable } from './efficiencyTables';
+import { currentTtftSelection, handleTtftResult, renderTtftTab, restoreTtftSelection, wireTtftTab, type TtftResultMessage, type TtftSelection } from './ttftTab';
 import { buildAttributionTooltip } from './attributionText';
 import {
 	BUCKET_DETAIL_ID, BUCKET_DRILL_BUTTON_ID, BUCKET_PICK_ID, bucketPickerHtml, deltaContextButtonHtml, renderBucketDetail,
@@ -125,12 +127,13 @@ async function loadChartModule(): Promise<void> {
 	Chart = mod.default as ChartConstructor;
 }
 
-type TabId = 'trends' | 'skills' | 'deltas' | 'attribution' | 'cache' | 'models' | 'value' | 'combined';
+type TabId = 'trends' | 'skills' | 'ttft' | 'deltas' | 'attribution' | 'cache' | 'models' | 'value' | 'combined';
 let activeTab: TabId = 'trends';
 
 const TABS: { id: TabId; label: string; labelKey?: string }[] = [
 	{ id: 'trends', label: '📈 Trends' },
 	{ id: 'skills', label: '🛠️ Skills', labelKey: 'efficiency.tab.skills' },
+	{ id: 'ttft', label: '⏱️ TTFT', labelKey: 'efficiency.tab.ttft' },
 	{ id: 'deltas', label: '🗓️ Month vs Month' },
 	{ id: 'attribution', label: '💸 Cost Attribution' },
 	{ id: 'cache', label: '⚡ Prompt Cache' },
@@ -141,10 +144,11 @@ const TABS: { id: TabId; label: string; labelKey?: string }[] = [
 
 /**
  * Tabs to show for this dataset. The Prompt Cache tab only exists when there is
- * cache-breakage data to put in it (Claude Code / Claude Desktop sessions).
+ * cache-breakage data to put in it (Claude Code / Claude Desktop sessions), and the
+ * TTFT tab only on a host that can answer its scan request.
  */
 function visibleTabs(d: EfficiencyViewData): { id: TabId; label: string; labelKey?: string }[] {
-	return TABS.filter(t => t.id !== 'cache' || d.cacheBreakage);
+	return TABS.filter(t => (t.id !== 'cache' || d.cacheBreakage) && (t.id !== 'ttft' || d.ttftAvailable));
 }
 
 
@@ -177,6 +181,7 @@ const SCOPE_POLICY: Partial<Record<TabId, { editor: boolean; vendor: boolean; be
 interface EfficiencyPersistedState extends Record<string, unknown> {
 	activeTab: TabId;
 	scope: EfficiencyScopeState;
+	ttft?: TtftSelection;
 }
 
 const viewStateManager = createViewStateManager<EfficiencyPersistedState>(
@@ -189,11 +194,12 @@ let scope: EfficiencyScopeState = defaultScopeState();
 function restorePersistedState(): void {
 	const saved = viewStateManager.restore();
 	scope = normalizeScopeState(saved.scope);
+	restoreTtftSelection(saved.ttft);
 	if (TABS.some(t => t.id === saved.activeTab)) { activeTab = saved.activeTab; }
 }
 
 function persistState(): void {
-	viewStateManager.patch({ activeTab, scope });
+	viewStateManager.patch({ activeTab, scope, ttft: currentTtftSelection() });
 }
 
 /** The reference "now" for range maths — the moment the extension built this payload. */
@@ -762,6 +768,8 @@ function renderSkillsTab(d: EfficiencyViewData, s: ScopedData): string {
 		<p class="eff-section-note">${s.skills.totalCalls} skill invocations across ${s.skills.topSkills.length} skill${s.skills.topSkills.length === 1 ? '' : 's'} over ${escapeHtml(s.range.label.toLowerCase())}. Bars stack invocations per skill; the line is the share of sessions that used any skill.</p>
 		${renderBucketSection(d, s, 'skills')}
 		<div class="combined-wrap"><canvas id="skills-chart"></canvas></div>
+		<h3 class="skill-section-heading">${escapeHtml(localize('efficiency.skills.table.heading'))}</h3>
+		${renderSkillUsageTable(buildSkillUsageRows(s.skills, d.skillDescriptions))}
 		${impactSection}`;
 }
 
@@ -1731,6 +1739,7 @@ function renderActiveTab(d: EfficiencyViewData, s: ScopedData): string {
 	switch (activeTab) {
 		case 'trends': return renderTrendsTab(d, s);
 		case 'skills': return renderSkillsTab(d, s);
+		case 'ttft': return renderTtftTab();
 		case 'deltas': return renderDeltasTab(d);
 		case 'attribution': return renderAttributionTab(d);
 		case 'cache': return renderCacheTab(d);
@@ -1778,6 +1787,7 @@ function render(): void {
 	if (activeTab === 'skills' && scoped.hasSkills) { void drawSkillsChart(scoped, generation); }
 	if (activeTab === 'combined') { void drawCombinedChart(scoped, generation); }
 	if (activeTab === 'models') { void drawModelCharts(data, scoped, generation); }
+	if (activeTab === 'ttft') { wireTtftTab(({ granularity, scanRange }) => { vscode.postMessage({ command: 'analyzeTtft', granularity, scanRange }); }, persistState); }
 }
 
 /** Applies a scope transition: persist it and redraw, skipping a no-op change. */
@@ -1936,6 +1946,10 @@ function applyValueSignals(next: EfficiencyViewData['value']): void {
 	// element, and the state assigned above is what that render then picks up.
 	setHtml(document.getElementById('eff-tab-content'), renderValueTab(data));
 }
+
+registerMessageHandler<{ command?: string } & TtftResultMessage>((message) => {
+	if (message?.command === 'ttftResult') { handleTtftResult(message); }
+});
 
 registerMessageHandler<{ command?: string; value?: unknown }>((message) => {
 	// Repository PR results are the only host push this view consumes. Cloud-agent task loads

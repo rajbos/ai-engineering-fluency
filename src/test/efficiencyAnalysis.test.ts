@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 
 import {
 	buildEfficiencyTrends,
+	buildSkillUsageRows,
 	buildSkillUsageTrends,
 	computeCostAttribution,
 	computeSkillImpact,
@@ -1730,4 +1731,14 @@ test('harnesses mode: eligible models are those used in both harnesses; stale ed
 	const single = reconcileModelSelection([shared], selection({ mode: 'harnesses' }), NOW);
 	assert.equal(single.editorA, '');
 	assert.equal(single.modelA, '');
+});
+
+test('buildSkillUsageRows totals each skill across buckets and adds known descriptions', () => {
+	const week = (byName: Record<string, number>) => ({ byName }) as unknown as Parameters<typeof buildSkillUsageRows>[0]['weeks'][number];
+	const rows = buildSkillUsageRows({ weeks: [week({ a: 1, b: 2 }), week({ a: 3 })] }, { a: 'does a' });
+	assert.deepEqual(rows, [
+		{ name: 'a', count: 4, description: 'does a' },
+		{ name: 'b', count: 2, description: '' },
+	]);
+	assert.deepEqual(buildSkillUsageRows({ weeks: [] }, undefined), []);
 });

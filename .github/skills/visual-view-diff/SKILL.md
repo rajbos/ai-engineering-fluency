@@ -213,7 +213,7 @@ click/select steps replayed on a fresh page before the screenshot:
 
 **Adding a tab to a view means adding a state for it here**, or the visual
 diff will never see what you built. Reach a nested tab by clicking its group
-first (the diagnostics Research and Settings groups do this).
+first (the diagnostics Settings group does this).
 
 The baseline is rendered from the **base commit's own** `views.config.json`
 — its definitions, steps, fixtures and bundles — plus every view and state

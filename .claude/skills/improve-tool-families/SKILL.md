@@ -1,6 +1,6 @@
 ---
 name: improve-tool-families
-description: Analyze coverage of the vscode-extension's tool-family definitions (DEFAULT_TOOL_FAMILIES in src/toolFamilies.ts) against the canonical tool-name list in src/toolNames.json and/or a live agent tool list, and suggest which family missing tool names likely belong to. Use when the Tool Output Token Analysis tab shows too many tools bucketed under "Other Tools", after adding a new editor adapter, after a new agent/CLI's tool list grows, or when asked to improve/expand the preconfigured tool families.
+description: Analyze coverage of the vscode-extension's tool-family definitions (DEFAULT_TOOL_FAMILIES in src/toolFamilies.ts) against the canonical tool-name list in src/toolNames.json and/or a live agent tool list, and suggest which family missing tool names likely belong to. Use when the Usage Analysis "Output tokens by tool family" section shows too many tools bucketed under "Other Tools", after adding a new editor adapter, after a new agent/CLI's tool list grows, or when asked to improve/expand the preconfigured tool families.
 ---
 
 # Improve Tool Families Skill

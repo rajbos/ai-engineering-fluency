@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { toEfficiencySessionInput } from '../efficiencyViewBuilder';
+import { buildEfficiencyViewData, NO_PR_VALUE_INPUTS, formatAttributionDateEnUs, toEfficiencySessionInput, type EfficiencyViewInputs } from '../efficiencyViewBuilder';
 import { addSessionEfficiencyToDailyStats, buildSessionEfficiencyAttribution } from '../modelEfficiency';
 import { addSessionToDailyStats, sortedDailyStats } from '../statsHelpers';
 import type { DailyTokenStats, ModelEfficiencyCounters } from '../types';
@@ -11,6 +11,37 @@ const counters = (over: Partial<ModelEfficiencyCounters> = {}): ModelEfficiencyC
 	inputTokens: 0, outputTokens: 0, cachedReadTokens: 0,
 	...over,
 } as ModelEfficiencyCounters);
+
+test('buildEfficiencyViewData: skill descriptions come from curation with host extras on top, and TTFT availability is the host\'s', () => {
+	const period = {
+		sessions: 0, toolCalls: { total: 0, byTool: {} }, applyUsage: { totalApplies: 0, totalCodeBlocks: 0 },
+		modelSwitching: { lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0 },
+	};
+	const inputs = (over: Partial<EfficiencyViewInputs> = {}): EfficiencyViewInputs => ({
+		dailyStats: [],
+		usage: {
+			last30Days: period, month: period, lastMonth: period, locale: 'en-US',
+			curationAnalysis: { availableTools: [{ source: 'skill', name: 's', description: 'from curation' }, { source: 'skill', name: 't', description: 'kept' }] },
+		} as unknown as EfficiencyViewInputs['usage'],
+		sessionInputs: [],
+		now: new Date('2026-05-02T00:00:00.000Z'),
+		calculateEstimatedCost: () => 0,
+		prValueInputs: NO_PR_VALUE_INPUTS,
+		formatAttributionDate: formatAttributionDateEnUs,
+		backendConfigured: false,
+		compactNumbers: false,
+		isDebugMode: false,
+		ttftAvailable: false,
+		...over,
+	});
+	const standalone = buildEfficiencyViewData(inputs());
+	assert.deepEqual(standalone.skillDescriptions, { s: 'from curation', t: 'kept' });
+	assert.equal(standalone.ttftAvailable, false);
+
+	const extension = buildEfficiencyViewData(inputs({ extraSkillDescriptions: { s: 'extra wins', x: 'added' }, ttftAvailable: true }));
+	assert.deepEqual(extension.skillDescriptions, { s: 'extra wins', t: 'kept', x: 'added' });
+	assert.equal(extension.ttftAvailable, true);
+});
 
 test('toEfficiencySessionInput sums turn counters and prefers actual tokens', () => {
 	const input = toEfficiencySessionInput({

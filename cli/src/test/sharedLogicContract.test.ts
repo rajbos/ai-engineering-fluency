@@ -432,7 +432,7 @@ test('CLI provider editor and billing costs remain undiscounted with Auto metada
 /** Fields the Efficiency webview reads from `window.__INITIAL_EFFICIENCY__` (EfficiencyViewData). */
 const EFFICIENCY_PAYLOAD_KEYS = [
 	'weekly', 'hasLoc', 'hasDuration', 'hasRetry', 'hasApply', 'attribution', 'attributionWindows',
-	'deltas', 'deltaWindows', 'value', 'skillTrends', 'skillImpact', 'hasSkills', 'modelDaily',
+	'deltas', 'deltaWindows', 'value', 'skillTrends', 'skillImpact', 'hasSkills', 'skillDescriptions', 'ttftAvailable', 'modelDaily',
 	'hasModelComparison', 'dailyVolume', 'sessionSamples', 'editors', 'behaviorWindowDays',
 	'cacheBreakage', 'lastUpdated', 'backendConfigured', 'compactNumbers', 'isDebugMode',
 ];

@@ -17,6 +17,7 @@
 import { toMemoryFilesAnalysisView } from './copilotMemoryFiles';
 import { deriveHydraFusionAggregate, type HydraFusionAggregate } from './hydrafusion';
 import { evaluateUsageInsights, type EvaluatedInsight, type InsightEvaluationState } from './insightsEngine';
+import type { ToolFamily } from './toolFamilies';
 import type {
 	AutomaticCompactionStats,
 	ClaudeDesktopCoverage,
@@ -46,6 +47,8 @@ export interface UsageAnalysisViewInputs {
 	hideAutomaticToolCalls: boolean;
 	use24HourTime: boolean;
 	suppressedUnknownTools: string[];
+	/** Tool families for the Tools tab's output-token tables: the defaults plus the host's overrides. */
+	toolFamilies: ToolFamily[];
 	/** Translator and persisted insight state; stateless hosts pass only `translate`. */
 	insights: InsightEvaluationState;
 }
@@ -65,6 +68,7 @@ export interface UsageAnalysisViewData {
 	readinessAvailable: boolean;
 	currentWorkspacePaths: string[];
 	suppressedUnknownTools: string[];
+	toolFamilies: ToolFamily[];
 	toolCallsByEditor: NonNullable<UsageAnalysisStats['toolCallsByEditor']>;
 	todaySessions: TodaySessionSummary[];
 	/**
@@ -93,7 +97,7 @@ export interface UsageAnalysisViewData {
 export const USAGE_ANALYSIS_VIEW_KEYS: ReadonlyArray<keyof UsageAnalysisViewData> = [
 	'today', 'last30Days', 'month', 'lastMonth', 'autoCompactionsLast7Days', 'locale',
 	'customizationMatrix', 'missedPotential', 'lastUpdated', 'backendConfigured',
-	'readinessAvailable', 'currentWorkspacePaths', 'suppressedUnknownTools', 'toolCallsByEditor',
+	'readinessAvailable', 'currentWorkspacePaths', 'suppressedUnknownTools', 'toolFamilies', 'toolCallsByEditor',
 	'todaySessions', 'recentSessions', 'claudeDesktopCoverage', 'use24HourTime', 'hideAutomaticToolCalls',
 	'insights', 'correctionReport', 'repeatedTasks', 'curationAnalysis', 'memoryFilesAnalysis', 'hydraFusion',
 ];
@@ -113,6 +117,7 @@ export function buildUsageAnalysisViewData(stats: UsageAnalysisStats, inputs: Us
 		readinessAvailable: inputs.readinessAvailable,
 		currentWorkspacePaths: inputs.currentWorkspacePaths,
 		suppressedUnknownTools: inputs.suppressedUnknownTools,
+		toolFamilies: inputs.toolFamilies,
 		toolCallsByEditor: stats.toolCallsByEditor ?? {},
 		todaySessions: stats.todaySessions ?? [],
 		recentSessions: stats.recentSessions,

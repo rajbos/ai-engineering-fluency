@@ -10,7 +10,7 @@
  * left out, so the view always reads the same shape (see #2304, #2316, #2418).
  *
  * The pure helpers the hosts used to carry copies of live here too:
- * {@link buildSessionFolderData}, {@link buildCacheInfo}, {@link diagnosticsToolCallStats}.
+ * {@link buildSessionFolderData}, {@link buildCacheInfo}.
  *
  * No `vscode`, no filesystem, no caching.
  */
@@ -88,12 +88,12 @@ export function buildCacheInfo(entries: number, sizeInMB: number, location: stri
 	};
 }
 
-/** Tool-call totals for the Tool Analysis tab: the last-30-days period, or null without stats. */
+/** Last-30-days tool-call totals, or null without stats. */
 export function diagnosticsToolCallStats(stats: UsageAnalysisStats | null | undefined): DiagnosticsToolCallStats | null {
 	return stats?.last30Days?.toolCalls ?? null;
 }
 
-/** Skill invocation totals for the Skill Usage tab: the last-30-days period, or null without stats. */
+/** Last-30-days skill invocation totals, or null without stats. */
 export function diagnosticsSkillCallStats(stats: UsageAnalysisStats | null | undefined): UsageAnalysisStats['last30Days']['skillCalls'] | null {
 	return stats?.last30Days?.skillCalls ?? null;
 }
@@ -135,13 +135,6 @@ export interface DiagnosticsViewInputs {
 	quotaEntitlements: unknown | null;
 	/** Host state: per-account budgets. Empty list elsewhere. */
 	accountBudgets: unknown[];
-	/** The host's usage-analysis stats; drives tool, skill and skill-description fields. */
-	usageStats: UsageAnalysisStats | null | undefined;
-	/** Host state: per-skill, per-editor counts. null where only the extension tracks them. */
-	skillCallsByEditor: Record<string, Record<string, number>> | null;
-	/** Extra skill descriptions the host can resolve (workspace SKILL.md files, built-ins). */
-	extraSkillDescriptions?: Record<string, string>;
-	toolFamilies: unknown[];
 }
 
 export interface DiagnosticsViewData {
@@ -157,19 +150,13 @@ export interface DiagnosticsViewData {
 	displaySettings: DiagnosticsViewInputs['displaySettings'];
 	quotaEntitlements: unknown | null;
 	accountBudgets: unknown[];
-	toolCallStats: DiagnosticsToolCallStats | null;
-	skillCallStats: UsageAnalysisStats['last30Days']['skillCalls'] | null;
-	skillCallsByEditor: Record<string, Record<string, number>> | null;
-	skillDescriptions: Record<string, string>;
-	toolFamilies: unknown[];
 }
 
 /** Every key {@link buildDiagnosticsViewData} emits; tests pin hosts against it. */
 export const DIAGNOSTICS_VIEW_KEYS: ReadonlyArray<keyof DiagnosticsViewData> = [
 	'report', 'sessionFiles', 'detailedSessionFiles', 'sessionFolders', 'cacheInfo',
 	'backendStorageInfo', 'backendConfigured', 'isDebugMode', 'globalStateCounters',
-	'displaySettings', 'quotaEntitlements', 'accountBudgets', 'toolCallStats', 'skillCallStats',
-	'skillCallsByEditor', 'skillDescriptions', 'toolFamilies',
+	'displaySettings', 'quotaEntitlements', 'accountBudgets',
 ];
 
 export function buildDiagnosticsViewData(inputs: DiagnosticsViewInputs): DiagnosticsViewData {
@@ -186,11 +173,21 @@ export function buildDiagnosticsViewData(inputs: DiagnosticsViewInputs): Diagnos
 		displaySettings: inputs.displaySettings,
 		quotaEntitlements: inputs.quotaEntitlements,
 		accountBudgets: inputs.accountBudgets,
-		toolCallStats: diagnosticsToolCallStats(inputs.usageStats),
-		skillCallStats: diagnosticsSkillCallStats(inputs.usageStats),
-		skillCallsByEditor: inputs.skillCallsByEditor,
-		skillDescriptions: { ...skillDescriptionsFromStats(inputs.usageStats), ...inputs.extraSkillDescriptions },
-		toolFamilies: inputs.toolFamilies,
+	};
+}
+
+/**
+ * The usage fields `diagnostics --json` has always carried. The Diagnostics webview no longer
+ * reads them (Usage and Efficiency show this data now), so only the CLI adds them, which keeps
+ * its JSON output stable for scripts.
+ */
+export function buildDiagnosticsCliUsageFields(usageStats: UsageAnalysisStats | null | undefined, toolFamilies: unknown[]) {
+	return {
+		toolCallStats: diagnosticsToolCallStats(usageStats),
+		skillCallStats: diagnosticsSkillCallStats(usageStats),
+		skillCallsByEditor: null,
+		skillDescriptions: skillDescriptionsFromStats(usageStats),
+		toolFamilies,
 	};
 }
 
@@ -204,17 +201,12 @@ export interface DiagnosticDataLoadedInputs {
 	githubAuth: unknown;
 	accountBudgets: unknown[];
 	quotaEntitlements: unknown | null;
-	usageStats: UsageAnalysisStats | null | undefined;
-	skillCallsByEditor: Record<string, Record<string, number>> | null;
-	skillDescriptions: Record<string, string>;
-	toolFamilies: unknown[];
 	otelComparison: unknown | null;
 }
 
 /**
  * The `diagnosticDataLoaded` message a host posts once the slow Diagnostics data is ready
- * (the follow-up to the initial payload). Tool and skill stats come from the same helpers
- * as {@link buildDiagnosticsViewData}.
+ * (the follow-up to the initial payload).
  */
 export function buildDiagnosticDataLoadedMessage(inputs: DiagnosticDataLoadedInputs) {
 	return {
@@ -228,11 +220,6 @@ export function buildDiagnosticDataLoadedMessage(inputs: DiagnosticDataLoadedInp
 		accountBudgets: inputs.accountBudgets,
 		// Carried with the list so the webview takes its full quota-card refresh path if a direct update was missed.
 		quotaEntitlements: inputs.quotaEntitlements,
-		toolCallStats: diagnosticsToolCallStats(inputs.usageStats),
-		skillCallStats: diagnosticsSkillCallStats(inputs.usageStats),
-		skillCallsByEditor: inputs.skillCallsByEditor,
-		skillDescriptions: inputs.skillDescriptions,
-		toolFamilies: inputs.toolFamilies,
 		otelComparison: inputs.otelComparison,
 	};
 }

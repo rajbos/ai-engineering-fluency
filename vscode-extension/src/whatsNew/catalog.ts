@@ -217,7 +217,7 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				titleKey: 'whatsNew.feature.diagnostics.ttft-tab.title',
 				descriptionKey: 'whatsNew.feature.diagnostics.ttft-tab.description',
 				kind: 'tab',
-				surface: { view: 'diagnostics', tab: 'ttft' },
+				surface: { view: 'efficiency', tab: 'ttft' },
 			},
 			{
 				// Listed last on purpose: the per-release cap means this is never

@@ -18,6 +18,10 @@ All notable changes to the VS Code extension will be documented in this file.
 - Usage Analysis → GitHub → Billing now holds GitHub API data and links to Details → Cost by Provider for per-provider costs; a gap with no local Copilot cost still shows in the coverage analysis
 - Diagnostics → Settings → Display: the per-account budget list now matches Billing, including its usage bars
 
+### Changes
+- Diagnostics no longer has a Research group. Usage analytics moved to where you would look for them: output tokens per tool family is now in **Usage Analysis › Tools & Integrations**, per-skill invocations and descriptions in **Efficiency › Skills**, and time to first token in **Efficiency › TTFT**. Model Usage stays in Diagnostics as **Pricing Check**, and OTel Delta joins the Diagnostics group.
+- "Tokens per call" for a tool now uses completed calls everywhere, so the tool family tables and the Cost vs speed map agree. Figures that used to appear under Tool Analysis can be higher, because they no longer divide by calls with no recorded outcome.
+
 ## [0.19.2] - 2026-10-28
 
 ### Features

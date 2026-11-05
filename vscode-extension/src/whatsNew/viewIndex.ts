@@ -189,6 +189,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 							{ id: 'usage.tools.latency', title: 'Tool latency profile', description: 'p50 and p95 duration per tool.', keywords: ['slow', 'duration', 'performance'], nav: { anchor: 'section-tool-latency' } },
 							{ id: 'usage.tools.mcp-health', title: 'MCP server health', description: 'Calls and failure share per MCP server.', nav: { anchor: 'section-mcp-health' } },
 							{ id: 'usage.tools.cost-speed', title: 'Cost vs speed map', description: 'Bubble chart of tool latency against the tokens each tool returns.', nav: { anchor: 'section-tool-cost-speed' } },
+							{ id: 'usage.tools.tool-families', title: 'Output tokens by tool family', description: 'Tokens per completed call for each tool, grouped by family and compared with the built-in baseline.', keywords: ['tool families', 'tool analysis', 'built-in'], nav: { anchor: 'section-tool-families' } },
 							{ id: 'usage.tools.mcp-tools', title: 'MCP Tools', description: 'MCP calls by server and by tool for three periods, and any unknown tools you can report.', keywords: ['unknown tools'], nav: { anchor: 'section-mcp-tools' } },
 						],
 					},
@@ -276,7 +277,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 					{ id: 'efficiency.trends.selected-period', title: 'Selected period', description: 'One week, month or day in detail: raw volumes and each ratio against the period before. Also on Skills, Combined and Models.', keywords: ['drill down', 'bucket', 'show the days'], nav: { anchor: 'eff-bucket-detail' } },
 				],
 			},
-			{ id: 'efficiency.skills', title: 'Skills', description: 'Skill use over time, and whether skill-assisted sessions run differently.', nav: { tab: 'skills' } },
+			{ id: 'efficiency.skills', title: 'Skills', description: 'Skill use over time, invocations and descriptions per skill, and whether skill-assisted sessions run differently.', keywords: ['skill usage'], nav: { tab: 'skills' } },
+			{ id: 'efficiency.ttft', title: 'TTFT', description: 'Time to first token per model, as a chart and a table.', keywords: ['latency', 'time to first token', 'speed'], nav: { tab: 'ttft' }, condition: 'In VS Code, for sessions with the Copilot debug log on' },
 			{ id: 'efficiency.deltas', title: 'Month vs Month', description: 'Each efficiency metric for this month against last month.', keywords: ['compare', 'delta'], nav: { tab: 'deltas' } },
 			{
 				id: 'efficiency.attribution',
@@ -368,7 +370,7 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 		id: 'diagnostics',
 		view: 'diagnostics',
 		title: 'Diagnostic Report',
-		description: 'Everything about how the extension sees your machine: session files, cache, research tools and settings.',
+		description: 'Everything about how the extension sees your machine: session files, cache, accuracy checks and settings.',
 		keywords: ['debug', 'troubleshoot', 'settings'],
 		children: [
 			{
@@ -381,19 +383,8 @@ export const VIEW_INDEX: readonly ViewIndexView[] = [
 					{ id: 'diagnostics.sessions', title: 'Session Files', description: 'Every session file found, per editor, with interactions and tokens. Open one in the Session Log Viewer.', keywords: ['logs', 'files', 'session log viewer'], nav: { tab: 'sessions' } },
 					{ id: 'diagnostics.cache', title: 'Session Cache', description: "The extension's own session-parse cache: size, age and location, and buttons to clear or reset it (not LLM prompt caching).", nav: { tab: 'cache' } },
 					{ id: 'diagnostics.path-analyzer', title: 'Path Analyzer', description: 'Point at a folder to see which session files the extension finds there and how it reads them.', keywords: ['folder', 'scan'], nav: { tab: 'path-analyzer' } },
-				],
-			},
-			{
-				id: 'diagnostics.group.research',
-				title: 'Research',
-				description: 'Deeper analyses you run on demand.',
-				nav: { tab: 'model-usage' },
-				children: [
-					{ id: 'diagnostics.model-usage', title: 'Model Usage', description: 'Tokens and cost per model for a chosen editor and time range.', nav: { tab: 'model-usage' } },
-					{ id: 'diagnostics.tool-analysis', title: 'Tool Analysis', description: 'Output tokens per tool, grouped by tool family, against the built-in baseline.', keywords: ['tool families'], nav: { tab: 'tool-analysis' } },
-					{ id: 'diagnostics.skill-usage', title: 'Skill Usage', description: 'Which skills were invoked over the last 30 days, per editor.', nav: { tab: 'skill-usage' } },
+					{ id: 'diagnostics.model-usage', title: 'Pricing Check', description: 'The tokens per price tier and estimated cost behind a total, for a chosen editor and time range. Spots model and pricing mismatches.', keywords: ['model usage', 'cost', 'unexpected cost'], nav: { tab: 'model-usage' } },
 					{ id: 'diagnostics.otel-delta', title: 'OTel Delta', description: 'Estimated against exact Copilot CLI token counts from OpenTelemetry export.', keywords: ['opentelemetry', 'accuracy'], nav: { tab: 'otel-delta' } },
-					{ id: 'diagnostics.ttft', title: 'TTFT', description: 'Time to first token per model, as a chart and a table.', keywords: ['latency', 'time to first token', 'speed'], nav: { tab: 'ttft' } },
 				],
 			},
 			{

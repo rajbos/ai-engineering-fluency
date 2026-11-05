@@ -1,6 +1,6 @@
 # Time to First Token (TTFT) Trends
 
-The **Research > TTFT** tab in the Diagnostic Report answers: *how long does a model take
+The **TTFT** tab in the Efficiency view answers: *how long does a model take
 to start streaming a response, and is that changing over time or by model?*
 
 ## Where the data comes from
@@ -60,7 +60,7 @@ asserting a unit with no source, which is the exact mistake this heuristic exist
 
 ## Scan range vs. Diagnostics discovery
 
-The rest of the Diagnostics screen (Session Files list, Model Usage dropdown, etc.) discovers
+The Diagnostics screen (Session Files list, Pricing Check dropdown, etc.) discovers
 session files through a 14-day/500-file round-robin cap per editor — see
 `selectSessionFilesRoundRobin()` in `extension.ts`. That cap exists to keep the general session
 cache small, but it silently hid `attrs.ttft` samples that genuinely exist on disk whenever the
@@ -68,8 +68,8 @@ only sessions carrying them were older than 14 days — which is likely for this
 since (per the gating setting above) fully-populated debug logs may only exist for whatever
 stretch of time the experimental File Logging setting happened to be on.
 
-The TTFT tab does not use that capped list. It scans `diagnosticsAllSessionFiles` — the full,
-unfiltered discovery result — filtered first by path shape (cheap, no I/O:
+The TTFT tab does not use that capped list, and does not depend on the Diagnostics panel having
+loaded. It scans the full, unfiltered discovery result (`getCopilotSessionFiles()`) filtered first by path shape (cheap, no I/O:
 `resolveDebugLogCandidatePaths()` rejects anything that isn't a VS Code Chat session file) and
 then, unless "All time" is selected, by the chosen lookback window via each candidate's mtime.
 Widening the picker can only ever reveal more real data that was already on disk; it never
@@ -82,20 +82,19 @@ changes what `attrs.ttft` contains.
 | Raw sample extraction | `extractTtftSamplesFromDebugLog()` in [tokenEstimation.ts](../../src/tokenEstimation.ts) |
 | Bucketing + per-model series | [ttftAnalysis.ts](../../src/ttftAnalysis.ts) (`buildTtftBuckets`, `buildTtftModelSeries`) |
 | Debug-log path resolution | `resolveDebugLogCandidatePaths()` in [workspaceHelpers.ts](../../src/workspaceHelpers.ts) — shared with the exact-billing path in `readTokensFromDebugLog()` |
-| Extension-host scan + message handler | `collectTtftSamples()` / `diagHandleAnalyzeTtft()` in `extension.ts` — scans `diagnosticsAllSessionFiles`, not the capped `diagnosticsCachedFiles` |
-| Tab UI + inline SVG chart | `renderTtftTab()` / `renderTtftChartSvg()` in `vscode-extension/src/webview/diagnostics/main.ts` |
+| Extension-host scan + message handler | `collectTtftSamples()` / `handleAnalyzeTtft()` in `extension.ts` — scans the full discovery list, not the capped `diagnosticsCachedFiles` |
+| Tab UI + inline SVG chart | `renderTtftTab()` / `renderTtftChartSvg()` in `vscode-extension/src/webview/efficiency/ttftTab.ts` |
 
 ## Design choices worth knowing
 
-- **Lazy, not eager.** Unlike the OTel Delta tab (computed once at diagnostics load),
-  TTFT is scanned on demand — first tab open, or a scan-range change — mirroring the
-  Model Usage tab's pattern. Granularity-only changes reuse the cached sample set and just
-  rebucket it. Scanning every session's debug log on every diagnostics open would be
-  needless I/O for a Research-tab curiosity nobody asked to see yet.
+- **Lazy, not eager.** TTFT is scanned on demand — first tab open, or a scan-range change — mirroring the
+  Pricing Check tab's pattern. Granularity-only changes reuse the cached sample set and just
+  rebucket it. Scanning every session's debug log every time the Efficiency view opens would be
+  needless I/O for a tab nobody asked to see yet.
 - **Cached in memory, not persisted.** Token counts and billing are cached per session
   because the dashboard's cost numbers depend on them. TTFT samples stay in an in-memory
-  cache for the current diagnostics session so bucket changes are instant, but they are
-  still re-read from disk when the diagnostics data reloads. They do not feed any other
+  cache so bucket changes are instant, but they are re-read from disk after an Efficiency
+  refresh or a cache clear. They do not feed any other
   number in the extension, so persisting them would be schema complexity with no payoff.
 - **No fixed trailing window.** Token charts show a fixed last-30-days/6-weeks/12-months
   window. TTFT buckets span only from the earliest sample to the latest, because how far

@@ -29,9 +29,9 @@ The shared nav row (`src/webview/shared/buttonConfig.ts`, `NAV_ORDER`) is the ca
 | Token Usage Over Time | `chart` | — | How has that moved over time? |
 | **Usage Analysis** | `usage` | 4 groups → 11 tabs | How do I actually work with AI, and what does it cost? |
 | Fluency Score | `maturity` | — | How mature is my AI engineering practice? |
-| Efficiency | `efficiency` | 8 tabs | Am I getting more output per dollar over time? |
+| Efficiency | `efficiency` | 9 tabs | Am I getting more output per dollar over time? |
 | Environmental Impact | `environmental` | — | What is the energy/water/carbon footprint? |
-| Diagnostics | `diagnostics` | 3 groups → 13 tabs | Is the extension itself seeing my data correctly? |
+| Diagnostics | `diagnostics` | 2 groups → 10 tabs | Is the extension itself seeing my data correctly? |
 | Team Dashboard | `dashboard` | 2 tabs | How does my team compare? (only when a backend is configured) |
 
 Further panels are reached contextually rather than from the nav row: **Log Viewer**
@@ -66,7 +66,7 @@ not user settings.
 |---|---|---|
 | 📊 **Usage** | **My Activity** | *(three bands — see below)* |
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
-| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · MCP Tools |
+| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · Output tokens by tool family · MCP Tools |
 | | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Tool Curation · Repository Hygiene Analysis |
 | | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
@@ -96,14 +96,13 @@ Analysis. Copy it when a view outgrows one row of tabs.
 
 | Group | Leaf tabs |
 |---|---|
-| 🩺 Diagnostics | Report · Session Files · Session Cache · Path Analyzer |
-| 🔬 Research | Model Usage · Tool Analysis · Skill Usage · OTel Delta · TTFT |
+| 🩺 Diagnostics | Report · Session Files · Session Cache · Path Analyzer · Pricing Check · OTel Delta |
 | ⚙️ Settings | Display · Backend Storage (Azure Storage / Team Server sub-tabs) · GitHub Auth · Debug (debug mode only) |
 
 ### Efficiency (`efficiency`)
 
 Flat tab strip, defined as a single array — the cheapest sub-view structure in the codebase:
-Trends · Skills · Month vs Month · Cost Attribution · Prompt Cache · Models · Value ·
+Trends · Skills · TTFT · Month vs Month · Cost Attribution · Prompt Cache · Models · Value ·
 Combined.
 
 ### Views with no sub-views
@@ -140,7 +139,7 @@ no tab id. That is the point: it is the one regrouping that costs nothing to try
 ### 2. Leaf tabs under a group tab — the Diagnostics pattern
 
 Use it when a view's tab strip **wraps or exceeds ~8 tabs** and the tabs fall into groups a
-reader picks between before picking a tab. It is what keeps Diagnostics' 13 tabs and Usage
+reader picks between before picking a tab. It is what keeps Diagnostics' 10 tabs and Usage
 Analysis' 11 legible.
 
 Keep the leaf tab ids exactly as they were and this costs no migration at all: the

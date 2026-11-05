@@ -10,6 +10,7 @@
  */
 import type { UsageAnalysisStats } from '../../src/types';
 import { buildCurationAnalysis, buildMcpEntriesFromJson, discoverSkillEntries } from '../../src/toolCuration';
+import { mergeToolFamilies } from '../../src/toolFamilies';
 import type { WorkspaceCustomization } from '../../src/customizationMatrix';
 import type { UsageAnalysisViewInputs } from '../../src/usageAnalysisViewBuilder';
 import { createTranslator } from './l10n';
@@ -50,7 +51,8 @@ export async function withUsageAnalysisViewStats(
 
 /**
  * Settings of a host without VS Code's: no backend, no persisted insight state (every
- * applicable insight is `new`), no Dark Factory readiness checks, no open workspace.
+ * applicable insight is `new`), no Dark Factory readiness checks, no open workspace, and
+ * the default tool families.
  */
 export function standaloneUsageAnalysisViewInputs(locale: string, language: string = locale): UsageAnalysisViewInputs {
 	return {
@@ -62,6 +64,7 @@ export function standaloneUsageAnalysisViewInputs(locale: string, language: stri
 		hideAutomaticToolCalls: true,
 		use24HourTime: false,
 		suppressedUnknownTools: [],
+		toolFamilies: mergeToolFamilies([]),
 		insights: { translate: createTranslator(language) },
 	};
 }

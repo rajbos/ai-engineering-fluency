@@ -26,7 +26,7 @@ function stats(over: Partial<UsageAnalysisStats> = {}): UsageAnalysisStats {
 
 const inputs = (over: Partial<UsageAnalysisViewInputs> = {}): UsageAnalysisViewInputs => ({
 	locale: 'nl-NL', backendConfigured: false, readinessAvailable: false, currentWorkspacePaths: [],
-	hideAutomaticToolCalls: true, use24HourTime: false, suppressedUnknownTools: [],
+	hideAutomaticToolCalls: true, use24HourTime: false, suppressedUnknownTools: [], toolFamilies: [],
 	insights: { translate },
 	...over,
 });
@@ -246,4 +246,9 @@ test('buildUsageAnalysisViewData: a rollup with zero turns is treated as not rou
 		totalAiu: 0, reviewAiu: 0, degradedTurns: 0, patternCounts: [],
 	};
 	assert.equal(buildUsageAnalysisViewData(stats({ last30Days }), inputs()).hydraFusion.last30Days, null);
+});
+
+test('buildUsageAnalysisViewData carries the host\'s tool families', () => {
+	const toolFamilies = [{ id: 'f', name: 'F', builtIn: ['a'], alternatives: ['b'] }];
+	assert.deepEqual(buildUsageAnalysisViewData(stats(), inputs({ toolFamilies })).toolFamilies, toolFamilies);
 });
