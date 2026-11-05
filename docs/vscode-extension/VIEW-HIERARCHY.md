@@ -66,14 +66,14 @@ not user settings.
 |---|---|---|
 | 📊 **Usage** | **My Activity** | *(three bands — see below)* |
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
-| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · MCP Tools · Tool Curation · Skill Suggestions (repeated-task clusters) |
-| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Repository Hygiene Analysis |
+| 📁 **Workspace** | **Tools & Integrations** | Unknown-tool banner · Tool Usage (3 periods) · tool execution sections (reliability, latency, MCP health, cost vs speed) · MCP Tools |
+| | **Workspace Health** | Copilot Customization Files table (20 per page, sortable, filter to workspaces with no customization files; path on hover) · Missed Potential · Copilot Memory Files · Copilot Repository Memories · Tool Curation · Repository Hygiene Analysis |
 | | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
 | | **Billing** | AI Billing Coverage (API balance · account budgets · coverage analysis · link to Details › Cost by Provider) |
-| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) |
+| 🎓 **Coaching** | **Insights** | Insight cards (new/acted/dismissed) · Skill Suggestions (repeated-task clusters) |
 | | **Corrections** | Corrections report |
 
 The **My Activity** tab is itself banded, via section-group headings

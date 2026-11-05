@@ -1,6 +1,7 @@
 /// <reference path="../../src/types/jsdom.d.ts" />
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as esbuild from 'esbuild';
 import { JSDOM } from 'jsdom';
@@ -283,6 +284,23 @@ function repoPrPayload(): Record<string, unknown> {
 		],
 	};
 }
+
+test('Tool Curation renders on Workspace Health and Skill Suggestions on Insights, neither under Tools & Integrations', async () => {
+	// The visual-diff fixture carries real curation and repeated-task payloads, which the sanitizers require.
+	const fixture = JSON.parse(readFileSync(path.join(EXT_ROOT, '..', '.github', 'skills', 'visual-view-diff', 'fixtures', 'usage.json'), 'utf8'));
+	const harness = await bootWebview(fixture);
+	const doc = harness.window.document;
+
+	assert.ok(doc.querySelector('#tab-panel-health #section-tool-curation'), 'Tool Curation belongs to Workspace Health');
+	assert.ok(doc.querySelector('#tab-panel-insights #section-skill-suggestions'), 'Skill Suggestions belongs to Insights');
+	assert.ok(doc.querySelector('#tab-panel-tools #section-tool-usage'), 'telemetry stays on Tools & Integrations');
+	for (const id of ['section-tool-curation', 'section-skill-suggestions']) {
+		assert.equal(doc.querySelector(`#tab-panel-tools #${id}`), null, `${id} must not render under Tools & Integrations`);
+		assert.equal(doc.querySelectorAll(`#${id}`).length, 1, `${id} renders once`);
+	}
+	// A status refresh replaces only the cards, so Skill Suggestions must sit outside their container.
+	assert.equal(doc.querySelector('#insights-container #section-skill-suggestions'), null);
+});
 
 /** `buildStats()` with cost-tier request counts and models in `last30Days`. */
 function buildStatsWithCostTiers(): Record<string, unknown> {
@@ -1793,8 +1811,8 @@ test('every insight deep-link anchor resolves to its section inside the destinat
 	};
 	const harness = await bootWebview(stats);
 	const targets = [
-		{ tab: 'tools', anchor: 'section-skill-suggestions', title: /Skill Suggestions/ },
-		{ tab: 'tools', anchor: 'section-tool-curation', title: /Tool Curation/i },
+		{ tab: 'insights', anchor: 'section-skill-suggestions', title: /Skill Suggestions/ },
+		{ tab: 'health', anchor: 'section-tool-curation', title: /Tool Curation/i },
 		{ tab: 'activity', anchor: 'section-interaction-modes', title: /Interaction Modes/i },
 		{ tab: 'activity', anchor: 'section-model-efficiency', title: /Model/i },
 	];
