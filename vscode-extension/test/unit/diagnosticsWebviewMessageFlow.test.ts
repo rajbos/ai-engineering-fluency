@@ -560,3 +560,91 @@ for (const moved of ['tool-analysis', 'skill-usage', 'ttft']) {
 		assert.ok(doc.querySelector('.group-tab[data-group="diagnostics"]')?.classList.contains('active'));
 	});
 }
+
+/** Boots with session files loaded; the tab is only opened when a test says so. */
+async function bootWithLoadedFiles(detailedSessionFiles: unknown[] = []): Promise<Harness> {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+	await harness.settle();
+	harness.post({ command: 'sessionFilesLoaded', detailedSessionFiles });
+	await harness.settle();
+	return harness;
+}
+
+const openPricingCheck = async (harness: Harness): Promise<void> => {
+	harness.window.document.querySelector('.tab[data-tab="model-usage"]').click();
+	await harness.settle();
+};
+
+const pricingCheckRequests = (harness: Harness): any[] => harness.posted.filter((m) => m.command === 'analyzeModelUsage');
+
+test('Pricing Check scans only once its tab is opened, because each scan reads every session file', async () => {
+	const harness = await bootWithLoadedFiles();
+	assert.equal(pricingCheckRequests(harness).length, 0);
+
+	await openPricingCheck(harness);
+
+	assert.deepEqual(pricingCheckRequests(harness).map((m) => m.timeRange), ['all']);
+});
+
+test('a switchTab message onto Pricing Check also starts the scan', async () => {
+	const harness = await bootWithLoadedFiles();
+
+	harness.post({ command: 'switchTab', tab: 'model-usage' });
+	await harness.settle();
+
+	assert.equal(pricingCheckRequests(harness).length, 1);
+});
+
+test('finished session loading refreshes Pricing Check results already on screen', async () => {
+	const harness = await bootWithLoadedFiles();
+	await openPricingCheck(harness);
+	harness.post({ command: 'modelUsageResult', editor: 'all', timeRange: 'all', fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0 });
+	harness.window.document.querySelector('.tab[data-tab="report"]').click();
+	await harness.settle();
+	const before = pricingCheckRequests(harness).length;
+
+	harness.post({ command: 'sessionFilesLoaded', detailedSessionFiles: [] });
+	await harness.settle();
+
+	assert.equal(pricingCheckRequests(harness).length, before + 1);
+});
+
+test('Pricing Check says what it counts, and the picker shows counts for the chosen range', async () => {
+	const harness = await bootWithLoadedFiles([{ file: 'a', editorSource: 'Cursor', size: 1, modified: '', interactions: 1, contextReferences: {}, firstInteraction: null, lastInteraction: null }]);
+	await openPricingCheck(harness);
+	const doc = harness.window.document;
+	const select = doc.getElementById('model-usage-editor-select');
+	assert.match(harness.text('#tab-model-usage') ?? '', /every session file found on this computer/);
+	select.value = 'Cursor';
+
+	harness.post({ command: 'modelUsageScanProgress', processed: 3, total: 9 });
+	assert.match(harness.text('#model-usage-status') ?? '', /\(3\/9\)/);
+
+	harness.post({
+		command: 'modelUsageResult', editor: 'Cursor', timeRange: 'lastMonth', fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0,
+		editorCounts: { 'Claude Code': 40 },
+	});
+
+	assert.equal(harness.text('#model-usage-status'), '');
+	const options = Array.from(select.options).map((o: any) => o.textContent.trim());
+	assert.ok(options.some((o) => o.endsWith('Claude Code (40)')), options.join(' | '));
+	assert.ok(options.some((o) => o.endsWith('Cursor (0)')), 'the selected editor stays pickable with no files in this range');
+	assert.equal(select.value, 'Cursor');
+});
+
+test('Pricing Check warns about unreadable files, and shows no total when the scan fails', async () => {
+	const harness = await bootWithLoadedFiles();
+	await openPricingCheck(harness);
+
+	harness.post({
+		command: 'modelUsageResult', editor: 'all', timeRange: 'all', fileCount: 1, filesWithUsage: 1, totalCost: 1.5, unreadableCount: 2,
+		rows: [{ model: 'gpt-x', sessionCount: 1, inputTokens: 1, outputTokens: 1, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, estimatedCost: 1.5 }],
+	});
+	assert.match(harness.text('#model-usage-results') ?? '', /2 session file\(s\) could not be read/);
+	assert.match(harness.text('#model-usage-results') ?? '', /\$1\.50/);
+
+	harness.post({ command: 'modelUsageResult', editor: 'all', timeRange: 'all', scanFailed: true });
+	assert.match(harness.text('#model-usage-results') ?? '', /Could not scan session files/);
+	assert.doesNotMatch(harness.text('#model-usage-results') ?? '', /\$/);
+});

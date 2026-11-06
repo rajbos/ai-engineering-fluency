@@ -60,8 +60,8 @@ asserting a unit with no source, which is the exact mistake this heuristic exist
 
 ## Scan range vs. Diagnostics discovery
 
-The Diagnostics screen (Session Files list, Pricing Check dropdown, etc.) discovers
-session files through a 14-day/500-file round-robin cap per editor — see
+The Diagnostics screen's Session Files list discovers session files through a 14-day cap and a
+500-file round-robin cap shared across editors — see
 `selectSessionFilesRoundRobin()` in `extension.ts`. That cap exists to keep the general session
 cache small, but it silently hid `attrs.ttft` samples that genuinely exist on disk whenever the
 only sessions carrying them were older than 14 days — which is likely for this data specifically,
@@ -74,6 +74,10 @@ loaded. It scans the full, unfiltered discovery result (`getCopilotSessionFiles(
 then, unless "All time" is selected, by the chosen lookback window via each candidate's mtime.
 Widening the picker can only ever reveal more real data that was already on disk; it never
 changes what `attrs.ttft` contains.
+
+The Pricing Check tab scans the full discovery list for the same reason (`scanPricingCheckFiles()`
+in `pricingCheckScan.ts`): a cost total checked against the capped list would be too low for any
+range past the cap.
 
 ## Where the code lives
 

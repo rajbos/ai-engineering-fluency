@@ -1101,23 +1101,30 @@ const MODEL_USAGE_TIME_RANGE_TO_PERIOD: Record<string, string> = {
   yesterday: "yesterday",
 };
 
-function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
-  const editorStats = getEditorStats(detailedFiles);
-  const editorOptions = Object.keys(editorStats).sort()
-    .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+function renderModelUsageEditorOptions(counts: Record<string, number>): string {
+  const editorOptions = Object.keys(counts).sort()
+    .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${counts[editor]})</option>`)
     .join("");
+  return `<option value="all">🌐 ${escapeHtml(localize("efficiency.scope.allEditors"))}</option>${editorOptions}`;
+}
+
+function editorCountsFromFiles(detailedFiles: SessionFileDetails[]): Record<string, number> {
+  return Object.fromEntries(Object.entries(getEditorStats(detailedFiles)).map(([editor, stats]) => [editor, stats.count]));
+}
+
+function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
   const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
   return `
     <div class="info-box">
       <div class="info-box-title">${escapeHtml(localize('diagnostics.pricingCheck.title'))}</div>
       <div>${escapeHtml(localize('diagnostics.pricingCheck.body'))}</div>
+      <div style="margin-top: 8px;">${escapeHtml(localize('diagnostics.pricingCheck.scope'))}</div>
     </div>
     <div class="section">
       <div class="section-title">🎯 Select Editor &amp; Time Range</div>
       <div class="folder-input-row">
         <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
-          <option value="all">🌐 All Editors</option>
-          ${editorOptions}
+          ${renderModelUsageEditorOptions(editorCountsFromFiles(detailedFiles))}
         </select>
         <span id="model-usage-time-selector"></span>
         <span id="model-usage-status" class="loading-status" role="status" aria-live="polite">${escapeHtml(statusText)}</span>
@@ -1422,6 +1429,10 @@ function activateTab(tabId: string): boolean {
     // Let the host record the subview so the what's-new announcer can skip tabs
     // the user already found for themselves. Fire-and-forget.
     vscode.postMessage({ command: "viewTabOpened", view: "diagnostics", tab: tabId });
+    if (tabId === "model-usage") {
+      const resultsDiv = document.getElementById("model-usage-results");
+      if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
+    }
     return true;
   }
   return false;
@@ -1762,9 +1773,35 @@ function setupModelUsageHandlers(): void {
   });
 }
 
+/** Replaces the picker's counts with those for the chosen range, keeping the user's selection. */
+function refreshModelUsageEditorOptions(editorCounts: unknown): void {
+  const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  if (!select || !editorCounts || typeof editorCounts !== "object") { return; }
+  const selected = select.value;
+  const counts: Record<string, number> = { ...(editorCounts as Record<string, number>) };
+  if (selected !== "all" && !(selected in counts)) { counts[selected] = 0; }
+  setHtml(select, renderModelUsageEditorOptions(counts));
+  select.value = selected;
+}
+
+function buildModelUsageNotice(title: string, body: string): string {
+  return `
+    <div class="info-box" style="margin: 0 0 12px;">
+      <div class="info-box-title">⚠️ ${escapeHtml(title)}</div>
+      <div>${escapeHtml(body)}</div>
+    </div>`;
+}
+
+function handleModelUsageScanProgress(message: DiagMessage): void {
+  const status = document.getElementById("model-usage-status");
+  if (status) { status.textContent = localizeFormat("diagnostics.pricingCheck.scanProgress", Number(message.processed || 0), Number(message.total || 0)); }
+}
+
 function handleModelUsageResult(message: DiagMessage): void {
   const resultsDiv = document.getElementById("model-usage-results");
   if (!resultsDiv) { return; }
+  const status = document.getElementById("model-usage-status");
+  if (status) { status.textContent = ""; }
   if (typeof message.timeRange === "string" && message.timeRange) {
     currentModelUsageTimeRange = message.timeRange;
     renderModelUsageTimeSelector(false);
@@ -1777,7 +1814,16 @@ function handleModelUsageResult(message: DiagMessage): void {
       </div>`);
     return;
   }
-  setHtml(resultsDiv, renderModelUsageResults(
+  if (message.scanFailed) {
+    setHtml(resultsDiv, buildModelUsageNotice(localize("diagnostics.pricingCheck.scanFailed.title"), localize("diagnostics.pricingCheck.scanFailed.body")));
+    return;
+  }
+  refreshModelUsageEditorOptions(message.editorCounts);
+  const unreadableCount = Number(message.unreadableCount || 0);
+  const unreadableNotice = unreadableCount > 0
+    ? buildModelUsageNotice(localize("diagnostics.pricingCheck.unreadable.title"), localizeFormat("diagnostics.pricingCheck.unreadable.body", unreadableCount))
+    : "";
+  setHtml(resultsDiv, unreadableNotice + renderModelUsageResults(
     String(message.editor || "all"),
     Number(message.fileCount || 0),
     Number(message.filesWithUsage || 0),
@@ -1795,10 +1841,6 @@ function setupTabHandlers(): void {
 
       if (tabId && activateTab(tabId)) {
         diagState.patch({ activeTab: tabId });
-        if (tabId === "model-usage") {
-          const resultsDiv = document.getElementById("model-usage-results");
-          if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
-        }
       }
     });
   });
@@ -2220,18 +2262,18 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
 
   const modelUsageSelect = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
   if (modelUsageSelect) {
-    const editorStats = getEditorStats(storedDetailedFiles);
-    const editorOptions = Object.keys(editorStats).sort()
-      .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
-      .join("");
-    setHtml(modelUsageSelect, `<option value="all">🌐 All Editors</option>${editorOptions}`);
+    setHtml(modelUsageSelect, renderModelUsageEditorOptions(editorCountsFromFiles(storedDetailedFiles)));
     modelUsageSelect.disabled = false;
   }
   renderModelUsageTimeSelector(false);
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
-  triggerModelUsageAnalysis();
+  // Each analysis scans every session file, so wait until the tab is being looked at. Results
+  // already on screen are refreshed, since the load that just finished may follow a cache clear.
+  const modelUsageResults = document.getElementById("model-usage-results");
+  const modelUsageTabOpen = document.getElementById("tab-model-usage")?.classList.contains("active");
+  if (modelUsageTabOpen || modelUsageResults?.innerHTML.trim()) { triggerModelUsageAnalysis(); }
 
   reRenderTable();
 }
@@ -2331,6 +2373,7 @@ const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
   folderPicked: handleFolderPicked,
   folderAnalysisResult: handleFolderAnalysisResult,
   modelUsageResult: handleModelUsageResult,
+  modelUsageScanProgress: handleModelUsageScanProgress,
   switchTab: handleSwitchTab,
 };
 
