@@ -1652,4 +1652,5 @@
   ,"mcp__ccd_pr__set_auto_merge": "CCD PR: Set Auto Merge"
   ,"publish_chat_update": "Publish Chat Update"
   ,"set_regular_project_onboarding": "Set Regular Project Onboarding"
+  ,"pylance-mcp-server-pylanceFileSyntaxErrors": "Pylance: File Syntax Errors"
 }
