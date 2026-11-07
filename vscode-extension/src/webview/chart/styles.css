@@ -113,6 +113,24 @@ body {
 	text-align: center;
 }
 
+.editor-card {
+	cursor: pointer;
+}
+
+.editor-card:hover {
+	border-color: var(--text-secondary);
+}
+
+.editor-card:focus-visible {
+	outline: 2px solid var(--text-secondary);
+	outline-offset: 2px;
+}
+
+.editor-card.selected {
+	border-color: var(--text-primary);
+	box-shadow: 0 0 0 1px var(--text-primary), 0 2px 6px var(--shadow-color);
+}
+
 .editor-logo-wrap {
 	display: flex;
 	align-items: center;

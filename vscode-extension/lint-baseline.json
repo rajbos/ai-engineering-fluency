@@ -107,8 +107,6 @@
 		},
 		"complexity": {
 			"src/copilotCliOtel.ts": 1,
-			"src/correctionDetection.ts": 1,
-			"src/hydrafusion.ts": 1,
 			"src/kilo.ts": 1,
 			"src/statsHelpers.ts": 1,
 			"vscode-extension/src/analysis/analysisWorker.ts": 1,
@@ -116,23 +114,20 @@
 			"vscode-extension/src/extension.ts": 7,
 			"vscode-extension/src/githubAccountBudgets.ts": 1,
 			"vscode-extension/src/webview/chart/main.ts": 5,
-			"vscode-extension/src/webview/usage/main.ts": 2
+			"vscode-extension/src/webview/usage/main.ts": 1
 		},
 		"max-lines-per-function": {
 			"src/chartDataBuilder.ts": 1,
-			"src/correctionDetection.ts": 1,
-			"src/hydrafusion.ts": 1,
 			"src/loadingHtml.ts": 1,
-			"vscode-extension/src/extension.ts": 8,
+			"vscode-extension/src/extension.ts": 7,
 			"vscode-extension/src/webview/usage/main.ts": 1
 		},
 		"sonarjs/cognitive-complexity": {
 			"src/claudecode.ts": 1,
 			"src/copilotCliOtel.ts": 1,
 			"src/copilotMemoryFiles.ts": 1,
-			"src/correctionDetection.ts": 1,
 			"src/efficiencyAnalysis.ts": 1,
-			"src/hydrafusion.ts": 2,
+			"src/hydrafusion.ts": 1,
 			"src/sessionDiscovery.ts": 1,
 			"src/statsHelpers.ts": 1,
 			"vscode-extension/src/analysis/analysisWorkerPool.ts": 1,

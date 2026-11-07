@@ -9,6 +9,7 @@ import { createViewStateManager } from '../shared/viewState';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import type { ChartDataPayload, ChartDataset, ChartPeriodData, ChartTimeWindow } from '../../../../src/types';
 import { filterPeriodByTimeWindow } from './timeWindowFilter';
+import { fallbackSplitForEditorFilter, filterPeriodByEditor, isSplitAvailableForEditorFilter, resolveEditorFilter } from './editorFilter';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import dataTableStyles from '../shared/dataTable.css';
@@ -75,6 +76,8 @@ let currentMetric: ChartMetric = 'tokens';
 let currentSplit: ChartSplit = 'total';
 let currentPeriod: ChartPeriod = 'day';
 let currentTimeWindow: ChartTimeWindow = 'last30';
+/** Editor picked by clicking a By Editor card; null shows every editor. */
+let currentEditorFilter: string | null = null;
 // Stores state to restore after a background data update re-initializes the chart
 let pendingMetric: ChartMetric | null = null;
 let pendingSplit: ChartSplit | null = null;
@@ -94,6 +97,8 @@ type ChartWebviewState = {
 	displayMode: DisplayMode;
 	/** Whether the per-editor breakdown cards under the Summary section are collapsed. */
 	editorListCollapsed: boolean;
+	/** Editor the chart is filtered to, or null for all editors. */
+	editorFilter?: string | null;
 	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
 	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';
 };
@@ -105,12 +110,13 @@ const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 	split: 'total',
 	displayMode: 'actual',
 	editorListCollapsed: false,
+	editorFilter: null,
 });
 
 let editorListCollapsed = false;
 
 function saveWebviewState(): void {
-	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
+	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed, editorFilter: currentEditorFilter });
 }
 
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
@@ -143,6 +149,11 @@ function getSessionsChartTitle(): string {
 }
 
 function getChartTitle(): string {
+	const title = getBaseChartTitle();
+	return currentEditorFilter ? `${title} – ${currentEditorFilter}` : title;
+}
+
+function getBaseChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	if (currentMetric === 'sessions') {
 		return getSessionsChartTitle();
@@ -196,16 +207,18 @@ function getActivePeriodData(data: InitialChartData): ChartPeriodData {
 			avgCostPerPeriod: 0,
 		};
 	}
+	if (currentEditorFilter) { period = filterPeriodByEditor(period, currentEditorFilter); }
 	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
 }
 
 const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; aggregationLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string; sessionsTitle: string; avgSessionsLabel: string }> = {
-	day:   { title: 'Token Usage – Last 30 Days', footer: 'Day-by-day token usage for the last 30 days', countLabel: 'Total Days', avgLabel: 'Avg Tokens / Day', aggregationLabel: 'Aggregated by Day', costTitle: 'Est. Cost – Last 30 Days', avgCostLabel: 'Avg Cost / Day', outputTitle: 'Lines of Code – Last 30 Days', avgLocLabel: 'Avg Lines / Day', sessionsTitle: 'Sessions – Last 30 Days', avgSessionsLabel: 'Avg Sessions / Day' },
-	week:  { title: 'Token Usage – Last 6 Weeks', footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks', avgLabel: 'Avg Tokens / Week', aggregationLabel: 'Aggregated by Week', costTitle: 'Est. Cost – Last 6 Weeks', avgCostLabel: 'Avg Cost / Week', outputTitle: 'Lines of Code – Last 6 Weeks', avgLocLabel: 'Avg Lines / Week', sessionsTitle: 'Sessions – Last 6 Weeks', avgSessionsLabel: 'Avg Sessions / Week' },
-	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months', countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions – Last 12 Months', avgSessionsLabel: 'Avg Sessions / Month' },
+	day:   { title: 'Token Usage', footer: 'Day-by-day token usage', countLabel: 'Total Days', avgLabel: 'Avg Tokens / Day', aggregationLabel: 'Aggregated by Day', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Day', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Day', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Day' },
+	week:  { title: 'Token Usage', footer: 'Week-by-week token usage', countLabel: 'Total Weeks', avgLabel: 'Avg Tokens / Week', aggregationLabel: 'Aggregated by Week', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Week', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Week', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Week' },
+	month: { title: 'Token Usage', footer: 'Monthly token usage', countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Month' },
 };
 
 function isComboSupported(metric: string, split: string): boolean {
+	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric as ChartMetric, split)) { return false; }
 	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
 	if (metric === 'cost') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
 	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'task' && split !== 'taskCategory'; }
@@ -317,6 +330,10 @@ function buildMetricControl(data: InitialChartData): HTMLElement {
 	return group;
 }
 
+function unsupportedSplitTitle(): string {
+	return currentEditorFilter ? `Not available while filtered to ${currentEditorFilter}` : `Not available for ${currentMetric} metric`;
+}
+
 function buildSplitControl(): HTMLElement {
 	const group = el('div', 'control-group');
 	group.append(el('span', 'control-label', 'Split:'));
@@ -324,7 +341,7 @@ function buildSplitControl(): HTMLElement {
 		const supported = isComboSupported(currentMetric, split);
 		const btn = el('button', `toggle${(currentSplit === split || (currentSplit === 'taskCategory' && split === 'task')) ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
 		btn.id = id;
-		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
+		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = unsupportedSplitTitle(); }
 		else if (tooltip) { btn.title = tooltip; }
 		return btn;
 	};
@@ -367,6 +384,8 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 
 function renderLayout(data: InitialChartData): void {
 	setCompactNumbers(data.compactNumbers !== false);
+	currentEditorFilter = resolveEditorFilter(currentEditorFilter, data.editorTotalsMap);
+	clampSplitForEditorFilter();
 	const root = document.getElementById('root');
 	if (!root) { return; }
 	root.replaceChildren();
@@ -414,7 +433,14 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 	wrap.id = 'editor-cards';
 	entries.forEach(([editor, tokens]) => {
 		const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
-			card.prepend(buildEditorLogo(editor));
+		card.prepend(buildEditorLogo(editor));
+		card.classList.add('editor-card');
+		card.dataset.editor = editor;
+		card.setAttribute('role', 'button');
+		card.tabIndex = 0;
+		card.setAttribute('aria-pressed', String(editor === currentEditorFilter));
+		card.classList.toggle('selected', editor === currentEditorFilter);
+		card.title = `Filter the charts to ${editor}`;
 		// JetBrains only persists user messages + assistant text in its JSONL
 		// — no API counts, no thinking tokens. Flag the caveat with an
 		// info marker on the card so users don't compare apples-to-oranges.
@@ -514,8 +540,62 @@ function wireEditorListToggle(): void {
 	});
 }
 
+function syncEditorCardSelection(): void {
+	document.querySelectorAll<HTMLElement>('#editor-cards .editor-card').forEach(card => {
+		const selected = card.dataset.editor === currentEditorFilter;
+		card.classList.toggle('selected', selected);
+		card.setAttribute('aria-pressed', String(selected));
+	});
+}
+
+/** Falls back to a split that has per-editor data when the current one has none for a filtered editor. */
+function clampSplitForEditorFilter(): void {
+	if (!currentEditorFilter) { return; }
+	const normalized = currentSplit === 'taskCategory' ? 'task' : currentSplit;
+	if (!isSplitAvailableForEditorFilter(currentMetric, normalized)) { currentSplit = fallbackSplitForEditorFilter(currentMetric); }
+	if (currentSplit !== 'total' || currentMetric === 'output') { currentDisplayMode = 'actual'; }
+}
+
+/** Clicking a By Editor card filters the charts to that editor; clicking it again clears the filter. */
+async function toggleEditorFilter(editor: string, data: InitialChartData): Promise<void> {
+	const previousSplit = currentSplit;
+	currentEditorFilter = currentEditorFilter === editor ? null : editor;
+	clampSplitForEditorFilter();
+	saveWebviewState();
+	syncEditorCardSelection();
+	if (currentSplit !== previousSplit) {
+		vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
+		setActiveSplit(currentSplit);
+	}
+	updateSplitButtonStates();
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingBtnEl = document.getElementById('view-rolling');
+	if (rollingBtnEl) {
+		rollingBtnEl.classList.toggle('hidden', !rollingApplicable);
+		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
+	}
+	updateSummaryCards(data);
+	await reinitChart(data);
+}
+
+function wireEditorCards(data: InitialChartData): void {
+	const cards = document.getElementById('editor-cards');
+	if (!cards) { return; }
+	const activate = (target: EventTarget | null) => {
+		const editor = (target as HTMLElement | null)?.closest<HTMLElement>('.editor-card')?.dataset.editor;
+		if (editor) { void toggleEditorFilter(editor, data); }
+	};
+	cards.addEventListener('click', e => activate(e.target));
+	cards.addEventListener('keydown', e => {
+		if (e.key !== 'Enter' && e.key !== ' ') { return; }
+		e.preventDefault();
+		activate(e.target);
+	});
+}
+
 function wireInteractions(data: InitialChartData): void {
 	wireEditorListToggle();
+	wireEditorCards(data);
 	syncLogoTheme();
 
 	const refresh = document.getElementById('btn-refresh');
@@ -659,6 +739,7 @@ async function switchMetric(metric: ChartMetric, data: InitialChartData): Promis
 	if (currentMetric === metric) { return; }
 	currentSplit = getPreferredSplitForMetric(metric, currentSplit);
 	currentMetric = metric;
+	clampSplitForEditorFilter();
 	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
 	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
@@ -703,6 +784,7 @@ function getPreferredSplitForMetric(metric: ChartMetric, split: ChartSplit): Cha
 
 function isSplitSupported(metric: ChartMetric, split: ChartSplit): boolean {
 	const normalized = split === 'taskCategory' ? 'task' : split;
+	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric, normalized)) { return false; }
 	if (metric === 'sessions') {
 		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
 	}
@@ -801,7 +883,7 @@ function updateSplitButtonStates(): void {
 		const supported = isSplitSupported(currentMetric, split as ChartSplit);
 		btn.disabled = !supported;
 		btn.classList.toggle('disabled', !supported);
-		btn.title = supported ? '' : `Not available for ${currentMetric} metric`;
+		btn.title = supported ? '' : unsupportedSplitTitle();
 	});
 }
 
@@ -1346,6 +1428,7 @@ function restoreChartState(initialData: InitialChartData): void {
 	// panel was created); the host value only seeds a brand-new panel, which has no saved flag.
 	const savedFlag = (vscode.getState() as Partial<ChartWebviewState> | undefined)?.editorListCollapsed;
 	editorListCollapsed = savedFlag ?? initialData.initialEditorListCollapsed ?? false;
+	currentEditorFilter = resolveEditorFilter(saved.editorFilter, initialData.editorTotalsMap);
 	if (!vscode.getState()) {
 		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
 		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
