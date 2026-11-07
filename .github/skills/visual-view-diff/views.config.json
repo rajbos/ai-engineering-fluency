@@ -86,7 +86,25 @@
       "global": "__INITIAL_CHART__",
       "fixture": "chart.json",
       "settleMs": 2000,
-      "noiseFloorPixels": 400
+      "noiseFloorPixels": 400,
+      "states": [
+        {
+          "id": "editor-filter",
+          "title": "Filtered to one editor (By Editor card clicked)",
+          "steps": [{ "click": "#editor-Claude\\ Code" }],
+          "expect": "#editor-Claude\\ Code.selected"
+        }
+      ],
+      "scenarios": [
+        {
+          "name": "Clicking a By Editor card filters the charts to it; clicking it again clears the filter",
+          "expect": "#editor-cards",
+          "steps": [
+            { "click": "#editor-Claude\\ Code", "expect": "#editor-Claude\\ Code.selected" },
+            { "click": "#editor-Claude\\ Code", "expect": "#split-model:not(.disabled)" }
+          ]
+        }
+      ]
     },
     {
       "id": "fluency-level-viewer",
