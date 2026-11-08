@@ -21,12 +21,8 @@ on:
   push:
     tags:
       - 'cli/v*'  # Tag push: publish to npm + create GitHub release
-    #branches:
-    #  - main
-    paths:
-      - '.github/workflows/cli-publish.yml'
-      - 'cli/package.json'
-      - 'cli/pnpm-lock.yaml'
+    # No `paths:` filter: GitHub ignores path filters for tag pushes, so one
+    # here would never take effect.
 
 permissions:
   contents: read
