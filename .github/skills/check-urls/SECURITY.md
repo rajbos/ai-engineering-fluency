@@ -1,8 +1,8 @@
 # Security model: check-urls
 
 Lightweight model derived from reading `check-urls.js`. Update it in the same PR as any
-change that adds or alters a trigger surface (see "Skill security classification" in the
-repository `AGENTS.md`).
+change that adds or alters a trigger surface (see "Skill security classification" in
+`.github/skills/README.md`).
 
 ## What the scripts do and talk to
 

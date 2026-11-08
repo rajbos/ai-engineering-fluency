@@ -4,7 +4,7 @@ Lightweight model derived from reading `visual-diff.js`, `render-views.js`,
 `diff-screenshots.js` and `lib/*.js`, plus the two other consumers of the view registry
 and `lib/`: `scripts/interaction-smoke.js` and `release-video/src/shots.ts`. Update it in
 the same PR as any change that adds or alters a trigger surface (see "Skill security
-classification" in the repository `AGENTS.md`).
+classification" in `.github/skills/README.md`).
 
 ## What the scripts do and talk to
 

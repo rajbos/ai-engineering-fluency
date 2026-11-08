@@ -113,7 +113,7 @@ jobs:
   # SECURITY.md or is declared exempt/pending in
   # .github/skills/skill-security-classification.json. Checks ALL skills, not
   # just the changed ones, so editing only the classification file cannot leave
-  # a stale entry. See "Skill security classification" in AGENTS.md.
+  # a stale entry. See "Skill security classification" in .github/skills/README.md.
   security-classification:
     name: Skill security classification
     runs-on: ubuntu-latest
