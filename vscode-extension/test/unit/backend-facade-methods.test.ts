@@ -119,6 +119,23 @@ describe('BackendFacade public methods', { concurrency: false }, () => {
 		assert.ok(syncStarted);
 	});
 
+	test('clearAzureSettingsCommand clears the stored shared key and tolerates a failing clear', async () => {
+		const facade: any = createFacade();
+		let clearedFor: string | undefined;
+		facade.credentialService.clearStoredStorageSharedKey = async (account: string) => {
+			clearedFor = account;
+			throw new Error('keychain unavailable');
+		};
+		facade.syncService.startTimerIfEnabled = () => {};
+		facade.queryService.clearQueryCache = () => {};
+		(vscode as any).__mock.setConfig({ 'aiEngineeringFluency.backend.storageAccount': 'myaccount' });
+		await facade.clearAzureSettingsCommand();
+		assert.equal(clearedFor, 'myaccount');
+		assert.ok((vscode as any).__mock.state.lastInfoMessages.some(
+			(m: string) => m.includes('Azure settings cleared')
+		));
+	});
+
 	test('setSharingProfileCommand delegates to azureResourceService', async () => {
 		const facade = createFacade();
 		let called = false;
