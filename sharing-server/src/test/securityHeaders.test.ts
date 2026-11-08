@@ -34,7 +34,7 @@ function assertSecurityHeaders(res: Response, label: string): string {
 	const nonce = /script-src 'nonce-([A-Za-z0-9+/=]+)'/.exec(csp)?.[1];
 	assert.ok(nonce, `${label}: script-src must be nonce-only, got ${csp}`);
 	assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp), `${label}: script-src must not allow unsafe-inline`);
-	assert.match(csp, new RegExp(`style-src 'self' 'nonce-${nonce.replace(/[+/=]/g, '\\$&')}'`), `${label}: style-src`);
+	assert.ok(csp.includes(`style-src 'self' 'nonce-${nonce}'`), `${label}: style-src must allow 'self' and the request nonce, got ${csp}`);
 	assert.match(csp, /frame-ancestors 'none'/, `${label}: frame-ancestors`);
 	assert.match(csp, /object-src 'none'/, `${label}: object-src`);
 	assert.match(csp, /base-uri 'none'/, `${label}: base-uri`);
