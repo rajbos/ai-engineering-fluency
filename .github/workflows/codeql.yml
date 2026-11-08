@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# One run per PR (or ref). A newer push to the same PR supersedes the
+# in-flight run, so cancel it; pushes to branches are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Path gate for the two compiled languages.
   #
@@ -51,6 +57,7 @@ jobs:
   check-changes:
     name: Select languages
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
@@ -100,6 +107,7 @@ jobs:
     name: Analyze
     needs: check-changes
     runs-on: ${{ matrix.runs-on || 'ubuntu-latest' }}
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -321,6 +329,7 @@ jobs:
   codeql-result:
     name: CodeQL result
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [check-changes, analyze]
     if: always()
     steps:
