@@ -2372,6 +2372,7 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 		'usage.router.stat.judgeRejection': 'Judge rejection rate',
 		'usage.router.stat.aiuPerTurn': 'AIU per turn',
 		'usage.router.period.last30Days': 'Last 30 days',
+		'usage.router.aria.table': 'Copilot Fusion routing metrics by period',
 	};
 	for (const [key, value] of Object.entries(english)) {
 		assert.equal(t(key), value, `English value for ${key}`);
@@ -2387,6 +2388,7 @@ test('l10n: cost-basis switch and Router card strings resolve in English and zh-
 			'efficiency.models.costBasis.provider': '\u63d0\u4f9b\u5546\u8d39\u7387',
 			'usage.router.title': 'Copilot Fusion \u8def\u7531\u5668',
 			'usage.router.stat.compoundRate': '\u590d\u5408\u7387',
+			'usage.router.aria.table': '\u6309\u65f6\u95f4\u6bb5\u5212\u5206\u7684 Copilot Fusion \u8def\u7531\u6307\u6807',
 		};
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);

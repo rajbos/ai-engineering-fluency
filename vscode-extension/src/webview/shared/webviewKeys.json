@@ -716,6 +716,7 @@
   "usage.router.stat.reviewShare",
   "usage.router.stat.totalSpend",
   "usage.router.patternMix",
+  "usage.router.aria.table",
   "efficiency.models.sideStats",
   "efficiency.models.costBasis.providerNote",
   "repoHeatmap.title",

@@ -38,21 +38,30 @@ describe('buildRouterSectionHtml', () => {
 		assert.equal(buildRouterSectionHtml({ today: null, last30Days: null }), '');
 	});
 
-	test('renders one block per routed period with the headline rates', () => {
+	test('renders one table with a column per period and a row per metric', () => {
 		const html = buildRouterSectionHtml({ today: null, last30Days: aggregate });
 		assert.match(html, /id="section-router"/);
-		assert.match(html, /data-router-period="last30Days"/);
-		assert.doesNotMatch(html, /data-router-period="today"/);
 		assert.match(html, /Copilot Fusion Router/);
+		assert.match(html, /<table[^>]*class="[^"]*router-table/);
+		// All four periods are columns, routed or not.
+		for (const period of ['today', 'last30Days', 'month', 'lastMonth']) {
+			assert.match(html, new RegExp(`router-col-${period}`), `column for ${period}`);
+		}
+		for (const header of ['Today', 'Last 30 days', 'This month', 'Last month', 'Metric']) {
+			assert.match(html, new RegExp(`>${header}<`), `header ${header}`);
+		}
+		// The routed period's values land in its column; headline rates included.
 		assert.match(html, /50\.0%/);
 		assert.match(html, /cascade 3 · single 1/);
 		assert.match(html, /10\.00/);
+		// Periods without routed turns show a muted dash in every metric row.
+		assert.match(html, /data-table-muted">–</);
 	});
 
 	test('shows an em dash when the judge never ran', () => {
 		const noJudge = deriveHydraFusionAggregate({ ...aggregate, judgeAccepts: 0, judgeRejects: 0 });
 		const html = buildRouterSectionHtml({ today: noJudge });
-		assert.match(html, /Judge rejection rate<\/div><div class="stat-value">—</);
+		assert.match(html, /<th[^>]*>Judge rejection rate<\/th>(?:(?!<\/tr>).)*>—</s);
 	});
 
 	test('escapes pattern names', () => {
