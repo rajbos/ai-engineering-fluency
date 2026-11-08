@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, canonicalizeToolId, lookupKnownToolName, isKnownToolDisplayName, getUnknownToolNames, type ToolNamePeriod } from '../utils/toolUtils';
+import { resolveCopilotAppConnectorToolName, isCopilotAppConnectorTool, resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, canonicalizeToolId, lookupKnownToolName, isKnownToolDisplayName, getUnknownToolNames, type ToolNamePeriod } from '../utils/toolUtils';
 import toolNamesData from '../toolNames.json';
 
 // ── resolveGuidMcpToolName ───────────────────────────────────────────────────
@@ -106,6 +106,34 @@ test('resolveMcpFamilyToolName: returns undefined for unrelated tools', () => {
 
 test('resolveMcpFamilyToolName: does not match a family action without the family keyword present', () => {
 	assert.equal(resolveMcpFamilyToolName('mcp__foo__create_pull_request'), undefined);
+});
+
+// ── Copilot app connectors (cc-<id>-[-<tool>]) ──────────────────────────────
+
+test('resolveCopilotAppConnectorToolName: Work IQ connector tools as seen in Copilot app sessions', () => {
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J--ask'), 'Work IQ: Ask');
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J--fetch'), 'Work IQ: Fetch');
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J--fetch_blob'), 'Work IQ: Fetch Blob');
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J--retrieve'), 'Work IQ: Retrieve');
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J--search_paths'), 'Work IQ: Search Paths');
+});
+
+test('resolveCopilotAppConnectorToolName: server id and non-Work IQ tools get a generic label', () => {
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J-'), 'Copilot App Connector');
+	assert.equal(resolveCopilotAppConnectorToolName('cc-Zx9_aB3cD4eF5gH--list_items'), 'Copilot App Connector: List Items');
+});
+
+test('resolveCopilotAppConnectorToolName: ignores look-alikes', () => {
+	assert.equal(resolveCopilotAppConnectorToolName('cc-short--ask'), undefined);
+	assert.equal(resolveCopilotAppConnectorToolName('cc-bEMk-Wo2Cycw97J'), undefined);
+	assert.equal(resolveCopilotAppConnectorToolName('github-mcp-server-get_file_contents'), undefined);
+	assert.equal(resolveCopilotAppConnectorToolName('run_in_terminal'), undefined);
+});
+
+test('Copilot app connector ids resolve through the family resolver and are not reported as unknown', () => {
+	assert.ok(isCopilotAppConnectorTool('cc-bEMk-Wo2Cycw97J--ask'));
+	assert.equal(resolveMcpFamilyToolName('cc-bEMk-Wo2Cycw97J--retrieve'), 'Work IQ: Retrieve');
+	assert.ok(isMcpFamilyResolvedTool('cc-bEMk-Wo2Cycw97J-'));
 });
 
 // ── isMcpFamilyResolvedTool ───────────────────────────────────────────────────
