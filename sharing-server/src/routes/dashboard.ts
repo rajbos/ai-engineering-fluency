@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { createRequire } from 'module';
 import {
 	encodeSession, decodeSession, makeClaims,
-	COOKIE_NAME, OAUTH_STATE_COOKIE, SESSION_MAX_AGE,
+	COOKIE_NAME, OAUTH_STATE_COOKIE, SESSION_MAX_AGE, shouldUseSecureCookies,
 } from '../session.js';
 import {
 	getUserById, getUserByGithubId, getUploadsForUser, upsertUser,
@@ -100,7 +100,7 @@ dashboard.get('/auth/github', (c) => {
 	// Bind state to a short-lived cookie for CSRF validation
 	setCookie(c, OAUTH_STATE_COOKIE, state, {
 		httpOnly: true,
-		secure: process.env.NODE_ENV === 'production',
+		secure: shouldUseSecureCookies(),
 		sameSite: 'Lax',
 		maxAge: OAUTH_STATE_MAX_AGE_SECONDS,
 		path: '/',
@@ -216,7 +216,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 
 	setCookie(c, COOKIE_NAME, sessionValue, {
 		httpOnly: true,
-		secure: process.env.NODE_ENV === 'production',
+		secure: shouldUseSecureCookies(),
 		sameSite: 'Lax',
 		maxAge: SESSION_MAX_AGE,
 		path: '/',
@@ -227,7 +227,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 
 /** GET /auth/logout — Clear session cookie and redirect to dashboard. */
 dashboard.get('/auth/logout', (c) => {
-	deleteCookie(c, COOKIE_NAME, { path: '/' });
+	deleteCookie(c, COOKIE_NAME, { path: '/', secure: shouldUseSecureCookies() });
 	return c.redirect('/dashboard');
 });
 

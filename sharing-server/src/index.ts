@@ -53,6 +53,7 @@ export {
 	decodeSession,
 	makeClaims,
 	assertSessionSecretConfigured,
+	shouldUseSecureCookies,
 	type SessionClaims,
 } from './session.js';
 
