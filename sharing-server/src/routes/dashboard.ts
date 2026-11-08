@@ -9,12 +9,13 @@ import {
 } from '../session.js';
 import {
 	getUserById, getUserByGithubId, getUploadsForUser, upsertUser,
-	getAdminUserSummaries, getAdminDailyTotals, isConfiguredAdminLogin,
+	getAdminUserSummaries, getAdminDailyTotals, getAdminBreakdownRows, type AdminBreakdownRow, isConfiguredAdminLogin,
 	type UploadRow, type UserRow, type UserUsageSummary, type AdminDailyRow,
 } from '../db.js';
 import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
 import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
 import { renderTeamInsights, teamInsightsCsv } from './teamPage.js';
+import { renderAdminBreakdown } from './adminBreakdown.js';
 import { renderNavExtra } from '../nav.js';
 export const dashboard = new Hono();
 
@@ -265,8 +266,9 @@ dashboard.get('/admin', (c) => {
 
 	const userSummaries = getAdminUserSummaries(30);
 	const dailyTotals = getAdminDailyTotals(90);
+	const breakdownRows = getAdminBreakdownRows(30);
 
-	return c.html(adminDashboardPage(c, user, userSummaries, dailyTotals));
+	return c.html(adminDashboardPage(c, user, userSummaries, dailyTotals, breakdownRows));
 });
 
 function getSessionUser(c: Context): UserRow | undefined {
@@ -1359,8 +1361,17 @@ function adminDashboardPage(
 	adminUser: UserRow,
 	userSummaries: UserUsageSummary[],
 	dailyTotals: AdminDailyRow[],
+	breakdownRows: AdminBreakdownRow[] = [],
 ): string {
 	const totalUsers = userSummaries.length;
+	const breakdownDays = 30;
+	const breakdownDayLabels = Array.from({ length: breakdownDays }, (_, index) => {
+		const date = new Date();
+		date.setUTCHours(0, 0, 0, 0);
+		date.setUTCDate(date.getUTCDate() - (breakdownDays - 1 - index));
+		return date.toISOString().slice(0, 10);
+	});
+	const breakdown = renderAdminBreakdown(breakdownRows, breakdownDays, breakdownDayLabels);
 
 	const stats7  = computeAdminPeriodStats(dailyTotals, 7);
 	const stats30 = computeAdminPeriodStats(dailyTotals, 30);
@@ -1659,6 +1670,7 @@ function adminDashboardPage(
 <div class="content">
   ${overviewHtml}
   ${chartHtml}
+  ${breakdown.html}
   ${tableHtml}
 </div>
 
@@ -1666,7 +1678,8 @@ function adminDashboardPage(
 var ADMIN_CHART_DATA = ${safeJson(chartData)};
 </script>
 <script>${_chartJsCode}</script>
-<script>${adminInteractiveJs}</script>`);
+<script>${adminInteractiveJs}</script>
+<script>${breakdown.script}</script>`);
 }
 
 function errorPage(message: string): string {

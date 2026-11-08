@@ -4,6 +4,9 @@
  */
 
 import { safeStringifyError } from '../../../../src/utils/errors';
+import type { SharingServerActivity } from './sharingServerActivity';
+
+export type { SharingServerActivity };
 
 export interface SharingServerEntry {
 	day: string;
@@ -18,6 +21,12 @@ export interface SharingServerEntry {
 	interactions: number;
 	datasetId?: string;
 	fluencyMetrics?: Record<string, unknown>;
+	/** Cost estimate (USD) for this row from the public price list; omitted when the model is unpriced. */
+	estimatedCostUsd?: number;
+	/** Uploading extension version, so a team admin can spot outdated installs. */
+	clientVersion?: string;
+	/** Validated activity counters (sessions, modes, tool and MCP calls). See sharingServerActivity.ts. */
+	activity?: SharingServerActivity;
 }
 
 /** Maximum number of entries per HTTP request (matches server-side limit). */

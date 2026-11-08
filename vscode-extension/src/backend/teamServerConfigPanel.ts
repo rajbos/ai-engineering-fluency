@@ -307,8 +307,12 @@ function renderTeamInfoColumn(): string {
         <tr><td>workspaceName, machineName</td><td>optional, only when the profile enables names</td></tr>
         <tr><td>editor</td><td>Copilot CLI, VS Code, Claude Desktop, ...</td></tr>
         <tr><td>datasetId, fluencyMetrics</td><td>your configured dataset tag; fluency score breakdown</td></tr>
+        <tr><td>estimatedCostUsd</td><td>0.42 — cost estimate for the row from the public price list, so the team can compare models</td></tr>
+        <tr><td>activity</td><td>sessions, ask/edit/agent/plan mode counts, tool-call and MCP-call counts by tool / server name</td></tr>
+        <tr><td>clientVersion</td><td>0.50.0 — the extension version, so admins can spot outdated installs</td></tr>
       </table>
       <div class="callout">Prompt and response content is never uploaded — only the aggregate counts above.</div>
+      <p class="info-lead">On the server, models, editors, repositories (workspace names), tools and MCP servers appear in Team Insights only as <em>team totals next to your own numbers</em>; which teammate used what is visible to server admins only. See <code>docs/sharing-server/TEAM-DATA-SCOPE.md</code>.</p>
       <h2>What you'll get</h2>
       <div class="dashboard-preview">
         <p class="dp-note">Illustrative preview of the team dashboard members sign into with GitHub — not live data.</p>

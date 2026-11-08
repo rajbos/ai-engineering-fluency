@@ -414,7 +414,10 @@ the recorded commit. It does not cover the Visual Studio, JetBrains or CLI relea
 
 ## Sharing server
 
-The extension preflight above does not validate the sharing server. Server coding
+The extension preflight above does not validate the sharing server.
+`sharing-server/scripts/capture-screenshots.cjs` renders the member, admin and
+personal pages from deterministic sample data into `sharing-server/images/` for the
+docs (same headless harness as the interaction check; never an IDE). Server coding
 and testing follow the [authoritative data separation contract](../sharing-server/AGENTS.md),
 including its HTTP/HTML privacy regression checklist. Unlike the extension's
 `local` stage, server tests must never read production data or call live GitHub:
