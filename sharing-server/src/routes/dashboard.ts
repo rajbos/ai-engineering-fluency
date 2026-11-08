@@ -16,12 +16,16 @@ import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
 import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
 import { renderTeamInsights, teamInsightsCsv } from './teamPage.js';
 import { renderNavExtra } from '../nav.js';
+import { htmlSecurityHeaders, cspNonce } from '../securityHeaders.js';
 export const dashboard = new Hono();
 
 dashboard.use('*', async (c, next) => {
 	c.header('Cache-Control', 'private, no-store');
 	await next();
 });
+
+// CSP (with a per-request nonce for the inline scripts/styles below), HSTS, framing and sniffing headers.
+dashboard.use('*', htmlSecurityHeaders());
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET ?? '';
@@ -84,7 +88,7 @@ const _chartJsCode: string = (() => {
 /** GET /auth/github — Start GitHub OAuth for the web dashboard. */
 dashboard.get('/auth/github', (c) => {
 	if (!GITHUB_CLIENT_ID) {
-		return c.html(errorPage('GitHub OAuth is not configured on this server.'), 503);
+		return c.html(errorPage(c, 'GitHub OAuth is not configured on this server.'), 503);
 	}
 	const state = randomState();
 	const params = new URLSearchParams({
@@ -113,7 +117,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 	// Validate CSRF state
 	deleteCookie(c, OAUTH_STATE_COOKIE, { path: '/' });
 	if (!code || !state || !storedState || state !== storedState) {
-		return c.html(errorPage('Invalid or expired authentication state. Please try again.'), 400);
+		return c.html(errorPage(c, 'Invalid or expired authentication state. Please try again.'), 400);
 	}
 
 	// Exchange code for access token
@@ -132,11 +136,11 @@ dashboard.get('/auth/github/callback', async (c) => {
 		});
 		const tokenData = await tokenRes.json() as { access_token?: string; error?: string };
 		if (!tokenData.access_token) {
-			return c.html(errorPage(`GitHub OAuth error: ${tokenData.error ?? 'no token returned'}`), 400);
+			return c.html(errorPage(c, `GitHub OAuth error: ${tokenData.error ?? 'no token returned'}`), 400);
 		}
 		accessToken = tokenData.access_token;
 	} catch (err) {
-		return c.html(errorPage(`Failed to reach GitHub: ${String(err)}`), 502);
+		return c.html(errorPage(c, `Failed to reach GitHub: ${String(err)}`), 502);
 	}
 
 	// Fetch user profile
@@ -151,11 +155,11 @@ dashboard.get('/auth/github/callback', async (c) => {
 			signal: AbortSignal.timeout(10_000),
 		});
 		if (!userRes.ok) {
-			return c.html(errorPage('Failed to retrieve GitHub profile.'), 502);
+			return c.html(errorPage(c, 'Failed to retrieve GitHub profile.'), 502);
 		}
 		userData = await userRes.json() as typeof userData;
 	} catch (err) {
-		return c.html(errorPage(`Failed to reach GitHub: ${String(err)}`), 502);
+		return c.html(errorPage(c, `Failed to reach GitHub: ${String(err)}`), 502);
 	}
 
 	// Optional org membership check
@@ -192,11 +196,11 @@ dashboard.get('/auth/github/callback', async (c) => {
 						  `${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN is likely invalid or expired. Rotate it.' : "your token likely lacks read:org scope or SSO authorization for this org."})`
 						: ` (Admin diagnostic: the membership check returned HTTP ${memberRes.status} — not a member, per GitHub.)`;
 				}
-				return c.html(errorPage(`Access denied: you are not a member of the "${allowedOrg}" organization.${adminDetail}`), 403);
+				return c.html(errorPage(c, `Access denied: you are not a member of the "${allowedOrg}" organization.${adminDetail}`), 403);
 			}
 		} catch (err) {
 			console.error(`[auth/callback] Org membership check for '${userData.login}' in '${allowedOrg}' failed with a network/timeout error:`, err);
-			return c.html(errorPage('Unable to verify organization membership. Please try again.'), 502);
+			return c.html(errorPage(c, 'Unable to verify organization membership. Please try again.'), 502);
 		}
 	}
 
@@ -205,7 +209,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 		user = upsertUser(userData.id, userData.login, userData.name, userData.avatar_url);
 	} catch (err) {
 		console.error('[auth/callback] upsertUser failed:', err);
-		return c.html(errorPage(`Database error during sign-in: ${String(err)}`), 500);
+		return c.html(errorPage(c, `Database error during sign-in: ${String(err)}`), 500);
 	}
 	const claims = makeClaims(user.id);
 	const sessionValue = encodeSession(claims);
@@ -238,14 +242,14 @@ dashboard.get('/dashboard', (c) => {
 	const claims = cookieValue ? decodeSession(cookieValue) : null;
 
 	if (!claims) {
-		return c.html(loginPage());
+		return c.html(loginPage(c));
 	}
 
 	// Re-read user from DB on every request (so is_admin/name changes take effect)
 	const user = getUserById(claims.sub);
 	if (!user) {
 		deleteCookie(c, COOKIE_NAME, { path: '/' });
-		return c.html(loginPage());
+		return c.html(loginPage(c));
 	}
 
 	const uploads = getUploadsForUser(user.id, 30);
@@ -280,7 +284,7 @@ dashboard.get('/team', (c) => {
 	if (!user) return c.redirect('/dashboard');
 
 	const data = getTeamInsights(user.id, parseTeamDays(c.req.query('days')));
-	return c.html(layout('Team Insights', `
+	return c.html(layout(c, 'Team Insights', `
 <div class="header">
   <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
@@ -296,8 +300,8 @@ dashboard.get('/team', (c) => {
     <a href="/auth/logout">Sign out</a>
   </div>
 </div>
-<script>${_chartJsCode}</script>
-${renderTeamInsights(data)}`));
+<script ${nonceAttr(c)}>${_chartJsCode}</script>
+${renderTeamInsights(data, cspNonce(c))}`));
 });
 
 dashboard.get('/team/export', (c) => {
@@ -348,6 +352,11 @@ function normalizeEditorName(raw: string | null | undefined): string {
 	return name;
 }
 
+/** `nonce="…"` for an inline <script>/<style>, so the page's CSP lets it run. */
+function nonceAttr(c: Context): string {
+	return `nonce="${h(cspNonce(c))}"`;
+}
+
 /** Safely embed arbitrary data as a JS literal inside a <script> block. */
 function safeJson(data: unknown): string {
 	return JSON.stringify(data)
@@ -382,7 +391,7 @@ interface FluencyScore {
 	categories: CategoryScore[];
 }
 
-function layout(title: string, body: string): string {
+function layout(c: Context, title: string, body: string): string {
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -393,7 +402,7 @@ function layout(title: string, body: string): string {
 <link rel="icon" href="/icon.png">
 <link rel="apple-touch-icon" href="/icon.png">
 <title>${h(title)} — AI Engineering Fluency</title>
-<style>
+<style ${nonceAttr(c)}>
   *, *::before, *::after { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -666,7 +675,7 @@ ${body}
 </html>`;
 }
 
-function loginPage(): string {
+function loginPage(c: Context): string {
 	const oauthAvailable = !!process.env.GITHUB_CLIENT_ID;
 	const oauthSection = oauthAvailable ? `
   <a href="/auth/github" class="btn btn-primary" style="font-size:1rem; padding:12px 28px">
@@ -676,7 +685,7 @@ function loginPage(): string {
     Note: requires org admin approval for SSO organizations.
   </p>` : '';
 
-	return layout('Sign In', `
+	return layout(c, 'Sign In', `
 <div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top: 80px; align-items:center">
   <h2 style="color:#e6edf3">Sign in to view your usage dashboard</h2>
@@ -1255,7 +1264,7 @@ function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin:
   }
 })();` : '';
 
-	return layout(`${user.github_login}'s Dashboard`, `
+	return layout(c, `${user.github_login}'s Dashboard`, `
 <div class="header">
   <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
@@ -1281,12 +1290,12 @@ function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin:
 </div>
 ${fluencyModalHtml}
 
-<script>
+<script ${nonceAttr(c)}>
 var CHART_DATA = ${safeJson(chartData)};
 </script>
-<script>${_chartJsCode}</script>
-<script>${interactiveJs}</script>
-<script>
+<script ${nonceAttr(c)}>${_chartJsCode}</script>
+<script ${nonceAttr(c)}>${interactiveJs}</script>
+<script ${nonceAttr(c)}>
 // Re-compute "Today" stats using browser's local timezone (server pre-renders in UTC)
 (function() {
   function fmtLocal(n) {
@@ -1311,7 +1320,7 @@ var CHART_DATA = ${safeJson(chartData)};
   }
 })();
 </script>
-<script>${fluencyJs}</script>`);
+<script ${nonceAttr(c)}>${fluencyJs}</script>`);
 }
 
 // ── Admin Dashboard ──────────────────────────────────────────────────────────
@@ -1640,7 +1649,7 @@ function adminDashboardPage(
   });
 })();`;
 
-	return layout('Admin Dashboard', `
+	return layout(c, 'Admin Dashboard', `
 <div class="header">
   <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
@@ -1662,15 +1671,15 @@ function adminDashboardPage(
   ${tableHtml}
 </div>
 
-<script>
+<script ${nonceAttr(c)}>
 var ADMIN_CHART_DATA = ${safeJson(chartData)};
 </script>
-<script>${_chartJsCode}</script>
-<script>${adminInteractiveJs}</script>`);
+<script ${nonceAttr(c)}>${_chartJsCode}</script>
+<script ${nonceAttr(c)}>${adminInteractiveJs}</script>`);
 }
 
-function errorPage(message: string): string {
-	return layout('Error', `
+function errorPage(c: Context, message: string): string {
+	return layout(c, 'Error', `
 <div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top:80px; align-items:center">
   <h2 style="color:#e6edf3">Something went wrong</h2>

@@ -410,6 +410,11 @@ await startServer(app);
 - **Signed session cookies** — dashboard sessions use HMAC-SHA256-signed cookies
   storing only `{sub, iat, exp}`. User data is re-read from SQLite on each request.
 - **XSS prevention** — all user-supplied strings are HTML-escaped before rendering.
+- **Security headers** — the built-in pages send a Content-Security-Policy that only
+  runs inline `<script>`/`<style>` blocks carrying a per-request nonce, plus
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and HSTS. Pages you add
+  through `createApp({ extend })` are not covered; apply `secureHeaders` from
+  `hono/secure-headers` to them yourself.
 - **No API keys** — authentication is fully managed by GitHub OAuth; there are no
   API keys to issue, rotate, or leak.
 
