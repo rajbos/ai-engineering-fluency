@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { buildRouterSectionHtml, sanitizeRouterPayload } from '../../src/webview/usage/hydraFusionCard';
+import { buildRouterSectionHtml, sanitizeRouterPayload } from '../../src/webview/usage/fusionCard';
 import { deriveHydraFusionAggregate } from '../../../src/hydrafusion';
 
 const aggregate = deriveHydraFusionAggregate({

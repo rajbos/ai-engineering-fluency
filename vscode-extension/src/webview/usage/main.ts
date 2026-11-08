@@ -43,7 +43,7 @@ import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName, getModelLookupCandidates } from '../../../../src/webview/shared/modelUtils';
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { buildContextWindowSectionHtml, NEAR_LIMIT_PERCENT } from './contextWindowSection';
-import { buildRouterSectionHtml, sanitizeRouterPayload, type RouterPayload } from './hydraFusionCard';
+import { buildRouterSectionHtml, sanitizeRouterPayload, type RouterPayload } from './fusionCard';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
