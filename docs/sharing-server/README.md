@@ -40,6 +40,23 @@ The web dashboard shows per-user usage summaries with time-range filters (Today 
 Last 7 Days / Last 30 Days), an editor breakdown chart, and a token usage trend graph
 grouped by editor or model.
 
+### Team Insights with model, editor and activity breakdowns
+
+![Team Insights with models, editors, repositories and activity](../../sharing-server/images/team-insights.png)
+
+Each breakdown chart has a **Team / You** switch, so you can put your own model or
+editor mix next to the team's:
+
+![Team Insights showing the viewer's own model and editor mix](../../sharing-server/images/team-insights-own-mix.png)
+
+### Admin dashboard with named per-user breakdowns
+
+![Admin dashboard with team model/editor trend and per-user breakdown](../../sharing-server/images/admin-dashboard.png)
+
+The screenshots are rendered from deterministic sample data by
+`sharing-server/scripts/capture-screenshots.cjs` (headless, isolated fixture
+database, no real users). Re-run it after a UI change to refresh them.
+
 ## Team Insights
 
 The cookie-authenticated `/team` page offers 7-, 30- and 90-day windows, each
@@ -57,6 +74,28 @@ team/own totals. The aggregate chart can show team totals or the average per
 daily active uploader alongside your own line. CSV and JSON downloads at
 `/team/export?days=N&format=csv|json` (choose one format) require the same session
 cookie and reuse the safe projection; they cannot reveal additional peer detail.
+
+### What the team can compare
+
+Besides token totals, Team Insights shows the team's **work context** as aggregates
+next to your own numbers (see
+[TEAM-DATA-SCOPE.md](TEAM-DATA-SCOPE.md) for the full field inventory and the
+reasoning):
+
+- **Models**: team tokens, share, uploader count and estimated cost per model, a
+  stacked daily trend, and your own share of each model.
+- **Editors**: the same per editor (VS Code chat, Copilot CLI, Claude Code, ...),
+  to see usage moving between IDE chat and CLI agents over time.
+- **Repositories**: workspace folder names with team tokens and uploader counts,
+  for uploaders who share readable names.
+- **How the team works**: sessions, agent-mode share, tool calls, MCP calls, the
+  most-used MCP servers and tools, each with your own number alongside.
+- **Estimated cost**: the sum of the uploaders' own price-list estimates, team-wide
+  and per model/editor, plus your own.
+
+None of these are attached to a peer row. Which teammate used which model, editor,
+repository or server is shown only on the admin dashboard, which also lists each
+user's extension version so outdated installs are easy to spot.
 
 Cohorts use interpolated p25/p50/p75 of active members' total input + output tokens
 with `<=` boundaries. Ties share rank/cohort; percentile is the percentage of

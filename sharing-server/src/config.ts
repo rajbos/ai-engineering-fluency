@@ -56,7 +56,21 @@ export const MAX_STRING_LENGTHS = {
 	machineName: 256,
 	datasetId: 128,
 	editor: 100,
+	clientVersion: 64,
+	activityKey: 128,
 } as const;
+
+/** Maximum JSON payload size (bytes) for the optional `activity` object per entry. */
+export const MAX_ACTIVITY_JSON_BYTES = 20_000; // 20 KB per entry
+
+/** Maximum number of named tools / MCP servers accepted in one entry's `activity`. */
+export const MAX_ACTIVITY_NAMED_KEYS = 50;
+
+/** Maximum allowed value for any `activity` count (sessions, tool calls, mode counts). */
+export const MAX_ACTIVITY_COUNT = 10_000_000;
+
+/** Maximum accepted `estimatedCostUsd` per entry. */
+export const MAX_ESTIMATED_COST_USD = 1_000_000;
 
 /** Maximum allowed value for token counts per upload entry. */
 export const MAX_TOKEN_VALUE = 2_000_000_000; // 2B tokens — large agent sessions can exceed 100M in one day

@@ -50,12 +50,15 @@ function user() {
 	return upsertUser(id, `${SENTINEL}-login-${id}`, `${SENTINEL}-name`, `https://example.test/${SENTINEL}`);
 }
 
+// Model, editor and workspace *names* are team-shared work context and may appear as team
+// aggregates (see sharing-server/AGENTS.md); everything identifying a person, machine or
+// dataset carries the sentinel and must never appear anywhere in the projection.
 function upload(userId: number, inputTokens: number, outputTokens = 0, overrides: Partial<UploadEntry> = {}): void {
 	upsertUpload(userId, {
-		day: TODAY, model: `${SENTINEL}-model`, datasetId: `${SENTINEL}-dataset`,
-		workspaceId: `${SENTINEL}-workspace-id`, workspaceName: `${SENTINEL}-workspace-name`,
+		day: TODAY, model: 'shared-model', datasetId: `${SENTINEL}-dataset`,
+		workspaceId: `${SENTINEL}-workspace-id`, workspaceName: 'shared-repo',
 		machineId: `${SENTINEL}-machine-id`, machineName: `${SENTINEL}-machine-name`,
-		editor: `${SENTINEL}-editor`, fluencyMetrics: { privateValue: SENTINEL },
+		editor: 'shared-editor', fluencyMetrics: { privateValue: SENTINEL },
 		inputTokens, outputTokens, interactions: 1, ...overrides,
 	});
 }
@@ -64,8 +67,36 @@ function keys(value: object, allowed: string[]): void {
 	assert.deepEqual(Object.keys(value).sort(), [...allowed].sort());
 }
 
+const SLICE_KEYS = ['label', 'inputTokens', 'outputTokens', 'totalTokens', 'interactions', 'estimatedCostUsd',
+	'activeUsers', 'sharePercent', 'ownTokens', 'ownInteractions', 'ownCostUsd', 'ownSharePercent'];
+const ACTIVITY_TOTAL_KEYS = ['sessions', 'modes', 'toolCalls', 'mcpCalls', 'uploadersWithActivity'];
+
 function assertPrivateProjection(result: TeamInsights): void {
-	keys(result, ['days', 'startDay', 'endDay', 'summary', 'members', 'self', 'cohorts', 'daily', 'quartiles']);
+	keys(result, ['days', 'startDay', 'endDay', 'summary', 'members', 'self', 'cohorts', 'daily', 'quartiles',
+		'dimensions', 'unnamedRepositories', 'trends', 'activity', 'cost']);
+	keys(result.dimensions, ['models', 'editors', 'repositories']);
+	for (const slice of [...result.dimensions.models, ...result.dimensions.editors, ...result.dimensions.repositories]) {
+		keys(slice, SLICE_KEYS);
+	}
+	keys(result.unnamedRepositories, ['totalTokens', 'ownTokens']);
+	keys(result.trends, ['models', 'editors']);
+	for (const trend of [result.trends.models, result.trends.editors]) {
+		keys(trend, ['labels', 'daily']);
+		for (const day of trend.daily) {
+			keys(day, ['day', 'team', 'own']);
+			assert.equal(day.team.length, trend.labels.length);
+			assert.equal(day.own.length, trend.labels.length);
+		}
+	}
+	keys(result.activity, ['team', 'self', 'mcpServers', 'tools']);
+	keys(result.activity.team, ACTIVITY_TOTAL_KEYS);
+	keys(result.activity.self, ACTIVITY_TOTAL_KEYS);
+	for (const named of [...result.activity.mcpServers, ...result.activity.tools]) {
+		keys(named, ['name', 'calls', 'activeUsers', 'ownCalls']);
+	}
+	keys(result.cost, ['totalCostUsd', 'ownCostUsd', 'activeUsersWithCost']);
+	// No grouping ids leak through any nested object.
+	assert.ok(!/"user_?[iI]d"/.test(JSON.stringify(result)));
 	keys(result.summary, ['activeUsers', 'inputTokens', 'outputTokens', 'totalTokens', 'interactions', 'averageTokens', 'medianTokens']);
 	keys(result.quartiles, ['q1', 'q2', 'q3']);
 	for (const member of [...result.members, result.self]) {

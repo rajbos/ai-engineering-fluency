@@ -53,6 +53,23 @@ export interface UploadRow {
 	schema_version: number;
 	uploaded_at: string;
 	fluency_json: string | null;
+	estimated_cost_usd: number | null;
+	client_version: string | null;
+	activity_json: string | null;
+}
+
+/**
+ * Validated activity counters attached to a rollup entry. Counts only: tool and MCP
+ * server names are product vocabulary, never prompt text or paths. Shape and limits are
+ * enforced by `validation/uploadSchema.ts`.
+ */
+export interface UploadActivity {
+	sessions?: number;
+	modes?: { ask?: number; edit?: number; agent?: number; plan?: number; customAgent?: number; cli?: number };
+	toolCalls?: number;
+	toolsByName?: Record<string, number>;
+	mcpCalls?: number;
+	mcpByServer?: Record<string, number>;
 }
 
 export interface UploadEntry {
@@ -68,6 +85,11 @@ export interface UploadEntry {
 	outputTokens: number;
 	interactions: number;
 	fluencyMetrics?: Record<string, unknown>;
+	/** Extension-side cost estimate in USD for this row's tokens (public price list). */
+	estimatedCostUsd?: number;
+	/** Version of the uploading client, e.g. the VS Code extension version. */
+	clientVersion?: string;
+	activity?: UploadActivity;
 }
 
 let _db: DatabaseSync | undefined;
@@ -152,6 +174,9 @@ const UPLOADS_TABLE_DDL = `
 		schema_version INTEGER NOT NULL DEFAULT 3,
 		uploaded_at    TEXT DEFAULT (datetime('now')),
 		fluency_json   TEXT,
+		estimated_cost_usd REAL,
+		client_version TEXT,
+		activity_json  TEXT,
 		UNIQUE(user_id, dataset_id, day, model, workspace_id, machine_id, editor)
 	)`;
 
@@ -228,6 +253,15 @@ function initSchema(db: DatabaseSync): void {
 		.all() as unknown as Array<{ name: string }>;
 	if (!cols.some(c => c.name === 'fluency_json')) {
 		db.exec('ALTER TABLE usage_uploads ADD COLUMN fluency_json TEXT');
+	}
+	// Team-safe extras (migration for existing DBs): cost estimate, client version and
+	// the validated activity counters. Nullable so older clients keep uploading unchanged.
+	for (const [column, type] of [
+		['estimated_cost_usd', 'REAL'], ['client_version', 'TEXT'], ['activity_json', 'TEXT'],
+	] as const) {
+		if (!cols.some(c => c.name === column)) {
+			db.exec(`ALTER TABLE usage_uploads ADD COLUMN ${column} ${type}`);
+		}
 	}
 
 	// Add fluency_score_json column to users if it doesn't exist (migration for existing DBs)
@@ -346,11 +380,16 @@ export function getUserByGithubId(githubId: number): UserRow | undefined {
 export function upsertUpload(userId: number, entry: UploadEntry): void {
 	const editor = ((entry.editor ?? '').trim() || 'VS Code').slice(0, 100);
 	const fluencyJson = entry.fluencyMetrics ? JSON.stringify(entry.fluencyMetrics) : null;
+	const activityJson = entry.activity ? JSON.stringify(entry.activity) : null;
+	const estimatedCost = typeof entry.estimatedCostUsd === 'number' && Number.isFinite(entry.estimatedCostUsd)
+		? entry.estimatedCostUsd : null;
+	const clientVersion = ((entry.clientVersion ?? '').trim() || null)?.slice(0, 64) ?? null;
 	getDb().prepare(`
 		INSERT INTO usage_uploads
 			(user_id, dataset_id, day, model, workspace_id, workspace_name, machine_id, machine_name,
-			 editor, input_tokens, output_tokens, interactions, fluency_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 editor, input_tokens, output_tokens, interactions, fluency_json,
+			 estimated_cost_usd, client_version, activity_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, dataset_id, day, model, workspace_id, machine_id, editor) DO UPDATE SET
 			workspace_name = excluded.workspace_name,
 			machine_name   = excluded.machine_name,
@@ -358,6 +397,9 @@ export function upsertUpload(userId: number, entry: UploadEntry): void {
 			output_tokens  = excluded.output_tokens,
 			interactions   = excluded.interactions,
 			fluency_json   = excluded.fluency_json,
+			estimated_cost_usd = excluded.estimated_cost_usd,
+			client_version = excluded.client_version,
+			activity_json  = excluded.activity_json,
 			uploaded_at    = datetime('now')
 	`).run(
 		userId,
@@ -373,6 +415,9 @@ export function upsertUpload(userId: number, entry: UploadEntry): void {
 		entry.outputTokens,
 		entry.interactions,
 		fluencyJson,
+		estimatedCost,
+		clientVersion,
+		activityJson,
 	);
 }
 
@@ -424,6 +469,50 @@ export function getTeamUsageDays(startDay: string, endDay: string): TeamUsageDay
 		GROUP BY user_id, day
 		HAVING SUM(input_tokens) + SUM(output_tokens) > 0 OR SUM(interactions) > 0
 	`).all(startDay, endDay) as unknown as TeamUsageDayRow[];
+}
+
+/**
+ * Row-level inputs for the identity-free team breakdowns (by model, editor, repository
+ * and activity). `user_id` is only used to count distinct uploaders and to mark the
+ * viewer's own share; it never leaves the server.
+ */
+export interface TeamBreakdownRow {
+	user_id: number;
+	day: string;
+	model: string;
+	editor: string;
+	workspace_name: string | null;
+	input_tokens: number;
+	output_tokens: number;
+	interactions: number;
+	estimated_cost_usd: number | null;
+	activity_json: string | null;
+}
+
+export function getTeamBreakdownRows(startDay: string, endDay: string): TeamBreakdownRow[] {
+	return getDb().prepare(`
+		SELECT user_id, day, model, editor, workspace_name,
+			input_tokens, output_tokens, interactions, estimated_cost_usd, activity_json
+		FROM usage_uploads
+		WHERE day >= ? AND day <= ?
+	`).all(startDay, endDay) as unknown as TeamBreakdownRow[];
+}
+
+/** Admin-only: the same breakdown inputs joined to the uploader's login and client version. */
+export interface AdminBreakdownRow extends TeamBreakdownRow {
+	github_login: string;
+	client_version: string | null;
+}
+
+export function getAdminBreakdownRows(days: number): AdminBreakdownRow[] {
+	return getDb().prepare(`
+		SELECT uu.user_id, uu.day, uu.model, uu.editor, uu.workspace_name,
+			uu.input_tokens, uu.output_tokens, uu.interactions, uu.estimated_cost_usd, uu.activity_json,
+			uu.client_version, u.github_login
+		FROM usage_uploads uu
+		JOIN users u ON uu.user_id = u.id
+		WHERE uu.day >= date('now', '-' || ? || ' days')
+	`).all(days) as unknown as AdminBreakdownRow[];
 }
 
 export interface AdminUploadRow extends UploadRow {

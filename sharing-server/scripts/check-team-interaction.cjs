@@ -47,12 +47,17 @@ async function main() {
 		const old = new Date();
 		old.setUTCDate(old.getUTCDate() - 40);
 		const viewer = fixture.upsertUser(78001, 'self-login', 'Your profile', null);
-		const forbidden = ['PRIVATE_PEER_LOGIN', 'PRIVATE_PEER_NAME', 'PRIVATE_WORKSPACE', 'PRIVATE_MACHINE', 'PRIVATE_MODEL'];
+		// Identity and device detail never reaches a member page. Model names are team
+		// context: they may appear as team aggregates but never inside a peer row.
+		const forbidden = ['PRIVATE_PEER_LOGIN', 'PRIVATE_PEER_NAME', 'PRIVATE_WORKSPACE', 'PRIVATE_MACHINE'];
+		const sharedModel = 'SHARED_MODEL_LABEL';
 		for (let i = 0; i < 4; i++) {
 			const user = i === 0 ? viewer : fixture.upsertUser(78001 + i, forbidden[0] + i, forbidden[1] + i, null);
 			fixture.upsertUpload(user.id, {
-				day: today, workspaceId: forbidden[2], machineId: forbidden[3], model: forbidden[4],
+				day: today, workspaceId: forbidden[2], machineId: forbidden[3], model: sharedModel,
 				inputTokens: (i + 1) * 100, outputTokens: 0, interactions: i + 1,
+				estimatedCostUsd: (i + 1) * 0.5,
+				activity: { sessions: i + 1, modes: { agent: i + 1 }, toolCalls: 2, toolsByName: { read_file: 2 }, mcpCalls: 1, mcpByServer: { github: 1 } },
 			});
 			if (i === 0) fixture.upsertUpload(user.id, {
 				day: old.toISOString().slice(0, 10), workspaceId: 'own-old', machineId: 'own-old', model: 'own-old',
@@ -79,6 +84,19 @@ async function main() {
 		assert.equal(await page.locator('#team-member-table tbody tr').count(), 4);
 		assertPrivate(await page.content());
 		assert.equal(await page.locator('.team-self td').first().textContent(), '4');
+		// Work-context breakdowns: the model shows once as a team total, never per peer row.
+		assert.ok(!(await page.locator('#team-member-table').innerText()).includes(sharedModel), 'model label inside a peer row');
+		assert.equal(await page.locator('#team-models-table tbody tr').count(), 1);
+		assert.equal(await page.locator('#team-models-table tbody th').first().textContent(), sharedModel);
+		assert.equal(await page.locator('#team-mcp-table tbody tr').count(), 1);
+		assert.equal(await page.locator('#team-tool-table tbody tr').count(), 1);
+		// The Team / You toggle swaps the stacked series to the viewer's own tokens.
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('team-models-chart')).data.datasets[0].data.at(-1)), 1000);
+		await page.locator('[data-team-dimension="models"][data-team-scope="own"]').click();
+		assert.equal(await page.locator('[data-team-dimension="models"][data-team-scope="own"]').getAttribute('aria-pressed'), 'true');
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('team-models-chart')).data.datasets[0].data.at(-1)), 100);
+		await page.locator('[data-team-dimension="editors"][data-team-scope="own"]').click();
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('team-editors-chart')).data.datasets[0].data.at(-1)), 100);
 
 		for (const days of [7, 90, 30]) {
 			await page.getByRole('link', { name: `Last ${days} days`, exact: true }).click();
@@ -186,6 +204,11 @@ async function main() {
 			return { value, tooltip: chart.options.plugins.tooltip.callbacks.label({ parsed: { y: value }, dataset }) };
 		});
 		assert.deepEqual(adminChart, { value: 999_949_999, tooltip: '  boundary-user: 999.9M tokens' });
+		// Admin breakdown: the dimension chart switches between model and editor stacks.
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('admin-dimension-chart')).data.datasets[0].label), 'boundary-model');
+		await page.locator('#admin-dimension-tabs [data-admin-dimension="editors"]').click();
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('admin-dimension-chart')).data.datasets[0].label), 'VS Code');
+		assert.ok((await page.locator('#admin-user-breakdown').innerText()).includes(sharedModel));
 		await page.locator('#admin-mode-tabs [data-admin-mode="average"]').click();
 		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('admin-trend-chart')).data.datasets[0].data.at(-1)), (999_949_999 + 1000) / 5);
 		await assertFitsPhone('/admin');
