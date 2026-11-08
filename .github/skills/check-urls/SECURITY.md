@@ -21,7 +21,7 @@ change that adds or alters a trigger surface (see "Skill security classification
 
 ## Credentials used and where they come from
 
-None. The only header sent is `User-Agent: copilot-token-tracker-url-checker/1.0`.
+None. The only header sent is `User-Agent: ai-engineering-fluency-url-checker/1.0`.
 No environment variables are read.
 
 ## Untrusted inputs parsed

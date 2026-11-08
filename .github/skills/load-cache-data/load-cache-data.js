@@ -56,7 +56,7 @@ if (showHelp) {
     console.log(`
 Load Cache Data Script
 
-This script loads and displays the GitHub Copilot Token Tracker's local cache data.
+This script loads and displays the AI Engineering Fluency extension's local cache data.
 The cache contains pre-computed statistics for session files.
 
 CACHE STRUCTURE:

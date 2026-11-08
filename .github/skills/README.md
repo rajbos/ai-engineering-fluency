@@ -337,6 +337,18 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 **Contents:**
 - Steps: clarify what/where with the user, investigate the codebase, define the places and approach to change, list tests to update, check for cross-surface gaps (e.g. data added to a VS Code view but not available in the shared modules/npm package), then file with `gh issue create`
 
+### improve-tool-families
+
+**Purpose**: Check which known tool names are not covered by any tool family in `DEFAULT_TOOL_FAMILIES` (`src/toolFamilies.ts`) and suggest the family each one likely belongs to.
+
+**Use this skill when:**
+- The Usage Analysis "Output tokens by tool family" section buckets too many tools under "Other Tools"
+- After adding a new editor adapter, or when an agent/CLI's tool list grows
+
+**Contents:**
+- `analyze-tool-families.js`: compares `src/toolNames.json` (and/or a `--tools` list) against the families' `builtIn`/`alternatives` arrays and suggests a family per uncovered name by keyword heuristics; `--json` for machine-readable output
+- Does not edit `toolFamilies.ts`: whether a tool is a baseline `builtIn` or a more efficient `alternative` is a judgment call left to the reviewer
+
 ## Skill security classification
 
 Every skill under `.github/skills/<name>/` that ships scripts (`.js .mjs .cjs .ts .ps1 .sh .py`, excluding `tests/` directories and `*.test.*`/`*.spec.*` files) must be classified. It either carries a one-page `SECURITY.md` next to its `SKILL.md`, or it is declared `exempt` (with a reason) or `pending` (with a tracking issue number) in `.github/skills/skill-security-classification.json`. Never both. `scripts/validate-skill-security.js` enforces this over all skills in CI (`validate-skills.yml`) and fails the build otherwise.

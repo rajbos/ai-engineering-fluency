@@ -227,7 +227,7 @@ function checkUrlWithMethod(urlStr, method) {
             port: url.port || undefined,
             path: url.pathname + url.search,
             headers: {
-                'User-Agent': 'copilot-token-tracker-url-checker/1.0',
+                'User-Agent': 'ai-engineering-fluency-url-checker/1.0',
             },
             timeout: TIMEOUT_MS,
             lookup: guardedLookup,
