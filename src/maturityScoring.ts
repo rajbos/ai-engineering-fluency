@@ -3,7 +3,6 @@
  * Computes AI Fluency Score and related metrics.
  */
 import type {
-	DetailedStats,
 	UsageAnalysisStats,
 	WorkspaceCustomizationMatrix,
 	UsageAnalysisPeriod,

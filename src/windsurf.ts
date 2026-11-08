@@ -5,11 +5,10 @@
  * Falls back to file-based discovery (~/.codeium/windsurf/cascade/*.pb) when running in VS Code.
  */
 import * as http from 'http';
-import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { ModelUsage, SessionFileDetails, DailyTokenStats } from './types';
+import type { ModelUsage, SessionFileDetails } from './types';
 import type { UriLike } from './opencode';
 
 /** Minimal view of an installed editor extension, as needed to reach the Windsurf language server. */

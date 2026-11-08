@@ -151,7 +151,7 @@ test('fails a SECURITY.md with an empty required section', () => {
 });
 
 test('a section holding only an HTML comment counts as empty', () => {
-	const commented = VALID_SECURITY_MD.replace('## Known gaps\n\nSomething true.\n', '## Known gaps\n\n<!-- TODO\nlater -->\n');
+	const commented = VALID_SECURITY_MD.replace('## Known gaps\n\nSomething true.\n', '## Known gaps\n\n<!-- fill in\nlater -->\n');
 	assert.notEqual(commented, VALID_SECURITY_MD);
 	assert.match(runOne({ 'SECURITY.md': commented }).join('\n'), /"## Known gaps" is empty/);
 });

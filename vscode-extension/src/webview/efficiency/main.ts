@@ -50,7 +50,6 @@ import {
 	MIN_SESSION_SHARE_FOR_COMPARE,
 	efficiencyTodayKey,
 	filterSessionsByEditor,
-	listComparableModels,
 	listModelHarnesses,
 	listModelVendors,
 	resolveEfficiencyRange,

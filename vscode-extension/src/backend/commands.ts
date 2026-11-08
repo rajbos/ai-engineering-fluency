@@ -5,7 +5,6 @@
 
 import * as vscode from 'vscode';
 
-import type { BackendFacade } from './facade';
 import { copyBackendConfigToClipboard } from './copyConfig';
 import { computeBackendSharingPolicy } from './sharingProfile';
 import { showBackendError, showBackendSuccess } from './integration';
