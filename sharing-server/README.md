@@ -71,6 +71,11 @@ $bytes = New-Object byte[] 32
 Get-Content .session_secret.txt
 ```
 
+> **Upgrading from an image before the non-root change?** The container now runs as
+> the unprivileged `node` user (uid 1000). A volume created by an older image is owned
+> by root, so hand it over once before starting the new image:
+> `docker compose run --rm --user root --entrypoint chown sharing-server -R node:node /data`
+
 ### 3. Start and verify
 
 ```bash

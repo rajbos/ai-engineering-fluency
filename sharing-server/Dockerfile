@@ -26,7 +26,12 @@ WORKDIR /app
 # Copy the compiled bundle (no node_modules needed — no native deps)
 COPY --from=builder /app/dist ./dist
 
-RUN mkdir -p /data
+# Run as the image's unprivileged `node` user (uid 1000). Only the data directory is
+# handed to it: DATA_DIR=/data holds the SQLite database (Docker volume) or the backup
+# copy (Azure Files, with the live database under LOCAL_DATA_DIR=/tmp/db). /app stays
+# root-owned so the server cannot rewrite its own code. A fresh named volume inherits
+# this ownership; a volume created by an older root image needs a one-time chown (README).
+RUN mkdir -p /data && chown -R node:node /data
 
 VOLUME ["/data"]
 
@@ -42,6 +47,8 @@ ENV NODE_ENV=production \
     DEPLOY_SHA=$DEPLOY_SHA \
     DEPLOY_BRANCH=$DEPLOY_BRANCH \
     DEPLOY_DATE=$DEPLOY_DATE
+
+USER node
 
 # Use tini as PID 1 for proper signal handling
 ENTRYPOINT ["tini", "--"]
