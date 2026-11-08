@@ -1,7 +1,8 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { requireBearerAuth, checkUploadRateLimit, type AuthVariables } from '../auth.js';
 import { upsertUpload, deleteUploadsForDays, getUploadsForUser, getDb, upsertUserFluencyScore, type UploadEntry } from '../db.js';
-import { MAX_ENTRIES_PER_UPLOAD } from '../config.js';
+import { MAX_ENTRIES_PER_UPLOAD, MAX_UPLOAD_BODY_BYTES, MAX_FLUENCY_SCORE_BODY_BYTES } from '../config.js';
 import { validateEntry } from '../validation/uploadSchema.js';
 import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
 
@@ -16,10 +17,23 @@ const MAX_FLUENCY_SCORE_JSON_BYTES = 100_000; // 100 KB
 
 export const api = new Hono<{ Variables: AuthVariables }>();
 
+/**
+ * Reject bodies over `maxSize` with 413 before they are buffered or parsed. Runs ahead of
+ * auth so an oversized request costs neither a GitHub token check nor a full read: a
+ * Content-Length over the limit is refused outright, and a chunked body is cut off as
+ * soon as it crosses the limit.
+ */
+function limitBody(maxSize: number): MiddlewareHandler {
+	return bodyLimit({
+		maxSize,
+		onError: (c) => c.json({ error: `Request body too large (max ${maxSize} bytes).` }, 413),
+	});
+}
+
 // GET /health — no auth required (mounted at root level, not here)
 
 /** POST /api/upload — Upload daily rollup data (one or more entries). */
-api.post('/upload', requireBearerAuth, async (c) => {
+api.post('/upload', limitBody(MAX_UPLOAD_BODY_BYTES), requireBearerAuth, async (c) => {
 	const user = c.get('user');
 
 	if (!checkUploadRateLimit(user.id)) {
@@ -125,7 +139,7 @@ api.get('/team-insights', requireBearerAuth, (c) => {
  * This is the authoritative score: the server dashboard uses it directly instead of
  * re-computing from aggregated upload blobs.
  */
-api.post('/fluency-score', requireBearerAuth, async (c) => {
+api.post('/fluency-score', limitBody(MAX_FLUENCY_SCORE_BODY_BYTES), requireBearerAuth, async (c) => {
 	const user = c.get('user');
 
 	let body: unknown;

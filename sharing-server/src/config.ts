@@ -64,6 +64,26 @@ export const MAX_TOKEN_VALUE = 2_000_000_000; // 2B tokens — large agent sessi
 /** Maximum number of entries allowed in a single upload request. */
 export const MAX_ENTRIES_PER_UPLOAD = 500;
 
+/**
+ * Upper bound (bytes) on the raw JSON of one upload entry: up to 10 KB of
+ * `fluencyMetrics` (MAX_FLUENCY_METRICS_JSON_BYTES in validation/uploadSchema.ts),
+ * the string fields above (multi-byte UTF-8 and JSON escaping included) and key names.
+ */
+export const MAX_UPLOAD_ENTRY_BYTES = 16 * 1024;
+
+/**
+ * Maximum request body (bytes) accepted by POST /api/upload, enforced before the body
+ * is read into memory or parsed. Sized so a full batch of the largest valid entries
+ * still fits; anything bigger would fail the per-entry checks anyway.
+ */
+export const MAX_UPLOAD_BODY_BYTES = MAX_ENTRIES_PER_UPLOAD * MAX_UPLOAD_ENTRY_BYTES; // 8,192,000 bytes (~7.8 MiB)
+
+/**
+ * Maximum request body (bytes) accepted by POST /api/fluency-score. The stored score
+ * is capped at 100 KB after re-serialization; the raw body gets headroom for whitespace.
+ */
+export const MAX_FLUENCY_SCORE_BODY_BYTES = 256 * 1024;
+
 // ── Database / Backup ─────────────────────────────────────────────────────────
 
 /** How often (ms) the database is backed up to Azure Files. */
