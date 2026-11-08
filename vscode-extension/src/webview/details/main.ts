@@ -1,6 +1,6 @@
 // Import shared utilities
 import { getModelDisplayName, isCustomProviderGroup } from '../../../../src/webview/shared/modelUtils';
-import { getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers, escapeHtml } from '../shared/formatUtils';
+import { getCharsPerToken, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers, escapeHtml } from '../shared/formatUtils';
 import { el, createButton, iconHeading, setHtml } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';

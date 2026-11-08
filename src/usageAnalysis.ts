@@ -11,11 +11,7 @@ import type {
 	ModeUsage,
 	ContextReferenceUsage,
 	McpToolUsage,
-	EditScopeUsage,
-	ApplyButtonUsage,
-	SessionDurationData,
 	AgentTypeUsage,
-	ModelSwitchingAnalysis,
 	ModelUsage,
 	UsageAnalysisPeriod,
 	ModelPricing,
@@ -684,27 +680,6 @@ function _eemProcessTextEditGroup(respRaw: ResponseItemRaw, acc: EemAcc): void {
 /**
  * Extract edited file paths and codeblock/apply counts from a request's response items.
  */
-type SingleEditObj = { text?: unknown; range?: { startLineNumber?: number; endLineNumber?: number } };
-
-/** Count lines added/removed from a single edit object, accumulating into languageUsage. */
-function _eemCountSingleEdit(editObj: SingleEditObj, ext: string, languageUsage: LanguageUsage): { linesAdded: number; linesRemoved: number } {
-	let linesAdded = 0;
-	let linesRemoved = 0;
-	if (typeof editObj.text === 'string' && editObj.text) {
-		const added = (editObj.text.match(/\n/g) ?? []).length + (editObj.text.endsWith('\n') ? 0 : 1);
-		linesAdded += added;
-		if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-		languageUsage[ext].linesAdded += added;
-	}
-	if (editObj.range && typeof editObj.range.startLineNumber === 'number' && typeof editObj.range.endLineNumber === 'number') {
-		const removed = Math.max(0, editObj.range.endLineNumber - editObj.range.startLineNumber);
-		linesRemoved += removed;
-		if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-		languageUsage[ext].linesRemoved += removed;
-	}
-	return { linesAdded, linesRemoved };
-}
-
 function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
 	const acc: EemAcc = { editedFilePaths: [], codeBlocks: 0, applies: 0, linesAdded: 0, linesRemoved: 0, languageUsage: {} };
 	if (!req.response || !Array.isArray(req.response)) { return acc; }
@@ -1086,31 +1061,6 @@ function processJsonSessionRequests(
 	);
 }
 
-/**
- * Merge usage analysis data into period stats
- */
-function _muaMergeContextRefFields(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
-	const p = period.contextReferences;
-	const a = analysis.contextReferences;
-	p.file += a.file;
-	p.selection += a.selection;
-	p.implicitSelection += a.implicitSelection || 0;
-	p.symbol += a.symbol;
-	p.codebase += a.codebase;
-	p.workspace += a.workspace;
-	p.terminal += a.terminal;
-	p.vscode += a.vscode;
-	p.terminalLastCommand += a.terminalLastCommand || 0;
-	p.terminalSelection += a.terminalSelection || 0;
-	p.clipboard += a.clipboard || 0;
-	p.changes += a.changes || 0;
-	p.outputPanel += a.outputPanel || 0;
-	p.problemsPanel += a.problemsPanel || 0;
-	p.pullRequest += a.pullRequest || 0;
-	p.copilotInstructions += a.copilotInstructions || 0;
-	p.agentsMd += a.agentsMd || 0;
-}
-
 type SessionModelSwitching = SessionUsageAnalysis['modelSwitching'];
 
 /** Add unique model names from a tier list into the period's tracked list if not already present. */
@@ -1191,32 +1141,6 @@ function _muaMergeModelSwitching(period: UsageAnalysisPeriod, analysis: SessionU
 	_muaUpdateModelSwitchingStats(period);
 }
 
-/** Merge edit scope metrics from analysis into period. */
-function _muaMergeEditScope(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
-	if (!analysis.editScope) { return; }
-	period.editScope.singleFileEdits += analysis.editScope.singleFileEdits;
-	period.editScope.multiFileEdits += analysis.editScope.multiFileEdits;
-	period.editScope.totalEditedFiles += analysis.editScope.totalEditedFiles;
-	const editSessions = period.editScope.singleFileEdits + period.editScope.multiFileEdits;
-	period.editScope.avgFilesPerSession = editSessions > 0 ? period.editScope.totalEditedFiles / editSessions : 0;
-}
-
-/** Merge session duration metrics from analysis into period using weighted averaging. */
-function _muaMergeSessionDuration(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
-	if (!analysis.sessionDuration) { return; }
-	period.sessionDuration.totalDurationMs += analysis.sessionDuration.totalDurationMs;
-	period.sessionDuration.activeDurationMs += analysis.sessionDuration.activeDurationMs;
-	const sessionCount = period.sessions;
-	if (sessionCount <= 0) { return; }
-	period.sessionDuration.avgDurationMs = period.sessionDuration.totalDurationMs / sessionCount;
-	const prevFirst = period.sessionDuration.avgFirstProgressMs * (sessionCount - 1);
-	period.sessionDuration.avgFirstProgressMs = (prevFirst + analysis.sessionDuration.avgFirstProgressMs) / sessionCount;
-	const prevElapsed = period.sessionDuration.avgTotalElapsedMs * (sessionCount - 1);
-	period.sessionDuration.avgTotalElapsedMs = (prevElapsed + analysis.sessionDuration.avgTotalElapsedMs) / sessionCount;
-	const prevWait = period.sessionDuration.avgWaitTimeMs * (sessionCount - 1);
-	period.sessionDuration.avgWaitTimeMs = (prevWait + analysis.sessionDuration.avgWaitTimeMs) / sessionCount;
-}
-
 /** Merge thinking effort data from analysis into period. */
 function _muaMergeThinkingEffort(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	if (!analysis.thinkingEffort) { return; }
@@ -1251,48 +1175,6 @@ function _muaMergeContextRefs(period: UsageAnalysisPeriod, analysis: SessionUsag
 	c.codeContextLines = (c.codeContextLines || 0) + (a.codeContextLines || 0);
 	_muaMergeCountMap(c.byKind, a.byKind);
 	_muaMergeCountMap(c.byPath, a.byPath);
-}
-
-function _muaAccumulateTierModels(
-	period: UsageAnalysisPeriod,
-	tiers: { standard: string[]; premium: string[]; unknown: string[] }
-): void {
-	for (const model of tiers.standard) {
-		if (!period.modelSwitching.standardModels.includes(model)) {
-			period.modelSwitching.standardModels.push(model);
-		}
-	}
-	for (const model of tiers.premium) {
-		if (!period.modelSwitching.premiumModels.includes(model)) {
-			period.modelSwitching.premiumModels.push(model);
-		}
-	}
-	for (const model of tiers.unknown) {
-		if (!period.modelSwitching.unknownModels.includes(model)) {
-			period.modelSwitching.unknownModels.push(model);
-		}
-	}
-}
-
-function _muaAccumulateCostModels(
-	period: UsageAnalysisPeriod,
-	costBuckets: { low?: string[]; medium?: string[]; high?: string[] }
-): void {
-	for (const model of costBuckets.low ?? []) {
-		if (!period.modelSwitching.lowCostModels.includes(model)) {
-			period.modelSwitching.lowCostModels.push(model);
-		}
-	}
-	for (const model of costBuckets.medium ?? []) {
-		if (!period.modelSwitching.mediumCostModels.includes(model)) {
-			period.modelSwitching.mediumCostModels.push(model);
-		}
-	}
-	for (const model of costBuckets.high ?? []) {
-		if (!period.modelSwitching.highCostModels.includes(model)) {
-			period.modelSwitching.highCostModels.push(model);
-		}
-	}
 }
 
 function _muaMergeEnhancedMetrics(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {

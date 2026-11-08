@@ -11,12 +11,22 @@ import { getTeamInsights } from '../teamInsights.js';
 
 const { version: packageVersion } = require('../../package.json') as { version: string };
 const app = createApp();
+// Identity, device and dataset detail: never on member surfaces, in any form.
 const sentinels = [
 	'PEER_LOGIN_SENTINEL', 'PEER_NAME_SENTINEL', 'PEER_AVATAR_SENTINEL',
-	'PEER_WORKSPACE_ID_SENTINEL', 'PEER_WORKSPACE_NAME_SENTINEL',
+	'PEER_WORKSPACE_ID_SENTINEL',
 	'PEER_MACHINE_ID_SENTINEL', 'PEER_MACHINE_NAME_SENTINEL', 'PEER_DATASET_SENTINEL',
-	'PEER_MODEL_SENTINEL', 'PEER_EDITOR_SENTINEL', 'PEER_FLUENCY_SENTINEL',
+	'PEER_FLUENCY_SENTINEL',
 ];
+// Work-context labels: allowed as team aggregates (see sharing-server/AGENTS.md), never
+// attached to a peer row.
+const aggregateLabels = {
+	workspaceName: 'PEER_WORKSPACE_NAME_SENTINEL',
+	model: 'PEER_MODEL_SENTINEL',
+	editor: 'PEER_EDITOR_SENTINEL',
+	mcpServer: 'PEER_MCP_SENTINEL',
+	tool: 'PEER_TOOL_SENTINEL',
+};
 let dataDir: string;
 let viewer: UserRow;
 let peer: UserRow;
@@ -37,6 +47,18 @@ function assertNoPeerMetadata(text: string): void {
 	for (const sentinel of sentinels) assert.ok(!text.includes(sentinel), `leaked ${sentinel}`);
 }
 
+/** Peer rows in the member table carry numbers only; work-context labels stay in aggregate sections. */
+function assertPeerRowsCarryNoLabels(html: string): void {
+	const table = html.split('id="team-member-table"')[1]?.split('</table>')[0] ?? '';
+	for (const label of Object.values(aggregateLabels)) {
+		assert.ok(!table.includes(label), `peer row carries ${label}`);
+	}
+	const dailyNumbers = html.split('id="team-daily-numbers"')[1]?.split('</details>')[0] ?? '';
+	for (const label of Object.values(aggregateLabels)) {
+		assert.ok(!dailyNumbers.includes(label), `daily numbers carry ${label}`);
+	}
+}
+
 before(() => {
 	dataDir = mkdtempSync(join(tmpdir(), 'sharing-team-dashboard-'));
 	process.env.LOCAL_DATA_DIR = dataDir;
@@ -52,10 +74,15 @@ before(() => {
 		inputTokens: 12345, outputTokens: 6789, interactions: 12,
 	});
 	upsertUpload(peer.id, {
-		day, model: sentinels[8], workspaceId: sentinels[3], workspaceName: sentinels[4],
-		machineId: sentinels[5], machineName: sentinels[6], datasetId: sentinels[7],
-		editor: sentinels[9], fluencyMetrics: { sentinel: sentinels[10] },
+		day, model: aggregateLabels.model, workspaceId: sentinels[3], workspaceName: aggregateLabels.workspaceName,
+		machineId: sentinels[4], machineName: sentinels[5], datasetId: sentinels[6],
+		editor: aggregateLabels.editor, fluencyMetrics: { sentinel: sentinels[7] },
 		inputTokens: 43210, outputTokens: 9876, interactions: 34,
+		estimatedCostUsd: 1.25, clientVersion: '0.99.0-peer',
+		activity: {
+			sessions: 4, modes: { agent: 3, ask: 1 }, toolCalls: 6, toolsByName: { [aggregateLabels.tool]: 6 },
+			mcpCalls: 2, mcpByServer: { [aggregateLabels.mcpServer]: 2 },
+		},
 	});
 });
 
@@ -103,7 +130,44 @@ describe('member dashboard privacy boundary', () => {
 			assert.ok(html.includes(`<a class="btn btn-secondary" href="/team/export?days=${days}&amp;format=json">`));
 			assert.ok(!html.includes('ADMIN_CHART_DATA'));
 			assert.ok(!html.includes('href="/admin"'));
+			assertPeerRowsCarryNoLabels(html);
+			// The peer's model, editor, repository, MCP server and tool are team context and show as
+			// team totals with the viewer's own numbers, never as "Peer 1 used ...".
+			const modelTable = html.split('id="team-models-table"')[1]?.split('</table>')[0] ?? '';
+			assert.ok(modelTable.includes(`<th scope="row">${aggregateLabels.model}</th>`));
+			const peerModelRow = modelTable.split('<tr').find(row => row.includes(aggregateLabels.model)) ?? '';
+			assert.ok(peerModelRow.includes('<td>53,086</td><td>73.5%</td><td>1</td>'), 'team total, team share and uploader count');
+			assert.ok(peerModelRow.includes('<td>0</td><td>0.0%</td>'), 'viewer has no own usage of the peer model');
+			assert.ok((html.split('id="team-editors-table"')[1] ?? '').includes(aggregateLabels.editor));
+			assert.ok((html.split('id="team-repository-table"')[1] ?? '').includes(aggregateLabels.workspaceName));
+			assert.ok((html.split('id="team-mcp-table"')[1] ?? '').includes(aggregateLabels.mcpServer));
+			assert.ok((html.split('id="team-tool-table"')[1] ?? '').includes(aggregateLabels.tool));
+			assert.ok(html.includes('<div class="label">Estimated cost</div><div class="value team-value">$1.25</div>'));
+			assert.ok(html.includes('<div class="label">Your estimated cost</div><div class="value team-value">$0.00</div>'));
+			assert.ok(!html.includes('0.99.0-peer'), 'client versions are admin-only');
 		}
+	});
+
+	test('CSV export keeps the numeric member table and carries no work-context labels', async () => {
+		const csv = await (await request('/team/export?format=csv&days=30')).text();
+		assertNoPeerMetadata(csv);
+		for (const label of Object.values(aggregateLabels)) assert.ok(!csv.includes(label), `CSV carries ${label}`);
+	});
+
+	test('admin page shows the same breakdowns per named user, members never see that table', async () => {
+		const adminHtml = await (await request('/admin', admin)).text();
+		const table = adminHtml.split('id="admin-user-breakdown"')[1]?.split('</table>')[0];
+		assert.ok(table, 'admin per-user breakdown is rendered');
+		const peerRow = table.split('<tr>').find(row => row.includes(`>${peer.github_login}</a>`));
+		assert.ok(peerRow, 'peer has a named row');
+		for (const label of [aggregateLabels.model, aggregateLabels.editor, aggregateLabels.workspaceName, aggregateLabels.mcpServer, '0.99.0-peer', '$1.25']) {
+			assert.ok(peerRow.includes(label), `admin row is missing ${label}`);
+		}
+		assert.ok(adminHtml.includes('id="admin-dimension-chart"'));
+		assert.ok(adminHtml.includes('Models &amp; editors — team, last 30 days'));
+		const memberHtml = await (await request('/team', viewer)).text();
+		assert.ok(!memberHtml.includes('admin-user-breakdown'));
+		assert.ok(!memberHtml.includes('admin-dimension-chart'));
 	});
 
 	test('full JSON exports equal the shared allowlisted projection and ignore identity selectors', async () => {

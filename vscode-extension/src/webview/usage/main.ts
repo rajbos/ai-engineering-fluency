@@ -396,11 +396,15 @@ type UsageFieldsWithIncompatibleTypes = {
 	[K in keyof UsageAnalysisViewData & keyof UsageAnalysisStats]: UsageAnalysisViewData[K] extends UsageAnalysisStats[K] ? never : K
 }[keyof UsageAnalysisViewData & keyof UsageAnalysisStats];
 type AssertNever<T extends never> = T;
-export type UsagePayloadContract = [
+type UsagePayloadContract = [
 	AssertNever<UsageFieldsMissingFromView>,
 	AssertNever<UsageFieldsNotFromBuilder>,
 	AssertNever<UsageFieldsWithIncompatibleTypes>,
 ];
+// Compile-time only: the tuple above fails to type-check when the view and the shared builder drift apart.
+// Reading it here keeps the assertion from being reported as an unused export.
+const usagePayloadContract = [] as unknown as UsagePayloadContract;
+void usagePayloadContract;
 const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
 
 // Initialize localization for webview

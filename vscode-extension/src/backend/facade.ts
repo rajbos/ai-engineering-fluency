@@ -817,6 +817,16 @@ export class BackendFacade {
       return this.getConfigPanelState();
     }
 
+    const draft = await this.resetAzureSettings();
+    return this.getConfigPanelState(draft);
+  }
+
+  /**
+   * Clears the stored shared key, resets all Azure/backend settings to their
+   * defaults and returns the reset draft. Shared by clearAzureSettings (panel)
+   * and clearAzureSettingsCommand (command palette).
+   */
+  private async resetAzureSettings(): Promise<BackendConfigDraft> {
     const settings = this.getSettings();
     // Clear shared key if exists
     if (settings.storageAccount) {
@@ -829,7 +839,7 @@ export class BackendFacade {
       }
     }
 
-    // Create a draft with empty Azure settings
+    // Build a clean reset draft with empty Azure settings
     const draft: BackendConfigDraft = {
       enabled: false,
       backend: "storageTables",
@@ -865,7 +875,7 @@ export class BackendFacade {
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
     this.afterConfigChange();
-    return this.getConfigPanelState(draft);
+    return draft;
   }
 
   private async saveDraft(draft: BackendConfigDraft): Promise<{
@@ -1008,53 +1018,7 @@ export class BackendFacade {
   }
 
   public async clearAzureSettingsCommand(): Promise<void> {
-    const settings = this.getSettings();
-    // Clear shared key if exists
-    if (settings.storageAccount) {
-      try {
-        await this.credentialService.clearStoredStorageSharedKey(
-          settings.storageAccount,
-        );
-      } catch (_e: unknown) {
-        // Continue even if key clear fails
-      }
-    }
-
-    // Build a clean reset draft (same defaults used by clearAzureSettings)
-    const draft: BackendConfigDraft = {
-      enabled: false,
-      backend: "storageTables",
-      authMode: "entraId",
-      datasetId: "default",
-      lookbackDays: 30,
-      includeMachineBreakdown: false,
-      azureResources: {
-        subscriptionId: "",
-        resourceGroup: "",
-        storageAccount: "",
-        aggTable: "usageAggDaily",
-        eventsTable: "usageEvents",
-      },
-      identity: {
-        userIdentityMode: "pseudonymous",
-        userId: "",
-      },
-      blobUpload: {
-        blobUploadEnabled: false,
-        blobContainerName: "copilot-session-logs",
-        blobUploadFrequencyHours: 24,
-        blobCompressFiles: true,
-      },
-      sharing: {
-        sharingProfile: "off",
-        shareWorkspaceMachineNames: false,
-        sharingServerEnabled: false,
-        sharingServerEndpointUrl: "",
-      },
-    };
-    const next = applyDraftToSettings(settings, draft, undefined);
-    await this.updateConfiguration(next);
-    this.afterConfigChange();
+    await this.resetAzureSettings();
 
     vscode.window.showInformationMessage(
       "Azure settings cleared successfully.",

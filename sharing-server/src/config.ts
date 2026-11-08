@@ -56,7 +56,21 @@ export const MAX_STRING_LENGTHS = {
 	machineName: 256,
 	datasetId: 128,
 	editor: 100,
+	clientVersion: 64,
+	activityKey: 128,
 } as const;
+
+/** Maximum JSON payload size (bytes) for the optional `activity` object per entry. */
+export const MAX_ACTIVITY_JSON_BYTES = 20_000; // 20 KB per entry
+
+/** Maximum number of named tools / MCP servers accepted in one entry's `activity`. */
+export const MAX_ACTIVITY_NAMED_KEYS = 50;
+
+/** Maximum allowed value for any `activity` count (sessions, tool calls, mode counts). */
+export const MAX_ACTIVITY_COUNT = 10_000_000;
+
+/** Maximum accepted `estimatedCostUsd` per entry. */
+export const MAX_ESTIMATED_COST_USD = 1_000_000;
 
 /** Maximum allowed value for token counts per upload entry. */
 export const MAX_TOKEN_VALUE = 2_000_000_000; // 2B tokens — large agent sessions can exceed 100M in one day
@@ -66,17 +80,20 @@ export const MAX_ENTRIES_PER_UPLOAD = 500;
 
 /**
  * Upper bound (bytes) on the raw JSON of one upload entry: up to 10 KB of
- * `fluencyMetrics` (MAX_FLUENCY_METRICS_JSON_BYTES in validation/uploadSchema.ts),
- * the string fields above (multi-byte UTF-8 and JSON escaping included) and key names.
+ * `fluencyMetrics` (MAX_FLUENCY_METRICS_JSON_BYTES in validation/uploadSchema.ts, kept as a
+ * literal here to avoid an import cycle), up to MAX_ACTIVITY_JSON_BYTES of `activity`, and
+ * 12 KB for the string fields above, numbers and key names. The string budget covers the
+ * worst case of control characters, which JSON-escape to 6 bytes each (~1,450 chars × 6).
+ * Raise this when an entry gains another bounded field; requestLimits.test.ts checks it.
  */
-export const MAX_UPLOAD_ENTRY_BYTES = 16 * 1024;
+export const MAX_UPLOAD_ENTRY_BYTES = 10_000 + MAX_ACTIVITY_JSON_BYTES + 12 * 1024; // 42,288 bytes
 
 /**
  * Maximum request body (bytes) accepted by POST /api/upload, enforced before the body
  * is read into memory or parsed. Sized so a full batch of the largest valid entries
  * still fits; anything bigger would fail the per-entry checks anyway.
  */
-export const MAX_UPLOAD_BODY_BYTES = MAX_ENTRIES_PER_UPLOAD * MAX_UPLOAD_ENTRY_BYTES; // 8,192,000 bytes (~7.8 MiB)
+export const MAX_UPLOAD_BODY_BYTES = MAX_ENTRIES_PER_UPLOAD * MAX_UPLOAD_ENTRY_BYTES; // 21,144,000 bytes (~20.2 MiB)
 
 /**
  * Maximum request body (bytes) accepted by POST /api/fluency-score. The stored score

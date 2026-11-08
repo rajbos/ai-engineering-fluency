@@ -5,7 +5,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { execFileSync } from 'child_process';
 import type { SessionFileCache } from '../../src/types';
 import { mergePlaceholderDetails } from './detailsOnlyCache';

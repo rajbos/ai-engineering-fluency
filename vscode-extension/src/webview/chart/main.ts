@@ -727,14 +727,6 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	chart = new Chart(ctx, createConfig(data));
 }
 
-function clampSplitForMetric(metric: ChartMetric): void {
-	const normalizedSplit = currentSplit === 'taskCategory' ? 'task' : currentSplit;
-	if (metric === 'cost' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; return; }
-	if (metric === 'output' && (normalizedSplit === 'model' || normalizedSplit === 'provider' || normalizedSplit === 'task')) { currentSplit = 'total'; return; }
-	if (metric === 'tokens' && normalizedSplit === 'language') { currentSplit = 'total'; return; }
-	if (metric === 'sessions' && normalizedSplit !== 'total' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; }
-}
-
 async function switchMetric(metric: ChartMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
 	currentSplit = getPreferredSplitForMetric(metric, currentSplit);

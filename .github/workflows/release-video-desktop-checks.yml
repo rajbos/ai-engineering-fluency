@@ -35,9 +35,16 @@ on:
 permissions:
   contents: read
 
+# One run per PR (or ref). A newer push to the same PR supersedes the
+# in-flight run, so cancel it; pushes to branches are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check-changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # dorny/paths-filter lists changed files through the pull-requests API.
     permissions:
       contents: read
@@ -86,6 +93,7 @@ jobs:
     needs: check-changes
     if: needs.check-changes.outputs.release-video == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -119,6 +127,7 @@ jobs:
     needs: check-changes
     if: needs.check-changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3

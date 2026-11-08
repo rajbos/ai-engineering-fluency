@@ -37,8 +37,8 @@ jobs:
       # you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, 
       # Copilot will do this for you automatically after the steps complete.
       contents: read
-      # Required to read and write the GitHub Actions cache for agent-sessions data
-      actions: write
+      # No `actions` scope: actions/cache/restore|save use the runner's cache
+      # service token (ACTIONS_RUNTIME_TOKEN), not GITHUB_TOKEN permissions.
 
     # You can define any steps you want, and they will run before the agent starts.
     # If you do not check out your code, Copilot will do this for you.

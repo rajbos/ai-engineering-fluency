@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import type { ModelUsage, ChatTurn } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { PiDataAccess } from '../pi';

@@ -1,4 +1,4 @@
-import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
+import type { DailyTokenStats, ChartDataPayload, ModelUsage } from './types';
 import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
 import { mergeDailyModelEfficiency } from './modelEfficiency';
 import { getModelDisplayName, getCustomProviderGroup, getModelLookupCandidates } from './webview/shared/modelUtils';

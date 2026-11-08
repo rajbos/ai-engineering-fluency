@@ -32,27 +32,15 @@ import type {
   ModelEfficiencyUsage,
   ModelId,
   ModelPricing,
-  EditorUsage,
-  RepositoryUsage,
   PeriodStats,
   DetailedStats,
   DailyTokenStats,
-  DailyModelEfficiency,
   ChartDataPayload,
   ChartTimeWindow,
   SessionFileCache,
   CustomizationFileEntry,
   SessionUsageAnalysis,
-  ToolCallUsage,
-  ModeUsage,
   ContextReferenceUsage,
-  McpToolUsage,
-  EditScopeUsage,
-  ApplyButtonUsage,
-  SessionDurationData,
-  ConversationPatterns,
-  AgentTypeUsage,
-  ModelSwitchingAnalysis,
   MissedPotentialWorkspace,
   UsageAnalysisStats,
   TodaySessionSummary,
@@ -63,11 +51,9 @@ import type {
   AgenticTrendPoint,
   DarkFactoryReport,
   SessionFileDetails,
-  PromptTokenDetail,
   ActualUsage,
   ChatTurn,
   SessionLogData,
-  WorkspaceCustomizationSummary,
   AgentSessionsResult,
   TokenEstimator,
   SessionRelationRef,
@@ -276,10 +262,8 @@ import {
   isJsonlContent as _isJsonlContent,
   isUuidPointerFile as _isUuidPointerFile,
   applyDelta as _applyDelta,
-  getModelTier as _getModelTier,
   calculateEstimatedCost as _calculateEstimatedCost,
   createEmptyContextRefs as _createEmptyContextRefs,
-  getTotalTokensFromModelUsage as _getTotalTokensFromModelUsage,
   reconstructJsonlStateAsync as _reconstructJsonlStateAsync,
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
@@ -300,11 +284,7 @@ import { HookManager } from './hookManager';
 import {
   mergeUsageAnalysis as _mergeUsageAnalysis,
   analyzeContextReferences as _analyzeContextReferences,
-  analyzeContentReferences as _analyzeContentReferences,
-  analyzeVariableData as _analyzeVariableData,
   analyzeRequestContext as _analyzeRequestContext,
-  calculateModelSwitching as _calculateModelSwitching,
-  trackEnhancedMetrics as _trackEnhancedMetrics,
   mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
@@ -344,22 +324,15 @@ import {
 
 // --- Workspace helpers ---
 import {
-  parseWorkspaceStorageJsonFile as _parseWorkspaceStorageJsonFile,
   extractWorkspaceIdFromSessionPath as _extractWorkspaceIdFromSessionPath,
-  resolveWorkspaceFolderFromSessionPath as _resolveWorkspaceFolderFromSessionPath,
   resolveWorkspaceFolderWithFallback as _resolveWorkspaceFolderWithFallback,
-  globToRegExp as _globToRegExp,
-  resolveExactWorkspacePath as _resolveExactWorkspacePath,
   getModeType as _getModeType,
-  extractCustomAgentName as _extractCustomAgentName,
   getEditorTypeFromPath as _getEditorTypeFromPath,
   getEditorNameFromRoot as _getEditorNameFromRoot,
   getRepoDisplayName as _getRepoDisplayName,
   detectEditorSource as _detectEditorSource,
-  parseGitRemoteUrl as _parseGitRemoteUrl,
   resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
-  normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
@@ -391,7 +364,7 @@ function ttftScanRangeToMs(range: unknown): number | null {
 import { countDelegationToolCalls } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, type SessionAggregateInput } from '../../src/statsHelpers';
 import { repositoryKey, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
@@ -407,7 +380,6 @@ import {
 	fetchUserEnterprises,
 	fetchEnterprisePremiumBudgets,
 	fetchPrCopilotReviewActivity,
-	type CopilotPlanInfo,
 	type RepoPrInfo,
 	type RepoPrRecord,
 	type RepoPrStatsResult,
@@ -470,7 +442,6 @@ import { deferWhileApplyingSettings } from './backend/settingsBatch';
 import { BackendFacade } from './backend/facade';
 import { BackendCommandHandler } from './backend/commands';
 import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
-import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
