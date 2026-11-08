@@ -76,27 +76,16 @@
 			"vscode-extension/src/utils/processHandlerGuard.ts": 5
 		},
 		"@typescript-eslint/no-unused-vars": {
-			"src/adapters/antigravityAdapter.ts": 2,
-			"src/adapters/copilotCliAdapter.ts": 1,
 			"src/adapters/kiloAdapter.ts": 1,
-			"src/adapters/piAdapter.ts": 1,
-			"src/chartDataBuilder.ts": 2,
-			"src/maturityScoring.ts": 2,
-			"src/usageAnalysis.ts": 5,
-			"src/windsurf.ts": 5,
-			"src/workspaceHelpers.ts": 4,
-			"vscode-extension/src/backend/commands.ts": 2,
-			"vscode-extension/src/backend/services/dataPlaneService.ts": 3,
-			"vscode-extension/src/cacheManager.ts": 1,
-			"vscode-extension/src/extension.ts": 25,
-			"vscode-extension/src/webview/chart/main.ts": 1,
-			"vscode-extension/src/webview/details/main.ts": 1,
-			"vscode-extension/src/webview/efficiency/main.ts": 1,
-			"vscode-extension/src/webview/environmental/main.ts": 1,
-			"vscode-extension/src/webview/logviewer/main.ts": 6,
+			"src/chartDataBuilder.ts": 1,
+			"src/maturityScoring.ts": 1,
+			"src/usageAnalysis.ts": 1,
+			"src/windsurf.ts": 3,
+			"src/workspaceHelpers.ts": 1,
+			"vscode-extension/src/backend/commands.ts": 1,
+			"vscode-extension/src/extension.ts": 7,
 			"vscode-extension/src/webview/maturity/main.ts": 1,
-			"vscode-extension/src/webview/usage/main.ts": 1,
-			"vscode-extension/src/webview/usage/usageListTables.ts": 1
+			"vscode-extension/src/webview/usage/main.ts": 1
 		},
 		"@typescript-eslint/triple-slash-reference": {
 			"src/copilotCliStore.ts": 1,
@@ -113,7 +102,7 @@
 			"vscode-extension/src/cacheManager.ts": 2,
 			"vscode-extension/src/extension.ts": 7,
 			"vscode-extension/src/githubAccountBudgets.ts": 1,
-			"vscode-extension/src/webview/chart/main.ts": 5,
+			"vscode-extension/src/webview/chart/main.ts": 4,
 			"vscode-extension/src/webview/usage/main.ts": 1
 		},
 		"max-lines-per-function": {

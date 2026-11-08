@@ -7,7 +7,7 @@
  * the automatic-tool set) arrives as an argument.
  */
 import type { MemoryFilesAnalysisView, ToolCurationAnalysis } from '../../../../src/types';
-import { getDataTableState, renderDataTable, renderDataTableFilter, type DataTableColumn, type DataTableFooterRow } from '../shared/dataTable';
+import { getDataTableState, renderDataTable, renderDataTableFilter, type DataTableFooterRow } from '../shared/dataTable';
 import { escapeHtml, formatAbsoluteDate, formatFileSize, formatNumber } from '../shared/formatUtils';
 import { localize } from '../shared/localization';
 

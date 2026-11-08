@@ -28,7 +28,6 @@ import { CopilotCliStoreAccess, isMicrosoftScoutCwd, isCopilotAppClientName } fr
 import { getCopilotCliExactUsage } from '../copilotCliOtel';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
-import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
 import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 

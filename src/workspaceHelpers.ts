@@ -14,12 +14,10 @@ import { parseWorkspaceStorageJsonFile, resolveFileUri } from './workspacePathRe
 // by both the CLI and the extension — can use it without pulling in the `vscode` API.
 export { parseWorkspaceStorageJsonFile };
 import {
-	fileUriToPath,
 	getRepoNameFromWorkspacePath,
 	hasWindowsDriveSegment,
 	normalizePath,
 	normalizePathForComparison,
-	normalizePathForDedup,
 	joinedChildPrefixForComparison,
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
@@ -268,7 +266,7 @@ function scanExactPattern(ctx: PatternScanContext): CustomizationFileEntry | und
 
 /** Handle `scanMode: "oneLevel"` — enumerate one directory level for wildcard matches. */
 function scanOneLevelPattern(ctx: PatternScanContext, excludeDirs: string[]): CustomizationFileEntry[] {
-	const { workspaceFolderPath, pattern, stalenessDays } = ctx;
+	const { workspaceFolderPath, pattern } = ctx;
 	const normalizedPattern = normalizePath(pattern.path);
 	const starIndex = normalizedPattern.indexOf('*');
 	if (starIndex === -1) { return []; }

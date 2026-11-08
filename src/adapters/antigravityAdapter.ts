@@ -1,6 +1,4 @@
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import * as inspector from 'inspector';
 import type { ModelUsage, ChatTurn } from '../types';
 import type {
