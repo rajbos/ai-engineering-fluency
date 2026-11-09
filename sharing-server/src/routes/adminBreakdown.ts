@@ -103,9 +103,10 @@ export interface AdminBreakdownHtml {
 
 /**
  * Render the admin breakdown cards for the last `days` days. `dayLabels` is the ordered
- * list of UTC dates the trend chart should cover.
+ * list of UTC dates the trend chart should cover. `nonce` is the request's CSP nonce for the
+ * inline `<style>`; the caller tags the returned `script` with it.
  */
-export function renderAdminBreakdown(rows: AdminBreakdownRow[], days: number, dayLabels: string[]): AdminBreakdownHtml {
+export function renderAdminBreakdown(rows: AdminBreakdownRow[], days: number, dayLabels: string[], nonce: string): AdminBreakdownHtml {
 	// A viewer id no user can have: the admin page wants team totals only, no "own" overlay.
 	const team = computeTeamBreakdownsFromRows(rows, -1, dayLabels);
 	const users = computeUserBreakdowns(rows);
@@ -113,7 +114,7 @@ export function renderAdminBreakdown(rows: AdminBreakdownRow[], days: number, da
 	const teamAgent = agentSharePercent(team.activity.team);
 
 	const dimensionsHtml = `
-<style>
+<style nonce="${h(nonce)}">
   .admin-two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; margin-top: 12px; }
   .admin-two-col > div { min-width: 0; }
   .admin-pills { display: flex; flex-wrap: wrap; gap: 4px; }

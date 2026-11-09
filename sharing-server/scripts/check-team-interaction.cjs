@@ -80,6 +80,8 @@ async function main() {
 		const page = await context.newPage();
 		const errors = [];
 		page.on('pageerror', error => errors.push(error.message));
+		// A CSP-blocked inline script does not throw; it only logs, so collect those too.
+		page.on('console', message => { if (/Content Security Policy/i.test(message.text())) errors.push(message.text()); });
 		await page.goto(`${baseUrl}/team`);
 		assert.equal(await page.locator('#team-member-table tbody tr').count(), 4);
 		assertPrivate(await page.content());

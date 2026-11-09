@@ -71,6 +71,11 @@ $bytes = New-Object byte[] 32
 Get-Content .session_secret.txt
 ```
 
+> **Upgrading from an image before the non-root change?** The container now runs as
+> the unprivileged `node` user (uid 1000). A volume created by an older image is owned
+> by root, so hand it over once before starting the new image:
+> `docker compose run --rm --user root --entrypoint chown sharing-server -R node:node /data`
+
 ### 3. Start and verify
 
 ```bash
@@ -437,6 +442,11 @@ await startServer(app);
 - **Signed session cookies** — dashboard sessions use HMAC-SHA256-signed cookies
   storing only `{sub, iat, exp}`. User data is re-read from SQLite on each request.
 - **XSS prevention** — all user-supplied strings are HTML-escaped before rendering.
+- **Security headers** — the built-in pages send a Content-Security-Policy that only
+  runs inline `<script>`/`<style>` blocks carrying a per-request nonce, plus
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and HSTS. Pages you add
+  through `createApp({ extend })` are not covered; apply `secureHeaders` from
+  `hono/secure-headers` to them yourself.
 - **No API keys** — authentication is fully managed by GitHub OAuth; there are no
   API keys to issue, rotate, or leak.
 

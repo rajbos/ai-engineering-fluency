@@ -49,7 +49,9 @@ function cohortCards(data: TeamInsights): string {
 </div>`).join('');
 }
 
-export function renderTeamInsights(data: TeamInsights): string {
+/** `nonce` is the request's CSP nonce, applied to the inline style and script blocks. */
+export function renderTeamInsights(data: TeamInsights, nonce: string): string {
+	const nonceAttr = nonce.replace(/[^A-Za-z0-9+/=_-]/g, '');
 	const { summary, self } = data;
 	const breakdowns = renderTeamBreakdowns(data);
 	let peer = 0;
@@ -72,7 +74,7 @@ ${breakdowns.selfStats}
 	// Only numeric aggregate series and server-generated ISO dates reach chart code.
 	const chartData = JSON.stringify(data.daily).replace(/</g, '\\u003c');
 	return `
-<style>
+<style nonce="${nonceAttr}">
   .team-page { --team-muted: #8b949e; --team-accent: #58a6ff; --team-grid: #30363d; --team-own: #e3b341; }
   .team-page h2 { margin: 0 0 8px; }
   .team-muted { color: var(--team-muted); font-size: 0.85rem; line-height: 1.5; }
@@ -178,7 +180,7 @@ ${breakdowns.selfStats}
     </table></div>` : '<p>No active uploaders in this period. Your uploads will appear here once available.</p>'}
   </section>
 </main>
-<script>
+<script nonce="${nonceAttr}">
 (function () {
   var daily = ${chartData};
   var buttons = document.querySelectorAll('[data-team-mode]');
@@ -239,5 +241,5 @@ ${breakdowns.selfStats}
   });
 })();
 </script>
-<script>${breakdowns.script}</script>`;
+<script nonce="${nonceAttr}">${breakdowns.script}</script>`;
 }
