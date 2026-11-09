@@ -43,6 +43,12 @@ export interface SessionDiscoveryDeps {
 	 * VS Code extension; absent outside an extension host.
 	 */
 	getExtensionStatus?: (extensionId: string) => { isActive: boolean } | undefined;
+	/**
+	 * Extra session files from outside the local home, e.g. running WSL distros read from Windows
+	 * (see wslDiscovery.ts). Evaluated on every discovery pass, so a host can honour a setting that
+	 * changed since the last scan. Must never start a stopped WSL distro.
+	 */
+	getExtraSessionFiles?: () => Promise<string[]>;
 }
 
 /** What one discovery pass observed; published to the instance only if the pass is still current. */
@@ -223,6 +229,16 @@ export class SessionDiscovery {
 		if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
 	}
 
+	/** Collect host-supplied extra session files (WSL distros); a failure here never fails the pass. */
+	private async collectExtraFiles(seen: Set<string>, allDeduped: string[], onBatch?: (files: string[]) => void): Promise<void> {
+		if (!this.deps.getExtraSessionFiles) { return; }
+		try {
+			this.addDedupedBatch(await this.deps.getExtraSessionFiles(), seen, allDeduped, onBatch);
+		} catch (error) {
+			this.deps.warn(`Could not discover extra (WSL) sessions: ${error}`);
+		}
+	}
+
 	/** Collect deduplicated Windsurf session files and add them to allDeduped. */
 	private async collectWindsurfFiles(seen: Set<string>, allDeduped: string[], status: DiscoveryPassStatus, onBatch?: (files: string[]) => void): Promise<void> {
 		if (!this.deps.windsurf) { return; }
@@ -274,7 +290,7 @@ export class SessionDiscovery {
 				}
 			)
 		);
-		await Promise.all([...adapterTasks, this.collectWindsurfFiles(seen, allDeduped, status, onBatch)]);
+		await Promise.all([...adapterTasks, this.collectWindsurfFiles(seen, allDeduped, status, onBatch), this.collectExtraFiles(seen, allDeduped, onBatch)]);
 
 		const dupCount = totalRaw - allDeduped.length;
 		if (dupCount > 0) { this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`); }

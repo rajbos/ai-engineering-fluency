@@ -43,6 +43,58 @@ import type { ModelUsage } from './types';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './utils/pathUtils';
 
+/** The few fs.promises calls Vibe session discovery needs; injectable so tests can observe every path touched. */
+export interface VibeDiscoveryFs {
+	readdir(dir: string, options: { withFileTypes: true }): Promise<{ name: string; isDirectory(): boolean }[]>;
+	access(p: string): Promise<void>;
+}
+
+/**
+ * Collect the meta.json of every session under one Vibe root (a `.vibe` home or an AoE sandbox store):
+ * legacy `logs/session/session_*` directories and unified-store `logs/session/unified/<uuid>` directories.
+ */
+export async function discoverVibeSessionsInRoot(root: string, fsApi: VibeDiscoveryFs = fs.promises): Promise<string[]> {
+	const sessions: string[] = [];
+	const collect = async (dir: string): Promise<void> => {
+		try {
+			for (const entry of await fsApi.readdir(dir, { withFileTypes: true })) {
+				if (!entry.isDirectory()) { continue; }
+				const metaPath = path.join(dir, entry.name, 'meta.json');
+				try {
+					await fsApi.access(metaPath);
+					sessions.push(metaPath);
+				} catch {
+					// meta.json missing — skip
+				}
+			}
+		} catch {
+			// directory missing — nothing to collect
+		}
+	};
+	const sessionDir = path.join(root, 'logs', 'session');
+	await collect(sessionDir);
+	await collect(path.join(sessionDir, 'unified'));
+	return sessions;
+}
+
+/**
+ * Agent of Empires (AoE) sandbox stores under a Vibe home: `<home>/sandbox-v2/<aoe-session-id>/`.
+ * Each is bind-mounted as `/root/.vibe` in a container, so it has the same `logs/session/...` layout as a Vibe home.
+ */
+export async function findVibeSandboxRoots(vibeHome: string, fsApi: VibeDiscoveryFs = fs.promises): Promise<string[]> {
+	const base = path.join(vibeHome, 'sandbox-v2');
+	try {
+		return (await fsApi.readdir(base, { withFileTypes: true }))
+			.filter(e => e.isDirectory())
+			.map(e => path.join(base, e.name));
+	} catch {
+		return [];
+	}
+}
+
+/** Matches a Vibe session meta.json path in a Vibe home or an AoE sandbox store (forward-slash, lower-case input). */
+const VIBE_SESSION_PATH_RE = /\/\.vibe\/(?:sandbox-v2\/[^/]+\/)?logs\/session\//;
+
 /**
  * Numeric session statistics from meta.json `stats`, beyond the token totals.
  * Every field is `undefined` when the key is absent or not a finite non-negative number
@@ -148,8 +200,11 @@ return path.join(this.getSessionLogDir(), 'unified');
 isVibeSessionFile(filePath: string): boolean {
 const normalized = normalizePathForComparison(filePath);
 if (!normalized.endsWith('/meta.json')) { return false; }
-if (normalized.includes('/.vibe/logs/session/')) { return true; }
-return normalized.startsWith(normalizePathForComparison(this.getSessionLogDir()) + '/');
+if (VIBE_SESSION_PATH_RE.test(normalized)) { return true; }
+if (normalized.startsWith(normalizePathForComparison(this.getSessionLogDir()) + '/')) { return true; }
+// An AoE sandbox store under a relocated $VIBE_HOME whose folder is not named .vibe.
+const sandboxBase = normalizePathForComparison(path.join(this.getVibeHomeDir(), 'sandbox-v2')) + '/';
+return normalized.startsWith(sandboxBase) && /^[^/]+\/logs\/session\//.test(normalized.slice(sandboxBase.length));
 }
 
 /**
@@ -163,30 +218,14 @@ return path.dirname(metaJsonPath);
  * Discover all Mistral Vibe sessions by scanning the session log directory.
  * Covers both layouts: legacy session_* directories directly under logs/session/ and
  * unified-store <uuid> directories under logs/session/unified/.
+ * Also scans AoE sandbox stores at <home>/sandbox-v2/<aoe-session-id>/ as extra roots.
  * Returns an array of meta.json paths, one per session.
  */
 async discoverSessions(): Promise<string[]> {
-const sessions: string[] = [];
-const collect = async (dir: string): Promise<void> => {
-try {
-const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-for (const entry of entries) {
-if (!entry.isDirectory()) { continue; }
-const metaPath = path.join(dir, entry.name, 'meta.json');
-try {
-await fs.promises.access(metaPath);
-sessions.push(metaPath);
-} catch {
-// meta.json missing — skip
-}
-}
-} catch {
-// directory missing — nothing to collect
-}
-};
-await collect(this.getSessionLogDir());
-await collect(this.getUnifiedSessionLogDir());
-return sessions;
+const home = this.getVibeHomeDir();
+const roots = [home, ...await findVibeSandboxRoots(home)];
+const perRoot = await Promise.all(roots.map(root => discoverVibeSessionsInRoot(root)));
+return perRoot.flat();
 }
 
 /**

@@ -17,6 +17,7 @@ import { curationCommand } from './commands/curation';
 import { memoryFilesCommand } from './commands/memoryFiles';
 import { skillSuggestionsCommand } from './commands/skillSuggestions';
 import { loadCache, saveCache, disableCache } from './helpers';
+import { setWslScanDisabled } from '../../src/wslDiscovery';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const packageJson = require('../package.json');
@@ -28,10 +29,12 @@ export function createProgram(): Command {
 		.name('ai-engineering-fluency')
 		.description('Analyze token usage, cost and fluency from local AI coding session files')
 		.version(packageJson.version)
-		.option('--no-cache', 'Bypass the session file cache and re-parse everything');
+		.option('--no-cache', 'Bypass the session file cache and re-parse everything')
+		.option('--no-wsl', 'Windows only: do not scan running WSL distros for session files');
 
 	// Initialise / tear-down cache around every sub-command
 	program.hook('preAction', () => {
+		if (program.opts().wsl === false) { setWslScanDisabled(true); }
 		if (program.opts().cache === false) {
 			disableCache();
 		} else {

@@ -88,6 +88,7 @@
   "config.backend.blobCompressFiles.description": "在上传到 Blob 存储之前，使用 gzip 压缩会话日志文件，以减少存储成本和带宽。",
   "config.backend.sharingServer.enabled.description": "启用到自托管团队服务器后端的同步。可以与 Azure 存储（backend.enabled）同时运行。需要配置 backend.sharingServer.endpointUrl。",
   "config.backend.sharingServer.endpointUrl.description": "自托管共享服务器的基础 URL（例如 https://copilot-sharing.example.com）。身份验证会通过现有 GitHub 会话自动处理——无需 API 密钥。",
+  "config.wsl.scanRunningDistros.description": "仅限 Windows：同时从已在运行的 WSL 发行版中读取编码代理（Claude Code、Codex CLI、Copilot CLI、Mistral Vibe，包括 Agent of Empires 沙盒）的会话文件。不会启动或读取已停止的发行版。",
   "config.sampleDataDirectory.description": "截图/演示模式：设置为文件夹路径时，将覆盖所有会话文件扫描，仅返回该目录中的 .json/.jsonl 文件。留空即可正常操作。",
   "config.suppressedUnknownTools.description": "要从使用分析仪表板中的“发现未知工具”部分隐藏的工具名称列表。对于您正在测试且尚无友好显示名称的工具很有用。",
   "config.curation.timeWindowDays.description": "确定工具未使用时回顾的天数，用于工具管理分析。",
