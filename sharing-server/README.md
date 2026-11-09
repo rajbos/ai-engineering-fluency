@@ -153,7 +153,7 @@ DB_PATH=./data/sharing.db
 
 ```bash
 pnpm run build   # compile TypeScript → dist/server.js
-npm start       # start the server (automatically loads .env via Node --env-file)
+pnpm start      # start the server (automatically loads .env via Node --env-file)
 ```
 
 Or for **watch mode** (auto-restarts `dist/server.js` whenever it changes):

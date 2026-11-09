@@ -98,10 +98,10 @@ UTC boundaries and future-date exclusion.
 From `sharing-server`, run the existing checks for server code changes:
 
 ```sh
-npm run check-types
-npm run build
-npm test
-npm run check:interaction
+pnpm run check-types
+pnpm run build
+pnpm test
+pnpm run check:interaction
 ```
 
 The headless interaction check requires the existing Playwright/Chromium setup
@@ -109,7 +109,7 @@ used by `.github/skills/visual-view-diff/lib/browser.js`; it adds no dependency.
 It clicks period links, trend modes, daily-total expansion, downloads and
 personal-dashboard navigation against an isolated fixture server, never an IDE.
 
-The root `.\build.ps1 -Project sharing -Target test` also runs `npm test`; it does
+The root `.\build.ps1 -Project sharing -Target test` also runs `pnpm test`; it does
 not replace the other checks. Deployment CI runs the server tests and headless
 interaction gate using the repository's locked Playwright tooling. Package
 publication CI runs server tests before building the library.

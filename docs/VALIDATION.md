@@ -426,10 +426,10 @@ use isolated temporary SQLite fixtures, never user databases, and stub authentic
 From `sharing-server`, run:
 
 ```sh
-npm run check-types
-npm run build
-npm test
-npm run check:interaction
+pnpm run check-types
+pnpm run build
+pnpm test
+pnpm run check:interaction
 ```
 
 The server's `check:interaction` is a reproducible headless browser check,
@@ -450,10 +450,11 @@ The root test entry point is:
 .\build.ps1 -Project sharing -Target test
 ```
 
-It runs the server's `npm test`, not the separate type/build/interaction checks.
-The deployment workflow gates on `npm test` and `npm run check:interaction`,
-using the repository's locked Playwright tooling. The package publishing workflow
-also runs `npm test` before the library build.
+It runs the server's `pnpm test`, not the separate type/build/interaction checks.
+The deployment workflow gates on `pnpm run check-types`, `pnpm test` and
+`pnpm run check:interaction`, using the repository's locked Playwright tooling.
+The package publishing workflow also runs `pnpm run check-types` and `pnpm test`
+before the library build.
 
 Exercise `/team` with a session cookie and `/api/team-insights` with a bearer token
 through actual HTTP routes, plus both CSV and JSON `/team/export` downloads with
