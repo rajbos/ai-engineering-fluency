@@ -8,7 +8,7 @@
  * tools in the Claude Code and Copilot CLI parsers); this is the single place
  * that combines them.
  */
-import { isMcpTool } from './utils/toolUtils';
+import { isMcpTool, isCopilotAppConnectorTool } from './utils/toolUtils';
 import { DELEGATION_TOOL_PATTERN } from './taskClassification';
 
 export type ToolKind = 'builtin' | 'mcp' | 'subagent' | 'skill';
@@ -22,7 +22,7 @@ const SKILL_TOOL_PATTERN = /^(skill|__slash__.*)$/i;
 const COPILOT_CLI_MCP_PATTERN = /^[a-z0-9_-]+-mcp-server-/i;
 
 export function classifyToolKind(toolName: string): ToolKind {
-	if (isMcpTool(toolName) || COPILOT_CLI_MCP_PATTERN.test(toolName)) { return 'mcp'; }
+	if (isMcpTool(toolName) || COPILOT_CLI_MCP_PATTERN.test(toolName) || isCopilotAppConnectorTool(toolName)) { return 'mcp'; }
 	if (SKILL_TOOL_PATTERN.test(toolName)) { return 'skill'; }
 	if (DELEGATION_TOOL_PATTERN.test(toolName)) { return 'subagent'; }
 	return 'builtin';

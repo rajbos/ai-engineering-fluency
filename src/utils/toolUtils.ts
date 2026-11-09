@@ -50,6 +50,47 @@ export function isGuidMcpTool(id: string): boolean {
 }
 
 /**
+ * Connectors managed by the GitHub Copilot app (e.g. Work IQ, added under the app's
+ * connector settings) are registered as an HTTP MCP server named `cc-<id>-`, where
+ * `<id>` is an opaque, per-user base64url-style id (e.g. `bEMk-Wo2Cycw97J`). Each tool
+ * is then `<server>-<tool>`, giving a double dash before the tool name:
+ *   cc-bEMk-Wo2Cycw97J-            (server, as seen in mcpServerName)
+ *   cc-bEMk-Wo2Cycw97J--retrieve   (tool)
+ * The id is not in any local config file; the app only keeps the connector's display
+ * name per event in ~/.copilot/data.db (`session_managed_mcp_event_display_names`).
+ */
+const COPILOT_APP_CONNECTOR_PATTERN = /^cc-[A-Za-z0-9_-]{8,32}?-(?:-([a-z][a-z0-9_]*))?$/;
+
+/**
+ * Tool set exposed by the Work IQ remote MCP server (workiq.svc.cloud.microsoft/mcp).
+ * A connector id is opaque, so an action from this set is how we recognize Work IQ.
+ */
+const WORK_IQ_CONNECTOR_ACTIONS = new Set(['ask', 'fetch', 'fetch_blob', 'retrieve', 'search_paths']);
+
+/**
+ * Resolve a Copilot app connector tool or server id to a friendly name.
+ * Returns `undefined` when the id does not match the `cc-<id>-[-<tool>]` pattern.
+ *
+ * Examples:
+ *   `cc-bEMk-Wo2Cycw97J--retrieve`  → `"Work IQ: Retrieve"`
+ *   `cc-bEMk-Wo2Cycw97J--other`     → `"Copilot App Connector: Other"`
+ *   `cc-bEMk-Wo2Cycw97J-`           → `"Copilot App Connector"`
+ */
+export function resolveCopilotAppConnectorToolName(id: string): string | undefined {
+	const match = COPILOT_APP_CONNECTOR_PATTERN.exec(id);
+	if (!match) { return undefined; }
+	const action = match[1];
+	if (!action) { return 'Copilot App Connector'; }
+	const prefix = WORK_IQ_CONNECTOR_ACTIONS.has(action) ? 'Work IQ' : 'Copilot App Connector';
+	return `${prefix}: ${toTitleCase(action)}`;
+}
+
+/** Returns `true` when a tool or server id is a Copilot app connector (`cc-<id>-…`). */
+export function isCopilotAppConnectorTool(id: string): boolean {
+	return COPILOT_APP_CONNECTOR_PATTERN.test(id);
+}
+
+/**
  * Known third-party MCP tool families. Each MCP client/host mints its own
  * server-id segment for the *same* upstream server (e.g. VS Code truncates a
  * user-configured server name to 13 chars, Claude Code uses the literal
@@ -140,10 +181,16 @@ function normalizeMcpId(id: string): string {
  * (from a keyword anywhere in the id) plus a known action name (as the id's
  * suffix), regardless of the server-registration prefix in between.
  *
+ * Copilot app connector ids (`cc-<id>--<tool>`, see
+ * `resolveCopilotAppConnectorToolName`) are resolved here too, so every caller
+ * and the unknown-tools filter recognize them without a toolNames.json entry.
+ *
  * Returns `undefined` when the id doesn't match any known family+action pair,
  * so callers can fall back to an exact toolNames.json entry or the raw id.
  */
 export function resolveMcpFamilyToolName(id: string): string | undefined {
+	const connector = resolveCopilotAppConnectorToolName(id);
+	if (connector) { return connector; }
 	const normalized = normalizeMcpId(id);
 	for (const family of MCP_TOOL_FAMILIES) {
 		if (!family.keywords.some(keyword => normalized.includes(keyword))) { continue; }
