@@ -1,4 +1,10 @@
 import { getTeamUsageDays } from './db.js';
+import { computeTeamBreakdowns, type TeamBreakdowns } from './teamBreakdowns.js';
+
+export type {
+	TeamBreakdowns, DimensionSlice, DimensionTrend, TeamActivity, ActivityTotals,
+	ActivityModeKey, NamedActivitySlice,
+} from './teamBreakdowns.js';
 
 export type UsageCohort = 'Light' | 'Medium' | 'Heavy' | 'Very heavy';
 
@@ -16,7 +22,7 @@ export interface TeamMember {
 	cohort: UsageCohort | null;
 }
 
-export interface TeamInsights {
+export interface TeamInsights extends TeamBreakdowns {
 	days: number;
 	startDay: string;
 	endDay: string;
@@ -146,5 +152,8 @@ export function getTeamInsights(viewerId: number, days: number): TeamInsights {
 		days, startDay, endDay, summary, members,
 		self: members.find(member => member.isSelf) ?? emptyMember(true),
 		cohorts, daily, quartiles,
+		// Work-context breakdowns (model, editor, repository, activity) as team aggregates
+		// plus the viewer's own share; still no per-peer labels.
+		...computeTeamBreakdowns(viewerId, startDay, endDay, daily.map(day => day.day)),
 	};
 }

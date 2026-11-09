@@ -1,7 +1,7 @@
 // Environmental Impact webview
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
-import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { formatFixed, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';

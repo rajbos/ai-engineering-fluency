@@ -6,8 +6,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Features
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
-
-### Features
+- Team Server: every uploaded rollup now also carries a per-row **cost estimate** (`estimatedCostUsd`, from the public price list), the extension **version** (`clientVersion`) and validated **activity counters** (`activity`: sessions, ask/edit/agent/plan/CLI mode counts, tool-call and MCP-call counts by tool/server name). All counts, no content. The Team Server shows models, editors, repositories, tools and MCP servers as team totals next to your own numbers on Team Insights, and per user on the admin dashboard. The **Configure Team Server Backend** panel lists the new fields; the scope is documented in `docs/sharing-server/TEAM-DATA-SCOPE.md`.
 - Fluency Score: the score and AI coding toolbox share blocks are now one **Share** section with a Score/Toolbox switch, placed above the page footer. Both can copy a summary and share to social media, the toolbox card can now be exported as a PNG, and the score's share strings are localized.
 
 ### Changes
@@ -22,6 +21,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Diagnostics → Settings → Display: the per-account budget list now matches Billing, including its usage bars
 
 ### Changes
+- Diagnostics › Pricing Check now counts every session file in the time range you pick. It used to see only the last 14 days and at most 500 files, so All Time and Last Month totals could be far too low. A long range can take longer the first time, and the tab shows scan progress.
 - Diagnostics no longer has a Research group. Usage analytics moved to where you would look for them: output tokens per tool family is now in **Usage Analysis › Tools & Integrations**, per-skill invocations and descriptions in **Efficiency › Skills**, and time to first token in **Efficiency › TTFT**. Model Usage stays in Diagnostics as **Pricing Check**, and OTel Delta joins the Diagnostics group.
 - "Tokens per call" for a tool now uses completed calls everywhere, so the tool family tables and the Cost vs speed map agree. Figures that used to appear under Tool Analysis can be higher, because they no longer divide by calls with no recorded outcome.
 

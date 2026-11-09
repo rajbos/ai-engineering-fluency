@@ -1,10 +1,10 @@
 // Log Viewer webview - displays session file details and chat turns
-import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
+import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
-import { aggregateTokenStats, aggregateActualUsageStats, aggregateModeStats, buildSummaryStats, getEffortDisplayName, getModeIcon, getTopEntries, MODE_LABELS, type ActualUsageStats, type BreakdownEntry, type SummaryStats, type ThinkingEffortUsage } from './summaryStats';
+import { aggregateTokenStats, aggregateActualUsageStats, aggregateModeStats, buildSummaryStats, getEffortDisplayName, getModeIcon, MODE_LABELS, type ActualUsageStats, type BreakdownEntry, type SummaryStats, type ThinkingEffortUsage } from './summaryStats';
 import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './turnsOverview';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
 import { buildMcpAndContextRefsCard, formatTopListWithOther, sumSessionCost } from './summaryCards';
@@ -327,15 +327,6 @@ return n > 0 ? 'delta-over' : n < 0 ? 'delta-under' : 'delta-zero';
 }
 
 // ── Top-list formatters (used in summary cards) ──────────────────────────────
-
-/**
- * Renders a top-N list as `<div>` rows.
- * @security All keys are passed through `escapeHtml`.
- */
-function formatTopList(entries: { key: string; value: number }[], mapper?: (k: string) => string): string {
-if (!entries.length) { return 'None'; }
-return entries.map(e => `<div>${escapeHtml(mapper ? mapper(e.key) : e.key)}: ${e.value}</div>`).join('');
-}
 
 // ── Shared render helpers ────────────────────────────────────────────────────
 
@@ -873,21 +864,6 @@ function buildTruncationCard(data: SessionLogData): string {
 	return `<div class="summary-card summary-card--warning" title="The AI dropped earlier messages to fit within the context window. This breaks prompt cache efficiency and may affect response quality.">
 <div class="summary-label">⚠️ ${localize('logviewer.summary.contextTruncated')}</div>
 <div class="summary-value">${data.truncationCount}</div>
-<div class="summary-sub">${sub}</div>
-</div>`;
-}
-
-function buildFileNameCard(data: SessionLogData): string {
-	const isOpenCode = data.file.includes('opencode.db#ses_');
-	const displayName = escapeHtml(truncateText(getFileName(data.file), 30));
-	const title = escapeHtml(getFileName(data.file));
-	const valueHtml = isOpenCode
-		? `<span title="${title}">${displayName}</span>`
-		: `<span class="filename-link" id="open-file-link" title="${title}">${displayName}</span>`;
-	const sub = isOpenCode ? 'Stored in SQLite database' : 'Click to open in editor';
-	return `<div class="summary-card">
-<div class="summary-label">📁 ${localize('logviewer.summary.fileName')}</div>
-<div class="summary-value" style="font-size: 16px;">${valueHtml}</div>
 <div class="summary-sub">${sub}</div>
 </div>`;
 }

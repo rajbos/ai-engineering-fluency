@@ -57,6 +57,18 @@ export function assertSessionSecretConfigured(env: NodeJS.ProcessEnv = process.e
 	}
 }
 
+/**
+ * Whether cookies set by the dashboard (session and OAuth state) get the `Secure` flag.
+ *
+ * Fails closed like `assertSessionSecretConfigured`: only an explicit
+ * `NODE_ENV=development|test` turns it off, so a deployment that forgets NODE_ENV (or sets
+ * something like `staging`) still keeps the session cookie off plain HTTP. Browsers treat
+ * `http://localhost` as a secure context, so local sign-in works either way.
+ */
+export function shouldUseSecureCookies(env: NodeJS.ProcessEnv = process.env): boolean {
+	return !DEV_FALLBACK_ENVIRONMENTS.includes(env.NODE_ENV ?? '');
+}
+
 let devSecretWarned = false;
 
 /** Test-only: forget that the one-time dev-fallback warning was emitted. */

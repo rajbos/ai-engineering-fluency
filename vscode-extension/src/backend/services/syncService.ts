@@ -21,6 +21,10 @@ import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
+import { buildSharingServerActivity, estimateEntryCostUsd } from './sharingServerActivity';
+import { getPricingSourceForEditor } from '../../../../src/chartDataBuilder';
+import modelPricingData from '../../../../src/modelPricing.json';
+import type { ModelPricing } from '../../../../src/types';
 import { SyncLock } from './syncLock';
 import { type IBlobUploadService } from './blobUploadService';
 import { isJsonlContent } from '../../../../src/tokenEstimation';
@@ -186,6 +190,10 @@ export interface SyncServiceDeps {
 	getGithubToken?: () => string | undefined;
 	/** Resolves the session-specific editor label supplied by an ecosystem adapter. */
 	getEditorLabel?: (sessionFile: string) => string;
+	/** Price list used for the Team Server per-row cost estimate. Defaults to the bundled modelPricing.json. */
+	getModelPricing?: () => Record<string, ModelPricing>;
+	/** Version reported to the Team Server as `clientVersion`. Defaults to this extension's package.json version. */
+	getClientVersion?: () => string | undefined;
 }
 
 /**
@@ -2004,11 +2012,19 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 		machineNamesById: Record<string, string>
 	): SharingServerEntry[] {
 		const includeNames = sharingPolicy.includeNames;
+		const pricing = this.deps.getModelPricing?.() ?? (modelPricingData.pricing as Record<string, ModelPricing>);
+		const clientVersion = this.resolveClientVersion();
 		const entries: SharingServerEntry[] = [];
 		for (const { key, value } of rollups.values()) {
 			// Same ID strategy as the Azure path: team profiles upload hashed workspace/machine
 			// IDs, only soloFull uploads raw ones. Names are still looked up by the raw ID.
 			const ids = applyIdStrategies(key, settings.datasetId, sharingPolicy);
+			const editor = key.editor ?? this.normalizeEditorName(vscode.env.appName);
+			// Team-safe extras (docs/sharing-server/TEAM-DATA-SCOPE.md): a cost estimate so the
+			// team can compare models, validated activity counters (modes, tool and MCP calls)
+			// and the client version. All counts, no content.
+			const estimatedCostUsd = estimateEntryCostUsd(key.model, value.inputTokens, value.outputTokens, pricing, getPricingSourceForEditor(editor));
+			const activity = buildSharingServerActivity(value.fluencyMetrics);
 			entries.push({
 				day: key.day,
 				model: key.model,
@@ -2020,11 +2036,29 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 				outputTokens: value.outputTokens,
 				interactions: value.interactions,
 				datasetId: settings.datasetId,
-				editor: key.editor ?? this.normalizeEditorName(vscode.env.appName),
+				editor,
 				fluencyMetrics: value.fluencyMetrics as Record<string, unknown> | undefined,
+				...(estimatedCostUsd !== undefined ? { estimatedCostUsd } : {}),
+				...(clientVersion ? { clientVersion } : {}),
+				...(activity ? { activity } : {}),
 			});
 		}
 		return entries;
+	}
+
+	/** The extension version reported as `clientVersion`; undefined when it cannot be resolved (never a placeholder). */
+	private resolveClientVersion(): string | undefined {
+		if (this.deps.getClientVersion) {
+			const provided = this.deps.getClientVersion();
+			return provided?.trim() || undefined;
+		}
+		try {
+			const extension = vscode.extensions.getExtension('RobBos.ai-engineering-fluency') ?? vscode.extensions.getExtension('RobBos.copilot-token-tracker');
+			const version = (extension?.packageJSON as { version?: unknown } | undefined)?.version;
+			return typeof version === 'string' && version.trim() ? version.trim().slice(0, 64) : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**

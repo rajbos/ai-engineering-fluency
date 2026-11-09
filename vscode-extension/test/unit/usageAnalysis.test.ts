@@ -2365,6 +2365,16 @@ function writeCliSessionFixture(t: test.TestContext, clientName: string): string
     // The split only applies under ~/.copilot/session-state/, so mirror that layout.
     const dir = makeWorkspaceFixtureDir('cliapp-split-');
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    // A ~/.copilot/session-state/ path makes analysis look up exact usage in the real
+    // ~/.copilot/session-store.db and OTel export (the latter can be many GB). Point
+    // the home directory at the fixture so the test never reads the developer's data.
+    for (const key of ['HOME', 'USERPROFILE'] as const) {
+        const previous = process.env[key];
+        process.env[key] = dir;
+        t.after(() => {
+            if (previous === undefined) { delete process.env[key]; } else { process.env[key] = previous; }
+        });
+    }
     const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
     fs.mkdirSync(sessionDir, { recursive: true });
     const sessionFile = path.join(sessionDir, 'events.jsonl');

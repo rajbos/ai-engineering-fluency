@@ -1579,27 +1579,6 @@
     },
     {
       "file": "vscode-extension/src/webview/chart/main.ts",
-      "hash": "ce22b63d1edf",
-      "count": 1,
-      "line": 262,
-      "sample": "Token Usage – Last 30 Days"
-    },
-    {
-      "file": "vscode-extension/src/webview/chart/main.ts",
-      "hash": "438cd9f2a8cf",
-      "count": 1,
-      "line": 263,
-      "sample": "Token Usage – Last 6 Weeks"
-    },
-    {
-      "file": "vscode-extension/src/webview/chart/main.ts",
-      "hash": "c2fb93de3ad1",
-      "count": 1,
-      "line": 264,
-      "sample": "Token Usage – Last 12 Months"
-    },
-    {
-      "file": "vscode-extension/src/webview/chart/main.ts",
       "hash": "8cf42567fd2e",
       "count": 1,
       "line": 317,
@@ -7813,6 +7792,62 @@
       "count": 1,
       "line": 182,
       "sample": "📅 Previous Month"
+    },
+    {
+      "file": "vscode-extension/src/webview/chart/main.ts",
+      "hash": "a1d620b7404a",
+      "count": 1,
+      "line": 215,
+      "sample": "Token Usage"
+    },
+    {
+      "file": "vscode-extension/src/webview/chart/main.ts",
+      "hash": "3835b057d3f3",
+      "count": 1,
+      "line": 216,
+      "sample": "Token Usage"
+    },
+    {
+      "file": "vscode-extension/src/webview/chart/main.ts",
+      "hash": "2a9a42633452",
+      "count": 1,
+      "line": 217,
+      "sample": "Token Usage"
+    },
+    {
+      "file": "vscode-extension/src/webview/chart/main.ts",
+      "hash": "ada05e78a0e8",
+      "count": 1,
+      "line": 443,
+      "sample": "Filter the charts to"
+    },
+    {
+      "file": "vscode-extension/src/backend/teamServerConfigPanel.ts",
+      "hash": "cf956ef68cd4",
+      "count": 1,
+      "line": 310,
+      "sample": "0.42 — cost estimate for the row from the public price list, so the team can com"
+    },
+    {
+      "file": "vscode-extension/src/backend/teamServerConfigPanel.ts",
+      "hash": "c46812436df7",
+      "count": 2,
+      "line": 311,
+      "sample": "activity"
+    },
+    {
+      "file": "vscode-extension/src/backend/teamServerConfigPanel.ts",
+      "hash": "8f7545f3cf4b",
+      "count": 1,
+      "line": 312,
+      "sample": "0.50.0 — the extension version, so admins can spot outdated installs"
+    },
+    {
+      "file": "vscode-extension/src/backend/teamServerConfigPanel.ts",
+      "hash": "57e83fd23cf2",
+      "count": 4,
+      "line": 315,
+      "sample": "team totals next to your own numbers"
     }
   ]
 }

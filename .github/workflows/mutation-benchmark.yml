@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # Exact Copilot CLI version run via `npx`. Pinned so a new release cannot
+  # change the tool and permission flags under this job. Keep in step with
+  # pr-risk-review.yml and skills-eval; bump deliberately after re-checking
+  # the flags below against the new version's `--help`.
+  COPILOT_CLI_VERSION: "1.0.94"
+
 jobs:
   mutation:
     name: Daily mutation run
@@ -26,7 +33,7 @@ jobs:
 
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
       with:
         egress-policy: audit
 
@@ -197,7 +204,7 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
         COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-      run: npx @github/copilot --version
+      run: npx --yes "@github/copilot@${COPILOT_CLI_VERSION}" --version
 
     - name: Run Copilot CLI to draft mutation improvement issue
       if: steps.gate.outputs.should_run == 'true' && steps.mutation.outcome == 'success' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.auth.outputs.auth_ok == 'true'
@@ -233,20 +240,25 @@ jobs:
         echo ""
         echo "=== Copilot CLI output ==="
 
-        # --allow-all-tools (not --allow-all): the agent only needs workspace
-        # file access and shell tools (gh), so don't grant --allow-all-paths
-        # or --allow-all-urls (least privilege).
+        # Least privilege: the prompt only reads the mutation report and source
+        # files, then runs `gh issue list|create|comment` and `gh label create`.
+        # So the model gets the read-only file tools plus a shell restricted to
+        # those two gh command groups, no temp dir and no built-in MCP servers.
         #
+        # --secret-env-vars strips GH_TOKEN/COPILOT_GITHUB_TOKEN from the
+        # shell environment (and redacts them from output), so `gh` cannot
+        # read the PAT from the environment there. Log gh in from the
+        # environment into its own config first, so the allowed `gh issue` /
+        # `gh label` commands stay authenticated without exposing the token
+        # as an expandable variable to the model's shell.
+        printf '%s' "$GH_TOKEN" | env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --with-token --hostname github.com
+
         # The prompt is piped via stdin rather than passed to -p/--prompt:
         # the prompt file's content starts with YAML frontmatter ("---"),
         # and the Copilot CLI's arg parser misreads a -p value starting
         # with "-" as another flag, failing with "Invalid command format."
         # even though the shell quoting is correct. Stdin has no such issue.
-        cat /tmp/copilot-prompt.md | npx @github/copilot \
-          --silent \
-          --allow-all-tools \
-          --add-dir "${GITHUB_WORKSPACE}" \
-          --no-ask-user 2>&1 || {
+        cat /tmp/copilot-prompt.md | npx --yes "@github/copilot@${COPILOT_CLI_VERSION}"           --silent           --no-color           --no-ask-user           --available-tools view grep glob bash           --allow-tool 'shell(gh issue:*)'           --allow-tool 'shell(gh label:*)'           --add-dir "${GITHUB_WORKSPACE}"           --disallow-temp-dir           --disable-builtin-mcps           --secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN           --deny-tool 'url'           2>&1 || {
             EXIT_CODE=$?
             echo "Warning: gh copilot exited with code $EXIT_CODE"
             exit $EXIT_CODE

@@ -11,6 +11,7 @@
 //   - EVAL_PKG_DIR   directory where agent-skills-eval was npm-installed
 //   - GH_TOKEN / COPILOT_GITHUB_TOKEN  auth for the Copilot CLI
 // Optional:
+//   - COPILOT_CLI_VERSION exact @github/copilot version (default pinned below)
 //   - COPILOT_MODEL       model passed to `copilot --model` (CLI default when unset)
 //   - SKILLS_ROOT         skills folder (default .github/skills)
 //   - EVAL_WORKSPACE      artifact output dir (default ./agent-skills-workspace)
@@ -38,6 +39,9 @@ const { evaluateSkills, consoleReporter } = await import(
   pathToFileURL(path.join(pkgDir, "node_modules", "agent-skills-eval", "dist", "index.js")).href
 );
 
+// Exact Copilot CLI version to run. The workflow sets COPILOT_CLI_VERSION; the
+// fallback keeps a local run pinned too, so `npx` never resolves "latest".
+const copilotCliVersion = process.env.COPILOT_CLI_VERSION || "1.0.94";
 const modelName = process.env.COPILOT_MODEL || "copilot-cli-default";
 // Kept as separate names so the model count reported below is derived from the
 // values actually handed to evaluateSkills, rather than assumed to be 1.
@@ -105,7 +109,7 @@ function copilotCliProvider() {
       }
       const args = [
         "--yes",
-        "@github/copilot",
+        `@github/copilot@${copilotCliVersion}`,
         "-p",
         prompt,
         "--silent",

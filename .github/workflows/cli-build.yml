@@ -19,14 +19,21 @@ on:
 permissions:
   contents: read
 
+# One run per PR (or ref). A newer push to the same PR supersedes the
+# in-flight run, so cancel it; pushes to branches are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check-changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       cli-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.cli-relevant == 'true' }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 
@@ -53,9 +60,10 @@ jobs:
     needs: check-changes
     if: needs.check-changes.outputs.cli-relevant == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
 

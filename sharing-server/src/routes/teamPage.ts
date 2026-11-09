@@ -1,4 +1,5 @@
 import type { TeamInsights, TeamMember } from '../teamInsights.js';
+import { renderTeamBreakdowns } from './teamBreakdownPage.js';
 
 const exact = (n: number): string => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 const percent = (n: number): string => `${n.toFixed(1)}%`;
@@ -48,8 +49,11 @@ function cohortCards(data: TeamInsights): string {
 </div>`).join('');
 }
 
-export function renderTeamInsights(data: TeamInsights): string {
+/** `nonce` is the request's CSP nonce, applied to the inline style and script blocks. */
+export function renderTeamInsights(data: TeamInsights, nonce: string): string {
+	const nonceAttr = nonce.replace(/[^A-Za-z0-9+/=_-]/g, '');
 	const { summary, self } = data;
+	const breakdowns = renderTeamBreakdowns(data);
 	let peer = 0;
 	const rows = data.members.map(member => `<tr${member.isSelf ? ' class="team-self" data-self="true"' : ''}>
   <th scope="row">${member.isSelf ? '<strong>You</strong>' : `Peer ${++peer}`}</th>
@@ -62,6 +66,7 @@ ${stat('Your total tokens', exact(self.totalTokens))}
 ${stat('Your token rank', `${self.rank} of ${summary.activeUsers}`)}
 ${stat('Your share of team tokens', percent(self.sharePercent))}
 ${stat('Your usage cohort', self.cohort ?? 'No activity')}
+${breakdowns.selfStats}
 </div>
 <p class="team-muted">${self.percentile === null
 	? 'No other active uploaders in this period yet; a peer percentile is not available.'
@@ -69,7 +74,7 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
 	// Only numeric aggregate series and server-generated ISO dates reach chart code.
 	const chartData = JSON.stringify(data.daily).replace(/</g, '\\u003c');
 	return `
-<style>
+<style nonce="${nonceAttr}">
   .team-page { --team-muted: #8b949e; --team-accent: #58a6ff; --team-grid: #30363d; --team-own: #e3b341; }
   .team-page h2 { margin: 0 0 8px; }
   .team-muted { color: var(--team-muted); font-size: 0.85rem; line-height: 1.5; }
@@ -78,7 +83,10 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
   .team-page > .card { min-width: 0; }
   .team-page .chart-wrap { min-width: 0; }
   .team-page meter { width: 100%; accent-color: var(--team-accent); }
+  .team-page #team-mode-table meter { width: 120px; vertical-align: middle; margin-right: 6px; }
   .team-page .team-self { outline: 1px solid var(--team-accent); outline-offset: -1px; }
+  .team-page .team-own-label th { border-left: 3px solid var(--team-own); }
+  .team-page h4 { margin: 18px 0 8px; color: #c9d1d9; font-size: 0.9rem; }
   .team-page td, .team-page th { font-variant-numeric: tabular-nums; }
   .team-page caption { text-align: left; padding: 8px 0; color: var(--team-muted); }
   .team-page a:not(.tab):not(.btn) { color: var(--team-accent); }
@@ -102,7 +110,8 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
     <p class="team-muted">Your uploaded usage in context, compared with active uploaders on this server. Usage volume is not productivity, skill, or fluency.</p>
     <div class="alert alert-warn"><strong>Names are hidden, not guaranteed anonymous.</strong>
       Exact usage patterns may identify a teammate, especially in small teams. Peer numbers below are row labels, not persistent identities.
-      Profiles, workspaces, machines, and individual peer timelines are never included in this view or its exports.</div>
+      Profiles, machines, and individual peer timelines are never included in this view or its exports.
+      Models, editors, repositories, tools and MCP servers appear only as team totals next to your own numbers, never per peer.</div>
   </section>
 
   <section class="card" aria-labelledby="team-overview">
@@ -115,6 +124,7 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
       ${stat('Interactions', exact(summary.interactions))}
       ${stat('Mean tokens / uploader', exact(summary.averageTokens))}
       ${stat('Median tokens / uploader', exact(summary.medianTokens))}
+      ${breakdowns.overviewStats}
     </div>
     <p class="team-muted">Active means positive tokens or interactions in this period. Totals reflect uploaded data, not necessarily all usage. Means and medians include you when active.</p>
   </section>
@@ -152,6 +162,8 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
     </details>
   </section>
 
+  ${breakdowns.sections}
+
   <section class="card" aria-labelledby="team-members">
     <div class="card-header"><h3 id="team-members">Raw numbers by active uploader</h3>
       <div class="team-actions">
@@ -168,7 +180,7 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
     </table></div>` : '<p>No active uploaders in this period. Your uploads will appear here once available.</p>'}
   </section>
 </main>
-<script>
+<script nonce="${nonceAttr}">
 (function () {
   var daily = ${chartData};
   var buttons = document.querySelectorAll('[data-team-mode]');
@@ -228,5 +240,6 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
     });
   });
 })();
-</script>`;
+</script>
+<script nonce="${nonceAttr}">${breakdowns.script}</script>`;
 }

@@ -8,6 +8,7 @@ test('classifyToolKind: MCP prefixes from every supported editor naming scheme',
         'mcp_io_github_git_get_file_contents', // VS Code Copilot Chat (local stdio)
         'mcp.github.github.issue_read',        // dotted variant
         'github-mcp-server-get_file_contents', // Copilot CLI
+        'cc-bEMk-Wo2Cycw97J--retrieve',        // Copilot app connector (Work IQ)
     ]) {
         assert.equal(classifyToolKind(name), 'mcp', name);
     }

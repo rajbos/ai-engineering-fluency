@@ -71,6 +71,11 @@ $bytes = New-Object byte[] 32
 Get-Content .session_secret.txt
 ```
 
+> **Upgrading from an image before the non-root change?** The container now runs as
+> the unprivileged `node` user (uid 1000). A volume created by an older image is owned
+> by root, so hand it over once before starting the new image:
+> `docker compose run --rm --user root --entrypoint chown sharing-server -R node:node /data`
+
 ### 3. Start and verify
 
 ```bash
@@ -206,10 +211,27 @@ Content-Type: application/json
     "inputTokens": 15000,
     "outputTokens": 8000,
     "interactions": 42,
-    "datasetId": "default"
+    "datasetId": "default",
+    "estimatedCostUsd": 0.42,
+    "clientVersion": "0.52.0",
+    "activity": {
+      "sessions": 3,
+      "modes": { "ask": 4, "edit": 1, "agent": 30, "plan": 2, "customAgent": 0, "cli": 5 },
+      "toolCalls": 118,
+      "toolsByName": { "read_file": 61, "run_in_terminal": 40, "edit_file": 17 },
+      "mcpCalls": 6,
+      "mcpByServer": { "github": 6 }
+    }
   }
 ]
 ```
+
+`estimatedCostUsd`, `clientVersion` and `activity` are optional, team-safe extras
+(see [docs/sharing-server/TEAM-DATA-SCOPE.md](../docs/sharing-server/TEAM-DATA-SCOPE.md)).
+`activity` is a closed set of non-negative integer counters plus two name → count
+maps capped at 50 names of at most 128 characters; unknown keys are rejected so
+free text can never reach a field the dashboards render as a label. Older clients
+that omit these fields keep working.
 
 Accepts up to **500 entries per request**. The server upserts by
 `(user_id, dataset_id, day, model, workspace_id, machine_id, editor)` so repeated
@@ -295,6 +317,16 @@ internal):
 | `cohorts` | Rows with `label` and `members` (count) |
 | `daily` | Rows with `day`, `inputTokens`, `outputTokens`, `totalTokens`, `interactions`, `ownTokens`, `activeUsers` |
 | `quartiles` | Interpolated token thresholds `q1`, `q2`, `q3` |
+| `dimensions` | `models`, `editors`, `repositories`: team slices per label with `label`, `inputTokens`, `outputTokens`, `totalTokens`, `interactions`, `estimatedCostUsd`, `activeUsers`, `sharePercent`, and the viewer's `ownTokens`, `ownInteractions`, `ownCostUsd`, `ownSharePercent` |
+| `unnamedRepositories` | `totalTokens` and `ownTokens` uploaded without a readable workspace name |
+| `trends` | `models` and `editors`: `labels` (top eight plus `Other`) and `daily` rows with `day`, `team[]`, `own[]` token series per label |
+| `activity` | `team` and `self` totals (`sessions`, `modes`, `toolCalls`, `mcpCalls`, `uploadersWithActivity`), plus `mcpServers` and `tools` rows with `name`, `calls`, `activeUsers`, `ownCalls` |
+| `cost` | `totalCostUsd`, `ownCostUsd`, `activeUsersWithCost` from the uploaded estimates |
+
+The breakdown labels (model ids, editor names, repository folder names, tool and MCP
+server names) are team-shared work context and appear only as team aggregates with
+the viewer's own share. They are never attached to a peer row; the named per-user
+version lives on the admin dashboard. Member pages say so in their warning banner.
 
 Each `members`/`self` row contains only `isSelf`, `inputTokens`, `outputTokens`,
 `totalTokens`, `interactions`, `daysActive`, `tokensPerActiveDay`, `sharePercent`,
@@ -410,6 +442,11 @@ await startServer(app);
 - **Signed session cookies** — dashboard sessions use HMAC-SHA256-signed cookies
   storing only `{sub, iat, exp}`. User data is re-read from SQLite on each request.
 - **XSS prevention** — all user-supplied strings are HTML-escaped before rendering.
+- **Security headers** — the built-in pages send a Content-Security-Policy that only
+  runs inline `<script>`/`<style>` blocks carrying a per-request nonce, plus
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and HSTS. Pages you add
+  through `createApp({ extend })` are not covered; apply `secureHeaders` from
+  `hono/secure-headers` to them yourself.
 - **No API keys** — authentication is fully managed by GitHub OAuth; there are no
   API keys to issue, rotate, or leak.
 
@@ -436,7 +473,8 @@ usage_uploads (
   id, user_id, dataset_id, day, model,
   workspace_id, workspace_name, machine_id, machine_name, editor,
   input_tokens, output_tokens, interactions, schema_version,
-  uploaded_at
+  uploaded_at, fluency_json,
+  estimated_cost_usd, client_version, activity_json   -- nullable team-safe extras
 )
 -- UNIQUE(user_id, dataset_id, day, model, workspace_id, machine_id, editor)
 ```

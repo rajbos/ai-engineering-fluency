@@ -27,18 +27,30 @@ numeric period totals (input/output/total tokens and interactions), activity-day
 counts, a self flag, and calculated cohort labels/comparisons. Rank, token share and
 percentile are derived from the active uploaders in the selected period.
 
+**Work-context breakdowns** (`dimensions`, `trends`, `activity`, `cost` in
+`TeamInsights`, built by `teamBreakdowns.ts`) are the one place labels appear, and
+only as **team aggregates plus the authenticated viewer's own numbers**: per label
+(model id, editor name, workspace/repository name, tool name, MCP server name) the
+team totals, a distinct-uploader count, and the viewer's own totals and share.
+A label is never paired with a peer row, a peer alias or a per-peer series, and
+the admin page is the only surface that attaches these labels to a login. The
+rationale and field inventory are in
+[docs/sharing-server/TEAM-DATA-SCOPE.md](../docs/sharing-server/TEAM-DATA-SCOPE.md).
+
 Downstream routes can import `getTeamInsights`, `parseTeamDays` and the public
 projection types from the server package. Authenticate first and derive
 `viewerId` only from that identity, never query/request input. Reusing the helper
 does not replace route authorization. This contract ships in the npm package.
 
 Never expose peers' names, logins, avatars, profile links, GitHub/internal IDs,
-hashed or stable aliases, workspace/machine/dataset identifiers or names,
-model/editor labels, fluency blobs, upload timestamps, or per-peer daily series.
+hashed or stable aliases, workspace/machine/dataset identifiers, machine names,
+client versions, fluency blobs, upload timestamps, or per-peer daily series. Never
+attach a model, editor, repository, tool or MCP-server label to a peer row.
 This applies to API JSON, full HTML, hidden DOM, embedded scripts, chart payloads
 and exports, not just visible text. Trends may show only the team aggregate and
-the authenticated user's own series. Anonymous display labels must not encode
-identity or provide a stable cross-request alias.
+the authenticated user's own series, per label where a label is allowed above.
+Anonymous display labels must not encode identity or provide a stable
+cross-request alias.
 
 **Anonymous labels remove direct identifiers; they do not guarantee anonymity.**
 Exact numeric totals and comparisons can re-identify people, especially in small
@@ -73,7 +85,9 @@ live GitHub in tests. Do not launch a GUI editor/IDE.
 
 Test real HTTP route responses and complete rendered HTML, including embedded
 scripts: assert allowlisted keys and the absence of seeded peer-identity/metadata
-sentinels, not merely that visible names are hidden. Verify user A cannot fetch
+sentinels, not merely that visible names are hidden. Seed work-context labels
+(model, editor, workspace name, tool, MCP server) on a peer and assert they appear
+only in the aggregate sections, never inside the member table, daily numbers or CSV. Verify user A cannot fetch
 user B's personal data with query parameters; unauthenticated requests are
 rejected; non-admins cannot fetch admin data; admins on member surfaces receive
 the same identity-free shape; and cache headers and exports preserve this contract.

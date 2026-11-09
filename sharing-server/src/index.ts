@@ -33,6 +33,13 @@ export {
 	type TeamInsights,
 	type TeamMember,
 	type UsageCohort,
+	type TeamBreakdowns,
+	type DimensionSlice,
+	type DimensionTrend,
+	type TeamActivity,
+	type ActivityTotals,
+	type ActivityModeKey,
+	type NamedActivitySlice,
 } from './teamInsights.js';
 
 // Auth — reuse so downstream endpoints authenticate the *same* user as core uploads.
@@ -53,6 +60,7 @@ export {
 	decodeSession,
 	makeClaims,
 	assertSessionSecretConfigured,
+	shouldUseSecureCookies,
 	type SessionClaims,
 } from './session.js';
 
