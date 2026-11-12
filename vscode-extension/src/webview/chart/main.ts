@@ -10,6 +10,8 @@ import { applyWebviewLocale } from '../shared/webviewLocale';
 import type { ChartDataPayload, ChartDataset, ChartPeriodData, ChartTimeWindow } from '../../../../src/types';
 import { filterPeriodByTimeWindow } from './timeWindowFilter';
 import { fallbackSplitForEditorFilter, filterPeriodByEditor, isSplitAvailableForEditorFilter, resolveEditorFilter } from './editorFilter';
+import { getPreferredSplitForMetric, isSplitAllowedForMetric, normalizeSplit, resolveHostInitialSelection, resolveSavedSelection, type ChartMetric, type ChartSelection, type ChartSplit, type LegacyChartView } from './chartSelection';
+import { buildStackedCostViewConfig } from './costStackConfig';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import dataTableStyles from '../shared/dataTable.css';
@@ -86,9 +88,6 @@ let pendingPeriod: ChartPeriod | null = null;
 type DisplayMode = 'actual' | 'rolling';
 let currentDisplayMode: DisplayMode = 'actual';
 
-type ChartMetric = 'tokens' | 'output' | 'cost' | 'sessions';
-type ChartSplit = 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory';
-
 type ChartWebviewState = {
 	period: ChartPeriod;
 	timeWindow: ChartTimeWindow;
@@ -100,7 +99,7 @@ type ChartWebviewState = {
 	/** Editor the chart is filtered to, or null for all editors. */
 	editorFilter?: string | null;
 	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
-	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';
+	view?: LegacyChartView;
 };
 
 const chartState = createViewStateManager<ChartWebviewState>(vscode, {
@@ -216,20 +215,6 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 	week:  { title: 'Token Usage', footer: 'Week-by-week token usage', countLabel: 'Total Weeks', avgLabel: 'Avg Tokens / Week', aggregationLabel: 'Aggregated by Week', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Week', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Week', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Week' },
 	month: { title: 'Token Usage', footer: 'Monthly token usage', countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Month' },
 };
-
-/** Splits the sessions and cost metrics can be broken down by. */
-const SESSIONS_COST_SPLITS: ReadonlySet<string> = new Set(['total', 'model', 'editor', 'provider', 'task']);
-/** Splits the output (lines of code) metric cannot be broken down by. */
-const OUTPUT_UNSUPPORTED_SPLITS: ReadonlySet<string> = new Set(['model', 'provider', 'task', 'taskCategory']);
-/** Splits the tokens metric (and any other metric) cannot be broken down by. */
-const TOKENS_UNSUPPORTED_SPLITS: ReadonlySet<string> = new Set(['language', 'provider']);
-
-/** Whether `metric` supports `split`, ignoring the editor filter. `split` is compared as given (not normalized). */
-function isSplitAllowedForMetric(metric: string, split: string): boolean {
-	if (metric === 'sessions' || metric === 'cost') { return SESSIONS_COST_SPLITS.has(split); }
-	if (metric === 'output') { return !OUTPUT_UNSUPPORTED_SPLITS.has(split); }
-	return !TOKENS_UNSUPPORTED_SPLITS.has(split);
-}
 
 function isComboSupported(metric: string, split: string): boolean {
 	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric as ChartMetric, split)) { return false; }
@@ -768,28 +753,8 @@ async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartD
 	await reinitChart(data);
 }
 
-/** Splits the cost metric keeps when switching to it; any other split falls back to 'total'. */
-const COST_PREFERRED_SPLITS: ReadonlySet<string> = new Set(['editor', 'provider', 'task']);
-
-/**
- * Per metric, whether a (normalized) split is kept when switching to that metric.
- * A split that is not kept falls back to 'total'; metrics without an entry keep every split.
- */
-const PREFERRED_SPLIT_KEEPS: Partial<Record<ChartMetric, (split: ChartSplit) => boolean>> = {
-	cost: split => COST_PREFERRED_SPLITS.has(split),
-	output: split => !OUTPUT_UNSUPPORTED_SPLITS.has(split),
-	tokens: split => split !== 'language',
-	sessions: split => SESSIONS_COST_SPLITS.has(split),
-};
-
-function getPreferredSplitForMetric(metric: ChartMetric, split: ChartSplit): ChartSplit {
-	const normalized = split === 'taskCategory' ? 'task' : split;
-	const keeps = PREFERRED_SPLIT_KEEPS[metric];
-	return !keeps || keeps(normalized) ? normalized : 'total';
-}
-
 function isSplitSupported(metric: ChartMetric, split: ChartSplit): boolean {
-	const normalized = split === 'taskCategory' ? 'task' : split;
+	const normalized = normalizeSplit(split);
 	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric, normalized)) { return false; }
 	return isSplitAllowedForMetric(metric, normalized);
 }
@@ -1055,45 +1020,16 @@ function buildCostDataset(isRolling: boolean, rollingLabel: string, costData: nu
 	};
 }
 
-/** Stacked bar chart of per-group estimated cost, shared by the cost-by-provider/editor/model views. */
-function buildStackedCostViewConfig(datasets: ModelDataset[], period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	return {
-		type: 'bar' as const,
-		data: { labels: period.labels, datasets: datasets as any },
-		options: {
-			...baseOptions,
-			plugins: {
-				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
-				tooltip: {
-					...baseOptions.plugins.tooltip,
-					callbacks: {
-						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
-						footer: (items: any[]) => {
-							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
-							return `Total: $${total.toFixed(4)}`;
-						}
-					}
-				}
-			},
-			scales: {
-				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
-				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
-			}
-		}
-	} as ChartConfig;
-}
-
 function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	return buildStackedCostViewConfig((period.billingGroupCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
+	return buildStackedCostViewConfig((period.billingGroupCostDatasets ?? []) as ModelDataset[], period.labels, baseOptions, c) as ChartConfig;
 }
 
 function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	return buildStackedCostViewConfig((period.editorCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
+	return buildStackedCostViewConfig((period.editorCostDatasets ?? []) as ModelDataset[], period.labels, baseOptions, c) as ChartConfig;
 }
 
 function buildCostModelViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	return buildStackedCostViewConfig((period.modelCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
+	return buildStackedCostViewConfig((period.modelCostDatasets ?? []) as ModelDataset[], period.labels, baseOptions, c) as ChartConfig;
 }
 
 function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
@@ -1358,21 +1294,6 @@ function createConfig(data: InitialChartData): ChartConfig {
 }
 
 
-type MetricSplit = { metric: ChartMetric; split: ChartSplit };
-
-function migrateViewKey(view: string): MetricSplit {
-	const map: Record<string, MetricSplit> = {
-		total: { metric: 'tokens', split: 'total' },
-		model: { metric: 'tokens', split: 'model' },
-		editor: { metric: 'tokens', split: 'editor' },
-		repository: { metric: 'tokens', split: 'repository' },
-		cost: { metric: 'cost', split: 'total' },
-		task: { metric: 'tokens', split: 'task' },
-		taskCategory: { metric: 'tokens', split: 'task' },
-	};
-	return map[view] ?? { metric: 'tokens', split: 'total' };
-}
-
 function restoreChartState(initialData: InitialChartData): void {
 	const saved = chartState.restore();
 	// Webview state is newest for an existing panel (the host value is a snapshot embedded when the
@@ -1387,32 +1308,26 @@ function restoreChartState(initialData: InitialChartData): void {
 	applySavedChartState(saved);
 }
 
+function currentSelection(): ChartSelection {
+	return { period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit };
+}
+
+function applySelection(selection: ChartSelection): void {
+	currentPeriod = selection.period;
+	currentTimeWindow = selection.timeWindow;
+	currentMetric = selection.metric;
+	currentSplit = selection.split;
+}
+
 /** Seeds a brand-new panel (no webview state yet) from the host's initial preferences. */
 function applyHostInitialState(initialData: InitialChartData): void {
-	if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-	if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
-	if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
-	if (initialData.initialSplit) {
-		currentSplit = initialData.initialSplit === 'taskCategory' ? 'task' : initialData.initialSplit;
-	} else if (initialData.initialView) {
-		const m = migrateViewKey(initialData.initialView);
-		currentMetric = m.metric; currentSplit = m.split;
-	}
+	applySelection(resolveHostInitialSelection(initialData, currentSelection()));
 }
 
 /** Restores an existing panel's toggles from its saved webview state, migrating the legacy `view` key. */
 function applySavedChartState(saved: ReturnType<typeof chartState.restore>): void {
-	currentPeriod = saved.period ?? 'day';
-	currentTimeWindow = saved.timeWindow ?? 'last30';
 	currentDisplayMode = saved.displayMode ?? 'actual';
-	if (saved.view && !saved.metric) {
-		const m = migrateViewKey(saved.view);
-		currentMetric = m.metric;
-		currentSplit = m.split;
-	} else {
-		currentMetric = saved.metric ?? 'tokens';
-		currentSplit = saved.split === 'taskCategory' ? 'task' : (saved.split ?? 'total');
-	}
+	applySelection(resolveSavedSelection(saved));
 }
 
 async function bootstrap(): Promise<void> {
