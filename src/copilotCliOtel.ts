@@ -481,33 +481,67 @@ async function hashFileHead(file: string, length: number): Promise<string> {
 	}
 }
 
+/** True when a parsed snapshot has the current version and the top-level shape the restore relies on. */
+function isUsableSnapshot(snapshot: OtelSnapshot): boolean {
+	return snapshot.version === SNAPSHOT_VERSION
+		&& Array.isArray(snapshot.sessions)
+		&& typeof snapshot.files === 'object'
+		&& snapshot.files !== null;
+}
+
+/**
+ * True when a saved file entry still describes the file on disk: it has a numeric offset, the file has not shrunk
+ * below it or vanished (the saved totals would include bytes that no longer exist), and its start hashes the same
+ * (otherwise the file was replaced rather than appended to).
+ */
+async function isSnapshotFileCurrent(dir: string, name: string, info: OtelSnapshot['files'][string], sizes: Map<string, number>): Promise<boolean> {
+	if (typeof info?.offset !== 'number') { return false; }
+	const size = sizes.get(name);
+	if (size === undefined || size < info.offset) { return false; }
+	return info.offset === 0 || await hashFileHead(path.join(dir, name), info.offset) === info.head;
+}
+
+/** The saved per-file offsets, or null when any saved file no longer matches the one on disk. */
+async function restoreSnapshotOffsets(dir: string, files: OtelSnapshot['files'], sizes: Map<string, number>): Promise<Map<string, number> | null> {
+	const offsets = new Map<string, number>();
+	for (const [name, info] of Object.entries(files)) {
+		if (!await isSnapshotFileCurrent(dir, name, info, sizes)) { return null; }
+		offsets.set(name, info.offset);
+	}
+	return offsets;
+}
+
+/** The saved sessions, keeping only well-formed entries with safe object keys. */
+function restoreSnapshotSessions(sessions: OtelSnapshot['sessions']): Map<string, CopilotCliOtelSessionUsage> {
+	const index = new Map<string, CopilotCliOtelSessionUsage>();
+	for (const [id, usage] of sessions) {
+		if (typeof id === 'string' && !isUnsafeObjectKey(id) && usage && typeof usage.actualTokens === 'number') { index.set(id, usage); }
+	}
+	return index;
+}
+
+/** Logs why a snapshot could not be used; a missing snapshot (first run) is expected and stays silent. */
+function logSnapshotRestoreFailure(error: unknown): void {
+	if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') { return; }
+	otelLog?.(`OTel index snapshot could not be used (${error instanceof Error ? error.message : String(error)}); rebuilding from the export`);
+}
+
 /** Loads the saved index into the in-memory state when it still describes the files on disk; otherwise leaves it empty. */
 async function restoreSnapshot(dir: string, sizes: Map<string, number>): Promise<void> {
 	if (!snapshotPath) { return; }
 	try {
 		const snapshot = JSON.parse(await fs.promises.readFile(snapshotPath, 'utf8')) as OtelSnapshot;
-		if (snapshot.version !== SNAPSHOT_VERSION || !Array.isArray(snapshot.sessions) || typeof snapshot.files !== 'object' || snapshot.files === null) { return; }
-		const offsets = new Map<string, number>();
-		for (const [name, info] of Object.entries(snapshot.files)) {
-			if (typeof info?.offset !== 'number') { return; }
-			const size = sizes.get(name);
-			// Shrunk or gone: the saved totals include bytes that no longer exist. Different start: a replaced file.
-			if (size === undefined || size < info.offset) { return; }
-			if (info.offset > 0 && await hashFileHead(path.join(dir, name), info.offset) !== info.head) { return; }
-			offsets.set(name, info.offset);
-		}
-		const index = new Map<string, CopilotCliOtelSessionUsage>();
-		for (const [id, usage] of snapshot.sessions) {
-			if (typeof id === 'string' && !isUnsafeObjectKey(id) && usage && typeof usage.actualTokens === 'number') { index.set(id, usage); }
-		}
+		if (!isUsableSnapshot(snapshot)) { return; }
+		const offsets = await restoreSnapshotOffsets(dir, snapshot.files, sizes);
+		if (!offsets) { return; }
+		const index = restoreSnapshotSessions(snapshot.sessions);
 		cachedIndex = index;
 		fileOffsets = offsets;
 		persistedBytes = sumOffsets(offsets);
-		let totalSize = 0;
-		for (const size of sizes.values()) { totalSize += size; }
+		const totalSize = sumOffsets(sizes);
 		otelLog?.(`OTel index restored from disk (${index.size} sessions); reading ${formatMb(Math.max(0, totalSize - persistedBytes))} of new data`);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') { otelLog?.(`OTel index snapshot could not be used (${error instanceof Error ? error.message : String(error)}); rebuilding from the export`); }
+		logSnapshotRestoreFailure(error);
 	}
 }
 
