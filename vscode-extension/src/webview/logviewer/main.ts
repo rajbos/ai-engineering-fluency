@@ -9,7 +9,8 @@ import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './t
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
 import { buildMcpAndContextRefsCard, formatTopListWithOther, sumSessionCost } from './summaryCards';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
-import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
+import type { HydraFusionTurn } from '../../../../src/hydrafusion';
+import type { SessionLogData as HostSessionLogData } from '../../../../src/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import dataTableStyles from '../shared/dataTable.css';
@@ -81,46 +82,15 @@ mcpTools: McpToolUsage;
 thinkingEffort?: ThinkingEffortUsage;
 };
 
-type SessionLogData = {
-file: string;
-title: string | null;
-editorSource: string;
-editorName: string;
-size: number;
-modified: string;
-interactions: number;
-contextReferences: ContextReferenceUsage;
-firstInteraction: string | null;
-lastInteraction: string | null;
-turns: ChatTurn[];
-usageAnalysis?: SessionUsageAnalysis;
-/** Session-level actual token count from LLM API (e.g. CLI session.shutdown). 0 when unavailable. */
-actualTokens?: number;
-/** Cache-read token count from session.shutdown modelMetrics (CLI sessions only). Absent when unavailable. */
-cachedTokens?: number;
-/** Number of subagent sessions started (CLI format only). */
-subAgentsStarted?: number;
-/** Parent session info (Copilot CLI sessions only, from data.db hierarchy). */
-parentInfo?: { uuid: string; name: string; sessionFile?: string } | null;
-/** Direct child sessions (Copilot CLI sessions only, from data.db hierarchy). */
-childInfo?: Array<{ uuid: string; name: string; sessionFile?: string }>;
-/** Total child count from data.db (may exceed childInfo.length). */
-totalChildCount?: number;
-/** Input token total from debug log (sum of all llm_request events). Present for VS Code Copilot Chat agent-mode sessions. */
-debugLogInputTokens?: number;
-/** Output token total from debug log (sum of all llm_request events). Present for VS Code Copilot Chat agent-mode sessions. */
-debugLogOutputTokens?: number;
-/** Number of LLM API calls made during the session (from debug log). >1 means agent-mode multi-call session. */
-modelTurns?: number;
-/** Number of session.truncation events where messages were removed (breaking prompt cache). */
-truncationCount?: number;
-/** Total messages removed across all truncation events. */
-messagesRemovedByTruncation?: number;
-/** Optional editor-specific note. When present, an info panel is rendered at the top of the viewer. */
-editorNote?: { items: string[] };
-/** Per-leg Copilot Fusion routing detail (Copilot CLI sessions that used the `hydrafusion` model). */
-hydraFusion?: HydraFusionSummary;
-compactNumbers?: boolean;
+/**
+ * The host's `SessionLogData` payload, read through this view's own (narrower)
+ * turn and usage-analysis shapes.
+ */
+type SessionLogData = Omit<HostSessionLogData, 'turns' | 'usageAnalysis' | 'contextReferences'> & {
+	contextReferences: ContextReferenceUsage;
+	turns: ChatTurn[];
+	usageAnalysis?: SessionUsageAnalysis;
+	compactNumbers?: boolean;
 };
 
 /**
