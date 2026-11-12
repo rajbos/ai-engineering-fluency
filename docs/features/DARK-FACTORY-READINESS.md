@@ -1,8 +1,10 @@
 # Dark Factory Readiness — a per-repository control scan
 
 The **AI Readiness** tab in **Usage Analysis** (or the **Show AI Readiness** command) assesses each
-repository in the workspace against the software-development "dark factory" maturity ladder, and
-names the specific controls blocking its next stage. It is separate from the personal Fluency Score
+repository in the workspace against the software-development "dark factory" maturity ladder. Each
+repository expands to the whole ladder: every stage, every check in it and that check's state, so
+work already done towards a later stage is visible even while an earlier stage is still open. The
+stage to work on next starts expanded. It is separate from the personal Fluency Score
 view; opening or refreshing that score no longer runs a repository scan.
 
 A dark factory is *not* vibe coding at scale. It is a governed, observable production system in
@@ -22,7 +24,7 @@ validate. The ladder therefore measures **governance and evidence controls**, no
 | Stage | Name | What it means |
 |---|---|---|
 | 0 | Manual / fragmented | Human coding, inconsistent repos and releases. The outcome sought is visibility, not autonomy. |
-| 1 | Standardized software delivery | Trunk-oriented delivery, reliable tests, IaC, ownership. Nothing above this is trustworthy without it. |
+| 1 | Standardized software delivery | Automated builds, tests on every change, dependency updates, a protected main branch. Nothing above this is trustworthy without it. |
 | 2 | AI-assisted engineers | Developers remain the authors; repository instructions steer assistants; AI policy is written down. |
 | 3 | Agent-delegated, human-reviewed | Bounded work packages. An agent may branch, implement, test and open a PR — but cannot approve or merge its own work. |
 | 4 | Spec-driven autonomous team | Versioned specifications, acceptance scenarios, independent evaluators, risk classification, progressive delivery. |
@@ -32,18 +34,57 @@ validate. The ladder therefore measures **governance and evidence controls**, no
 
 | Tier | Needs auth? | Examples |
 |---|---|---|
-| **Filesystem** | No | `.github/workflows/*`, reusable-workflow calls, `CODEOWNERS`, `.devcontainer/`, `.github/agents/`, `.github/skills/`, Issue Forms, `dependabot.yml`, `.github/copilot-instructions.md`, `AGENTS.md`, IaC markers, agentic workflow definitions |
+| **Filesystem** | No | `.github/workflows/*`, `.devcontainer/` or `copilot-setup-steps.yml`, `.github/agents/`, `.github/skills/`, Issue Forms, Dependabot or Renovate configuration, `.github/copilot-instructions.md`, `AGENTS.md`, IaC markers, AI review workflows, agentic workflow definitions |
 | **GitHub API** | Yes | Rulesets and branch protection, required checks, merge queue, environment protection rules, CodeQL / dependency review / secret scanning enablement, artifact attestations |
 
 The API tier is expected to be unavailable or partially denied — a token may be absent,
 fine-grained, or refused on a private repository. That is the common case, not the edge case.
 
+## Required, recommended and not applicable
+
+Not every control makes sense for every repository, and not every good practice is a precondition
+for delegating work to agents. Three mechanisms keep the ladder from demanding the wrong thing:
+
+- **Recommended controls** (`"recommended": true` in the catalogue) are listed and can be picked
+  for the Copilot prompt, but never block a stage and are not counted as missing evidence. Today
+  those are **Reproducible environment** (a dev container or `copilot-setup-steps.yml`: useful, but
+  a repository delivers reliably without one) and **Artifact attestations**. Attestations are the
+  evidence that the artefact shipped is the one the governed pipeline built, which matters once
+  nobody reads every line, but it is a supply-chain control first. So it sits at stage 4 as advice
+  rather than at stage 1 as a gate.
+- **Not applicable** is a fourth control state. *Infrastructure as code*, *Deployment environments*
+  and *Environment protection rules* only apply when a workflow is seen deploying to cloud
+  infrastructure (a cloud deploy action, or `terraform` / `kubectl` / `helm` / `az` / `aws` /
+  `gcloud` deploy commands). A desktop app, an extension or a library that only builds, tests and
+  publishes gets `not-applicable`, which neither blocks the stage nor counts as unchecked. Signing
+  in to a cloud, or pushing a package or container image, is not treated as a deployment.
+- **GitHub-only controls** (`"platform": "github"`) are not judged absent when the repository's
+  `origin` remote is on another host. They report `unknown` with the reason, because this scan has
+  no way to look for the equivalent there. A control that was positively found still counts, and a
+  repository with no remote at all is still checked. A GitHub Enterprise Server remote reads as
+  "another host" until the enterprise URI setting is configured.
+
+Two controls the first version required were dropped: **CODEOWNERS** (review is already enforced
+by the *Human review enforced on merge* control, and a CODEOWNERS file is neither necessary nor
+sufficient for that) and **Reusable workflows** (how a team shares its CI definitions says nothing
+about whether one repository is ready).
+
+### The independent evaluator
+
+The implementing agent must not be the only judge of its own change. Any of these satisfies the
+*Independent evaluator* control: a review, test or security agent under `.github/agents/`; a
+workflow that requests Copilot code review or runs an AI review action; an AI review tool's
+configuration file; or, from the pull-request statistics the view already fetched, an AI reviewer
+having actually been requested on pull requests. Copilot code review switched on through a ruleset
+or an organization policy leaves no file, so *not found* resolves to `unknown`, never `absent`.
+For the same reason there is no "no independent evaluator" anti-pattern any more.
+
 ## `present`, `absent`, and `unknown`
 
-A control has three states, and `unknown` is a first-class one. It is never collapsed into a pass or
+A control has three evidence states, and `unknown` is a first-class one. It is never collapsed into a pass or
 a fail. The scan turns that into a **band** rather than a single number:
 
-- **`confirmedStage`** — the highest stage whose controls are *all* observed present. Unknowns never
+- **`confirmedStage`** — the highest stage whose required, applicable controls are *all* observed present. Unknowns never
   lift it, so it is a lower bound.
 - **`ceilingStage`** — the highest stage nothing observed rules out. Unknowns are treated
   optimistically here, so it is an upper bound, not a claim.
@@ -80,7 +121,6 @@ Findings surface the anti-patterns from the research that are actually observabl
 | Finding | Severity | Trigger |
 |---|---|---|
 | `agents-before-delivery` | High | AI/agent controls are configured while stage 1 delivery (CI, tests in CI) is absent. |
-| `no-independent-evaluator` | Medium | Custom agents exist but none reads as a review, test or security agent — the implementation agent would own its own acceptance oracle. |
 | `unbounded-workflow-permissions` | Medium | A workflow declares `permissions: write-all`. |
 | `long-lived-cloud-credentials` | Medium | A workflow references static cloud credentials without requesting an OIDC token. |
 
@@ -118,6 +158,10 @@ those statistics are absent, the control is `unknown`.
 - Several stage-1 and stage-4 controls (`ci-test-execution`, `infrastructure-as-code`,
   `versioned-specifications`, `executable-acceptance`, `independent-evaluator-agent`) are heuristics
   over file and workflow patterns. They are labelled as such in the UI.
+- Whether a repository deploys at all is itself a heuristic over workflow content. A repository
+  that deploys from another system, or through a shared reusable workflow, reads as "deploys
+  nothing", so its deployment controls show as not applicable.
+- CI is only read from GitHub Actions. On another host the CI controls are `unknown`, not assessed.
 - The scan reads the working tree as checked out. A repository whose delivery is defined entirely in
   a shared reusable workflow will under-report; that is why `artifact-attestations` and
   `deployment-environments` resolve absence to `unknown`.

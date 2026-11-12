@@ -1,6 +1,6 @@
 {
   "description": "Dark Factory readiness control catalogue. Each control is one governance or evidence capability a repository either has, does not have, or that this scan cannot see. Stages follow the software-development dark factory maturity ladder and are assessed per repository (a product line), never per person and never for a whole enterprise.",
-  "lastUpdated": "2026-09-01",
+  "lastUpdated": "2026-11-12",
   "maxAssessableStage": 4,
   "stages": [
     {
@@ -11,7 +11,7 @@
     {
       "stage": 1,
       "name": "Standardized software delivery",
-      "summary": "Trunk-oriented delivery, reliable tests, infrastructure as code, observability and service ownership. Nothing above this stage is trustworthy without it."
+      "summary": "Automated builds, tests that run on every change, dependency updates and a protected main branch. Nothing above this stage is trustworthy without it."
     },
     {
       "stage": 2,
@@ -41,6 +41,7 @@
       "label": "CI workflows",
       "tier": "filesystem",
       "evidence": "direct",
+      "platform": "github",
       "why": "Automated delivery has to exist before anything can be delegated to an agent.",
       "remediation": "Add at least one GitHub Actions workflow under .github/workflows/."
     },
@@ -50,44 +51,28 @@
       "label": "Tests executed in CI",
       "tier": "filesystem",
       "evidence": "heuristic",
+      "platform": "github",
       "why": "A green build is only evidence when the build actually runs tests.",
       "remediation": "Run the test suite from a workflow step so every change is validated."
     },
     {
-      "id": "reusable-workflows",
-      "stage": 1,
-      "label": "Reusable workflows",
-      "tier": "filesystem",
-      "evidence": "direct",
-      "why": "Shared delivery definitions are what make a product line consistent rather than per-repository folklore.",
-      "remediation": "Call a shared workflow with `uses: owner/repo/.github/workflows/file.yml@ref`."
-    },
-    {
-      "id": "codeowners",
-      "stage": 1,
-      "label": "CODEOWNERS",
-      "tier": "filesystem",
-      "evidence": "direct",
-      "why": "Service ownership has to be explicit before review can be held to anyone.",
-      "remediation": "Add a CODEOWNERS file in .github/, the repository root, or docs/."
-    },
-    {
       "id": "dependabot",
       "stage": 1,
-      "label": "Dependabot configuration",
+      "label": "Automated dependency updates",
       "tier": "filesystem",
       "evidence": "direct",
       "why": "Supply-chain currency is part of reliable delivery, not an AI feature.",
-      "remediation": "Add .github/dependabot.yml."
+      "remediation": "Add .github/dependabot.yml, or a Renovate configuration (renovate.json)."
     },
     {
       "id": "devcontainer",
       "stage": 1,
-      "label": "Reproducible dev environment",
+      "label": "Reproducible environment",
       "tier": "filesystem",
       "evidence": "direct",
-      "why": "Agents and humans need the same reproducible environment for a result to transfer between them.",
-      "remediation": "Add a .devcontainer/ configuration."
+      "recommended": true,
+      "why": "A result transfers between agents and humans more reliably when both start from the same environment. Useful, but a repository can deliver reliably without one.",
+      "remediation": "Add a .devcontainer/ configuration, or a .github/workflows/copilot-setup-steps.yml for the coding agent."
     },
     {
       "id": "infrastructure-as-code",
@@ -95,7 +80,7 @@
       "label": "Infrastructure as code",
       "tier": "filesystem",
       "evidence": "heuristic",
-      "why": "Environments that are clicked together by hand cannot be rebuilt or rolled back automatically.",
+      "why": "Environments that are clicked together by hand cannot be rebuilt or rolled back automatically. Only assessed when the workflows deploy to cloud infrastructure.",
       "remediation": "Describe the environment in Terraform, Bicep, Pulumi, Helm or Kubernetes manifests."
     },
     {
@@ -104,6 +89,7 @@
       "label": "Code scanning",
       "tier": "hybrid",
       "evidence": "direct",
+      "platform": "github",
       "why": "Static analysis is one of the few automated checks that keeps meaning when a machine wrote the code.",
       "remediation": "Enable CodeQL — either the default setup or a .github/workflows/codeql.yml workflow.",
       "unknownWhenAbsent": true,
@@ -115,19 +101,9 @@
       "label": "Branch protection or rulesets",
       "tier": "api",
       "evidence": "direct",
+      "platform": "github",
       "why": "Without an enforced target branch, every control above it is advisory.",
       "remediation": "Protect the default branch with a ruleset that requires status checks."
-    },
-    {
-      "id": "artifact-attestations",
-      "stage": 1,
-      "label": "Artifact attestations",
-      "tier": "hybrid",
-      "evidence": "direct",
-      "why": "Provenance is the evidence that the artefact you shipped is the artefact CI built.",
-      "remediation": "Use actions/attest-build-provenance in the release workflow.",
-      "unknownWhenAbsent": true,
-      "unknownReason": "Attestations can be produced by workflows this scan cannot read, or by a shared reusable workflow."
     },
     {
       "id": "copilot-instructions",
@@ -198,6 +174,7 @@
       "label": "Agent-authored pull requests",
       "tier": "api",
       "evidence": "direct",
+      "platform": "github",
       "why": "Delegation is only real once agents are actually opening pull requests in this repository.",
       "remediation": "Delegate a bounded work package to a coding agent and let it open a draft pull request."
     },
@@ -207,6 +184,7 @@
       "label": "Human review enforced on merge",
       "tier": "api",
       "evidence": "direct",
+      "platform": "github",
       "why": "The stage-3 boundary is that an agent can propose but cannot approve or merge its own work.",
       "remediation": "Require pull request reviews from someone other than the author on the protected branch."
     },
@@ -216,6 +194,7 @@
       "label": "Issue Forms as an intent queue",
       "tier": "filesystem",
       "evidence": "direct",
+      "platform": "github",
       "why": "Structured intent is what makes a work package specifiable rather than a paragraph of prose.",
       "remediation": "Add .github/ISSUE_TEMPLATE/*.yml Issue Forms capturing intent, constraints and acceptance criteria."
     },
@@ -240,11 +219,13 @@
     {
       "id": "independent-evaluator-agent",
       "stage": 4,
-      "label": "Independent evaluator agents",
-      "tier": "filesystem",
+      "label": "Independent evaluator",
+      "tier": "hybrid",
       "evidence": "heuristic",
-      "why": "The implementation agent must not own the acceptance oracle it is judged by.",
-      "remediation": "Define separate review, test or security agents under .github/agents/, distinct from the implementation agent."
+      "why": "The agent that implements a change must not be the only judge of it. Copilot code review, another AI reviewer, or a separate review, test or security agent all count.",
+      "remediation": "Turn on Copilot code review for pull requests, or define a separate review, test or security agent under .github/agents/.",
+      "unknownWhenAbsent": true,
+      "unknownReason": "Copilot code review turned on through a ruleset or organization policy leaves no file in the repository, so no evaluator found here does not mean there is none."
     },
     {
       "id": "agentic-workflows",
@@ -252,6 +233,7 @@
       "label": "Agentic workflows",
       "tier": "filesystem",
       "evidence": "direct",
+      "platform": "github",
       "why": "Autonomy that runs on a schedule or an event has to be defined in the repository to be governed.",
       "remediation": "Define agentic workflows in .github/workflows/ so their triggers and permissions are reviewable."
     },
@@ -261,6 +243,7 @@
       "label": "Deployment environments declared",
       "tier": "hybrid",
       "evidence": "direct",
+      "platform": "github",
       "why": "Progressive delivery needs named environments before it can have gates.",
       "remediation": "Declare `environment:` on the deploying job.",
       "unknownWhenAbsent": true,
@@ -272,8 +255,22 @@
       "label": "Environment protection rules",
       "tier": "api",
       "evidence": "direct",
+      "platform": "github",
       "why": "A named environment without required reviewers or wait timers gates nothing.",
       "remediation": "Add required reviewers or a wait timer to the production environment."
+    },
+    {
+      "id": "artifact-attestations",
+      "stage": 4,
+      "label": "Artifact attestations",
+      "tier": "hybrid",
+      "evidence": "direct",
+      "recommended": true,
+      "platform": "github",
+      "why": "Once nobody reads every line, provenance is the evidence that the artefact you shipped is the one the governed pipeline built. It is a supply-chain control first, so it is recommended here rather than required.",
+      "remediation": "Use actions/attest-build-provenance in the release workflow.",
+      "unknownWhenAbsent": true,
+      "unknownReason": "Attestations can be produced by workflows this scan cannot read, or by a shared reusable workflow."
     },
     {
       "id": "risk-classification",

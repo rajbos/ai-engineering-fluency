@@ -9,7 +9,7 @@
  */
 import { escapeHtml } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
-import { DARK_FACTORY_DISCLAIMER, nextStageToClose } from '../../../../src/darkFactoryReadiness';
+import { DARK_FACTORY_DISCLAIMER, DARK_FACTORY_STAGES, nextStageToClose } from '../../../../src/darkFactoryReadiness';
 import type {
 	DarkFactoryControlResult,
 	DarkFactoryFinding,
@@ -70,67 +70,124 @@ function buildBandHtml(repo: DarkFactoryRepoReport): string {
 	</div>`;
 }
 
-/** Checked-by-default box that selects an item for the Copilot Chat prompt. */
-function buildPickHtml(kind: DarkFactoryPickKind, id: string, label: string): string {
-	return `<input type="checkbox" class="df-pick" data-df-kind="${kind}" data-df-id="${escapeHtml(id)}" checked aria-label="${escapeHtml(localizeFormat('readiness.action.includeItem', label))}">`;
+/** Icon, tooltip key and CSS modifier for each control state. */
+const STATE_PRESENTATION: Record<DarkFactoryControlResult['state'], { icon: string; labelKey: string; modifier: string }> = {
+	'present': { icon: 'codicon-pass', labelKey: 'readiness.state.present', modifier: 'df-state-present' },
+	'absent': { icon: 'codicon-error', labelKey: 'readiness.state.absent', modifier: 'df-state-absent' },
+	'unknown': { icon: 'codicon-question', labelKey: 'readiness.state.unknown', modifier: 'df-state-unknown' },
+	'not-applicable': { icon: 'codicon-circle-slash', labelKey: 'readiness.state.notApplicable', modifier: 'df-state-na' },
+};
+
+/** A recommended control that is missing: worth doing, not blocking. */
+const ADVISORY_PRESENTATION = { icon: 'codicon-warning', labelKey: 'readiness.state.absent', modifier: 'df-state-advisory' };
+
+/** Box that selects a missing control or a finding for the Copilot Chat prompt. */
+function buildPickHtml(kind: DarkFactoryPickKind, id: string, label: string, checked = true): string {
+	return `<input type="checkbox" class="df-pick" data-df-kind="${kind}" data-df-id="${escapeHtml(id)}"${checked ? ' checked' : ''} aria-label="${escapeHtml(localizeFormat('readiness.action.includeItem', label))}">`;
 }
 
 /**
- * One control rendered as its label plus why it matters or what to do about it.
- * Actionable controls (missing ones) get a selection box; unchecked ones do not,
- * since there is nothing concrete to implement until their state is known.
+ * The line under a control's name: where it was found, what to do about it, or
+ * why it could not be judged — whichever its state calls for.
  */
-function buildControlItemHtml(control: DarkFactoryControlResult, secondLine: string, actionable = false): string {
+function controlSecondLine(control: DarkFactoryControlResult): string {
+	if (control.state === 'absent') { return control.remediation; }
+	if (control.state === 'present') { return control.detail ?? control.why; }
+	return control.detail ?? 'State could not be determined.';
+}
+
+/**
+ * One control as a row: its state, its name, and the line that explains the
+ * state. A missing control gets a selection box; it is pre-selected only when
+ * it is a required control of the stage to work on next, so the default prompt
+ * stays about the next step.
+ */
+function buildControlRowHtml(control: DarkFactoryControlResult, preselect: boolean): string {
+	// A missing recommended control is advice, so it gets a warning rather than the
+	// error mark that means "this blocks the stage".
+	const advisory = control.recommended && control.state === 'absent';
+	const state = advisory ? ADVISORY_PRESENTATION : STATE_PRESENTATION[control.state] ?? STATE_PRESENTATION.unknown;
+	const stateLabel = localize(state.labelKey);
 	const heuristic = control.evidence === 'heuristic'
 		? ' <span class="df-heuristic" title="Detected by pattern matching — a candidate, not a verdict">heuristic</span>'
 		: '';
-	const pick = actionable ? buildPickHtml('control', control.id, control.label) : '';
-	return `<li${actionable ? ' class="df-pickable"' : ''}>
+	const recommended = control.recommended
+		? ` <span class="df-tag" title="${escapeHtml(localize('readiness.tag.recommendedHint'))}">${escapeHtml(localize('readiness.tag.recommended'))}</span>`
+		: '';
+	const pick = control.state === 'absent' ? buildPickHtml('control', control.id, control.label, preselect && !control.recommended) : '';
+	return `<li class="df-control ${state.modifier}">
+		<span class="df-state-icon codicon ${state.icon}" role="img" title="${escapeHtml(stateLabel)}" aria-label="${escapeHtml(stateLabel)}"></span>
 		${pick}<span class="df-item-text">
-			<span class="df-control-label">${escapeHtml(control.label)}</span>${heuristic}
-			<span class="df-control-detail">${escapeHtml(secondLine)}</span>
+			<span class="df-control-label" title="${escapeHtml(control.why)}">${escapeHtml(control.label)}</span>${recommended}${heuristic}
+			<span class="df-control-detail">${escapeHtml(controlSecondLine(control))}</span>
 		</span>
 	</li>`;
 }
 
-/** The controls blocking the next stage, with the concrete remediation for each. */
-function buildBlockersHtml(stage: DarkFactoryStageResult, controls: readonly DarkFactoryControlResult[]): string {
-	if (stage.missing.length === 0) { return ''; }
-	const items = controlsById(controls, stage.missing)
-		.map(control => buildControlItemHtml(control, control.remediation, true))
-		.join('');
-	return `<div class="df-block">
-		<div class="df-block-title">Missing for Stage ${stage.stage} &mdash; ${escapeHtml(stage.name)}</div>
-		<ul class="df-control-list">${items}</ul>
-	</div>`;
+/** "2 of 5 in place · 1 missing · 2 unchecked" for a stage's required, applicable controls. */
+function buildStageProgressHtml(required: readonly DarkFactoryControlResult[]): string {
+	const applicable = required.filter(control => control.state !== 'not-applicable');
+	const count = (state: DarkFactoryControlResult['state']) => applicable.filter(control => control.state === state).length;
+	const parts = [`<span>${escapeHtml(localizeFormat('readiness.stage.progress', count('present'), applicable.length))}</span>`];
+	if (count('absent') > 0) {
+		parts.push(`<span class="df-count-missing">${escapeHtml(localizeFormat('readiness.stage.missing', count('absent')))}</span>`);
+	}
+	if (count('unknown') > 0) {
+		parts.push(`<span>${escapeHtml(localizeFormat('readiness.summary.unchecked', count('unknown')))}</span>`);
+	}
+	return `<span class="df-stage-progress">${parts.join('')}</span>`;
 }
 
-/** The controls the scan could not determine, each with the reason it could not. */
-function buildUnknownsHtml(stage: DarkFactoryStageResult, controls: readonly DarkFactoryControlResult[]): string {
-	if (stage.unknown.length === 0) { return ''; }
-	const items = controlsById(controls, stage.unknown)
-		.map(control => buildControlItemHtml(control, control.detail ?? 'State could not be determined.'))
-		.join('');
-	return `<div class="df-block df-block-unknown">
-		<div class="df-block-title">Could not check for Stage ${stage.stage}</div>
-		<ul class="df-control-list">${items}</ul>
-	</div>`;
+/**
+ * One stage of the ladder with every one of its controls, whatever their state.
+ * Only the stage to work on next starts open; the others show their progress in
+ * the header, so work already done towards a later stage stays visible.
+ */
+function buildStageHtml(stage: DarkFactoryStageResult, repo: DarkFactoryRepoReport, isNext: boolean): string {
+	const controls = repo.controls.filter(control => control.stage === stage.stage);
+	const verdict = VERDICT_PRESENTATION[stage.verdict];
+	const next = isNext ? `<span class="df-tag df-tag-next">${escapeHtml(localize('readiness.stage.next'))}</span>` : '';
+	const rows = controls.map(control => buildControlRowHtml(control, isNext)).join('');
+	return `<details class="df-stage"${isNext ? ' open' : ''}>
+		<summary class="df-stage-summary">
+			<span class="df-dot ${verdict.modifier}">${stage.stage}</span>
+			<span class="df-stage-name">${escapeHtml(stage.name)}</span>
+			${next}
+			${buildStageProgressHtml(controls.filter(control => !control.recommended))}
+			<span class="df-chip ${verdict.modifier}">${escapeHtml(verdict.label)}</span>
+		</summary>
+		<div class="df-stage-body">
+			<div class="df-stage-desc">${escapeHtml(stage.summary)}</div>
+			<ul class="df-control-list">${rows}</ul>
+		</div>
+	</details>`;
 }
 
-function buildStageChipsHtml(repo: DarkFactoryRepoReport): string {
-	const chips = repo.stages.map(stage => {
-		const presentation = VERDICT_PRESENTATION[stage.verdict];
-		const title = `${stage.name} — ${stage.summary}`;
-		return `<span class="df-chip ${presentation.modifier}" title="${escapeHtml(title)}">
-			<span class="df-chip-stage">${stage.stage}</span>${escapeHtml(presentation.label)}
-		</span>`;
-	}).join('');
-	return `<div class="df-chips">${chips}</div>`;
+/** The stages this scan never awards, listed so the whole ladder is visible. */
+function buildUnassessedStagesHtml(maxAssessedStage: number): string {
+	return DARK_FACTORY_STAGES.filter(stage => stage.stage > maxAssessedStage).map(stage => `<div class="df-stage df-stage-unassessed" title="${escapeHtml(stage.summary)}">
+		<div class="df-stage-summary">
+			<span class="df-dot">${stage.stage}</span>
+			<span class="df-stage-name">${escapeHtml(stage.name)}</span>
+			<span class="df-stage-progress">${escapeHtml(localize('readiness.stage.notAssessed'))}</span>
+		</div>
+	</div>`).join('');
+}
+
+/** Every stage and every check, so progress beyond the confirmed stage is visible. */
+function buildLadderHtml(repo: DarkFactoryRepoReport, nextStage: DarkFactoryStageResult | undefined): string {
+	const stages = repo.stages.map(stage => buildStageHtml(stage, repo, stage.stage === nextStage?.stage)).join('');
+	const highest = repo.stages.reduce((max, stage) => Math.max(max, stage.stage), 0);
+	return `<div class="df-ladder">
+		<div class="df-ladder-title">${escapeHtml(localize('readiness.ladder.title'))}</div>
+		${stages}
+		${buildUnassessedStagesHtml(highest)}
+	</div>`;
 }
 
 function buildFindingsHtml(findings: readonly DarkFactoryFinding[]): string {
 	if (findings.length === 0) { return ''; }
-	const items = findings.map(finding => `<li class="df-pickable">
+	const items = findings.map(finding => `<li class="df-control">
 		${buildPickHtml('finding', finding.id, finding.title)}<span class="df-item-text">
 			<span class="df-finding-title">${SEVERITY_ICONS[finding.severity]} ${escapeHtml(finding.title)}</span>
 			<span class="df-control-detail">${escapeHtml(finding.detail)}</span>
@@ -176,8 +233,8 @@ function buildSummaryCountsHtml(repo: DarkFactoryRepoReport, nextStage: DarkFact
 }
 
 /** The button that drafts a Copilot Chat prompt from the selected items. */
-function buildActionHtml(repoIndex: number, nextStage: DarkFactoryStageResult | undefined, repo: DarkFactoryRepoReport): string {
-	const actionable = (nextStage?.missing.length ?? 0) + repo.findings.length;
+function buildActionHtml(repoIndex: number, repo: DarkFactoryRepoReport): string {
+	const actionable = repo.controls.filter(control => control.state === 'absent').length + repo.findings.length;
 	if (actionable === 0) { return ''; }
 	return `<div class="df-action">
 		<span class="df-action-text">${escapeHtml(localize('readiness.action.hint'))}</span>
@@ -186,15 +243,17 @@ function buildActionHtml(repoIndex: number, nextStage: DarkFactoryStageResult | 
 }
 
 function buildRepoCardHtml(repo: DarkFactoryRepoReport, repoIndex: number): string {
-	// The first stage above the confirmed one is the only actionable target;
-	// listing every unattained stage's gaps at once buries it.
+	// The first stage above the confirmed one is the target to work on: it is the
+	// one stage that starts open, and the only one whose gaps are pre-selected.
 	const nextStage = nextStageToClose(repo);
 	const identity = repo.nameWithOwner
 		? `<span class="df-repo-owner">${escapeHtml(repo.nameWithOwner)}</span>`
-		: `<span class="df-repo-owner df-repo-owner-unknown">local repository &mdash; no GitHub remote resolved</span>`;
+		: repo.hosting === 'other'
+			? `<span class="df-repo-owner df-repo-owner-unknown">${escapeHtml(localize('readiness.repo.otherHost'))}</span>`
+			: `<span class="df-repo-owner df-repo-owner-unknown">local repository &mdash; no GitHub remote resolved</span>`;
 
 	// Collapsed by default so the tab reads as an overview across all
-	// repositories; each row expands to the full band, blockers and findings.
+	// repositories; each row expands to the band, the whole ladder and findings.
 	return `<details class="df-repo-card" data-df-repo="${repoIndex}">
 		<summary class="df-repo-summary">
 			<span class="df-repo-head">
@@ -207,11 +266,9 @@ function buildRepoCardHtml(repo: DarkFactoryRepoReport, repoIndex: number): stri
 		</summary>
 		<div class="df-repo-body">
 			${buildBandHtml(repo)}
-			${buildStageChipsHtml(repo)}
-			${nextStage ? buildBlockersHtml(nextStage, repo.controls) : ''}
-			${nextStage ? buildUnknownsHtml(nextStage, repo.controls) : ''}
+			${buildLadderHtml(repo, nextStage)}
 			${buildFindingsHtml(repo.findings)}
-			${buildActionHtml(repoIndex, nextStage, repo)}
+			${buildActionHtml(repoIndex, repo)}
 		</div>
 	</details>`;
 }
@@ -264,12 +321,7 @@ export function buildDarkFactorySectionHtml(report: DarkFactoryReport | undefine
 
 	return `
 		<div class="df-section">
-			<div class="df-section-head">
-				<span class="df-section-icon">🏭</span>
-				<span class="df-section-title">Dark Factory Readiness</span>
-				<span class="df-section-badge">per repository</span>
-			</div>
-			<div class="df-disclaimer">
+			<div class="section-subtitle df-disclaimer">
 				<strong>${escapeHtml(localize('readiness.disclaimer.headline'))}</strong> ${escapeHtml(localize('readiness.disclaimer.body'))}
 			</div>
 			<details class="df-about">
@@ -314,7 +366,8 @@ export function buildDarkFactoryChatPrompt(
 	if (controls.length > 0) {
 		lines.push('', 'Missing controls:');
 		for (const control of controls) {
-			lines.push(`- ${control.label} (Stage ${control.stage}): ${control.remediation}${control.why ? ` Why: ${control.why}` : ''}`);
+			const weight = control.recommended ? ', recommended' : '';
+			lines.push(`- ${control.label} (Stage ${control.stage}${weight}): ${control.remediation}${control.why ? ` Why: ${control.why}` : ''}`);
 		}
 	}
 	if (findings.length > 0) {
