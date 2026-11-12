@@ -24,9 +24,9 @@ import * as os from 'os';
 import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
-import { readDbBufferWithWalFingerprint, getWalStat, type WalReadResult } from './utils/sqliteWal';
 
-import { SqlJsDbCacheBase, type SqlDatabase } from './utils/sqlJsDbCache';
+import { type SqlDatabase } from './utils/sqlJsDbCache';
+import { WalSqlJsDbCacheBase, readSessionMetadataRow } from './openCodeFamilyDb';
 
 /** Minimal URI interface required by KiloDataAccess (subset of vscode.Uri). */
 export interface KiloUriLike {
@@ -44,7 +44,7 @@ function toFiniteNumber(value: unknown): number {
 	return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
-export class KiloDataAccess extends SqlJsDbCacheBase {
+export class KiloDataAccess extends WalSqlJsDbCacheBase {
 	private readonly extensionUri: KiloUriLike;
 
 	constructor(extensionUri: KiloUriLike) {
@@ -103,100 +103,6 @@ export class KiloDataAccess extends SqlJsDbCacheBase {
 		return null;
 	}
 
-	private statKiloDb(dbPath: string): fs.Stats | null {
-		try {
-			return fs.statSync(dbPath);
-		} catch (error) {
-			if (this.isMissingFileError(error) && this._dbCache?.path === dbPath) {
-				this.closeDbCache();
-			}
-			return null;
-		}
-	}
-
-	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
-		const wal = getWalStat(dbPath);
-		return this._dbCache?.path === dbPath
-			&& this._dbCache.mtimeMs === stats.mtimeMs
-			&& this._dbCache.size === stats.size
-			&& this._dbCache.walMtimeMs === wal.mtimeMs
-			&& this._dbCache.walSize === wal.size;
-	}
-
-	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
-		const wal = getWalStat(dbPath);
-		return `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${wal.mtimeMs}:${wal.size}`;
-	}
-
-	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
-		return left.mtimeMs === right.mtimeMs && left.size === right.size;
-	}
-
-	/** True when `_dbCache` was built from a read that reported this exact fingerprint. */
-	private isCachedDbCurrentForFingerprint(dbPath: string, result: WalReadResult): boolean {
-		return this._dbCache?.path === dbPath
-			&& this._dbCache.mtimeMs === result.dbMtimeMs
-			&& this._dbCache.size === result.dbSize
-			&& this._dbCache.walMtimeMs === result.walMtimeMs
-			&& this._dbCache.walSize === result.walSize;
-	}
-
-	private async refreshKiloDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
-		let result: WalReadResult;
-		try {
-			// Use the fingerprint the read itself reports rather than a fresh getWalStat(dbPath)
-			// call afterwards: a throttled sqliteWal read can serve a buffer older than "now", and
-			// stamping it with the current WAL state would make a stale cache entry look current —
-			// permanently hiding any WAL writes that land after this read but before the throttle
-			// window lapses (see #2036 review notes on src/utils/sqliteWal.ts).
-			result = await readDbBufferWithWalFingerprint(dbPath);
-		} catch {
-			return this.getCachedDbForPath(dbPath);
-		}
-
-		// The cheap pre-check in getKiloDb() that led here used a fresh WAL stat and found a
-		// possible change, but the read above may have been served from sqliteWal's own throttle
-		// under the buffer's ORIGINAL fingerprint — i.e. nothing actually changed since the db
-		// already cached here was built. Reuse it rather than paying to reparse bytes we already
-		// have parsed — see #2036 review notes (Fix 1).
-		if (this.isCachedDbCurrentForFingerprint(dbPath, result)) {
-			return this._dbCache?.db ?? null;
-		}
-
-		let db: SqlDatabase;
-		try {
-			const SQL = await this.initSqlJs();
-			db = new SQL.Database(result.buffer);
-		} catch {
-			return this.getCachedDbForPath(dbPath);
-		}
-
-		const currentStats = this.statKiloDb(dbPath);
-		if (!currentStats || !this.sameDbStats(stats, currentStats)) {
-			this.closeDb(db);
-			if (this.isCachedDbCurrent(dbPath, currentStats ?? stats)) {
-				return this._dbCache?.db ?? null;
-			}
-			return this.getCachedDbForPath(dbPath);
-		}
-
-		if (!result.walIncluded) {
-			// A WAL-blind plain read (see sqliteWal.ts) — usable for this one call, but not safe to
-			// treat as "caught up": persisting it into `_dbCache` would let a later WAL-quiet moment
-			// look identical to a genuinely caught-up read, hiding committed rows never checkpointed
-			// into the main file — see #2036 review notes (Fix 3). Keep it only in the single
-			// trailing transient slot instead.
-			this.releasePendingTransientDb();
-			this._pendingTransientDb = db;
-			return db;
-		}
-
-		this.closeDbCache();
-		this.releasePendingTransientDb();
-		this._dbCache = { db, path: dbPath, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize };
-		return db;
-	}
-
 	/**
 	 * Returns a cached SQL.Database instance for kilo.db, re-opening only when
 	 * the file's mtime changes. This avoids reading and parsing the entire DB file
@@ -207,7 +113,7 @@ export class KiloDataAccess extends SqlJsDbCacheBase {
 	 */
 	private async getKiloDb(): Promise<SqlDatabase | null> {
 		const dbPath = this.getKiloDbPath();
-		const stats = this.statKiloDb(dbPath);
+		const stats = this.statDbFile(dbPath);
 		if (!stats) { return this.getCachedDbForPath(dbPath); }
 
 		if (this.isCachedDbCurrent(dbPath, stats)) {
@@ -218,7 +124,7 @@ export class KiloDataAccess extends SqlJsDbCacheBase {
 		const inflight = this._dbCacheInflight.get(cacheKey);
 		if (inflight) { return inflight; }
 
-		const createDbPromise = this.refreshKiloDb(dbPath, stats);
+		const createDbPromise = this.refreshDb(dbPath, stats);
 		this._dbCacheInflight.set(cacheKey, createDbPromise);
 		try {
 			return await createDbPromise;
@@ -233,26 +139,7 @@ export class KiloDataAccess extends SqlJsDbCacheBase {
 	 * Read session metadata from the Kilo Code SQLite database.
 	 */
 	async readKiloDbSession(sessionId: string): Promise<any | null> {
-		const db = await this.getKiloDb();
-		if (!db) { return null; }
-		try {
-			const result = db.exec('SELECT id, slug, title, time_created, time_updated, project_id, directory FROM session WHERE id = ?', [sessionId]);
-			if (result.length === 0 || result[0].values.length === 0) { return null; }
-			const row = result[0].values[0];
-			const cols = result[0].columns;
-			const obj: any = {};
-			for (let i = 0; i < cols.length; i++) { obj[cols[i]] = row[i]; }
-			return {
-				id: obj.id,
-				slug: obj.slug,
-				title: obj.title,
-				projectID: obj.project_id,
-				directory: obj.directory,
-				time: { created: obj.time_created, updated: obj.time_updated }
-			};
-		} catch {
-			return null;
-		}
+		return readSessionMetadataRow(await this.getKiloDb(), sessionId);
 	}
 
 	/**
