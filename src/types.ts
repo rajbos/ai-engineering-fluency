@@ -1662,7 +1662,11 @@ export interface EvaluatedInsight {
   body: string;
   actionLabel?: string;
   actionCommand?: string;
+  /** Optional second action, rendered alongside the primary one (e.g. an alternate next step). */
+  secondaryActionLabel?: string;
+  secondaryActionCommand?: string;
   status: InsightStatus;
+  /** When true, this insight may also be surfaced as a VS Code toast notification. */
   allowToast?: boolean;
 }
 
