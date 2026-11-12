@@ -430,6 +430,87 @@ test('a saved OTel index is discarded when the export file was replaced, not jus
 	});
 });
 
+/**
+ * Builds and saves an index for one session, then rewrites the snapshot with `edit` and marks the saved total as
+ * 5000 tokens, so a restored index (5000) is distinguishable from a rebuilt one (110).
+ */
+/** Waits until a rebuild has re-saved the snapshot over `written`, so its background save cannot land in the next test. */
+async function waitForResave(snapshot: string, written: string): Promise<void> {
+	const current = () => (fs.existsSync(snapshot) ? fs.readFileSync(snapshot, 'utf8') : written);
+	for (let i = 0; i < 100 && current() === written; i++) { await new Promise((r) => setTimeout(r, 20)); }
+	assert.notEqual(current(), written, 'the rebuilt index was saved again');
+}
+
+async function saveEditedSnapshot(t: import('node:test').TestContext, homeDir: string, edit: (saved: any) => void): Promise<{ snapshot: string; written: string }> {
+	const otelDir = path.join(homeDir, '.copilot', 'otel');
+	const snapshot = path.join(homeDir, 'storage', 'otel-index.json');
+	setCopilotCliOtelSnapshotPath(snapshot);
+	t.after(() => setCopilotCliOtelSnapshotPath(undefined));
+	writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
+	await loadCopilotCliOtelIndex();
+	await waitForFile(snapshot);
+	const saved = JSON.parse(fs.readFileSync(snapshot, 'utf8'));
+	saved.sessions[0][1].actualTokens = 5000;
+	edit(saved);
+	const written = JSON.stringify(saved);
+	fs.writeFileSync(snapshot, written);
+	clearCopilotCliOtelCache();
+	return { snapshot, written };
+}
+
+test('a saved OTel index from another snapshot version is ignored and the export is re-read', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const { snapshot, written } = await saveEditedSnapshot(t, homeDir, (saved) => { saved.version = 999; });
+		const index = await loadCopilotCliOtelIndex();
+		assert.equal(index.get(SESSION_ID)?.actualTokens, 110, 'rebuilt from the export, not the saved 5000');
+		await waitForResave(snapshot, written);
+	});
+});
+
+test('a saved OTel index with a malformed file entry is discarded as a whole', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const { snapshot, written } = await saveEditedSnapshot(t, homeDir, (saved) => { saved.files[OTEL_FILE].offset = 'not-a-number'; });
+		const index = await loadCopilotCliOtelIndex();
+		assert.equal(index.get(SESSION_ID)?.actualTokens, 110);
+		await waitForResave(snapshot, written);
+	});
+});
+
+test('a saved OTel index drops unsafe or malformed session entries but keeps the valid ones', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		await saveEditedSnapshot(t, homeDir, (saved) => {
+			saved.sessions.push(['__proto__', { actualTokens: 1 }], [SESSION_ID_2, { actualTokens: 'many' }], [42, { actualTokens: 1 }]);
+		});
+		const index = await loadCopilotCliOtelIndex();
+		assert.equal(index.get(SESSION_ID)?.actualTokens, 5000, 'the valid entry is restored');
+		assert.equal(index.get(SESSION_ID_2), undefined);
+		assert.equal(index.size, 1);
+		assert.equal(Object.getPrototypeOf({}).actualTokens, undefined, 'no prototype pollution');
+	});
+});
+
+test('an unreadable OTel snapshot is logged and rebuilt; a missing one stays silent', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const messages: string[] = [];
+		setCopilotCliOtelLogger((m) => messages.push(m));
+		t.after(() => setCopilotCliOtelLogger(undefined));
+		const { snapshot } = await saveEditedSnapshot(t, homeDir, () => { /* unchanged */ });
+		fs.writeFileSync(snapshot, '{ not json');
+		messages.length = 0;
+		const index = await loadCopilotCliOtelIndex();
+		assert.equal(index.get(SESSION_ID)?.actualTokens, 110);
+		assert.ok(messages.some((m) => /snapshot could not be used/.test(m)), messages.join(' | '));
+		await waitForResave(snapshot, '{ not json');
+
+		fs.rmSync(snapshot);
+		clearCopilotCliOtelCache();
+		messages.length = 0;
+		await loadCopilotCliOtelIndex();
+		assert.ok(!messages.some((m) => /snapshot could not be used/.test(m)), messages.join(' | '));
+		await waitForFile(snapshot);
+	});
+});
+
 test('subscribers are told once when the OTel index is ready, instead of each waiting on their own read', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		writeOtelSpans(path.join(homeDir, '.copilot', 'otel'), [chatSpan(SESSION_ID)]);
