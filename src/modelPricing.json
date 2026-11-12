@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-10-27",
+    "lastUpdated": "2026-11-12",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1427,6 +1427,27 @@
       ],
       "cachedInputCostPerMillion": 0.05,
       "cacheCreationCostPerMillion": 1.25
+    },
+    "claude-fable-5.2": {
+      "inputCostPerMillion": 8.0,
+      "outputCostPerMillion": 40.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Fable 5.2"
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 10.0
+    },
+    "gemini-4-carbon": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 4 Carbon"
+      ],
+      "cachedInputCostPerMillion": 0.1
     }
   }
 }
