@@ -570,29 +570,53 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
  *   turn's `turnNumber`.
  */
 export function matchHydraFusionTurnsToChatTurns(
-	chatTurns: { turnNumber: number; timestamp: string | null }[],
+	chatTurns: ChatTurnStamp[],
 	hydraTurns: HydraFusionTurn[],
 ): Map<number, number> {
 	const matches = new Map<number, number>();
 	let chatIndex = 0;
 	for (let h = 0; h < hydraTurns.length; h++) {
-		const startedAt = hydraTurns[h].startedAt ? Date.parse(hydraTurns[h].startedAt!) : NaN;
+		const startedAt = parseTimestamp(hydraTurns[h].startedAt);
 		if (Number.isNaN(startedAt)) { continue; }
 
-		let matchedTurnNumber: number | null = null;
-		while (chatIndex < chatTurns.length) {
-			const ts = chatTurns[chatIndex].timestamp ? Date.parse(chatTurns[chatIndex].timestamp!) : NaN;
-			// An unusable timestamp can never be a match for *any* fusion turn, but it must not
-			// get stuck as the loop's position either — skip it permanently so later, well-formed
-			// chat turns stay reachable by this and every subsequent fusion turn.
-			if (Number.isNaN(ts)) { chatIndex++; continue; }
-			if (ts > startedAt) { break; }
-			matchedTurnNumber = chatTurns[chatIndex].turnNumber;
-			chatIndex++;
-		}
-		if (matchedTurnNumber !== null) { matches.set(h, matchedTurnNumber); }
+		const step = advanceChatTurnsTo(chatTurns, chatIndex, startedAt);
+		chatIndex = step.nextIndex;
+		if (step.matchedTurnNumber !== null) { matches.set(h, step.matchedTurnNumber); }
 	}
 	return matches;
+}
+
+/** The fields of a chat turn that {@link matchHydraFusionTurnsToChatTurns} correlates on. */
+type ChatTurnStamp = { turnNumber: number; timestamp: string | null };
+
+/** Parses an ISO timestamp to epoch ms, or `NaN` when it is missing or unparsable. */
+function parseTimestamp(value: string | null): number {
+	return value ? Date.parse(value) : NaN;
+}
+
+/**
+ * Advances the shared chat-turn cursor from `startIndex` past every chat turn at or
+ * before `startedAt`, returning the last one passed (the prompt the router was
+ * resolving) and where the cursor stopped, so the next fusion turn resumes there.
+ */
+function advanceChatTurnsTo(
+	chatTurns: ChatTurnStamp[],
+	startIndex: number,
+	startedAt: number,
+): { matchedTurnNumber: number | null; nextIndex: number } {
+	let matchedTurnNumber: number | null = null;
+	let chatIndex = startIndex;
+	while (chatIndex < chatTurns.length) {
+		const ts = parseTimestamp(chatTurns[chatIndex].timestamp);
+		// An unusable timestamp can never be a match for *any* fusion turn, but it must not
+		// get stuck as the loop's position either — skip it permanently so later, well-formed
+		// chat turns stay reachable by this and every subsequent fusion turn.
+		if (Number.isNaN(ts)) { chatIndex++; continue; }
+		if (ts > startedAt) { break; }
+		matchedTurnNumber = chatTurns[chatIndex].turnNumber;
+		chatIndex++;
+	}
+	return { matchedTurnNumber, nextIndex: chatIndex };
 }
 
 // ── Cross-session aggregate ──────────────────────────────────────────────────
