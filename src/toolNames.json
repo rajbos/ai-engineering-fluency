@@ -1693,4 +1693,6 @@
   ,"openviking-remember": "OpenViking: Remember"
   ,"openviking-search": "OpenViking: Search"
   ,"openviking-write": "OpenViking: Write"
+  ,"get_session_automation": "Automation Session"
+  ,"mcp__terminal__stop_terminal_tab": "Stop Terminal Tab"
 }
