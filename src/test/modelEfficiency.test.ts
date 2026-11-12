@@ -951,6 +951,22 @@ test('addSessionEfficiencyToDailyStats: scales the exact cost by each day fracti
     assert.ok(Math.abs(map.get('2026-07-02')!.modelEfficiency!['gpt-5.6-sol'].exactCost! - 6) < 1e-9);
 });
 
+test('addSessionEfficiencyToDailyStats: a routed session\'s day-row cost and session-record cost agree (CLI/desktop path)', () => {
+    // The filtered head-to-head sums session records; the unfiltered one sums day rows.
+    // For a routed session both must carry the real models' cost, not $0 on one side.
+    const map = new Map<string, DailyTokenStats>([['2026-07-01', { date: '2026-07-01' } as DailyTokenStats]]);
+    addSessionEfficiencyToDailyStats(map, {
+        editorType: 'Copilot CLI',
+        modelUsage: ROUTED_USAGE,
+        usageAnalysis: { modelEfficiency: { hydrafusion: counters({ calls: 3, editTurns: 2 }) } },
+        dailyFractions: { '2026-07-01': 1 },
+    }, ROUTED_PRICING);
+    const row = map.get('2026-07-01')!.modelEfficiency!.hydrafusion;
+    const recordCost = row.sessionRecords!.reduce((sum, r) => sum + r.cost, 0);
+    assert.ok(Math.abs(row.cost - 0.005) < 1e-9, `day cost ${row.cost}`);
+    assert.ok(Math.abs(recordCost - row.cost) < 1e-9, `record cost ${recordCost}`);
+});
+
 test('accumulateDayAndEditorModelTokens: the Claude Code (VS Code) label is its own slice and still merges back to the day', () => {
 	const entry = emptyDay();
 	accumulateDayAndEditorModelTokens(entry, 'Claude Code CLI', { 'gpt-5': { inputTokens: 300, outputTokens: 60, sessions: 1 } }, {});
