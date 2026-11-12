@@ -87,6 +87,25 @@ export interface AccountBudget {
 	detail?: string;
 }
 
+type QuotaSnapshot = NonNullable<AccountPlanInfo['quota_snapshots']>[string];
+
+/** A quota field the API may send as a number, a numeric string, `''` or null; undefined unless it is a finite number. */
+function finiteQuotaNumber(raw: number | string | null | undefined): number | undefined {
+	if (raw === null || raw === undefined || raw === '') { return undefined; }
+	const value = Number(raw);
+	return Number.isFinite(value) ? value : undefined;
+}
+
+/** The monthly entitlement in AI Credits; undefined for an unlimited or missing quota. */
+function quotaEntitlement(quota: QuotaSnapshot): number | undefined {
+	return quota && !quota.unlimited ? finiteQuotaNumber(quota.entitlement) : undefined;
+}
+
+/** The AI Credits left this period, when the API reports a usable figure. */
+function quotaRemaining(quota: QuotaSnapshot): number | undefined {
+	return finiteQuotaNumber(quota?.quota_remaining);
+}
+
 /** Turns one account's plan response into an AccountBudget (without the identity fields). */
 export function parseAccountBudget(
 	planInfo: AccountPlanInfo,
@@ -96,14 +115,8 @@ export function parseAccountBudget(
 	const planName = planId ? (planNames[planId] ?? planId) : undefined;
 	const resetDate = planInfo.quota_reset_date_utc ?? planInfo.quota_reset_date;
 	const quota = planInfo.quota_snapshots?.premium_interactions;
-	const entitlementRaw = quota && !quota.unlimited && quota.entitlement !== null && quota.entitlement !== '' ? Number(quota.entitlement) : undefined;
-	const entitlement = entitlementRaw !== undefined && Number.isFinite(entitlementRaw) ? entitlementRaw : undefined;
-	const remainingRaw = quota?.quota_remaining;
-	const remaining = remainingRaw === null || remainingRaw === undefined || remainingRaw === '' ? undefined : Number(remainingRaw);
-	const balance = computeApiBalance(
-		entitlement === undefined ? undefined : entitlement / 100,
-		remaining !== undefined && Number.isFinite(remaining) ? remaining : undefined,
-	);
+	const entitlement = quotaEntitlement(quota);
+	const balance = computeApiBalance(entitlement === undefined ? undefined : entitlement / 100, quotaRemaining(quota));
 	return balance
 		? { status: 'ok', planId, planName, balance, resetDate }
 		: { status: 'no-quota', planId, planName, resetDate };

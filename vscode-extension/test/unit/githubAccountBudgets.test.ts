@@ -60,6 +60,27 @@ describe('parseAccountBudget', () => {
 		assert.equal(parseAccountBudget({}).status, 'no-quota');
 	});
 
+	test('accepts the entitlement sent as a numeric string', () => {
+		const r = parseAccountBudget({ quota_snapshots: { premium_interactions: { entitlement: '1000', quota_remaining: 250 } } });
+		assert.equal(r.status, 'ok');
+		assert.equal(r.balance?.budgetUsd, 10);
+		assert.equal(r.balance?.remainingAiCredits, 250);
+	});
+
+	test('an empty, null or non-numeric entitlement is no-quota', () => {
+		for (const entitlement of ['', null, 'n/a']) {
+			assert.equal(parseAccountBudget({ quota_snapshots: { premium_interactions: { entitlement } } }).status, 'no-quota', String(entitlement));
+		}
+	});
+
+	test('an empty, null or non-numeric quota_remaining counts the whole budget as available', () => {
+		for (const quota_remaining of ['', null, 'n/a', undefined]) {
+			const r = parseAccountBudget({ quota_snapshots: { premium_interactions: { entitlement: 1000, quota_remaining } } });
+			assert.equal(r.balance?.remainingAiCredits, 1000, String(quota_remaining));
+			assert.equal(r.balance?.usedAiCredits, 0);
+		}
+	});
+
 	test('falls back to the plan id when the plan is unknown', () => {
 		assert.equal(parseAccountBudget({ copilot_plan: 'mystery' }).planName, 'mystery');
 	});
