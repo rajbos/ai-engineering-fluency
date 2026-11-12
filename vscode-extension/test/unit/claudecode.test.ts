@@ -1600,3 +1600,61 @@ test('ClaudeCodeAdapter.analyzeUsage: pairs tool_result with tool_use to record 
 		cleanup(filePath);
 	}
 });
+
+// ----- getClaudeCodeSessionMeta: title precedence, first-wins fields, timestamp parsing -----
+
+async function metaFor(events: unknown[]) {
+	const filePath = createTempSession(events as any[]);
+	try {
+		return await claudeCode.getClaudeCodeSessionMeta(filePath);
+	} finally {
+		cleanup(filePath);
+	}
+}
+
+test('getClaudeCodeSessionMeta: a custom-title outranks the ai-title in either order', async () => {
+	const before = await metaFor([
+		{ type: 'custom-title', customTitle: 'My name' },
+		{ type: 'ai-title', aiTitle: 'Model name' },
+	]);
+	assert.equal(before?.title, 'My name');
+	const after = await metaFor([
+		{ type: 'ai-title', aiTitle: 'Model name' },
+		{ type: 'custom-title', customTitle: 'My name' },
+	]);
+	assert.equal(after?.title, 'My name');
+});
+
+test('getClaudeCodeSessionMeta: a session with only a custom-title still gets a title', async () => {
+	const meta = await metaFor([{ type: 'custom-title', customTitle: 'Cowork session' }]);
+	assert.equal(meta?.title, 'Cowork session');
+});
+
+test('getClaudeCodeSessionMeta: the last ai-title wins and empty titles are ignored', async () => {
+	const meta = await metaFor([
+		{ type: 'ai-title', aiTitle: 'First' },
+		{ type: 'ai-title', aiTitle: 'Second' },
+		{ type: 'ai-title', aiTitle: '' },
+		{ type: 'custom-title', customTitle: '' },
+	]);
+	assert.equal(meta?.title, 'Second');
+});
+
+test('getClaudeCodeSessionMeta: keeps the first entrypoint and cwd, and skips unparseable timestamps', async () => {
+	const meta = await metaFor([
+		{ type: 'user', entrypoint: 'cli', cwd: '/first', timestamp: 'not-a-date' },
+		{ type: 'user', entrypoint: 'claude-desktop', cwd: '/second', timestamp: '2026-05-02T10:00:00.000Z' },
+		{ type: 'assistant', timestamp: '2026-05-01T09:00:00.000Z' },
+	]);
+	assert.equal(meta?.entrypoint, 'cli');
+	assert.equal(meta?.cwd, '/first');
+	assert.equal(meta?.firstInteraction, '2026-05-01T09:00:00.000Z');
+	assert.equal(meta?.lastInteraction, '2026-05-02T10:00:00.000Z');
+	assert.equal(meta?.title, undefined);
+});
+
+test('getClaudeCodeSessionMeta: no timestamps leaves both interaction bounds undefined', async () => {
+	const meta = await metaFor([{ type: 'user', entrypoint: 'cli' }]);
+	assert.equal(meta?.firstInteraction, undefined);
+	assert.equal(meta?.lastInteraction, undefined);
+});
