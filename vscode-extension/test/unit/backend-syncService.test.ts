@@ -856,6 +856,43 @@ test('computeDailyRollupsFromLocalSessions handles OpenCode sessions', async () 
 	assert.equal(first.key.model, 'claude-sonnet');
 });
 
+test('computeDailyRollupsFromLocalSessions handles Crush sessions, defaulting missing interactions to 0', async () => {
+	const svc = makeService({
+		getCopilotSessionFiles: async () => ['/fake/project/.crush/crush.db#abc'],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+		isCrushSession: () => true,
+		getCrushSessionData: async () => ({
+			tokens: 30,
+			interactions: 1,
+			modelUsage: { 'gpt-5': { inputTokens: 10, outputTokens: 20 } },
+			timestamp: Date.now() - 60000,
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({ lookbackDays: 7, userId: undefined });
+	assert.equal(result.rollups.size, 1);
+	const first = Array.from(result.rollups.values())[0] as any;
+	assert.equal(first.key.model, 'gpt-5');
+	assert.equal(first.value.inputTokens, 10);
+	assert.equal(first.value.outputTokens, 20);
+	assert.equal(first.value.interactions, 0);
+});
+
+test('computeDailyRollupsFromLocalSessions skips OpenCode sessions older than the lookback window', async () => {
+	const svc = makeService({
+		getCopilotSessionFiles: async () => ['/fake/opencode/session.json'],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+		isOpenCodeSession: () => true,
+		getOpenCodeSessionData: async () => ({
+			tokens: 300,
+			interactions: 2,
+			modelUsage: { 'claude-sonnet': { inputTokens: 100, outputTokens: 200, interactions: 2 } },
+			timestamp: Date.now() - 30 * 24 * 60 * 60 * 1000,
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({ lookbackDays: 7, userId: undefined });
+	assert.equal(result.rollups.size, 0);
+});
+
 test('computeDailyRollupsFromLocalSessions skips OpenCode sessions without handler', async () => {
 	const svc = makeService({
 		getCopilotSessionFiles: async () => ['/fake/opencode/session.json'],
