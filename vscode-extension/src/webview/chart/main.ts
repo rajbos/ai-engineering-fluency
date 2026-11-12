@@ -217,12 +217,23 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 	month: { title: 'Token Usage', footer: 'Monthly token usage', countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions', avgSessionsLabel: 'Avg Sessions / Month' },
 };
 
+/** Splits the sessions and cost metrics can be broken down by. */
+const SESSIONS_COST_SPLITS: ReadonlySet<string> = new Set(['total', 'model', 'editor', 'provider', 'task']);
+/** Splits the output (lines of code) metric cannot be broken down by. */
+const OUTPUT_UNSUPPORTED_SPLITS: ReadonlySet<string> = new Set(['model', 'provider', 'task', 'taskCategory']);
+/** Splits the tokens metric (and any other metric) cannot be broken down by. */
+const TOKENS_UNSUPPORTED_SPLITS: ReadonlySet<string> = new Set(['language', 'provider']);
+
+/** Whether `metric` supports `split`, ignoring the editor filter. `split` is compared as given (not normalized). */
+function isSplitAllowedForMetric(metric: string, split: string): boolean {
+	if (metric === 'sessions' || metric === 'cost') { return SESSIONS_COST_SPLITS.has(split); }
+	if (metric === 'output') { return !OUTPUT_UNSUPPORTED_SPLITS.has(split); }
+	return !TOKENS_UNSUPPORTED_SPLITS.has(split);
+}
+
 function isComboSupported(metric: string, split: string): boolean {
 	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric as ChartMetric, split)) { return false; }
-	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
-	if (metric === 'cost') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
-	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'task' && split !== 'taskCategory'; }
-	return split !== 'language' && split !== 'provider';
+	return isSplitAllowedForMetric(metric, split);
 }
 
 function buildChartHeader(data: InitialChartData): HTMLElement {
@@ -757,36 +768,30 @@ async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartD
 	await reinitChart(data);
 }
 
+/** Splits the cost metric keeps when switching to it; any other split falls back to 'total'. */
+const COST_PREFERRED_SPLITS: ReadonlySet<string> = new Set(['editor', 'provider', 'task']);
+
+/**
+ * Per metric, whether a (normalized) split is kept when switching to that metric.
+ * A split that is not kept falls back to 'total'; metrics without an entry keep every split.
+ */
+const PREFERRED_SPLIT_KEEPS: Partial<Record<ChartMetric, (split: ChartSplit) => boolean>> = {
+	cost: split => COST_PREFERRED_SPLITS.has(split),
+	output: split => !OUTPUT_UNSUPPORTED_SPLITS.has(split),
+	tokens: split => split !== 'language',
+	sessions: split => SESSIONS_COST_SPLITS.has(split),
+};
+
 function getPreferredSplitForMetric(metric: ChartMetric, split: ChartSplit): ChartSplit {
 	const normalized = split === 'taskCategory' ? 'task' : split;
-	if (metric === 'cost') {
-		return (normalized === 'editor' || normalized === 'provider' || normalized === 'task') ? normalized : 'total';
-	}
-	if (metric === 'output') {
-		return (normalized === 'model' || normalized === 'provider' || normalized === 'task') ? 'total' : normalized;
-	}
-	if (metric === 'tokens') {
-		return normalized === 'language' ? 'total' : normalized;
-	}
-	if (metric === 'sessions') {
-		return (normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task') ? normalized : 'total';
-	}
-	return normalized;
+	const keeps = PREFERRED_SPLIT_KEEPS[metric];
+	return !keeps || keeps(normalized) ? normalized : 'total';
 }
 
 function isSplitSupported(metric: ChartMetric, split: ChartSplit): boolean {
 	const normalized = split === 'taskCategory' ? 'task' : split;
 	if (currentEditorFilter && !isSplitAvailableForEditorFilter(metric, normalized)) { return false; }
-	if (metric === 'sessions') {
-		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
-	}
-	if (metric === 'cost') {
-		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
-	}
-	if (metric === 'output') {
-		return normalized !== 'model' && normalized !== 'provider' && normalized !== 'task';
-	}
-	return normalized !== 'language' && normalized !== 'provider';
+	return isSplitAllowedForMetric(metric, normalized);
 }
 
 async function reinitChart(data: InitialChartData): Promise<void> {
@@ -1050,8 +1055,8 @@ function buildCostDataset(isRolling: boolean, rollingLabel: string, costData: nu
 	};
 }
 
-function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = (period.billingGroupCostDatasets ?? []) as ModelDataset[];
+/** Stacked bar chart of per-group estimated cost, shared by the cost-by-provider/editor/model views. */
+function buildStackedCostViewConfig(datasets: ModelDataset[], period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
 	return {
 		type: 'bar' as const,
 		data: { labels: period.labels, datasets: datasets as any },
@@ -1077,64 +1082,18 @@ function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: Retur
 			}
 		}
 	} as ChartConfig;
+}
+
+function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	return buildStackedCostViewConfig((period.billingGroupCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
 }
 
 function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = (period.editorCostDatasets ?? []) as ModelDataset[];
-	return {
-		type: 'bar' as const,
-		data: { labels: period.labels, datasets: datasets as any },
-		options: {
-			...baseOptions,
-			plugins: {
-				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
-				tooltip: {
-					...baseOptions.plugins.tooltip,
-					callbacks: {
-						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
-						footer: (items: any[]) => {
-							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
-							return `Total: $${total.toFixed(4)}`;
-						}
-					}
-				}
-			},
-			scales: {
-				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
-				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
-			}
-		}
-	} as ChartConfig;
+	return buildStackedCostViewConfig((period.editorCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
 }
 
 function buildCostModelViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = (period.modelCostDatasets ?? []) as ModelDataset[];
-	return {
-		type: 'bar' as const,
-		data: { labels: period.labels, datasets: datasets as any },
-		options: {
-			...baseOptions,
-			plugins: {
-				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
-				tooltip: {
-					...baseOptions.plugins.tooltip,
-					callbacks: {
-						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
-						footer: (items: any[]) => {
-							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
-							return `Total: $${total.toFixed(4)}`;
-						}
-					}
-				}
-			},
-			scales: {
-				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
-				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
-			}
-		}
-	} as ChartConfig;
+	return buildStackedCostViewConfig((period.modelCostDatasets ?? []) as ModelDataset[], period, baseOptions, c);
 }
 
 function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
@@ -1422,17 +1381,27 @@ function restoreChartState(initialData: InitialChartData): void {
 	editorListCollapsed = savedFlag ?? initialData.initialEditorListCollapsed ?? false;
 	currentEditorFilter = resolveEditorFilter(saved.editorFilter, initialData.editorTotalsMap);
 	if (!vscode.getState()) {
-		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
-		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
-		if (initialData.initialSplit) {
-			currentSplit = initialData.initialSplit === 'taskCategory' ? 'task' : initialData.initialSplit;
-		} else if (initialData.initialView) {
-			const m = migrateViewKey(initialData.initialView);
-			currentMetric = m.metric; currentSplit = m.split;
-		}
+		applyHostInitialState(initialData);
 		return;
 	}
+	applySavedChartState(saved);
+}
+
+/** Seeds a brand-new panel (no webview state yet) from the host's initial preferences. */
+function applyHostInitialState(initialData: InitialChartData): void {
+	if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+	if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
+	if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+	if (initialData.initialSplit) {
+		currentSplit = initialData.initialSplit === 'taskCategory' ? 'task' : initialData.initialSplit;
+	} else if (initialData.initialView) {
+		const m = migrateViewKey(initialData.initialView);
+		currentMetric = m.metric; currentSplit = m.split;
+	}
+}
+
+/** Restores an existing panel's toggles from its saved webview state, migrating the legacy `view` key. */
+function applySavedChartState(saved: ReturnType<typeof chartState.restore>): void {
 	currentPeriod = saved.period ?? 'day';
 	currentTimeWindow = saved.timeWindow ?? 'last30';
 	currentDisplayMode = saved.displayMode ?? 'actual';
