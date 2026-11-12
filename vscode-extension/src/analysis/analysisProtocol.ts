@@ -45,6 +45,15 @@ export type AnalysisWorkerEvent =
 
 export type AnalysisWorkerMessage = AnalysisResponse | AnalysisWorkerEvent;
 
+/** What a successful response carries. */
+export type AnalysisResult = Extract<AnalysisResponse, { ok: true }>['result'];
+
+/** The failed response for a request that threw: the stack (or message), plus the Node error code when there is one. */
+export function toFailureResponse(id: number, error: unknown): AnalysisResponse {
+	const code = (error as NodeJS.ErrnoException | undefined)?.code;
+	return { type: 'result', id, ok: false, error: error instanceof Error ? (error.stack ?? error.message) : String(error), ...(typeof code === 'string' ? { code } : {}) };
+}
+
 /** The host's answer to an `otelUsage` ask. */
 export interface OtelUsageReply {
 	type: 'otelUsageReply';

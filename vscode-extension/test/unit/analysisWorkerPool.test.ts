@@ -7,8 +7,10 @@ import {
 	AnalysisWorkerError,
 	type WorkerLike,
 	type AnalysisWorkerPoolOptions,
+	describeLongestRunning,
+	describeRequestTarget,
 } from '../../src/analysis/analysisWorkerPool';
-import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerMessage, OtelUsageReply } from '../../src/analysis/analysisProtocol';
+import { toFailureResponse, type AnalysisHostMessage, type AnalysisRequest, type AnalysisWorkerMessage, type OtelUsageReply } from '../../src/analysis/analysisProtocol';
 import type { SessionFileCache } from '../../../src/types';
 
 /** A worker whose behaviour the test drives by hand: no threads, no timing. */
@@ -531,4 +533,32 @@ test('a timed-out request keeps its timeout verdict when another worker exhausts
 	assert.equal(await outcome, 'timeout');
 	await assert.rejects(pool.analyze('hang.json', 1, 1), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed', 'and it is quarantined');
 	await pool.dispose();
+});
+
+test('describeRequestTarget names the file, else the workspace, else the fallback', () => {
+	assert.equal(describeRequestTarget({ id: 1, op: 'analyze', path: '/a.json', mtime: 1, size: 2 }, 'x'), '/a.json');
+	assert.equal(describeRequestTarget({ id: 2, op: 'customization', workspace: '/ws' }, 'x'), '/ws');
+	assert.equal(describeRequestTarget({ id: 3 } as unknown as AnalysisRequest, 'a request'), 'a request');
+});
+
+test('describeLongestRunning reports none, the elapsed seconds, and a host wait', () => {
+	const request: AnalysisRequest = { id: 1, op: 'analyze', path: '/a.json', mtime: 1, size: 2 };
+	assert.equal(describeLongestRunning(undefined, 10_000), 'none');
+	assert.equal(describeLongestRunning({ request, postedAt: 1_000, hostLookups: 0 }, 13_400), '/a.json for 12s');
+	assert.equal(describeLongestRunning({ request, postedAt: 1_000, hostLookups: 2 }, 13_600), '/a.json for 13s (waiting on the host)');
+});
+
+test('toFailureResponse keeps the stack and a string Node error code only', () => {
+	const error = Object.assign(new Error('gone'), { code: 'ENOENT' });
+	const withCode = toFailureResponse(7, error);
+	assert.equal(withCode.ok, false);
+	assert.equal(withCode.id, 7);
+	if (withCode.ok) { return; }
+	assert.equal(withCode.error, error.stack);
+	assert.equal(withCode.code, 'ENOENT');
+	const numericCode = toFailureResponse(8, Object.assign(new Error('x'), { code: 42 }));
+	assert.ok(!('code' in numericCode));
+	const thrownString = toFailureResponse(9, 'plain');
+	assert.ok(!thrownString.ok && thrownString.error === 'plain');
+	assert.ok(!('code' in thrownString));
 });

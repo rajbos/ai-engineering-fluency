@@ -22,7 +22,7 @@ import type { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter'
 import { analyzeSessionFile, quickAnalyzeSessionContent, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 import { computeSessionFileDetails } from './sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from './workspaceCustomizationScan';
-import type { AnalysisHostMessage, AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage, OtelUsageReply } from './analysisProtocol';
+import { toFailureResponse, type AnalysisHostMessage, type AnalysisRequest, type AnalysisResponse, type AnalysisResult, type AnalysisWorkerData, type AnalysisWorkerMessage, type OtelUsageReply } from './analysisProtocol';
 
 if (!parentPort) {
 	throw new Error('analysisWorker must be started as a worker thread');
@@ -100,28 +100,31 @@ async function handle(request: AnalysisRequest): Promise<AnalysisResponse> {
 
 async function handleRequest(request: AnalysisRequest): Promise<AnalysisResponse> {
 	try {
-		// This registry never ran discovery, so tell it what the host's discovery learned about this session.
-		if ((request.op === 'analyze' || request.op === 'details') && request.copilotCliKinds?.length) {
-			copilotCliAdapter?.noteSessionKinds(request.path, request.copilotCliKinds);
-		}
-		if (request.op === 'analyze') {
-			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;
-			return { type: 'result', id: request.id, ok: true, result: await analyzeSessionFile(deps, request.path, request.mtime, request.size, existing) };
-		}
-		if (request.op === 'quick') {
-			return { type: 'result', id: request.id, ok: true, result: await quickAnalyzeSessionContent(deps, request.path, request.content) };
-		}
-		if (request.op === 'customization') {
-			return { type: 'result', id: request.id, ok: true, result: scanCustomizationFilesForWorkspace(request.workspace) };
-		}
-		if (request.op === 'details') {
-			const stat = { size: request.size, mtime: new Date(request.mtimeMs) };
-			return { type: 'result', id: request.id, ok: true, result: await computeSessionFileDetails(deps, request.path, stat, request.details) };
-		}
-		return { type: 'result', id: request.id, ok: true, result: await supplementCacheWithDebugLog(request.cached, request.path) };
+		noteCopilotCliKinds(request);
+		return { type: 'result', id: request.id, ok: true, result: await runOperation(request) };
 	} catch (error) {
-		const code = (error as NodeJS.ErrnoException | undefined)?.code;
-		return { type: 'result', id: request.id, ok: false, error: error instanceof Error ? (error.stack ?? error.message) : String(error), ...(typeof code === 'string' ? { code } : {}) };
+		return toFailureResponse(request.id, error);
+	}
+}
+
+/** This registry never ran discovery, so tell it what the host's discovery learned about this session. */
+function noteCopilotCliKinds(request: AnalysisRequest): void {
+	if ((request.op === 'analyze' || request.op === 'details') && request.copilotCliKinds?.length) {
+		copilotCliAdapter?.noteSessionKinds(request.path, request.copilotCliKinds);
+	}
+}
+
+/** Runs the analysis the request's `op` names and returns its result. */
+async function runOperation(request: AnalysisRequest): Promise<AnalysisResult> {
+	switch (request.op) {
+		case 'analyze': {
+			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;
+			return analyzeSessionFile(deps, request.path, request.mtime, request.size, existing);
+		}
+		case 'quick': return quickAnalyzeSessionContent(deps, request.path, request.content);
+		case 'customization': return scanCustomizationFilesForWorkspace(request.workspace);
+		case 'details': return computeSessionFileDetails(deps, request.path, { size: request.size, mtime: new Date(request.mtimeMs) }, request.details);
+		case 'supplement': return supplementCacheWithDebugLog(request.cached, request.path);
 	}
 }
 
