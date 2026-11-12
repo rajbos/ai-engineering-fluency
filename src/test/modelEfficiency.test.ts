@@ -815,6 +815,39 @@ test('buildSessionEfficiencyAttribution: re-keys a routed session cache entry', 
     assert.equal(attribution.modelUsage?.['hydrafusion'].inputTokens, 1000);
 });
 
+test('buildSessionEfficiencyAttribution: a routed session record is priced at the real models\' rates, not $0', () => {
+    // Regression: the router id has no price entry, so pricing the folded usage gave
+    // $0 and the head-to-head (which reads session records) showed Fusion as free.
+    const attribution = buildSessionEfficiencyAttribution({
+        modelUsage: ROUTED_USAGE,
+        usageAnalysis: { modelEfficiency: { hydrafusion: counters({ calls: 3, editTurns: 2 }) } },
+    } as unknown as SessionFileCache);
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelCounters(daily, attribution, ROUTED_PRICING);
+    const record = daily.hydrafusion.sessionRecords![0];
+    // sol: 0.001 + opus: 0.004 — the same figure the day row gets from accumulateDailyModelTokens.
+    assert.ok(Math.abs(record.cost - 0.005) < 1e-9, `cost ${record.cost}`);
+    assert.equal(record.inputTokens, 1000);
+});
+
+test('buildSessionEfficiencyAttribution: a model also picked by name keeps its own cost beside the router', () => {
+    const attribution = buildSessionEfficiencyAttribution({
+        modelUsage: ROUTED_USAGE,
+        usageAnalysis: { modelEfficiency: { hydrafusion: counters({ calls: 2 }), 'claude-opus-5': counters({ calls: 1 }) } },
+    } as unknown as SessionFileCache);
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelCounters(daily, attribution, ROUTED_PRICING);
+    assert.ok(Math.abs(daily.hydrafusion.sessionRecords![0].cost - 0.001) < 1e-9);
+    assert.ok(Math.abs(daily['claude-opus-5'].sessionRecords![0].cost - 0.004) < 1e-9);
+});
+
+test('accumulateDailyModelCounters: an already re-keyed input without the original usage still prices unrouted models', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelCounters(daily, { modelUsage: ROUTED_USAGE, modelEfficiency: { 'gpt-5.6-sol': counters({ calls: 1 }) } }, ROUTED_PRICING);
+    assert.ok(Math.abs(daily['gpt-5.6-sol'].sessionRecords![0].cost - 0.001) < 1e-9);
+    assert.ok(Math.abs(daily['claude-opus-5'].sessionRecords![0].cost - 0.004) < 1e-9);
+});
+
 test('accumulateDayAndEditorModelTokens: a routed session is re-keyed in both the day total and the editor slice', () => {
     const entry = emptyDay();
     accumulateDayAndEditorModelTokens(entry, 'Copilot CLI', ROUTED_USAGE, ROUTED_PRICING, { hydrafusion: counters({ calls: 1 }) });
