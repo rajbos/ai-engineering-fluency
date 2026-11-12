@@ -1421,30 +1421,12 @@ background: var(--bg-tertiary);
 	margin-bottom: 6px;
 }
 
-.df-section-head {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-bottom: 12px;
-}
-
-.df-section-icon {
-	font-size: 22px;
-}
-
-.df-section-title {
-	font-size: 18px;
-	font-weight: 700;
-	color: var(--text-primary);
-}
-
-.df-section-badge {
-	font-size: 11px;
-	font-weight: 600;
-	padding: 2px 8px;
-	border-radius: 10px;
-	background: var(--badge-bg);
-	color: var(--badge-fg);
+/* Refresh sits at the right of the section title, as a quiet action. */
+.df-refresh {
+	margin-left: auto;
+	font-size: 12px;
+	font-weight: normal;
+	padding: 4px 10px;
 }
 
 .df-notice {
@@ -1469,10 +1451,11 @@ background: var(--bg-tertiary);
 }
 
 .df-repo-card {
-	background: var(--bg-tertiary);
+	background: var(--list-hover-bg);
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
+	border-radius: 6px;
 	margin-bottom: 8px;
+	box-shadow: 0 2px 4px var(--shadow-color);
 }
 
 .df-repo-card[open] {
@@ -1487,29 +1470,35 @@ background: var(--bg-tertiary);
 	padding: 10px 14px;
 	cursor: pointer;
 	list-style: none;
-	border-radius: 8px;
+	border-radius: 6px;
 }
 
 .df-repo-summary::-webkit-details-marker {
 	display: none;
 }
 
-.df-repo-summary::before {
+.df-repo-summary::before,
+.df-stage > summary::before {
 	content: '▸';
-	color: var(--text-primary);
-	font-size: 22px;
+	color: var(--text-secondary);
+	font-size: 14px;
 	line-height: 1;
-	width: 20px;
+	width: 14px;
 	text-align: center;
 	transition: transform 0.15s ease;
+}
+
+.df-stage[open] > summary::before {
+	transform: rotate(90deg);
 }
 
 .df-repo-card[open] > .df-repo-summary::before {
 	transform: rotate(90deg);
 }
 
-.df-repo-summary:hover {
-	background: var(--bg-secondary);
+.df-repo-summary:hover,
+.df-stage > summary:hover {
+	background: var(--row-alternate-bg);
 }
 
 .df-repo-summary:focus-visible {
@@ -1527,8 +1516,8 @@ background: var(--bg-tertiary);
 }
 
 .df-summary-stage {
-	font-size: 13px;
-	font-weight: 700;
+	font-size: 12px;
+	font-weight: 600;
 	color: var(--text-primary);
 	white-space: nowrap;
 }
@@ -1545,12 +1534,13 @@ background: var(--bg-tertiary);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
+	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
 	border-radius: 50%;
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 700;
-	border: 2px solid var(--border-color);
+	border: 1px solid var(--border-color);
 	background: var(--bg-secondary);
 	color: var(--text-primary);
 }
@@ -1576,9 +1566,8 @@ background: var(--bg-tertiary);
 }
 
 .df-repo-body {
-	padding: 4px 16px 16px 38px;
+	padding: 12px 14px 14px;
 	border-top: 1px solid var(--border-color);
-	padding-top: 14px;
 }
 
 .df-overview {
@@ -1601,12 +1590,6 @@ background: var(--bg-tertiary);
 	font-size: 11px;
 }
 
-.df-disclaimer {
-	font-size: 12px;
-	color: var(--text-secondary);
-	margin-bottom: 8px;
-}
-
 .df-disclaimer strong {
 	color: var(--text-primary);
 }
@@ -1626,13 +1609,14 @@ background: var(--bg-tertiary);
 .df-about-body {
 	margin-top: 8px;
 	padding: 10px 12px;
-	background: var(--bg-tertiary);
+	background: var(--list-hover-bg);
+	border: 1px solid var(--border-color);
 	border-radius: 6px;
 	line-height: 1.5;
 }
 
 .df-repo-name {
-	font-size: 15px;
+	font-size: 13px;
 	font-weight: 700;
 	color: var(--text-primary);
 }
@@ -1656,8 +1640,8 @@ background: var(--bg-tertiary);
 }
 
 .df-band-stage {
-	font-size: 20px;
-	font-weight: 800;
+	font-size: 14px;
+	font-weight: 700;
 	color: var(--text-primary);
 }
 
@@ -1670,29 +1654,17 @@ background: var(--bg-tertiary);
 	color: var(--success-fg);
 }
 
-.df-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin-bottom: 14px;
-}
-
 .df-chip {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
 	font-size: 11px;
 	font-weight: 600;
-	padding: 3px 10px;
-	border-radius: 12px;
+	padding: 1px 8px;
+	border-radius: 10px;
 	border: 1px solid var(--border-color);
 	color: var(--text-secondary);
 	background: var(--bg-secondary);
-}
-
-.df-chip-stage {
-	font-weight: 800;
-	color: var(--text-primary);
 }
 
 .df-verdict-attained {
@@ -1714,16 +1686,126 @@ background: var(--bg-tertiary);
 	margin-top: 12px;
 	padding: 10px 12px;
 	border-radius: 6px;
-	background: var(--bg-secondary);
-	border-left: 3px solid var(--error-fg);
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-left: 3px solid var(--warning-fg);
 }
 
-.df-block-unknown {
-	border-left-color: var(--warning-fg);
+/* The ladder: every stage with every check, so progress beyond the confirmed
+   stage is visible. Laid out as rows in one bordered list, like the data tables
+   elsewhere in this view. */
+.df-ladder {
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
 }
 
-.df-block-findings {
-	border-left-color: var(--error-fg);
+.df-ladder-title {
+	padding: 6px 12px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-secondary);
+	background: var(--row-alternate-bg);
+	border-bottom: 1px solid var(--border-color);
+}
+
+.df-stage + .df-stage {
+	border-top: 1px solid var(--border-color);
+}
+
+.df-stage-summary {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 10px;
+	padding: 8px 12px;
+	list-style: none;
+}
+
+.df-stage > summary {
+	cursor: pointer;
+}
+
+.df-stage > summary::-webkit-details-marker {
+	display: none;
+}
+
+.df-stage > summary:focus-visible {
+	outline: 1px solid var(--focus-border, var(--border-color));
+	outline-offset: -1px;
+}
+
+/* A stage this scan never awards has no chevron; keep its dot aligned with the rest. */
+.df-stage-unassessed .df-stage-summary {
+	padding-left: 36px;
+	color: var(--text-muted);
+}
+
+.df-stage-unassessed .df-stage-name {
+	color: var(--text-secondary);
+	font-weight: 400;
+}
+
+.df-stage-name {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.df-stage-progress {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 2px 10px;
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.df-stage-body {
+	padding: 2px 12px 10px 36px;
+}
+
+.df-stage-desc {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-bottom: 8px;
+}
+
+.df-tag {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 0 6px;
+	border-radius: 8px;
+	border: 1px solid var(--border-color);
+	color: var(--text-secondary);
+	margin-left: 6px;
+	white-space: nowrap;
+}
+
+.df-tag-next {
+	margin-left: 0;
+	border-color: var(--link-color);
+	color: var(--link-color);
+}
+
+.df-state-icon {
+	flex-shrink: 0;
+	font-size: 14px;
+	line-height: 16px;
+}
+
+.df-state-present .df-state-icon { color: var(--success-fg); }
+.df-state-absent .df-state-icon { color: var(--error-fg); }
+.df-state-unknown .df-state-icon,
+.df-state-advisory .df-state-icon { color: var(--warning-fg); }
+.df-state-na .df-state-icon { color: var(--text-muted); }
+
+.df-state-na .df-control-label {
+	color: var(--text-secondary);
+	font-weight: 400;
 }
 
 .df-block-title {
@@ -1740,6 +1822,9 @@ background: var(--bg-tertiary);
 }
 
 .df-control-list li {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
 	margin-bottom: 8px;
 }
 
@@ -1781,12 +1866,6 @@ background: var(--bg-tertiary);
 	margin-top: 8px;
 }
 
-.df-control-list li.df-pickable {
-	display: flex;
-	align-items: flex-start;
-	gap: 8px;
-}
-
 .df-pick {
 	margin: 2px 0 0;
 	flex-shrink: 0;
@@ -1802,11 +1881,7 @@ background: var(--bg-tertiary);
 	align-items: center;
 	flex-wrap: wrap;
 	gap: 10px 16px;
-	margin-top: 14px;
-	padding: 10px 12px;
-	border-radius: 6px;
-	border: 1px solid var(--border-color);
-	background: var(--bg-secondary);
+	margin-top: 12px;
 }
 
 .df-action-text {

@@ -8,7 +8,7 @@ import {
 	buildDarkFactoryReport,
 	detectFindings,
 	evaluatorAgentNames,
-	hasEvaluatorAgent,
+	evaluatorObservation,
 	nextStageToClose,
 	resolveControl,
 	scoreDarkFactoryReadiness,
@@ -40,8 +40,8 @@ function presentThrough(throughStage: number, overrides: Record<string, DarkFact
 	return { ...observations, ...overrides };
 }
 
-function score(observations: Record<string, DarkFactoryObservation>, facts?: DarkFactoryRepoFacts) {
-	return scoreDarkFactoryReadiness({ name: 'demo', repoRoot: '/tmp/demo', observations, facts });
+function score(observations: Record<string, DarkFactoryObservation>, facts?: DarkFactoryRepoFacts, hosting?: 'github' | 'other' | 'unknown') {
+	return scoreDarkFactoryReadiness({ name: 'demo', repoRoot: '/tmp/demo', observations, facts, hosting });
 }
 
 function controlDef(overrides: Partial<DarkFactoryControlDefinition> = {}): DarkFactoryControlDefinition {
@@ -76,9 +76,21 @@ test('catalogue: control ids are unique and every control names a remediation', 
 	}
 });
 
-test('catalogue: every assessable stage has at least one control', () => {
+test('catalogue: every assessable stage has at least one required control', () => {
 	for (let stage = 1; stage <= MAX_ASSESSABLE_STAGE; stage++) {
-		assert.ok(DARK_FACTORY_CONTROLS.some(c => c.stage === stage), `stage ${stage} has no controls`);
+		assert.ok(DARK_FACTORY_CONTROLS.some(c => c.stage === stage && !c.recommended), `stage ${stage} has no required controls`);
+	}
+});
+
+test('catalogue: CODEOWNERS and reusable workflows are not readiness controls', () => {
+	const ids = DARK_FACTORY_CONTROLS.map(c => c.id);
+	assert.equal(ids.includes('codeowners'), false);
+	assert.equal(ids.includes('reusable-workflows'), false);
+});
+
+test('catalogue: a dev environment and artifact attestations are recommended, not required', () => {
+	for (const id of ['devcontainer', 'artifact-attestations']) {
+		assert.equal(DARK_FACTORY_CONTROLS.find(c => c.id === id)?.recommended, true, `${id} should be recommended`);
 	}
 });
 
@@ -135,6 +147,37 @@ test('resolveControl: an absent observation on a plain filesystem control stays 
 	assert.equal(result.state, 'absent');
 });
 
+test('resolveControl: a not-applicable observation passes through with its reason', () => {
+	const result = resolveControl(controlDef(), { state: 'not-applicable', detail: 'nothing is deployed' });
+	assert.equal(result.state, 'not-applicable');
+	assert.equal(result.detail, 'nothing is deployed');
+});
+
+test('resolveControl: a GitHub-only control is not judged absent when the remote is on another host', () => {
+	const def = controlDef({ platform: 'github' });
+	for (const observation of [{ state: 'absent' as const, detail: 'none' }, undefined]) {
+		const result = resolveControl(def, observation, 'other');
+		assert.equal(result.state, 'unknown');
+		assert.match(result.detail ?? '', /not on GitHub/);
+	}
+});
+
+test('resolveControl: a GitHub-only control found anyway on another host is still present', () => {
+	const result = resolveControl(controlDef({ platform: 'github' }), { state: 'present', detail: 'build.yml' }, 'other');
+	assert.equal(result.state, 'present');
+});
+
+test('resolveControl: a GitHub-only control keeps its absence on GitHub and with no remote at all', () => {
+	const def = controlDef({ platform: 'github' });
+	assert.equal(resolveControl(def, { state: 'absent' }, 'github').state, 'absent');
+	assert.equal(resolveControl(def, { state: 'absent' }, 'unknown').state, 'absent');
+	assert.equal(resolveControl(def, { state: 'absent' }).state, 'absent');
+});
+
+test('resolveControl: a control that exists on any host is still judged on another host', () => {
+	assert.equal(resolveControl(controlDef(), { state: 'absent' }, 'other').state, 'absent');
+});
+
 // ---------------------------------------------------------------------------
 // Stage verdicts and the confirmed/ceiling band
 // ---------------------------------------------------------------------------
@@ -148,12 +191,48 @@ test('scoring: an empty repository confirms stage 0 and blocks stage 1', () => {
 });
 
 test('scoring: an absent control blocks its stage and is named as missing', () => {
-	const report = score(presentThrough(1, { 'codeowners': { state: 'absent', detail: 'none' } }));
+	const report = score(presentThrough(1, { 'dependabot': { state: 'absent', detail: 'none' } }));
 	const stage1 = report.stages.find(s => s.stage === 1);
 	assert.equal(stage1?.verdict, 'blocked');
-	assert.ok(stage1?.missing.includes('codeowners'));
+	assert.ok(stage1?.missing.includes('dependabot'));
 	assert.equal(report.confirmedStage, 0);
 	assert.equal(report.ceilingStage, 0, 'a blocked stage caps the ceiling too');
+});
+
+test('scoring: a missing recommended control never blocks its stage', () => {
+	const report = score(presentThrough(1, { 'devcontainer': { state: 'absent', detail: 'none' } }));
+	const stage1 = report.stages.find(s => s.stage === 1);
+	assert.equal(stage1?.verdict, 'attained');
+	assert.equal(stage1?.missing.includes('devcontainer'), false);
+	assert.equal(report.confirmedStage, 1);
+	assert.equal(report.controls.find(c => c.id === 'devcontainer')?.state, 'absent', 'it is still reported, just not blocking');
+});
+
+test('scoring: an unchecked recommended control is not counted as missing evidence', () => {
+	const withAttestations = score(presentThrough(4));
+	const without = score(presentThrough(4, { 'artifact-attestations': { state: 'absent', detail: 'none' } }));
+	assert.equal(without.controls.find(c => c.id === 'artifact-attestations')?.state, 'unknown');
+	assert.equal(without.unknownCount, withAttestations.unknownCount);
+});
+
+test('scoring: a not-applicable control neither blocks its stage nor leaves it unverified', () => {
+	const report = score(presentThrough(1, { 'infrastructure-as-code': { state: 'not-applicable', detail: 'nothing is deployed' } }));
+	const stage1 = report.stages.find(s => s.stage === 1);
+	assert.equal(stage1?.verdict, 'attained');
+	assert.deepEqual(stage1?.notApplicable, ['infrastructure-as-code']);
+	assert.equal(stage1?.present.includes('infrastructure-as-code'), false);
+	assert.equal(report.confirmedStage, 1);
+});
+
+test('scoring: on a non-GitHub remote, absent GitHub-only controls leave a stage unverified instead of blocked', () => {
+	const observations = presentThrough(0);
+	const onGitHub = score(observations, undefined, 'github').stages.find(s => s.stage === 1);
+	const elsewhere = score(observations, undefined, 'other').stages.find(s => s.stage === 1);
+	assert.ok(onGitHub?.missing.includes('ci-workflows'));
+	assert.equal(elsewhere?.missing.includes('ci-workflows'), false);
+	assert.ok(elsewhere?.unknown.includes('ci-workflows'));
+	assert.ok(elsewhere?.missing.includes('dependabot'), 'a control that exists on any host is still judged');
+	assert.equal(score(observations, undefined, 'other').hosting, 'other');
 });
 
 test('scoring: unknowns make a stage indeterminate rather than attained or blocked', () => {
@@ -265,19 +344,20 @@ test('findings: an unknown delivery control is not treated as a gap', () => {
 	assert.equal(detectFindings(controls).some(f => f.id === 'agents-before-delivery'), false);
 });
 
-test('findings: agents without an evaluator are flagged', () => {
-	const findings = detectFindings([], { agentFileNames: ['implementer.agent.md', 'refactor.agent.md'] });
-	const finding = findings.find(f => f.id === 'no-independent-evaluator');
-	assert.equal(finding?.severity, 'medium');
+test('findings: a recommended control does not count as AI customization ahead of delivery', () => {
+	const controls = controlResults([
+		{ id: 'ci-workflows', state: 'absent', stage: 1 },
+		{ id: 'artifact-attestations', state: 'present', stage: 4, recommended: true },
+	]);
+	assert.equal(detectFindings(controls).some(f => f.id === 'agents-before-delivery'), false);
 });
 
-test('findings: a review agent satisfies the evaluator requirement', () => {
-	const findings = detectFindings([], { agentFileNames: ['implementer.agent.md', 'code-quality-review.agent.md'] });
-	assert.equal(findings.some(f => f.id === 'no-independent-evaluator'), false);
-});
-
-test('findings: no agents at all does not raise the evaluator finding', () => {
-	assert.equal(detectFindings([], { agentFileNames: [] }).some(f => f.id === 'no-independent-evaluator'), false);
+test('findings: a missing evaluator is a control state, never an anti-pattern', () => {
+	// Copilot code review enabled through a ruleset leaves no file, so "no evaluator
+	// found" cannot be told apart from "evaluator configured elsewhere".
+	const report = score(presentThrough(3, { 'independent-evaluator-agent': { state: 'absent', detail: 'none' } }));
+	assert.equal(report.findings.some(f => /evaluator/i.test(f.id)), false);
+	assert.equal(report.controls.find(c => c.id === 'independent-evaluator-agent')?.state, 'unknown');
 });
 
 test('findings: write-all workflow permissions are flagged and named', () => {
@@ -301,7 +381,27 @@ test('evaluatorAgentNames: matches review, test, security and quality roles', ()
 		evaluatorAgentNames(['architecture-expert.agent.md', 'test-expert.agent.md', 'security-audit.md', 'refactor.agent.md']),
 		['test-expert.agent.md', 'security-audit.md'],
 	);
-	assert.equal(hasEvaluatorAgent(['refactor.agent.md']), false);
+	assert.deepEqual(evaluatorAgentNames(['refactor.agent.md']), []);
+});
+
+test('evaluatorObservation: AI review requests on pull requests count as an independent evaluator', () => {
+	const observation = evaluatorObservation({ state: 'absent', detail: 'none' }, { totalPrs: 10, aiAuthoredPrs: 0, aiReviewRequestedPrs: 4 });
+	assert.equal(observation?.state, 'present');
+	assert.match(observation?.detail ?? '', /4 pull request/);
+	assert.equal(evaluatorObservation(undefined, { totalPrs: 10, aiAuthoredPrs: 0, aiReviewRequestedPrs: 1 })?.state, 'present');
+});
+
+test('evaluatorObservation: no review requests proves nothing, so the filesystem answer stands', () => {
+	const fromFiles = { state: 'absent' as const, detail: 'none' };
+	assert.equal(evaluatorObservation(fromFiles, { totalPrs: 10, aiAuthoredPrs: 0, aiReviewRequestedPrs: 0 }), fromFiles);
+	assert.equal(evaluatorObservation(fromFiles, undefined), fromFiles);
+	assert.equal(evaluatorObservation(fromFiles, { totalPrs: 0, aiAuthoredPrs: 0, aiReviewRequestedPrs: 3, error: 'denied' }), fromFiles);
+	assert.equal(evaluatorObservation(undefined, undefined), undefined);
+});
+
+test('evaluatorObservation: an evaluator already found in the files keeps its own detail', () => {
+	const fromFiles = { state: 'present' as const, detail: 'Evaluator agent(s): test-expert.agent.md' };
+	assert.equal(evaluatorObservation(fromFiles, { totalPrs: 10, aiAuthoredPrs: 0, aiReviewRequestedPrs: 4 }), fromFiles);
 });
 
 // ---------------------------------------------------------------------------

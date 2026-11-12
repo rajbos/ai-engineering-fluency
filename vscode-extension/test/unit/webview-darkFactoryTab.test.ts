@@ -97,7 +97,7 @@ test('the Copilot button drafts a chat prompt from the items still checked in th
 		const repo = scoreDarkFactoryReadiness({
 			name: 'demo', repoRoot: '/tmp/demo',
 			observations: {
-				'codeowners': { state: 'absent', detail: 'none' },
+				'dependabot': { state: 'absent', detail: 'none' },
 				'ci-test-execution': { state: 'absent', detail: 'none' },
 			},
 		});
@@ -109,7 +109,7 @@ test('the Copilot button drafts a chat prompt from the items still checked in th
 		(doc.querySelector('.df-chat-btn') as HTMLElement).click();
 		const drafts = messages.filter(m => m.command === 'draftCopilotChatWithPrompt');
 		assert.equal(drafts.length, 1);
-		assert.match(drafts[0].prompt!, /CODEOWNERS/);
+		assert.match(drafts[0].prompt!, /Automated dependency updates/);
 		assert.equal(drafts[0].prompt!.includes('Tests executed in CI'), false);
 
 		Array.from(doc.querySelectorAll('.df-pick')).forEach(input => { (input as HTMLInputElement).checked = false; });

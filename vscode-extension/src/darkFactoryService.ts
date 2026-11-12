@@ -15,14 +15,16 @@
  */
 import * as path from 'path';
 import {
+	DARK_FACTORY_CATALOGUE_VERSION,
 	agentPullRequestObservation,
 	buildDarkFactoryReport,
+	evaluatorObservation,
 	scoreDarkFactoryReadiness,
 	type DarkFactoryPrStats,
 	type DarkFactoryRepoSignals,
 } from '../../src/darkFactoryReadiness';
 import { collectDarkFactoryFileSignals, isGitRepoRoot, readGitOriginUrl, resolveRepoIdentity } from '../../src/darkFactorySignals';
-import type { DarkFactoryReport } from '../../src/types';
+import type { DarkFactoryHosting, DarkFactoryReport } from '../../src/types';
 import { buildGitHubHosts, parseGitHubRemote, type RepoPrStatsResult } from './githubPrService';
 
 /**
@@ -55,9 +57,10 @@ export function parseCachedReport(value: unknown): DarkFactoryReport | undefined
  */
 export function readinessScopeKey(workspacePaths: readonly string[]): string {
 	// The skipped count is part of the scope: crossing the scan cap changes the overview
-	// without changing the selected roots.
+	// without changing the selected roots. So is the catalogue version: a report scored
+	// against an older catalogue lists controls that may no longer exist.
 	const { roots, skipped } = selectRepoRoots(workspacePaths);
-	return `${roots.join('|')}#${skipped}`;
+	return `${roots.join('|')}#${skipped}@${DARK_FACTORY_CATALOGUE_VERSION}`;
 }
 
 /** The persisted cache entry: a report plus the scope it was scanned for. */
@@ -84,12 +87,17 @@ export function isReportStale(report: DarkFactoryReport, now: Date = new Date())
 	return !(age >= 0 && age <= DARK_FACTORY_CACHE_TTL_MS);
 }
 
-/** Resolve `owner/repo` from a repository's `origin` remote, when it is a GitHub one. */
-function resolveNameWithOwner(repoRoot: string, hosts: Set<string>): string | undefined {
+/**
+ * Resolve where a repository is hosted from its `origin` remote, and its
+ * `owner/repo` when that remote is a GitHub one. A remote that is not on a known
+ * GitHub host is `other` — which is also what a GitHub Enterprise Server remote
+ * reads as until its URI is configured.
+ */
+function resolveHosting(repoRoot: string, hosts: Set<string>): { hosting: DarkFactoryHosting; nameWithOwner?: string } {
 	const origin = readGitOriginUrl(repoRoot);
-	if (!origin) { return undefined; }
+	if (!origin) { return { hosting: 'unknown' }; }
 	const parsed = parseGitHubRemote(origin, hosts);
-	return parsed ? `${parsed.owner}/${parsed.repo}` : undefined;
+	return parsed ? { hosting: 'github', nameWithOwner: `${parsed.owner}/${parsed.repo}` } : { hosting: 'other' };
 }
 
 /**
@@ -129,6 +137,7 @@ export function indexPrStats(prStats: RepoPrStatsResult | undefined): Map<string
 		index.set(`${repo.owner}/${repo.repo}`.toLowerCase(), {
 			totalPrs: repo.totalPrs,
 			aiAuthoredPrs: repo.aiAuthoredPrs,
+			aiReviewRequestedPrs: repo.aiReviewRequestedPrs,
 			error: repo.error,
 		});
 	}
@@ -160,14 +169,20 @@ export function scanDarkFactoryReadiness(options: DarkFactoryScanOptions): DarkF
 
 	const reports = roots.map(repoRoot => {
 		const { observations, facts } = collectDarkFactoryFileSignals(repoRoot);
-		const nameWithOwner = resolveNameWithOwner(repoRoot, hosts);
-		const prObservation = agentPullRequestObservation(nameWithOwner ? prIndex.get(nameWithOwner.toLowerCase()) : undefined);
+		const { hosting, nameWithOwner } = resolveHosting(repoRoot, hosts);
+		const prStats = nameWithOwner ? prIndex.get(nameWithOwner.toLowerCase()) : undefined;
+		const evaluator = evaluatorObservation(observations['independent-evaluator-agent'], prStats);
 
 		const signals: DarkFactoryRepoSignals = {
 			name: path.basename(repoRoot),
 			repoRoot,
 			nameWithOwner,
-			observations: { ...observations, 'agent-authored-pull-requests': prObservation },
+			hosting,
+			observations: {
+				...observations,
+				'agent-authored-pull-requests': agentPullRequestObservation(prStats),
+				...(evaluator ? { 'independent-evaluator-agent': evaluator } : {}),
+			},
 			facts,
 		};
 		return scoreDarkFactoryReadiness(signals);
