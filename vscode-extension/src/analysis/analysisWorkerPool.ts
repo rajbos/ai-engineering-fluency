@@ -115,6 +115,20 @@ interface Slot {
 	resumeQueue: Array<() => void>;
 }
 
+/** What a request is about, for log lines: its file, its workspace, or `fallback` for neither. */
+export function describeRequestTarget(request: AnalysisRequest, fallback: string): string {
+	if ('path' in request) { return request.path; }
+	if ('workspace' in request) { return request.workspace; }
+	return fallback;
+}
+
+/** The stall report's "longest-running" part: the oldest in-flight request, how long it has run, and whether it waits on the host. */
+export function describeLongestRunning(oldest: Pick<Pending, 'request' | 'postedAt' | 'hostLookups'> | undefined, now: number): string {
+	if (!oldest) { return 'none'; }
+	const onHost = oldest.hostLookups > 0 ? ' (waiting on the host)' : '';
+	return `${describeRequestTarget(oldest.request, 'a request')} for ${Math.round((now - oldest.postedAt) / 1000)}s${onHost}`;
+}
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
 const DEFAULT_MAX_RESTARTS = 5;
 const DEFAULT_RESTART_WINDOW_MS = 60 * 1000;
@@ -447,6 +461,16 @@ export class AnalysisWorkerPool {
 	}
 
 	private reportStall(limitMs: number): void {
+		const { inFlight, onHost, oldest } = this.summarizeInFlight();
+		if (inFlight === 0 && this.queue.length === 0) { this.lastProgressAt = Date.now(); return; }
+		const now = Date.now();
+		if (now - this.lastProgressAt < limitMs || now - this.lastStallReportAt < limitMs) { return; }
+		this.lastStallReportAt = now;
+		this.options.warn(`Analysis pool: no request has completed for ${Math.round((now - this.lastProgressAt) / 1000)}s — ${this.queue.length} queued, ${inFlight} on workers (${onHost} waiting on the host), longest-running: ${describeLongestRunning(oldest, now)}`);
+	}
+
+	/** Counts the requests on workers and those of them parked on the host, and finds the one posted first. */
+	private summarizeInFlight(): { inFlight: number; onHost: number; oldest: Pending | undefined } {
 		let inFlight = 0;
 		let onHost = 0;
 		let oldest: Pending | undefined;
@@ -457,12 +481,7 @@ export class AnalysisWorkerPool {
 				if (!oldest || pending.postedAt < oldest.postedAt) { oldest = pending; }
 			}
 		}
-		if (inFlight === 0 && this.queue.length === 0) { this.lastProgressAt = Date.now(); return; }
-		const now = Date.now();
-		if (now - this.lastProgressAt < limitMs || now - this.lastStallReportAt < limitMs) { return; }
-		this.lastStallReportAt = now;
-		const what = oldest ? ('path' in oldest.request ? oldest.request.path : 'workspace' in oldest.request ? oldest.request.workspace : 'a request') : 'none';
-		this.options.warn(`Analysis pool: no request has completed for ${Math.round((now - this.lastProgressAt) / 1000)}s — ${this.queue.length} queued, ${inFlight} on workers (${onHost} waiting on the host), longest-running: ${what}${oldest ? ` for ${Math.round((now - oldest.postedAt) / 1000)}s${oldest.hostLookups > 0 ? ' (waiting on the host)' : ''}` : ''}`);
+		return { inFlight, onHost, oldest };
 	}
 
 	private onTimeout(slot: Slot, pending: Pending): void {
@@ -477,7 +496,7 @@ export class AnalysisWorkerPool {
 		for (const other of slot.pending.values()) {
 			if (other !== pending && other.timer) { clearTimeout(other.timer); other.timer = undefined; }
 		}
-		const target = 'path' in pending.request ? pending.request.path : 'workspace' in pending.request ? pending.request.workspace : 'a session';
+		const target = describeRequestTarget(pending.request, 'a session');
 		this.options.warn(`Analysis of ${target} exceeded ${(this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS) / 1000}s; restarting its worker`);
 		// Killing the worker is the only way to stop a hung synchronous parse. The exit handler
 		// rejects this request as a timeout and re-sends the innocent ones sharing the worker.
