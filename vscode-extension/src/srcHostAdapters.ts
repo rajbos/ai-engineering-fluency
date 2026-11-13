@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import type { SessionDiscoveryDeps } from '../../src/sessionDiscovery';
 import type { WindsurfHost } from '../../src/windsurf';
+import { discoverWslSessionFiles, isWslScanAllowedByEnvironment } from '../../src/wslDiscovery';
 
 export function createWindsurfHost(): WindsurfHost {
 	return {
@@ -15,10 +16,15 @@ export function createWindsurfHost(): WindsurfHost {
 	};
 }
 
-export function createSessionDiscoveryHost(): Pick<SessionDiscoveryDeps, 'getConfiguredSampleDataDirectory' | 'getExtensionStatus'> {
+export function createSessionDiscoveryHost(): Pick<SessionDiscoveryDeps, 'getConfiguredSampleDataDirectory' | 'getExtensionStatus' | 'getExtraSessionFiles'> {
 	return {
 		getConfiguredSampleDataDirectory: () =>
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory'),
 		getExtensionStatus: (id) => vscode.extensions.getExtension(id),
+		// Windows only; running WSL distros only (never starts one). Re-read on every scan so the setting applies without a reload.
+		getExtraSessionFiles: async () =>
+			isWslScanAllowedByEnvironment() && vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('wsl.scanRunningDistros', true)
+				? discoverWslSessionFiles()
+				: [],
 	};
 }

@@ -68,7 +68,10 @@ export class ClaudeCodeDataAccess {
 	isClaudeCodeSessionFile(filePath: string): boolean {
 		const normalized = normalizePathForComparison(filePath);
 		const projectsDir = normalizePathForComparison(this.getClaudeCodeProjectsDir());
-		return normalized.startsWith(projectsDir) && normalized.endsWith('.jsonl');
+		if (!normalized.endsWith('.jsonl')) { return false; }
+		// A Claude Code home inside a running WSL distro, read from Windows (see wslDiscovery.ts).
+		if (/^\/\/wsl(?:\.localhost|\$)\/[^/]+\/home\/[^/]+\/\.claude\/projects\//.test(normalized)) { return true; }
+		return normalized.startsWith(projectsDir);
 	}
 
 	/**

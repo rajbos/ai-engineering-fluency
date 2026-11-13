@@ -88,6 +88,7 @@
   "config.backend.blobCompressFiles.description": "Compress session log files with gzip before uploading to blob storage to reduce storage costs and bandwidth.",
   "config.backend.sharingServer.enabled.description": "Enable syncing to the self-hosted Team Server backend. Can run simultaneously with Azure Storage (backend.enabled). Requires backend.sharingServer.endpointUrl to be configured.",
   "config.backend.sharingServer.endpointUrl.description": "Base URL of the self-hosted sharing server (e.g. https://copilot-sharing.example.com). Authentication is handled automatically via your existing GitHub session — no API key needed.",
+  "config.wsl.scanRunningDistros.description": "Windows only: also read session files of coding agents (Claude Code, Codex CLI, Copilot CLI, Mistral Vibe incl. Agent of Empires sandboxes) from WSL distros that are already RUNNING. A stopped distro is never started or read.",
   "config.sampleDataDirectory.description": "Screenshot/demo mode: when set to a folder path, overrides all session file scanning and returns only .json/.jsonl files from this directory. Leave empty for normal operation.",
   "config.suppressedUnknownTools.description": "List of tool names to suppress from the 'Unknown Tools Found' section in the Usage Analysis dashboard. Useful for tools you are testing that don't yet have friendly display names.",
   "config.curation.timeWindowDays.description": "Number of days to look back when determining which tools are unused for the Tool Curation analysis.",

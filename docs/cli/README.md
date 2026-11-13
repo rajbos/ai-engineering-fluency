@@ -45,6 +45,7 @@ Global options, valid before any command:
 | Option | Effect |
 |---|---|
 | `--no-cache` | Ignore the parsed-session cache (`cli-cache.json`) and re-parse every file; that cache is neither read nor written for the run. It does **not** bypass the `segment` output cache — use `segment --refresh` for that. |
+| `--no-wsl` | Windows only: do not scan running WSL distros for session files (see [WSL distros](#sessions-inside-wsl-distros-windows)). |
 | `-V, --version` | Print the package version. |
 | `-h, --help` | Help for the CLI, or for one command: `ai-engineering-fluency usage --help`. |
 
@@ -400,7 +401,8 @@ These change where session files are looked for. They are the same variables the
 |---|---|
 | `CODEX_HOME` | Codex CLI data folder instead of `~/.codex`. |
 | `HERMES_HOME` | Hermes data folder instead of `~/.hermes` (`%LOCALAPPDATA%\hermes` on Windows). |
-| `VIBE_HOME` | Mistral Vibe data folder instead of `~/.vibe`. |
+| `VIBE_HOME` | Mistral Vibe data folder instead of `~/.vibe`. Agent of Empires sandbox stores under `<VIBE_HOME>/sandbox-v2/*/` are scanned as extra Vibe roots. |
+| `AI_ENGINEERING_FLUENCY_WSL` | Windows: set to `0`, `false`, `off` or `no` to turn off scanning of WSL distros (same as `--no-wsl`). |
 | `XDG_CONFIG_HOME` | Linux: base for VS Code-family, Cline and Cursor data (default `~/.config`). Linux/macOS: base for Crush's `projects.json`. |
 | `XDG_DATA_HOME` | Linux/macOS: base for OpenCode and Kilo Code (default `~/.local/share`). Linux: base for Devin CLI. |
 | `APPDATA` | Windows: base for VS Code-family, Cline, Cursor, Kiro and Devin CLI data. |
@@ -409,6 +411,18 @@ These change where session files are looked for. They are the same variables the
 | `USERPROFILE` | Inside WSL, a value like `/mnt/d/Users/<name>` adds that drive when your Windows profile is not on `C:`. |
 
 > Known limitation: the CLI labels sessions by recognising the default folder names (`.codex`, `.vibe`, `hermes`). If you point `CODEX_HOME`, `VIBE_HOME` or `HERMES_HOME` at a folder with a different name, the sessions may be shown as "VS Code" or not be parsed.
+
+### Sessions inside WSL distros (Windows)
+
+On Windows the CLI also reads session files that live inside WSL distros, for example Claude Code, Codex CLI, Copilot CLI and Mistral Vibe run in Ubuntu (including Agent of Empires sandboxes, whose Vibe logs sit in `~/.vibe/sandbox-v2/<aoe-session-id>/` on the Ubuntu side). This is the reverse of the WSL-to-Windows lookup described above.
+
+- Only distros that are **already running** are read. They are found with `wsl.exe --list --running --quiet`. Reading a `\wsl.localhost\<distro>` path starts a stopped distro, so the CLI never touches the path of a distro that is not in that list, and never starts one. `docker-desktop` and `docker-desktop-data` are skipped.
+- User homes come from the distro's `/etc/passwd` (entries with a `/home/<user>` home); `.claude`, `.codex`, `.copilot` and `.vibe` (plus the AoE sandbox stores) are checked in each.
+- Sessions from Mistral Vibe show their origin in the title, e.g. `[WSL:Ubuntu · AoE:3f9a2c1b]`.
+- Disable with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`. If `wsl.exe` is missing or slow (4 s timeout) the scan is silently skipped.
+- Not yet scanned inside WSL: the other tools' folders (Gemini CLI, OpenCode, Pi, ...).
+
+To check the "never starts a distro" behaviour by hand: run `wsl --terminate <distro>`, confirm it is gone with `wsl -l --running`, run `ai-engineering-fluency stats`, and confirm `wsl -l --running` is still empty afterwards. Then start the distro (for example `wsl -d <distro>`) and run `stats` again to see its sessions. (Don't terminate a distro that runs services you need.)
 
 ### Opt-ins for exact token counts
 

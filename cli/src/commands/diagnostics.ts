@@ -86,7 +86,7 @@ export const diagnosticsCommand = new Command('diagnostics')
 	.option('--json', 'Output the Diagnostics view payload as JSON (for machine consumption)')
 	.action(async (options) => {
 		if (shouldOutputJson(options)) {
-			const candidates = getDiagnosticPaths();
+			const candidates = await getDiagnosticPaths();
 			const sessionFiles = await discoverSessionFiles();
 			const usageStats = sessionFiles.length === 0 ? null : await calculateUsageAnalysisStats(sessionFiles);
 			const report = `AI Engineering Fluency CLI - Diagnostic Report
@@ -98,7 +98,7 @@ Timestamp: ${new Date().toISOString()}`;
 		console.log(chalk.bold.cyan('\n🔬 Copilot Token Tracker - Diagnostics\n'));
 
 		// --- Search path candidates ---
-		const candidates = getDiagnosticPaths();
+		const candidates = await getDiagnosticPaths();
 		const existing = candidates.filter(c => c.exists);
 		const missing = candidates.filter(c => !c.exists);
 
