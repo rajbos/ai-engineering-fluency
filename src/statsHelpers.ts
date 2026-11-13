@@ -589,35 +589,59 @@ export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: numb
 	// the sole (and therefore filtered-out) entry in `shares`, which would leave every chart map
 	// empty for this entry instead of falling back to "Conversation".
 	const safeTaskCategory = taskCategory && !isUnsafeObjectKey(taskCategory) ? taskCategory : undefined;
-	if (safeTaskCategory) {
-		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-		if (!Object.hasOwn(entry.taskCategoryUsage, safeTaskCategory) || !entry.taskCategoryUsage[safeTaskCategory]) { entry.taskCategoryUsage[safeTaskCategory] = { tokens: 0, sessions: 0 }; }
-		entry.taskCategoryUsage[safeTaskCategory].tokens += tokens;
-		entry.taskCategoryUsage[safeTaskCategory].sessions += 1;
+	if (safeTaskCategory) { addTaskCategoryUsage(entry, safeTaskCategory, tokens); }
+	ensureTaskCategoryChartMaps(entry);
+	const shares = resolveTaskCategoryShares(safeTaskCategory, taskCategoryShares);
+	for (const [category, shareRaw] of Object.entries(shares)) {
+		if (isUnsafeObjectKey(category)) { continue; }
+		const share = Number(shareRaw) || 0;
+		if (share <= 0) { continue; }
+		addTaskCategoryShare(entry, category as TaskCategory, share, tokens, modelUsage);
 	}
-	if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
-	if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
-	if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+}
+
+/** Adds one session's tokens to `taskCategoryUsage` (efficiencyAnalysis.ts's task-mix input). */
+function addTaskCategoryUsage(entry: DailyTokenStats, category: TaskCategory, tokens: number): void {
+	if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+	if (!Object.hasOwn(entry.taskCategoryUsage, category) || !entry.taskCategoryUsage[category]) { entry.taskCategoryUsage[category] = { tokens: 0, sessions: 0 }; }
+	entry.taskCategoryUsage[category].tokens += tokens;
+	entry.taskCategoryUsage[category].sessions += 1;
+}
+
+/**
+ * Picks the category weights to attribute by: the breakdown when it has any positive share, else
+ * the (safe) primary category, else "Conversation".
+ */
+function resolveTaskCategoryShares(safeTaskCategory: TaskCategory | undefined, taskCategoryShares: TaskCategoryBreakdown | undefined): Partial<Record<string, number>> {
 	// TaskCategoryBreakdown is always a full, all-categories map (see taskClassification.ts), so
 	// Object.keys(...).length is always 12 — checking it alone would treat an all-zero breakdown
 	// as "meaningful" and skip every category below, leaving no attribution at all. Require at
 	// least one positive share instead.
 	const hasPositiveShare = taskCategoryShares && Object.values(taskCategoryShares).some(v => Number(v) > 0);
-	const shares = hasPositiveShare
-		? taskCategoryShares!
-		: (safeTaskCategory ? { [safeTaskCategory]: 1 } : { Conversation: 1 });
-	for (const [category, shareRaw] of Object.entries(shares)) {
-		if (isUnsafeObjectKey(category)) { continue; }
-		const share = Number(shareRaw) || 0;
-		if (share <= 0) { continue; }
-		const cat = category as TaskCategory;
-		// Own-property reads: a parsed or cached category such as "toString" must not resolve to an
-		// inherited member (adding a number to a function would store a string).
-		entry.taskCategoryTokens[cat] = ((Object.hasOwn(entry.taskCategoryTokens, cat) && entry.taskCategoryTokens[cat]) || 0) + (tokens * share);
-		entry.taskCategorySessions[cat] = ((Object.hasOwn(entry.taskCategorySessions, cat) && entry.taskCategorySessions[cat]) || 0) + share;
-		if (!Object.hasOwn(entry.taskCategoryModelUsage, cat) || !entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
-		addModelUsage(entry.taskCategoryModelUsage[cat]!, scaleModelUsage(modelUsage, share));
-	}
+	if (hasPositiveShare) { return taskCategoryShares!; }
+	return safeTaskCategory ? { [safeTaskCategory]: 1 } : { Conversation: 1 };
+}
+
+/** Adds one category's weighted share of a session to the chart's "By Task" maps. */
+function addTaskCategoryShare(entry: DailyTokenStats, cat: TaskCategory, share: number, tokens: number, modelUsage: ModelUsage): void {
+	const { taskCategoryTokens, taskCategorySessions, taskCategoryModelUsage } = ensureTaskCategoryChartMaps(entry);
+	// Own-property reads: a parsed or cached category such as "toString" must not resolve to an
+	// inherited member (adding a number to a function would store a string).
+	taskCategoryTokens[cat] = ((Object.hasOwn(taskCategoryTokens, cat) && taskCategoryTokens[cat]) || 0) + (tokens * share);
+	taskCategorySessions[cat] = ((Object.hasOwn(taskCategorySessions, cat) && taskCategorySessions[cat]) || 0) + share;
+	if (!Object.hasOwn(taskCategoryModelUsage, cat) || !taskCategoryModelUsage[cat]) { taskCategoryModelUsage[cat] = {}; }
+	addModelUsage(taskCategoryModelUsage[cat]!, scaleModelUsage(modelUsage, share));
+}
+
+/**
+ * Creates the chart's "By Task" maps when missing. Always runs for every entry, even when no share
+ * survives filtering, so callers see empty maps rather than undefined.
+ */
+function ensureTaskCategoryChartMaps(entry: DailyTokenStats): Required<Pick<DailyTokenStats, 'taskCategoryTokens' | 'taskCategorySessions' | 'taskCategoryModelUsage'>> {
+	if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
+	if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
+	if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+	return { taskCategoryTokens: entry.taskCategoryTokens, taskCategorySessions: entry.taskCategorySessions, taskCategoryModelUsage: entry.taskCategoryModelUsage };
 }
 
 function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
