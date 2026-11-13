@@ -10,7 +10,8 @@ import type {
 } from '../ecosystemAdapter';
 import { KiroDataAccess } from '../kiro';
 import { createEmptyContextRefs } from '../tokenEstimation';
-import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
+import { applyModelSwitchingStats } from './modelSwitching';
 
 export class KiroAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'kiro';
@@ -107,16 +108,7 @@ export class KiroAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, I
 				analysis.toolCalls.byTool[toolCall.toolName] = (analysis.toolCalls.byTool[toolCall.toolName] || 0) + 1;
 			}
 		}
-		const uniqueModels = [...new Set(models)];
-		analysis.modelSwitching.uniqueModels = uniqueModels;
-		analysis.modelSwitching.modelCount = uniqueModels.length;
-		analysis.modelSwitching.totalRequests = models.length;
-		let switchCount = 0;
-		for (let i = 1; i < models.length; i++) {
-			if (models[i] !== models[i - 1]) { switchCount++; }
-		}
-		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
+		applyModelSwitchingStats(analysis, models, ctx.modelPricing);
 		return analysis;
 	}
 }

@@ -6,7 +6,8 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { VisualStudioDataAccess } from '../visualstudio';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { isMcpTool, normalizeMcpToolName, extractMcpServerName, normalizePathForComparison } from '../workspaceHelpers';
-import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
+import { applyModelSwitchingStats } from './modelSwitching';
 
 export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'visualstudio';
@@ -168,16 +169,7 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 				this.processVSResponseObject(objects[i]?.[1], analysis, models, ctx);
 			}
 		}
-		const uniqueModels = [...new Set(models)];
-		analysis.modelSwitching.uniqueModels = uniqueModels;
-		analysis.modelSwitching.modelCount = uniqueModels.length;
-		analysis.modelSwitching.totalRequests = models.length;
-		let switchCount = 0;
-		for (let i = 1; i < models.length; i++) {
-			if (models[i] !== models[i - 1]) { switchCount++; }
-		}
-		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
+		applyModelSwitchingStats(analysis, models, ctx.modelPricing);
 		return analysis;
 	}
 
