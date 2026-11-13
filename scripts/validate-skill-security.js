@@ -9,7 +9,7 @@
  *   - declared in `.github/skills/skill-security-classification.json` as
  *     `exempt` (with a reason) or `pending` (with a tracking issue number).
  * Never both, and never neither. The triggers that make a skill require a
- * `SECURITY.md` are listed in AGENTS.md ("Skill security classification").
+ * `SECURITY.md` are listed in .github/skills/README.md ("Skill security classification").
  *
  * Always checks every skill, not just changed ones, so editing only the
  * classification file cannot leave a stale entry behind.
@@ -215,7 +215,7 @@ function main(argv) {
 	if (errors.length > 0) {
 		console.error('Skill security classification failed:');
 		for (const error of errors) { console.error(`  - ${error}`); }
-		console.error('See "Skill security classification" in AGENTS.md.');
+		console.error('See "Skill security classification" in .github/skills/README.md.');
 		return 1;
 	}
 	console.log('Skill security classification OK.');

@@ -2,8 +2,7 @@
 
 Lightweight model derived from reading `session-file-discovery.js`, `get-session-files.js`,
 `diagnose-session-files.js` and `analyze-session-schema.ps1`. Update it in the same PR as
-any change that adds or alters a trigger surface (see "Skill security classification" in
-the repository `AGENTS.md`).
+any change that adds or alters a trigger surface (see "Skill security classification" in `.github/skills/README.md`).
 
 This skill is classified as modelled (not exempt) because `analyze-session-schema.ps1`
 reads the user's private AI session logs and writes what it derives into a file inside

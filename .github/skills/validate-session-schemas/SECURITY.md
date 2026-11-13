@@ -2,7 +2,7 @@
 
 Lightweight model derived from reading `validate-session-schemas.js` and
 `schema-baselines.json`. Update it in the same PR as any change that adds or alters a
-trigger surface (see "Skill security classification" in the repository `AGENTS.md`).
+trigger surface (see "Skill security classification" in `.github/skills/README.md`).
 
 This skill is classified as modelled (not exempt) because it temporarily copies OpenCode
 conversation data into the OS temp directory, outside stdout and outside any declared output

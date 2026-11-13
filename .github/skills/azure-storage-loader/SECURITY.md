@@ -2,7 +2,7 @@
 
 Lightweight model derived from reading `load-table-data.js` and `example-usage.js`.
 Update it in the same PR as any change that adds or alters a trigger surface (see
-"Skill security classification" in the repository `AGENTS.md`).
+"Skill security classification" in `.github/skills/README.md`).
 
 ## What the scripts do and talk to
 

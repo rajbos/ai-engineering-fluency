@@ -4,9 +4,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "npm compile",
+      "label": "pnpm compile",
       "type": "shell",
-      "command": "npm run compile",
+      "command": "pnpm run compile",
       "options": {
         "cwd": "${workspaceFolder}/vscode-extension"
       },

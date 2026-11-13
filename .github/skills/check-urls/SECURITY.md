@@ -1,8 +1,8 @@
 # Security model: check-urls
 
 Lightweight model derived from reading `check-urls.js`. Update it in the same PR as any
-change that adds or alters a trigger surface (see "Skill security classification" in the
-repository `AGENTS.md`).
+change that adds or alters a trigger surface (see "Skill security classification" in
+`.github/skills/README.md`).
 
 ## What the scripts do and talk to
 
@@ -21,7 +21,7 @@ repository `AGENTS.md`).
 
 ## Credentials used and where they come from
 
-None. The only header sent is `User-Agent: copilot-token-tracker-url-checker/1.0`.
+None. The only header sent is `User-Agent: ai-engineering-fluency-url-checker/1.0`.
 No environment variables are read.
 
 ## Untrusted inputs parsed
