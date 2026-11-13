@@ -715,21 +715,7 @@ args: { machineId: string; userId: string | undefined; editorForFile: string | u
 ): Promise<boolean> {
 if (!this.deps.editorHandlers?.getOpenCodeSessionData) { return false; }
 const getOpenCodeSessionData = this.deps.editorHandlers.getOpenCodeSessionData;
-const data = await getOpenCodeSessionData(sessionFile);
-const eventMs = data.timestamp || fileMtimeMs;
-if (!eventMs || eventMs < args.startMs) { return false; }
-const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
-await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, args.workspaceNamesById);
-for (const [model, usage] of Object.entries(data.modelUsage)) {
-const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId: args.machineId, userId: args.userId, editor: args.editorForFile };
-upsertDailyRollup(args.rollups, key, {
-inputTokens: usage.inputTokens || 0,
-outputTokens: usage.outputTokens || 0,
-interactions: usage.interactions || 0,
-});
-}
-return true;
+return this.addModelUsageSessionToRollups(sessionFile, fileMtimeMs, args, await getOpenCodeSessionData(sessionFile));
 }
 
 /**
@@ -744,11 +730,23 @@ args: { machineId: string; userId: string | undefined; editorForFile: string | u
 ): Promise<boolean> {
 if (!this.deps.editorHandlers?.getCrushSessionData) { return false; }
 const getCrushSessionData = this.deps.editorHandlers.getCrushSessionData;
-const data = await getCrushSessionData(sessionFile);
+// Crush paths: <project>/.crush/crush.db#<id>  — no workspaceStorage segment
+return this.addModelUsageSessionToRollups(sessionFile, fileMtimeMs, args, await getCrushSessionData(sessionFile));
+}
+
+/**
+ * Adds a session whose handler reports per-model usage (OpenCode, Crush) to the rollups map, on the day of its
+ * timestamp (or the file's mtime). Returns false if that falls outside the lookback window.
+ */
+private async addModelUsageSessionToRollups(
+sessionFile: string,
+fileMtimeMs: number,
+args: { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number },
+data: { modelUsage: Record<string, ModelUsageEntry>; timestamp: number }
+): Promise<boolean> {
 const eventMs = data.timestamp || fileMtimeMs;
 if (!eventMs || eventMs < args.startMs) { return false; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-// Crush paths: <project>/.crush/crush.db#<id>  — no workspaceStorage segment
 const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
 await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, args.workspaceNamesById);
 for (const [model, usage] of Object.entries(data.modelUsage)) {
@@ -2136,7 +2134,7 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 		this.deps.logger.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
 
 		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
-		const entities = this.buildBackfillEntities(rollups, settings, sharingPolicy, resolvedIdentity, workspaceNamesById, machineNamesById);
+		const entities = this.buildEntitiesForSync(rollups, settings, sharingPolicy, resolvedIdentity, workspaceNamesById, machineNamesById);
 
 		// Signal upload phase to caller before the (potentially slow) upsert
 		onProgress?.(-1, entities.length, sortedDays.length);
@@ -2155,34 +2153,6 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 		const dayKeys = new Set<string>();
 		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
 		return Array.from(dayKeys).sort();
-	}
-
-	private buildBackfillEntities(
-		rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
-		settings: BackendSettings,
-		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
-		resolvedIdentity: { userId?: string; userKeyType?: BackendUserIdentityMode },
-		workspaceNamesById: Record<string, string>,
-		machineNamesById: Record<string, string>
-	): BackendAggDailyEntityLike[] {
-		const entities: BackendAggDailyEntityLike[] = [];
-		for (const { key, value } of rollups.values()) {
-			const effectiveUserId = (key.userId ?? '').trim() || undefined;
-			const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
-			const includeNames = sharingPolicy.includeNames;
-			const { workspaceId: workspaceIdToStore, machineId: machineIdToStore } = applyIdStrategies(key, settings.datasetId, sharingPolicy);
-			entities.push(createDailyAggEntity({
-				datasetId: settings.datasetId, day: key.day, model: key.model,
-				workspaceId: workspaceIdToStore, workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,
-				machineId: machineIdToStore, machineName: includeNames ? machineNamesById[key.machineId] : undefined,
-				userId: effectiveUserId, userKeyType: resolvedIdentity.userKeyType,
-				shareWithTeam: includeConsent ? true : undefined,
-				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
-				inputTokens: value.inputTokens, outputTokens: value.outputTokens,
-				interactions: value.interactions, fluencyMetrics: value.fluencyMetrics
-			}));
-		}
-		return entities;
 	}
 
 	private async cleanBackfillStaleEntities(
