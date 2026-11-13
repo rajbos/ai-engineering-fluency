@@ -773,6 +773,17 @@ test('compareModels: nulls stay null and never produce a winner', () => {
 	assert.equal(cost.significant, false);
 });
 
+test('compareModels: two zero values are a zero-delta tie, not a division by zero', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({ cost: 0 }) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({ cost: 0 }) })], 'b', 'Jul')!;
+	const cost = compareModels(a, b).rows.find(r => r.id === 'cost-per-edit-turn')!;
+	assert.equal(cost.a, 0);
+	assert.equal(cost.b, 0);
+	assert.equal(cost.deltaPct, 0);
+	assert.equal(cost.winner, 'tie');
+	assert.equal(cost.significant, false);
+});
+
 test('compareModels: verdict counts significant wins on each side', () => {
 	// b is cheaper (wins cost rows) but retries far more (loses quality rows).
 	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({ cost: 40 }) })], 'a', 'Jul')!;
