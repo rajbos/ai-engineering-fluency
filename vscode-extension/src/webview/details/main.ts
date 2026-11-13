@@ -13,43 +13,14 @@ import dataTableStyles from '../shared/dataTable.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
-import type { ModelUsage } from '../shared/types';
+import type { PeriodStats } from '../../../../src/types';
 import { getBillingGroup } from '../../../../src/chartDataBuilder';
 import { ALL_PERIODS, getAllProviders, getFilterableProviders, getActiveExcludedProviders } from './providerFilter';
 import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 import { renderDataTable, rerenderDataTable, setDataTableState, type DataTableColumn, type DataTableOptions, type DataTableRowOptions, type DataTableState } from '../shared/dataTable';
 
-type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
 type SortDir = 'asc' | 'desc';
-
-type PeriodStats = {
-tokens: number;
-thinkingTokens: number;
-estimatedTokens: number;
-actualTokens: number;
-sessions: number;
-avgInteractionsPerSession: number;
-avgTokensPerSession: number;
-modelUsage: ModelUsage;
-editorUsage: EditorUsage;
-co2: number;
-treesEquivalent: number;
-waterUsage: number;
-estimatedCost: number;
-estimatedCostCopilot?: number;
-cachedTokens?: number;
-/**
- * Estimated cost per billing group (e.g. "GitHub Copilot", "Anthropic", "Google")
- * for this period in USD. Used to show/filter cost across all providers, not just
- * GitHub Copilot's UBB billing.
- */
-billingGroupCosts?: Record<string, number>;
-/** Per-editor model usage breakdown, used to determine which billing group(s) an editor/model belongs to for provider filtering. */
-editorModelUsage?: { [editor: string]: ModelUsage };
-/** Number of sessions in this period that delegated work to sub-agents (1+ sub-agent tool calls). Absent when zero. */
-subAgentSessions?: number;
-};
 
 type DetailedStats = {
 today: PeriodStats;
