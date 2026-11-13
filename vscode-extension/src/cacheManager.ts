@@ -23,6 +23,61 @@ export interface CacheManagerDeps {
 	onPeerClearDetected?: () => void;
 }
 
+/** True when two entries describe the same version of a file (same mtime and size). */
+function isSameFileVersion(a: SessionFileCache, b: SessionFileCache): boolean {
+	return a.mtime === b.mtime && a.size === b.size;
+}
+
+/**
+ * A path removed via deleteCachedSessionData() must not be resurrected from whatever
+ * another (or this) window already published to disk — see deletedFilePaths' doc comment.
+ * Only strip a disk entry that is no newer than this tombstone's baseline mtime: a strictly
+ * newer disk entry means another window republished this path after this deletion decision
+ * was made, and that newer publish must survive, not be silently destroyed.
+ */
+function stripTombstonedEntries(merged: Record<string, SessionFileCache>, tombstones: Map<string, number>): void {
+	for (const [deletedPath, tombstoneMtime] of tombstones) {
+		const diskEntry = merged[deletedPath];
+		if (diskEntry && typeof diskEntry.mtime === 'number' && diskEntry.mtime > tombstoneMtime) {
+			continue;
+		}
+		delete merged[deletedPath];
+	}
+}
+
+/** Whether a live in-memory entry should replace the entry already in the merged snapshot. */
+function shouldReplaceSnapshotEntry(entry: SessionFileCache, prev: SessionFileCache | undefined): boolean {
+	if (!prev) { return true; }
+	// Negated `>=` (not `<`) so a non-numeric prev.mtime still blocks the replacement.
+	if (typeof entry.mtime !== 'number' || !(entry.mtime >= prev.mtime)) { return false; }
+	// A details-only placeholder must not overwrite a full on-disk entry at the same mtime.
+	const placeholderOverFull = entry.detailsOnly === true && !prev.detailsOnly && isSameFileVersion(entry, prev);
+	return !placeholderOverFull;
+}
+
+/** Merge one live in-memory entry into the snapshot, keeping the newer entry by mtime. */
+function mergeLiveEntry(merged: Record<string, SessionFileCache>, filePath: string, entry: SessionFileCache): void {
+	const prev = merged[filePath];
+	if (!shouldReplaceSnapshotEntry(entry, prev)) { return; }
+	// A full entry replacing a same-version placeholder keeps the placeholder's detail metadata.
+	const upgradesPlaceholder = prev?.detailsOnly === true && !entry.detailsOnly && isSameFileVersion(entry, prev);
+	merged[filePath] = upgradesPlaceholder ? mergePlaceholderDetails(entry, prev) : entry;
+}
+
+/** Cap the merged entries to the newest `maxEntries` by mtime. */
+function capToNewestEntries(merged: Record<string, SessionFileCache>, maxEntries: number): Record<string, SessionFileCache> {
+	const keys = Object.keys(merged);
+	if (keys.length <= maxEntries) {
+		return merged;
+	}
+	const capped: Record<string, SessionFileCache> = {};
+	const newestFirst = keys.sort((a, b) => (merged[b].mtime ?? 0) - (merged[a].mtime ?? 0));
+	for (const key of newestFirst.slice(0, maxEntries)) {
+		capped[key] = merged[key];
+	}
+	return capped;
+}
+
 export class CacheManager {
 	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
 	private static readonly SNAPSHOT_MAX_ENTRIES = 20_000;
@@ -1481,37 +1536,11 @@ export class CacheManager {
 	private async buildMergedSnapshotEntries(): Promise<Record<string, SessionFileCache>> {
 		const existing = await this.readSharedSnapshot();
 		const merged: Record<string, SessionFileCache> = existing ? { ...existing } : {};
-		// A path removed via deleteCachedSessionData() must not be resurrected from whatever
-		// another (or this) window already published to disk — see deletedFilePaths' doc comment.
-		// Only strip a disk entry that is no newer than this tombstone's baseline mtime: a strictly
-		// newer disk entry means another window republished this path after this deletion decision
-		// was made, and that newer publish must survive, not be silently destroyed.
-		for (const [deletedPath, tombstoneMtime] of this.deletedFilePaths) {
-			const diskEntry = merged[deletedPath];
-			if (diskEntry && typeof diskEntry.mtime === 'number' && diskEntry.mtime > tombstoneMtime) {
-				continue;
-			}
-			delete merged[deletedPath];
-		}
+		stripTombstonedEntries(merged, this.deletedFilePaths);
 		for (const [filePath, entry] of this.sessionFileCache) {
-			const prev = merged[filePath];
-			// A details-only placeholder must not overwrite a full on-disk entry at the same mtime.
-			const placeholderOverFull = entry.detailsOnly === true && prev && !prev.detailsOnly && entry.mtime === prev.mtime && entry.size === prev.size;
-			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime && !placeholderOverFull)) {
-				// A full entry replacing a same-version placeholder keeps the placeholder's detail metadata.
-				merged[filePath] = prev?.detailsOnly === true && !entry.detailsOnly && entry.mtime === prev.mtime && entry.size === prev.size ? mergePlaceholderDetails(entry, prev) : entry;
-			}
+			mergeLiveEntry(merged, filePath, entry);
 		}
-		const keys = Object.keys(merged);
-		if (keys.length <= CacheManager.SNAPSHOT_MAX_ENTRIES) {
-			return merged;
-		}
-		const capped: Record<string, SessionFileCache> = {};
-		const newestFirst = keys.sort((a, b) => (merged[b].mtime ?? 0) - (merged[a].mtime ?? 0));
-		for (const key of newestFirst.slice(0, CacheManager.SNAPSHOT_MAX_ENTRIES)) {
-			capped[key] = merged[key];
-		}
-		return capped;
+		return capToNewestEntries(merged, CacheManager.SNAPSHOT_MAX_ENTRIES);
 	}
 
 	/**
