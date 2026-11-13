@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
 import type * as http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { detectAiType, detectCoAuthorAiType, normalizeRepoKey, reconcileRepoPrRecords, summarizeRepoPrRecords, toCacheableRepoPrRecords, toRepoPrRecord, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, isCompletedCopilotReview, isAttributableCopilotReviewRequest, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import { detectAiType, detectCoAuthorAiType, normalizeRepoKey, reconcileRepoPrRecords, summarizeRepoPrRecords, toCacheableRepoPrRecords, toRepoPrRecord, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchCopilotPlanInfoPage, fetchCopilotTokenEndpointInfoPage, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, isCompletedCopilotReview, isAttributableCopilotReviewRequest, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 /**
  * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
@@ -559,6 +559,94 @@ test('fetchCopilotTokenEndpointInfo: handles partial response gracefully', async
 	assert.equal(error, undefined);
 	assert.equal(info?.endpoints?.api, 'https://api.business.githubcopilot.com');
 	assert.equal(info?.expires_at, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// fetchCopilotPlanInfoPage / fetchCopilotTokenEndpointInfoPage — the shared
+// copilot_internal JSON fetch, driven through an injected request factory so
+// no live network call is made.
+// ---------------------------------------------------------------------------
+
+/** A fake request factory that answers with `statusCode` and `body`, recording the request options. */
+function fakeCopilotInternalRequest(statusCode: number, body: string) {
+	const calls: http.RequestOptions[] = [];
+	const requestFn = ((options: http.RequestOptions, callback: (res: http.IncomingMessage) => void) => {
+		calls.push(options);
+		const res = Object.assign(new EventEmitter(), { statusCode }) as unknown as http.IncomingMessage;
+		callback(res);
+		setImmediate(() => {
+			res.emit('data', body);
+			res.emit('end');
+		});
+		return new FakeClientRequest();
+	}) as unknown as typeof http.request;
+	return { requestFn, calls };
+}
+
+test('fetchCopilotPlanInfoPage: GETs copilot_internal/user and returns the parsed plan on 2xx', async () => {
+	const { requestFn, calls } = fakeCopilotInternalRequest(200, JSON.stringify({ login: 'octocat', copilot_plan: 'copilot_business' }));
+	const result = await fetchCopilotPlanInfoPage('secret-token', requestFn);
+	assert.deepEqual(result, { planInfo: { login: 'octocat', copilot_plan: 'copilot_business' }, statusCode: 200 });
+	assert.equal(calls.length, 1);
+	assert.ok(String(calls[0].path).endsWith('/copilot_internal/user'), String(calls[0].path));
+	const headers = calls[0].headers as Record<string, string>;
+	assert.equal(headers.Authorization, 'Bearer secret-token');
+	assert.equal(headers.Accept, 'application/json');
+});
+
+test('fetchCopilotPlanInfoPage: a non-2xx status returns an HTTP error and no plan', async () => {
+	const { requestFn } = fakeCopilotInternalRequest(403, JSON.stringify({ message: 'Forbidden' }));
+	assert.deepEqual(await fetchCopilotPlanInfoPage('token', requestFn), { statusCode: 403, error: 'HTTP 403' });
+});
+
+test('fetchCopilotPlanInfoPage: malformed JSON returns the parse error and no plan', async () => {
+	const { requestFn } = fakeCopilotInternalRequest(200, '{not json');
+	const result = await fetchCopilotPlanInfoPage('token', requestFn);
+	assert.equal(result.planInfo, undefined);
+	assert.equal(result.statusCode, 200);
+	assert.match(result.error ?? '', /SyntaxError/);
+});
+
+test('fetchCopilotPlanInfoPage: a JSON non-object body is reported as an unexpected format', async () => {
+	const { requestFn } = fakeCopilotInternalRequest(200, 'null');
+	assert.deepEqual(await fetchCopilotPlanInfoPage('token', requestFn), { statusCode: 200, error: 'Unexpected response format' });
+});
+
+test('fetchCopilotTokenEndpointInfoPage: GETs copilot_internal/v2/token and strips the token string on 2xx', async () => {
+	const { requestFn, calls } = fakeCopilotInternalRequest(200, JSON.stringify({
+		token: 'tid=short-lived', expires_at: 1700000000, endpoints: { api: 'https://api.individual.githubcopilot.com' },
+	}));
+	const result = await fetchCopilotTokenEndpointInfoPage('token', requestFn);
+	assert.deepEqual(result, {
+		info: { expires_at: 1700000000, endpoints: { api: 'https://api.individual.githubcopilot.com' } },
+		statusCode: 200,
+	});
+	assert.equal('token' in (result.info ?? {}), false);
+	assert.ok(String(calls[0].path).endsWith('/copilot_internal/v2/token'), String(calls[0].path));
+});
+
+test('fetchCopilotTokenEndpointInfoPage: a non-2xx status returns an HTTP error and no info', async () => {
+	const { requestFn } = fakeCopilotInternalRequest(404, '');
+	assert.deepEqual(await fetchCopilotTokenEndpointInfoPage('token', requestFn), { statusCode: 404, error: 'HTTP 404' });
+});
+
+test('fetchCopilotTokenEndpointInfoPage: malformed JSON returns the parse error and no info', async () => {
+	const { requestFn } = fakeCopilotInternalRequest(200, '<html>');
+	const result = await fetchCopilotTokenEndpointInfoPage('token', requestFn);
+	assert.equal(result.info, undefined);
+	assert.equal(result.statusCode, 200);
+	assert.match(result.error ?? '', /SyntaxError/);
+});
+
+test('fetchCopilotPlanInfoPage: a transport failure resolves with the error instead of rejecting', async () => {
+	const req = new FakeClientRequest();
+	const requestFn = (() => req) as unknown as typeof http.request;
+	const promise = fetchCopilotPlanInfoPage('token', requestFn);
+	req.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+	const result = await promise;
+	assert.equal(result.planInfo, undefined);
+	assert.equal(result.statusCode, undefined);
+	assert.match(result.error ?? '', /ECONNRESET/);
 });
 
 test('fetchCopilotTokenEndpointInfo: handles empty info object gracefully', async () => {
