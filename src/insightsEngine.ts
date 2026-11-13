@@ -41,6 +41,7 @@ import type { ModelPricing } from './types';
 // The translator type lives in types.ts (re-exported by the extension's l10nCore) so this
 // module stays free of the localization bundles: hosts inject a translator.
 import type { Translate } from './types';
+import type { InsightCategory, InsightSeverity, InsightStatus, InsightState, InsightStateBag, EvaluatedInsight } from './types';
 
 /**
  * Picks the `.one` or `.other` variant of a key for `count`.
@@ -321,9 +322,7 @@ function usesOnlyDefaultModelSet(p: UsageAnalysisPeriod): boolean {
 // Public types
 // ---------------------------------------------------------------------------
 
-export type InsightCategory = 'context' | 'agentic' | 'customization' | 'consistency' | 'tools' | 'trend';
-export type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
-export type InsightStatus = 'new' | 'seen' | 'dismissed' | 'snoozed' | 'done';
+export type { InsightCategory, InsightSeverity, InsightStatus, InsightState, InsightStateBag, EvaluatedInsight } from './types';
 
 export interface InsightContext {
 	/**
@@ -353,33 +352,6 @@ export interface InsightContext {
 	repeatedTasks?: RepeatedTaskReport | null;
 	/** Optional — populated when Copilot memory-files discovery has run. */
 	memoryFilesAnalysis?: MemoryFilesAnalysis | null;
-}
-
-export interface InsightState {
-	status: InsightStatus;
-	firstSurfacedAt: string;   // ISO timestamp
-	lastSurfacedAt: string;    // ISO timestamp
-	snoozeUntil?: string;      // ISO timestamp; present when status === 'snoozed'
-}
-
-/** Persisted bag of per-insight state keyed by insight id. */
-export type InsightStateBag = Record<string, InsightState>;
-
-/** A fully evaluated, display-ready insight card. */
-export interface EvaluatedInsight {
-	id: string;
-	category: InsightCategory;
-	severity: InsightSeverity;
-	title: string;
-	body: string;
-	actionLabel?: string;
-	actionCommand?: string;
-	/** Optional second action, rendered alongside the primary one (e.g. an alternate next step). */
-	secondaryActionLabel?: string;
-	secondaryActionCommand?: string;
-	status: InsightStatus;
-	/** When true, this insight may also be surfaced as a VS Code toast notification. */
-	allowToast?: boolean;
 }
 
 // ---------------------------------------------------------------------------
