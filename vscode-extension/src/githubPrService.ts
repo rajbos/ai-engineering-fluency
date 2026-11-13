@@ -106,11 +106,16 @@ type CopilotInternalResponse = { body?: object; statusCode?: number; error?: str
  * GET `<restPathPrefix><path>` with the user's token and resolve with the parsed JSON object.
  * Never rejects: a non-2xx status, a non-object body, a parse error or a transport failure
  * resolves with `error` set instead of `body`.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
  */
-function fetchCopilotInternalJson(token: string, path: string): Promise<CopilotInternalResponse> {
+function fetchCopilotInternalJson(
+	token: string,
+	path: string,
+	requestFn: typeof https.request = https.request,
+): Promise<CopilotInternalResponse> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
-		const req = https.request(
+		const req = requestFn(
 			{
 				hostname,
 				path: `${restPathPrefix}${path}`,
@@ -147,9 +152,12 @@ function fetchCopilotInternalJson(token: string, path: string): Promise<CopilotI
 	});
 }
 
-/** Internal low-level fetcher for the copilot_internal/user endpoint. */
-async function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
-	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/user');
+/**
+ * Low-level fetcher for the copilot_internal/user endpoint.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+export async function fetchCopilotPlanInfoPage(token: string, requestFn: typeof https.request = https.request): Promise<CopilotPlanResult> {
+	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/user', requestFn);
 	return body ? { planInfo: body as CopilotPlanInfo, ...result } : result;
 }
 
@@ -161,7 +169,7 @@ async function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResul
  */
 export function fetchCopilotPlanInfo(
 	token: string,
-	fetcher: (token: string) => Promise<CopilotPlanResult> = fetchCopilotPlanInfoPage,
+	fetcher: (token: string) => Promise<CopilotPlanResult> = (t) => fetchCopilotPlanInfoPage(t),
 ): Promise<CopilotPlanResult> {
 	return fetcher(token);
 }
@@ -193,9 +201,12 @@ export type CopilotTokenEndpointInfo = {
 
 export type CopilotTokenEndpointResult = { info?: CopilotTokenEndpointInfo; statusCode?: number; error?: string };
 
-/** Internal low-level fetcher for the copilot_internal/v2/token endpoint. */
-async function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenEndpointResult> {
-	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/v2/token');
+/**
+ * Low-level fetcher for the copilot_internal/v2/token endpoint.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+export async function fetchCopilotTokenEndpointInfoPage(token: string, requestFn: typeof https.request = https.request): Promise<CopilotTokenEndpointResult> {
+	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/v2/token', requestFn);
 	if (!body) { return result; }
 	// Exclude the short-lived token string — we only care about the metadata.
 	const { token: _token, ...rest } = body as { token?: string } & CopilotTokenEndpointInfo;
@@ -211,7 +222,7 @@ async function fetchCopilotTokenEndpointInfoPage(token: string): Promise<Copilot
  */
 export function fetchCopilotTokenEndpointInfo(
 	token: string,
-	fetcher: (token: string) => Promise<CopilotTokenEndpointResult> = fetchCopilotTokenEndpointInfoPage,
+	fetcher: (token: string) => Promise<CopilotTokenEndpointResult> = (t) => fetchCopilotTokenEndpointInfoPage(t),
 ): Promise<CopilotTokenEndpointResult> {
 	return fetcher(token);
 }
