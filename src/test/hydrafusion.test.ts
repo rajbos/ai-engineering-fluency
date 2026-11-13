@@ -478,6 +478,23 @@ describe('matchHydraFusionTurnsToChatTurns', () => {
 		assert.equal(matches.get(1), 3);
 	});
 
+	test('skips a fusion turn with no start time without consuming chat turns a later fusion turn needs', () => {
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:15.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const hydraTurns = [{ ...summary.turns[0], startedAt: null }, summary.turns[1]];
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: '2026-01-01T00:00:10.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, hydraTurns);
+		assert.equal(matches.has(0), false);
+		assert.equal(matches.get(1), 2);
+		assert.equal(matches.size, 1);
+	});
+
 	test('returns an empty map for a session with no fusion turns', () => {
 		const chatTurns = [{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' }];
 		assert.equal(matchHydraFusionTurnsToChatTurns(chatTurns, []).size, 0);
