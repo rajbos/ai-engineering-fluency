@@ -107,6 +107,7 @@
     "gemini-4-argon": 0.25,
     "gpt-6.1-terra": 0.25,
     "claude-fable-5.2": 0.24,
-    "gemini-4-carbon": 0.25
+    "gemini-4-carbon": 0.25,
+    "gemini-4-hydrogen": 0.25
   }
 }
