@@ -19,7 +19,7 @@ importers:
         version: 6.0.1
       commander:
         specifier: ^15.0.0
-        version: 15.0.0
+        version: 15.1.0
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -319,8 +319,8 @@ packages:
     resolution: {integrity: sha512-/Ce6KNm3vIbWdMlNna6RVIZ/ICQxnJxCicet5LBKK9ZffBkqzDw0xh9EiKSljdRtiIQ1S1z4YgcscUUGzNCWrA==}
     engines: {node: '>=22'}
 
-  commander@15.0.0:
-    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+  commander@15.1.0:
+    resolution: {integrity: sha512-cgnQ88TRrWcC7pVq46RzJVRMktu3W2RcbnoidnfBsl1bmDCBwJS/udcIZpKoCrbAYYaCqsz1yZCVIgbIaU3ddQ==}
     engines: {node: '>=22.12.0'}
 
   esbuild@0.28.2:
@@ -487,7 +487,7 @@ snapshots:
 
   chalk@6.0.1: {}
 
-  commander@15.0.0: {}
+  commander@15.1.0: {}
 
   esbuild@0.28.2:
     optionalDependencies:
