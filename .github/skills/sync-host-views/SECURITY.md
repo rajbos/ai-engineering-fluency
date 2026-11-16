@@ -1,8 +1,7 @@
 # Security model: sync-host-views
 
 Lightweight model derived from reading `sync-host-views.js`. Update it in the same PR as
-any change that adds or alters a trigger surface (see "Skill security classification" in
-the repository `AGENTS.md`).
+any change that adds or alters a trigger surface (see "Skill security classification" in `.github/skills/README.md`).
 
 ## What the scripts do and talk to
 

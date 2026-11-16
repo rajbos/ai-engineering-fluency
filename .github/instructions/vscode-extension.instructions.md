@@ -6,7 +6,7 @@ applyTo: "vscode-extension/**"
 
 ## Architecture Overview
 
-The extension's entry point and orchestration live in the `CopilotTokenTracker` class in `vscode-extension/src/extension.ts`, which is still very large (see the decomposition status in the repo-root `AGENTS.md`); supporting logic lives in sibling modules under `vscode-extension/src/` and in the shared repo-root `src/`. Put new logic in a module and call it from there rather than adding it to `extension.ts`. Its primary function is to track GitHub Copilot token usage by reading and parsing session log files.
+The extension's entry point and orchestration live in the `CopilotTokenTracker` class in `vscode-extension/src/extension.ts`, which is still very large (see "Where the `extension.ts` decomposition stands" below); supporting logic lives in sibling modules under `vscode-extension/src/` and in the shared repo-root `src/`. Put new logic in a module and call it from there rather than adding it to `extension.ts`. Its primary function is to track GitHub Copilot token usage by reading and parsing session log files.
 
 - **Activation**: The extension activates on VS Code startup via the `onStartupFinished` event in `vscode-extension/package.json`. The `activate` function in `vscode-extension/src/extension.ts` instantiates `CopilotTokenTracker`.
 
@@ -176,7 +176,7 @@ const html = this.getSomeViewHtml(..., { localization });
 
 `validate:l10n` and `lint:l10n` only check *consistency* of strings already wired through `localize(`/`t(`/`vscode.l10n.t(` — neither one notices a plain string literal written directly into UI-rendering code that never goes through that system at all, e.g. `button.textContent = 'Refresh'` or `<h2>Usage Analysis</h2>` baked straight into an HTML template literal. Run `pnpm run lint:hardcoded-strings` (script: `scripts/check-hardcoded-strings.mjs`) to catch that instead. It walks the TypeScript AST (not a blind regex scan) of `src/webview/**/*.ts`, `src/backend/configPanel.ts`, `src/backend/teamServerConfigPanel.ts`, the repo-root `src/loadingHtml.ts` (moved out of `vscode-extension/src/`), and the `getXxxHtml`-style methods in `extension.ts`, and flags a string/template literal (including each branch of a `cond ? 'A' : 'B'`, each static piece of `'a' + x + 'b'` concatenation, and the fallback side of `x ?? 'F'` / `x || 'F'`) that looks like prose when it sits in a UI-rendering position — assigned (via `=` or `+=`) to `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder` (identifier or string-literal object keys alike), passed to a known text-argument sink (`el(...)`, `iconHeading(...)`, `createButton(id, label, ...)`, `document.createTextNode(...)`, `setHtml(...)`), passed to `.setAttribute('aria-label'|'title'|'placeholder', ...)`, or as an `aria-label`/`title`/`placeholder` attribute or tag text content (`<button>`, `<h1>`-`<h6>`, `<span>`, `<vscode-button>`, …) inside any string or template literal, holes in an interpolation included, or as direct text sitting outside any tag in a raw HTML fragment (e.g. `'<span class="icon"></span> Insights'` built for concatenation into a `setHtml(...)` call) — and isn't already an argument to `localize(`/`t(`/`vscode.l10n.t(`. A markup-bearing value (`.innerHTML =` / `setHtml(...)`) is reported once via whichever mechanism actually matches the text, not twice. It has five deliberate scope boundaries, documented in the script's doc comment: it doesn't trace a literal nested inside a template's `${...}` hole back to an *enclosing* tag context; it doesn't parse the client-side JavaScript inside the large inline `<script>` bodies that `configPanel.ts`/`teamServerConfigPanel.ts`/`loadingHtml.ts` build as plain strings, only the markup around it; it recognizes only a fixed, explicit list of sink property/function names, not an arbitrary call graph; its tag matching stops at the *nearest* closing tag rather than a properly balanced one, so a tag nested directly inside another of the *same* name isn't handled correctly (a real fix needs a stack-based tokenizer, not another regex); and an `// i18n-exempt` comment must sit next to the specific reported line, not necessarily the enclosing literal's own opening line, for a multiline template. None of these are bugs to report — they're documented limits of a heuristic ratchet, not a sound analysis. The `// i18n-exempt` escape hatch is checked against real comment tokens found by the TypeScript scanner (not raw line text), specifically so a marker can't be smuggled in as part of a string/template literal's own rendered content.
 
-This check is a **baseline/ratchet**, the same pattern as the `max-lines` ceiling in `eslint.config.mjs` (see the repo-root AGENTS.md's "File-size ceiling" section): it doesn't try to fix today's existing hardcoded strings, it only stops new ones. `scripts/hardcoded-strings-baseline.json` records every violation that already existed, keyed by file + a hash of the offending line's trimmed content (not the line number, so it survives unrelated line-number drift) with a per-key occurrence count (so a genuinely new duplicate of an already-baselined line is still caught, not silently covered by the first occurrence). CI fails only when the check finds a violation whose count exceeds what the baseline recorded for that file+hash — a genuinely new hardcoded string.
+This check is a **baseline/ratchet**, the same pattern as the `max-lines` ceiling in `eslint.config.mjs` (see "File-size ceiling" below): it doesn't try to fix today's existing hardcoded strings, it only stops new ones. `scripts/hardcoded-strings-baseline.json` records every violation that already existed, keyed by file + a hash of the offending line's trimmed content (not the line number, so it survives unrelated line-number drift) with a per-key occurrence count (so a genuinely new duplicate of an already-baselined line is still caught, not silently covered by the first occurrence). CI fails only when the check finds a violation whose count exceeds what the baseline recorded for that file+hash — a genuinely new hardcoded string.
 
 If a new literal is legitimately not meant to be localized (a brand name, a debug-only string, an emoji), use one of two escape hatches instead of letting it fail the build:
 
@@ -281,7 +281,7 @@ If you find any match outside of `addModelUsage` itself, convert it to use the h
 
 ## Key Files & Conventions
 
-- **`vscode-extension/src/extension.ts`**: The entry point and the large `CopilotTokenTracker` class. It still holds much of the logic, but new logic should go in separate modules (see the repo-root `AGENTS.md` and `docs/adr/EXTENSION-TS-DECOMPOSITION.md`).
+- **`vscode-extension/src/extension.ts`**: The entry point and the large `CopilotTokenTracker` class. It still holds much of the logic, but new logic should go in separate modules (see "Where the `extension.ts` decomposition stands" below and `docs/adr/EXTENSION-TS-DECOMPOSITION.md`).
   - `CopilotTokenTracker`: The main class.
   - `calculateDetailedStats()`: The primary data aggregation method.
   - `getDetailsHtml()`: The method responsible for rendering the webview's HTML content. All styling is inlined within this method's template string.
@@ -423,3 +423,39 @@ Current adapter set (9):
 - [ ] Also update the CLI side — see `.github/instructions/cli.instructions.md`
 
 **`handles()` for CopilotChat/Cli currently returns `false`**: discovery is owned by the adapters, but per-session parsing is still routed through the existing fallback path in `extension.ts` (`countInteractionsInSession`, `estimateTokensFromSession`, `getSessionFileDataCached`). A future PR can flip `handles()` to use the exported `isCopilotChatSessionPath` / `isCopilotCliSessionPath` predicates once the JSON parser helpers are extracted from `extension.ts`. When you flip `handles()`, also fix `_detectEditorSource(filePath, (p) => !!this.findEcosystem(p))` at extension.ts:~3224 — the predicate must check `?.id === 'opencode'` (or use `getEditorTypeFromPath` convention) so that VS Code paths are still labeled "VS Code", not "OpenCode".
+
+## Webview changes must be validated by clicking, not by reading
+
+The `postMessage` wire between a webview panel and the extension host is untyped by construction, and a `<button>` nobody attached a listener to looks identical to a working one in the source. After any change under `vscode-extension/src/webview/**` or to a panel's message handling in `extension.ts`, run both checks (they render the real bundles headlessly and never open an editor window, so they are safe for agents):
+
+```bash
+cd vscode-extension
+pnpm run check:contract      # every posted message has a handler on the other side
+pnpm run check:interaction   # clicks every control in every panel
+```
+
+For any change that alters what a panel *looks like*, also run `pnpm run visual:diff` and read `../visual-output/diff/report.md` (repo-root `visual-output/`) plus the diff PNGs: the views you changed should show as changed and nothing else should. Name the expected views/tabs in the PR body. CI posts the before/after/diff screenshots on the PR itself: the `ui-checks` job renders and uploads them, and the separate `ui-checks-comment.yml` `workflow_run` workflow (it runs from the default branch, where the upload secret lives) attaches them as one comment, replaced on every push. Do not commit PNGs or upload images by hand.
+
+Registry rules (a miss fails nothing, so they are easy to forget):
+
+- **A new webview panel must be added to `.github/skills/visual-view-diff/views.config.json`**, with a fixture for its `__INITIAL_*__` payload. That one registry feeds the visual diff, the CI screenshots, the interaction crawl and `release-video/`.
+- **A new tab or mode on an existing panel needs a `state`** in the same file, or it diffs as "unchanged" and ships without a screenshot. (`release-video/` falls back to the `.tab-button[data-tab="…"]` / `#tab-panel-…` convention for catalogued tabs without a state, but only a registered state gets the tab into the diff, screenshots and crawl.)
+
+What each check catches, and the one-command release preflight, is in [docs/VALIDATION.md](../../docs/VALIDATION.md).
+
+## Localization changes require test coverage
+
+When adding or changing runtime localization keys (entries in `vscode-extension/package.nls.json` / `package.nls.zh-cn.json` consumed via the `l10n.t()` helper in `vscode-extension/src/l10n.ts`), add unit tests in `vscode-extension/test/unit/l10n.test.ts` asserting the new keys resolve to their expected English text (and zh-CN translation where one exists). PR review flags localization changes that ship without this coverage.
+
+## File-size ceiling (`max-lines`)
+
+`vscode-extension/eslint.config.mjs` enforces a `max-lines` ceiling (the threshold and severity live in that file) alongside the per-function complexity rules. Small functions alone don't stop a file from becoming unmanageable, so new code should not push any linted file past the ceiling — split instead. Run `cd vscode-extension && pnpm run lint` to see the current offenders; `vscode-extension/src/extension.ts` is by far the largest offender (other large files, such as the usage webview's `main.ts`, may also show up). `max-lines` is an `error`, and a per-file override in that config pins `extension.ts` at its current size, so it cannot grow and no second file can cross the ceiling. Ratchet the threshold (and that pin) down as files shrink; don't raise either to accommodate growth.
+
+### Where the `extension.ts` decomposition stands
+
+`docs/adr/EXTENSION-TS-DECOMPOSITION.md` is a **plan**, not a description of the code, and the figures inside it are a snapshot that has since drifted. Its destinations fall into two groups:
+
+- **Already exist** (extraction folds code into them): the shared `src/tokenEstimation.ts` and `src/sessionParser.ts`, and in `vscode-extension/src/` `backend/rollups.ts`, `agentSessionsService.ts`, `cacheManager.ts`, `githubPrService.ts`, `onboarding.ts`, `hookManager.ts`, `extensionPoints.ts`, `viewRegression.ts` and `backend/services/*`.
+- **Not created yet** (the new per-panel UI modules and services the ADR proposes, for example `backend/ui/diagnosticsPanel.ts`, `backend/services/worktreeService.ts`, `statusBarPresenter.ts`): check with `ls` before assuming one is there.
+
+`extension.ts` is still one large `CopilotTokenTracker` class. Do not add new feature logic to it: put it in a new or existing module and call it from there. Do not move existing code out opportunistically either; follow the ADR's extraction order and batch sizes: one cluster per PR at most, and a large cluster (such as session parsing) is moved in several small PRs rather than all at once.

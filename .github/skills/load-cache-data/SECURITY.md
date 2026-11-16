@@ -2,7 +2,7 @@
 
 Lightweight model derived from reading `load-cache-data.js` and the cache entry type
 `SessionFileCache` in `src/types.ts`. Update it in the same PR as any change that adds or
-alters a trigger surface (see "Skill security classification" in the repository `AGENTS.md`).
+alters a trigger surface (see "Skill security classification" in `.github/skills/README.md`).
 
 This skill is classified as modelled (not exempt) because its purpose is to print cache
 entries derived from the user's AI sessions into a chat transcript (trigger 6). The default
