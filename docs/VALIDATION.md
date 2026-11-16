@@ -23,7 +23,7 @@ of the wire or actually click the thing. That is what the checks below add.
 ## One command before a release
 
 ```bash
-cd vscode-extension && npm run preflight
+cd vscode-extension && pnpm run preflight
 ```
 
 Runs everything, in stages, on your machine, against your real editor data. It
@@ -31,11 +31,11 @@ does **not** stop at the first failure — a release decision needs the whole
 picture, so it runs every check and prints one verdict at the end.
 
 ```bash
-npm run preflight -- --list          # what it would run, and why each one exists
-npm run preflight -- --quick         # skip the slow browser stage (~2 min faster)
-npm run preflight -- --stage local   # only the checks that need real editor data
-npm run preflight -- --skip visual   # everything except one check
-npm run preflight -- --json          # machine-readable
+pnpm run preflight --list             # what it would run, and why each one exists
+pnpm run preflight --quick            # skip the slow browser stage (~2 min faster)
+pnpm run preflight --stage local      # only the checks that need real editor data
+pnpm run preflight --skip visual      # everything except one check
+pnpm run preflight --json             # machine-readable
 ```
 
 Exit codes: `0` release-ready, `1` a required check failed, `2` preflight could
@@ -59,31 +59,31 @@ this is meant to prevent.
 
 | Check | Command | Catches |
 |---|---|---|
-| `types` | `npm run check-types` | type errors |
+| `types` | `pnpm run check-types` | type errors |
 | `lint` | `pnpm run lint` | lint errors, and ESLint warnings growing past `lint-baseline.json` |
-| `json` | `npm run lint:json` | malformed data files |
-| `l10n` | `npm run lint:l10n` | localization keys out of sync |
-| `compile` | `npm run compile` | build failures |
-| `contract` | `npm run check:contract` | **a message with no handler on the other side** |
+| `json` | `pnpm run lint:json` | malformed data files |
+| `l10n` | `pnpm run lint:l10n` | localization keys out of sync |
+| `compile` | `pnpm run compile` | build failures |
+| `contract` | `pnpm run check:contract` | **a message with no handler on the other side** |
 
 ### `test` — the unit suite
 
 | Check | Command |
 |---|---|
-| `unit` | `npm run test:node` |
+| `unit` | `pnpm run test:node` |
 
 ### `ui` — what the panels actually do when you click them
 
 | Check | Command | Catches |
 |---|---|---|
-| `interaction` | `npm run check:interaction` | **a control that does nothing when clicked** |
-| `visual` | `npm run visual:diff` | what the change looks like, next to the merge base |
+| `interaction` | `pnpm run check:interaction` | **a control that does nothing when clicked** |
+| `visual` | `pnpm run visual:diff` | what the change looks like, next to the merge base |
 
 ### `local` — your real editor data on this machine
 
 | Check | Command | Catches |
 |---|---|---|
-| `editor-data` | `npm run check:editor-data` | an editor that stopped producing readable sessions |
+| `editor-data` | `pnpm run check:editor-data` | an editor that stopped producing readable sessions |
 | `session-schemas` | `node .github/skills/validate-session-schemas/validate-session-schemas.js` | a log format that drifted |
 | `debug-log-schema` | `node .github/skills/discover-debug-log-schema/discover-debug-log-schema.js` | VS Code Chat debug-log drift silently turning exact billing into estimates |
 | `editor-names` | `node .github/skills/validate-editor-names/validate-editor-names.js` | CLI and extension disagreeing on an editor's name |
@@ -95,7 +95,7 @@ this is meant to prevent.
 ### `check:contract` — webview message contract
 
 ```bash
-npm run check:contract
+pnpm run check:contract
 ```
 
 Reads both sides of the `postMessage` wire and reports any message with no
@@ -128,10 +128,10 @@ short — it is the escape hatch, not the norm.
 ### `check:interaction` — interaction smoke
 
 ```bash
-npm run check:interaction
-npm run check:interaction -- --view chart,usage   # one or more views
-npm run check:interaction -- --isolate            # reload between clicks (slow, exhaustive)
-npm run check:interaction -- --concurrency 1      # one view at a time (default 4)
+pnpm run check:interaction
+pnpm run check:interaction --view chart,usage      # one or more views
+pnpm run check:interaction --isolate               # reload between clicks (slow, exhaustive)
+pnpm run check:interaction --concurrency 1         # one view at a time (default 4)
 ```
 
 Renders the **real** webview bundles headlessly (reusing the `visual-view-diff`

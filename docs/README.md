@@ -9,7 +9,7 @@ tags: [documentation, index]
 
 # Documentation
 
-This directory contains all documentation for the GitHub Copilot Token Tracker / AI Engineering Fluency project.
+This directory contains all documentation for the AI Engineering Fluency project.
 
 ## Core Reference
 
@@ -23,7 +23,7 @@ Essential reference documents covering the data model, scoring rules, and tracke
 | [USAGE-ANALYSIS.md](USAGE-ANALYSIS.md) | Guide to the Usage Analysis Dashboard features and tracked metrics |
 | [COPILOT-CLI-FORMAT-CHANGES.md](COPILOT-CLI-FORMAT-CHANGES.md) | Breaking changes to Copilot CLI session log format and their impact |
 | [COPILOT-CLI-OTEL-EXPORT.md](COPILOT-CLI-OTEL-EXPORT.md) | Enabling Copilot CLI's OpenTelemetry file export for exact token counts |
-| [VALIDATION.md](VALIDATION.md) | What each check catches, and the one-command release preflight (`npm run preflight`) |
+| [VALIDATION.md](VALIDATION.md) | What each check catches, and the one-command release preflight (`pnpm run preflight`) |
 | [REPO-HEALTH-SCAN.md](REPO-HEALTH-SCAN.md) | Daily code-health scan (8 topics) → one issue → one PR, via GitHub Actions or a local Claude Code routine |
 
 ## Component Documentation

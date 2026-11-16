@@ -64,3 +64,42 @@ Then in `cli/src/helpers.ts` add only the routing/processing hooks:
 - [ ] `pnpm run build` passes (from `cli/`)
 - [ ] CLI `stats` command shows the new editor in the session list
 - [ ] Token counts are non-zero and plausible
+
+## CLI Must Reuse Shared Functions
+
+The CLI (`cli/`) is a thin consumer of the shared TypeScript modules in the repo-root `src/` folder (the same modules the VS Code extension uses). **Never reimplement session parsing or cost attribution logic in the CLI — always call the shared functions from `src/`.**
+
+### The canonical split (mirrors `getSessionFileDataCached` in `extension.ts`)
+
+| What you need | Function to call | Source |
+|---|---|---|
+| Token counts (total, actual, thinking) | `estimateTokensFromJsonlSession()` | `tokenEstimation.ts` |
+| Per-model cost attribution (model usage) | `getModelUsageFromSession()` | `usageAnalysis.ts` |
+| Debug-log token override | `extractAllTokensFromDebugLog()` | `tokenEstimation.ts` |
+| Per-day stats from a session (non-extension hosts) | `addSessionToDailyStats()` + `addSessionEfficiencyToDailyStats()` | `statsHelpers.ts`, `modelEfficiency.ts` |
+| Chart webview payload | `buildChartData()` | `chartDataBuilder.ts` |
+| Efficiency webview payload | `buildEfficiencyViewData()` | `efficiencyViewBuilder.ts` |
+| Usage Analysis webview payload | `buildUsageAnalysisViewData()` (+ `buildWorkspaceCustomization()`, `buildCurationAnalysis()`, `evaluateUsageInsights()` for its inputs) | `usageAnalysisViewBuilder.ts`, `customizationMatrix.ts`, `toolCuration.ts`, `insightsEngine.ts` |
+| Diagnostics webview payload | `buildDiagnosticsViewData()` and its `diagnosticDataLoaded` follow-up `buildDiagnosticDataLoadedMessage()` (+ `buildSessionFolderData()`, `buildCacheInfo()`) | `diagnosticsViewBuilder.ts` |
+
+Webview payloads follow the same rule: one function in `src/` builds a payload and
+every host (extension, CLI, desktop) calls it, differing only in how it gathers inputs
+and in host settings. The Chart, Efficiency, Usage Analysis and Diagnostics payloads
+(table above) do this today. A field a host cannot produce is passed as the builder's
+documented "not available in this host" value, never omitted. Never add a host-side copy of a payload builder,
+and move a payload's assembly to `src/` when you change it — otherwise a field a view
+starts requiring reaches one host and not the others.
+
+**Critical rule**: `estimateTokensFromJsonlSession().modelUsage` must **not** be used as the primary source for model attribution. It returns `{}` for delta-format sessions (VS Code Chat JSONL), causing $0 cost for those sessions. Always call `getModelUsageFromSession()` separately for model attribution — it handles all formats through a single code path.
+
+```typescript
+// Correct — matches VS Code's getSessionFileDataCached pattern:
+const result = estimateTokensFromJsonlSession(content);         // token counts only
+tokens = result.actualTokens > 0 ? result.actualTokens : result.tokens;
+fileModelUsage = await getModelUsageFromSession(deps, filePath, content); // attribution
+
+// Wrong — diverges from VS Code, breaks delta-format sessions:
+fileModelUsage = result.modelUsage; // empty {} for VS Code Chat sessions
+```
+
+If you find yourself adding a fallback like "if modelUsage is empty, call X" in the CLI, that is a sign the primary attribution source is wrong — fix the source instead.
