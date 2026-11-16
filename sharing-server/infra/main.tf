@@ -106,6 +106,11 @@ resource "azurerm_container_app" "this" {
       name         = "data"
       storage_name = azurerm_container_app_environment_storage.data.name
       storage_type = "AzureFile"
+      # The image runs as the unprivileged `node` user (uid/gid 1000, see Dockerfile `USER node`).
+      # SMB has no per-file Unix owners: every file on the share appears owned by the mount's
+      # uid/gid, and the default mount is root-owned, so the server could not write its backup
+      # (EPERM on /data/sharing.db). Mount the share as uid/gid 1000, owner/group access only.
+      mount_options = "uid=1000,gid=1000,dir_mode=0750,file_mode=0640"
     }
 
     container {
