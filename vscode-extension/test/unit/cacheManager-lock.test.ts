@@ -103,7 +103,7 @@ test('acquireCacheLock: breaks stale lock even without pid field (backward compa
 	const acquired = await manager.acquireCacheLock();
 	assert.equal(acquired, true, 'Should acquire a stale lock with no pid field');
 	assert.ok(
-		logs.some(l => l.includes('Breaking stale cache lock')),
+		logs.some(l => /Breaking lock cache_prod\.lock \(heartbeat stale/.test(l)),
 		'Should log stale lock break'
 	);
 	await manager.releaseCacheLock();

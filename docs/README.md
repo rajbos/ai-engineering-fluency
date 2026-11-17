@@ -115,6 +115,7 @@ Decisions and plans captured during development. Every ADR starts with a **Statu
 |---|---|---|
 | [adr/ANALYSIS-WORKER.md](adr/ANALYSIS-WORKER.md) | Implemented | Why session parsing and workspace scans run on worker threads, and how that is kept from regressing |
 | [adr/SQLITE-WAL-READS.md](adr/SQLITE-WAL-READS.md) | Implemented | Why sql.js reads of data.db/opencode.db must merge pending WAL frames first |
+| [adr/CROSS-HOST-PARSE-COORDINATION.md](adr/CROSS-HOST-PARSE-COORDINATION.md) | Implemented | How VS Code stable, Insiders and the desktop app share one machine-wide parse lock, and why snapshots stay per host |
 | [adr/TOOL-EXECUTION-STATS.md](adr/TOOL-EXECUTION-STATS.md) | Implemented | Per-tool failure counts and latency histograms (reliability, latency, MCP health, cost-vs-speed panels): data sources, additive design, phased plan |
 | [adr/LOCALIZATION-ARCHITECTURE.md](adr/LOCALIZATION-ARCHITECTURE.md) | Accepted | Repo-wide localization standard: the four runtime tiers and one source of truth |
 | [adr/INSIGHTS-CATALOG-LOCALIZATION.md](adr/INSIGHTS-CATALOG-LOCALIZATION.md) | Implemented | How the Insights catalog is localized without giving up insightsEngine.ts's purity |
