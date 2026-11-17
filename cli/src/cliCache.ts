@@ -17,7 +17,8 @@ import { CliCachePolicy } from '../../src/cachePolicy';
 // 12 (#2316): all of the above in one version.
 // 13 (#2316): deletion-only sessions keep their lines of code.
 // 14 (#2483): Mistral Vibe sessions gain vendorStats and a wall-clock sessionDuration in their usage analysis.
-const CACHE_VERSION = 14;
+// 15: Copilot app sessions that selected `auto` and were routed by Copilot Fusion count as `hydrafusion`.
+const CACHE_VERSION = 15;
 
 /** Maximum number of entries to keep in the cache file. */
 const MAX_CACHE_ENTRIES = 2000;

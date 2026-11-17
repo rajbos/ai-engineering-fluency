@@ -78,6 +78,27 @@ test('Auto usage: marker-only estimates work but session picker and CLI model ch
 });
 
 
+test('Copilot Fusion: a Copilot app session that selected auto is attributed to hydrafusion', async () => {
+	const deps = { warn: (message: string) => assert.fail(message), ecosystems: [], tokenEstimators: { 'gpt-4o': 0.25 }, modelPricing: {} };
+	const session = (selectionReason: string) => [
+		{ type: 'session.start', data: { selectedModel: 'auto' } },
+		{ type: 'session.auto_mode_resolved', data: { chosenModel: 'gpt-6.1-sol', selectionReason, routingMethod: 'auto_v2' } },
+		{ type: 'user.message', data: { content: 'fix the warning' } },
+		{ type: 'assistant.message', data: { content: 'done' } },
+	].map(event => JSON.stringify(event)).join('\n');
+
+	const fusion = await getModelUsageFromSession(deps, 'events.jsonl', session('Copilot Fusion selected GPT-6.1 Sol since the task has high complexity.'));
+	assert.equal(fusion['auto'], undefined);
+	assert.ok(fusion['hydrafusion'].inputTokens > 0);
+	assert.ok(fusion['hydrafusion'].outputTokens > 0);
+
+	// Before Fusion, Auto wrote the same events without crediting Fusion: those stay `auto`.
+	const plain = await getModelUsageFromSession(deps, 'events.jsonl', session('Selected GPT-6.1 Sol for this task.'));
+	assert.equal(plain['hydrafusion'], undefined);
+	assert.ok(plain['auto'].inputTokens > 0);
+});
+
+
 function emptyPeriod(): UsageAnalysisPeriod {
     return {
         sessions: 0,
