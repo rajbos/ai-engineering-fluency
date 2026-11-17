@@ -70,6 +70,7 @@ import type {
   ServerMemoriesAnalysisView,
 } from '../../src/types';
 import { buildShareCardData, type ShareCardPeriodData } from './shareCardData';
+import { buildFluencyScorePayload } from '../../src/teamServer/fluencyScorePayload';
 import {
 	ensureContextPressure,
 	hasContextSignal,
@@ -6607,13 +6608,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Skip the score computation when the service would refuse the upload anyway.
 		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl || settings.sharingProfile === 'off') { return; }
 		const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
-		const scorePayload: Record<string, unknown> = {
-			overallStage: maturityData.overallStage, overallLabel: maturityData.overallLabel,
-			categories: maturityData.categories.map((c: any) => ({
-				category: c.category, icon: c.icon, stage: c.stage, tips: c.tips,
-			})),
-			computedAt: new Date().toISOString(),
-		};
+		const scorePayload = buildFluencyScorePayload(maturityData);
 		// Gated on the way in, not ordered on the way out: this upload is detached, so two of them
 		// can still land out of order and leave the server holding the older score. Making that
 		// safe needs the server to reject an older version, which is not this PR's to change.

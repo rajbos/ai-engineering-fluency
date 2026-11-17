@@ -11,6 +11,15 @@ This directory contains the TypeScript sources and JSON configuration files shar
 3. **Both rules are ESLint errors.** The root `eslint.config.mjs` (the config ESLint resolves for `src/**`) sets `no-restricted-imports` with `paths: ['vscode']` and `patterns: ['**/vscode-extension/**', '**/cli/**', '**/desktop/**']` for `src/**/*.ts`; it runs with `pnpm run lint` in `vscode-extension/`. The CLI and desktop bundles do not alias `vscode` any more, so a stray import also breaks their builds.
 4. **Tests for shared modules live in `src/test/`** and need no VS Code harness: run them from `vscode-extension/` with `pnpm run test:src`. They also run as part of `test:node`, `test:coverage` and CI through `vscode-extension/test/unit/sharedSrcTests.test.ts`. A test that needs the extension (imports from `vscode-extension/` or the `vscode` shim) stays in `vscode-extension/test/unit/`. `src/test` is outside the lint scope but inside the code-duplication gate.
 
+## Team Server sync (`teamServer/`)
+
+The daily-rollup builder and upload client behind the extension's Team Server / Azure Storage
+sync, moved here so the desktop app can upload too. `dailyRollupBuilder.ts` turns session files
+into per-(day, model, workspace, machine, editor) rollups; the extension's `SyncService` extends
+it and the desktop app uses it directly. `teamServerEntries.ts` applies the sharing policy
+(hashed vs raw IDs, names) and builds the `/api/upload` rows; `sharingServerUploadService.ts`
+posts them. The old paths under `vscode-extension/src/backend/` re-export these modules.
+
 Background/proposal only (not applied): [docs/adr/SHARED-SRC-API-BOUNDARY.md](../docs/adr/SHARED-SRC-API-BOUNDARY.md) analyses a consumer-facing `src/index.ts` barrel and a deep-import lint rule; the rules above are what is actually enforced today.
 
 > Note: `copilotPlans.json` is only used by the VS Code extension and lives in `vscode-extension/src/copilotPlans.json`; it is documented here alongside the other data files.

@@ -19,6 +19,41 @@ launch and every six hours, downloads it in the background, and offers
 **Restart to install** in the tray menu (it also installs on the next quit).
 **Check for updates** in the same menu checks on demand.
 
+## Uploading to a team server
+
+**Team Server…** in the tray menu opens a settings window that uploads this
+machine's daily usage rollups to a self-hosted
+[sharing server](../sharing-server/README.md), the same data the VS Code
+extension's `backend.sharingServer.*` settings send. That lets the desktop app
+feed one server while VS Code and VS Code Insiders feed others.
+
+- **Server URL**: `https://` only (`http://` is accepted for `localhost`).
+- **Sharing profile**, **dataset ID**, **lookback** and **include names** mean
+  the same as the extension's `backend.sharingProfile`, `backend.datasetId`,
+  `backend.lookbackDays` and `backend.shareWorkspaceMachineNames`. Use the same
+  dataset ID as any other client uploading to the same server.
+- **Sign in with GitHub** uses the OAuth device flow (scope `read:user`); the
+  token is encrypted with Windows' credential protection (Electron
+  `safeStorage`) under `%APPDATA%\AI Engineering Fluency\team-server-token.bin`.
+  Settings live next to it in `team-server.json`.
+- **OAuth client ID (publisher setup, once):** device-flow sign-in goes through
+  one GitHub OAuth App owned by whoever publishes the app, with "Enable Device
+  Flow" ticked. Its client ID is public and ships in the build as
+  `GITHUB_OAUTH_CLIENT_ID` (`src/teamServer.ts`); people installing the app
+  never set it, they only sign in. `AIEF_GITHUB_CLIENT_ID` overrides it for
+  development. Until it is set, the sign-in button is disabled.
+- Each upload sends the daily rollups to `/api/upload` and the fluency score
+  (the one the **Fluency Score** view shows) to `/api/fluency-score`, the same
+  two calls the extension makes. They succeed or fail independently and the
+  status shows both.
+- Uploads run a minute after launch, then every 15 minutes, and on
+  **Upload to team server now**. The tray shows the last result.
+
+What is uploaded is decided by shared code, not by this app: the rollup builder
+and payload live in `../src/teamServer/` and each session is parsed by the CLI's
+session processing (`getSessionFileCacheForRollups`). The server replaces a
+user's rows per (dataset, day) on each upload, so a repeat upload is idempotent.
+
 ## How it works
 
 The desktop app does **not** reimplement the UI. It reuses the existing

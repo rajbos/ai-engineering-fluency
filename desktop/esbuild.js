@@ -44,6 +44,7 @@ async function main() {
     await Promise.all([
       esbuild.build({ ...sharedNodeOptions, entryPoints: ['src/main.ts'], outfile: 'dist/main.js' }),
       esbuild.build({ ...sharedNodeOptions, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.js' }),
+      esbuild.build({ ...sharedNodeOptions, entryPoints: ['src/teamServerPreload.ts'], outfile: 'dist/teamServerPreload.js' }),
     ]);
     console.log(`Desktop built (${production ? 'production' : 'development'})`);
     return;
@@ -92,12 +93,13 @@ async function main() {
     },
   };
 
-  const [mainCtx, preloadCtx] = await Promise.all([
+  const [mainCtx, preloadCtx, teamServerPreloadCtx] = await Promise.all([
     esbuild.context({ ...sharedNodeOptions, entryPoints: ['src/main.ts'], outfile: 'dist/main.js', plugins: [rebuildPlugin] }),
     esbuild.context({ ...sharedNodeOptions, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.js', plugins: [rebuildPlugin] }),
+    esbuild.context({ ...sharedNodeOptions, entryPoints: ['src/teamServerPreload.ts'], outfile: 'dist/teamServerPreload.js', plugins: [rebuildPlugin] }),
   ]);
 
-  await Promise.all([mainCtx.watch(), preloadCtx.watch()]);
+  await Promise.all([mainCtx.watch(), preloadCtx.watch(), teamServerPreloadCtx.watch()]);
   console.log('[watch] watching src/ for changes — Ctrl+C to stop');
 }
 

@@ -2,8 +2,10 @@ import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeTheme, protoc
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
-import { buildDiagnosticReport, buildPanelHtml as buildPanelPage, sessionEditorName, VSCODE_THEME_VARS, PANEL_ASSET_PREFIX, type PanelId } from './panelPage';
+import { buildDiagnosticReport, buildPanelHtml as buildPanelPage, computeFluencyScore, sessionEditorName, VSCODE_THEME_VARS, PANEL_ASSET_PREFIX, type PanelId } from './panelPage';
 import { checkForUpdates, getUpdateState, installUpdate, startUpdateChecks } from './updater';
+import { DesktopTeamServerSync, isGitHubSignInConfigured, type TeamServerStatus } from './teamServer';
+import { buildTeamServerPageHtml } from './teamServerPage';
 import {
     discoverSessionFiles,
     calculateDetailedStats,
@@ -12,11 +14,12 @@ import {
     buildChartPayload,
     buildEfficiencyPayload,
     getSessionBackingPath,
+    buildCustomizationMatrix,
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
 import { withUsageAnalysisViewStats } from '../../cli/src/usageAnalysisView';
-import type { DailyTokenStats, DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../src/types';
 import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
@@ -82,6 +85,8 @@ let currentPanel: PanelId = 'details';
 let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
+// Customization matrix for the fluency score; `undefined` is a valid result (no recent workspaces).
+let cachedCustomizationMatrix: { value: WorkspaceCustomizationMatrix | undefined } | null = null;
 let cachedChartPayload: object | null = null;
 // Session-derived inputs behind both the Chart and Efficiency payloads, from one session walk.
 let cachedViewStats: ViewStats | null = null;
@@ -273,6 +278,21 @@ async function loadUsageStats(): Promise<UsageAnalysisStats> {
     return cachedUsageStats;
 }
 
+function getCustomizationMatrix(): Promise<WorkspaceCustomizationMatrix | undefined> {
+    return shareInFlight('customization', loadCustomizationMatrix);
+}
+
+async function loadCustomizationMatrix(): Promise<WorkspaceCustomizationMatrix | undefined> {
+    expireCachesOnDateChange();
+    while (!cachedCustomizationMatrix) {
+        await computeForCurrentFiles(
+            async files => ({ value: await buildCustomizationMatrix(files) }),
+            (matrix) => { cachedCustomizationMatrix ??= matrix; },
+        );
+    }
+    return cachedCustomizationMatrix.value;
+}
+
 /**
  * Chart payload, computed once and reused. Building it walks every session file,
  * which on a large history blocks the main process for a long time — doing that
@@ -371,6 +391,7 @@ function expireCachesOnDateChange(): void {
     if (cachedDataDay !== '') {
         cachedStats = null;
         cachedUsageStats = null;
+        cachedCustomizationMatrix = null;
         cachedChartPayload = null;
         cachedViewStats = null;
         cachedEfficiencyPayload = null;
@@ -442,6 +463,7 @@ async function refreshStats(): Promise<void> {
         // refresh spans midnight, and the next read must then expire them.
         cachedDataDay = toLocalDayKey(stats.lastUpdated);
         cachedUsageStats = null; // reset so it recomputes on next access
+        cachedCustomizationMatrix = null;
         cachedChartPayload = null;
         cachedViewStats = null;
         cachedEfficiencyPayload = null;
@@ -456,7 +478,7 @@ function buildPanelHtml(panel: PanelId): Promise<string> {
     return buildPanelPage(
         panel,
         { locale: app.getLocale(), isDark: nativeTheme.shouldUseDarkColors },
-        { getStats, getChartPayload, getEfficiencyPayload, getUsageStats, getSessionFiles },
+        { getStats, getChartPayload, getEfficiencyPayload, getUsageStats, getSessionFiles, getCustomizationMatrix },
         app.getVersion(),
     );
 }
@@ -756,6 +778,8 @@ function updateTrayMenu(t: Tray): void {
             },
         },
         { type: 'separator' },
+        ...teamServerMenuItems(),
+        { type: 'separator' },
         {
             label: 'Launch at startup',
             type: 'checkbox',
@@ -778,6 +802,98 @@ function updateTrayMenu(t: Tray): void {
         },
     ]);
     t.setContextMenu(menu);
+}
+
+// ---------------------------------------------------------------------------
+// Team Server upload
+// ---------------------------------------------------------------------------
+
+let teamServerSync: DesktopTeamServerSync | null = null;
+let teamServerWindow: BrowserWindow | null = null;
+
+function teamServerStatusLabel(status: TeamServerStatus): string {
+    switch (status.state) {
+        case 'syncing': return 'Team Server: uploading…';
+        case 'ok': return `Team Server: uploaded ${status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleTimeString() : ''}`.trim();
+        case 'error': return 'Team Server: last upload failed';
+        case 'signed-out': return 'Team Server: sign in required';
+        case 'idle': return 'Team Server: waiting for first upload';
+        default: return 'Team Server: off';
+    }
+}
+
+function teamServerMenuItems(): Electron.MenuItemConstructorOptions[] {
+    const status = teamServerSync?.getStatus() ?? { state: 'disabled' as const };
+    const items: Electron.MenuItemConstructorOptions[] = [
+        { label: 'Team Server…', click: () => showTeamServerWindow() },
+    ];
+    if (status.state !== 'disabled') {
+        items.push({ label: teamServerStatusLabel(status), enabled: false });
+        items.push({
+            label: 'Upload to team server now',
+            enabled: status.state !== 'syncing' && status.state !== 'signed-out',
+            click: () => { void teamServerSync?.syncNow(); },
+        });
+    }
+    return items;
+}
+
+function showTeamServerWindow(): void {
+    if (teamServerWindow && !teamServerWindow.isDestroyed()) {
+        teamServerWindow.show();
+        teamServerWindow.focus();
+        return;
+    }
+    const win = new BrowserWindow({
+        width: 620,
+        height: 760,
+        title: 'Team Server — AI Engineering Fluency',
+        icon: resolveAppIcon(),
+        autoHideMenuBar: true,
+        webPreferences: {
+            preload: path.join(__dirname, 'teamServerPreload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+        },
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (event) => event.preventDefault());
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildTeamServerPageHtml(nativeTheme.shouldUseDarkColors)));
+    win.on('closed', () => { teamServerWindow = null; });
+    teamServerWindow = win;
+}
+
+/** Only the Team Server settings window may call these handlers. */
+function fromTeamServerWindow(event: Electron.IpcMainInvokeEvent): boolean {
+    return !!teamServerWindow && !teamServerWindow.isDestroyed() && event.sender === teamServerWindow.webContents;
+}
+
+function registerTeamServerIpc(sync: DesktopTeamServerSync): void {
+    const loadPayload = () => ({
+        settings: sync.getSettings(),
+        status: sync.getStatus(),
+        signedIn: sync.isSignedIn(),
+        signInConfigured: isGitHubSignInConfigured(),
+    });
+    ipcMain.handle('team-server:load', (event) => fromTeamServerWindow(event) ? loadPayload() : undefined);
+    ipcMain.handle('team-server:save', (event, settings: unknown) => {
+        if (!fromTeamServerWindow(event)) { return { error: 'Not allowed.' }; }
+        return { error: sync.saveSettings(settings) };
+    });
+    ipcMain.handle('team-server:sign-in', async (event) => {
+        if (!fromTeamServerWindow(event)) { throw new Error('Not allowed.'); }
+        return sync.beginSignIn((url) => { void shell.openExternal(url); });
+    });
+    ipcMain.handle('team-server:sign-out', (event) => { if (fromTeamServerWindow(event)) { sync.signOut(); } });
+    ipcMain.handle('team-server:sync-now', async (event) => fromTeamServerWindow(event) ? sync.syncNow() : undefined);
+}
+
+function onTeamServerStatus(status: TeamServerStatus): void {
+    if (tray) { updateTrayMenu(tray); }
+    if (teamServerWindow && !teamServerWindow.isDestroyed()) {
+        teamServerWindow.webContents.send('team-server:status', status);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -949,6 +1065,12 @@ app.whenReady().then(async () => {
 
     registerProtocol();
     registerIpcHandlers();
+    teamServerSync = new DesktopTeamServerSync({
+        onStatusChange: onTeamServerStatus,
+        // The same score the Fluency Score panel shows, from the same cached usage stats.
+        getFluencyScore: () => computeFluencyScore({ getUsageStats, getCustomizationMatrix }),
+    });
+    registerTeamServerIpc(teamServerSync);
     Menu.setApplicationMenu(buildAppMenu());
 
     // Pre-load the cache so the first panel render is fast
@@ -972,6 +1094,10 @@ app.whenReady().then(async () => {
         navigateToPanel(currentPanel);
         return getUsageStats();
     }).catch(() => { /* surfaced per-panel via the error page */ });
+
+    // Uploads run on their own timer; the first one waits a minute so the startup stats walk
+    // has warmed the session cache it reuses.
+    void teamServerSync.start();
 
     startUpdateChecks({
         onStateChange: () => { if (tray) { updateTrayMenu(tray); } },
@@ -1004,5 +1130,6 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', async () => {
+    teamServerSync?.stop();
     await saveCache();
 });
