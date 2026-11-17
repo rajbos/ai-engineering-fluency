@@ -1168,8 +1168,19 @@ export interface WorkspaceCustomizationMatrix {
  * could not determine the state (no GitHub token, a denied API call, or a
  * control whose absence is not observable), and it must never be collapsed
  * into either `present` or `absent`.
+ *
+ * `not-applicable` means the control does not apply to this repository at all
+ * (infrastructure as code in a repository that deploys nothing). It neither
+ * blocks a stage nor counts as missing evidence.
  */
-export type DarkFactoryControlState = 'present' | 'absent' | 'unknown';
+export type DarkFactoryControlState = 'present' | 'absent' | 'unknown' | 'not-applicable';
+
+/**
+ * Where a repository is hosted, as far as its `origin` remote tells:
+ * `github` (a GitHub remote resolved), `other` (a remote on another host), or
+ * `unknown` (no remote at all).
+ */
+export type DarkFactoryHosting = 'github' | 'other' | 'unknown';
 
 /** Where a control's state comes from. */
 export type DarkFactoryControlTier =
@@ -1199,6 +1210,16 @@ export interface DarkFactoryControlDefinition {
   label: string;
   tier: DarkFactoryControlTier;
   evidence: DarkFactoryEvidenceKind;
+  /**
+   * A recommended control is shown and can be acted on, but never blocks its
+   * stage and is not counted as missing evidence.
+   */
+  recommended?: boolean;
+  /**
+   * Set when the control only exists on GitHub. For a repository whose remote
+   * is on another host its absence is reported as `unknown`, not `absent`.
+   */
+  platform?: 'github';
   /** Why the control matters on the ladder. */
   why: string;
   /** What to do when it is absent. */
@@ -1223,9 +1244,12 @@ export interface DarkFactoryControlResult extends DarkFactoryControlDefinition {
   detail?: string;
 }
 
-/** Whether a stage's controls are all satisfied, definitely not, or unverifiable. */
+/**
+ * Whether a stage's required controls are all satisfied, definitely not, or
+ * unverifiable. Recommended and not-applicable controls play no part.
+ */
 export type DarkFactoryStageVerdict =
-  /** Every control is present. */
+  /** Every required, applicable control is present. */
   | 'attained'
   /** At least one control is absent — this stage is not reached. */
   | 'blocked'
@@ -1238,12 +1262,14 @@ export interface DarkFactoryStageResult {
   name: string;
   summary: string;
   verdict: DarkFactoryStageVerdict;
-  /** Control ids that are present. */
+  /** Required control ids that are present. */
   present: string[];
-  /** Control ids that are absent — the specific things blocking this stage. */
+  /** Required control ids that are absent — the specific things blocking this stage. */
   missing: string[];
-  /** Control ids whose state could not be determined. */
+  /** Required control ids whose state could not be determined. */
   unknown: string[];
+  /** Required control ids that do not apply to this repository. */
+  notApplicable: string[];
 }
 
 /** An anti-pattern the scan detected in a repository. */
@@ -1263,6 +1289,8 @@ export interface DarkFactoryRepoReport {
   repoRoot: string;
   /** `owner/repo` when the origin remote could be resolved. */
   nameWithOwner?: string;
+  /** Where the repository is hosted, when its origin remote says. */
+  hosting?: DarkFactoryHosting;
   /**
    * Highest stage whose controls are *all* confirmed present. This is a lower
    * bound: unknowns never lift it.
@@ -1273,9 +1301,9 @@ export interface DarkFactoryRepoReport {
    * optimistically. This is an upper bound, never a claim.
    */
   ceilingStage: number;
-  /** True when every control resolved to `present` or `absent`. */
+  /** True when no required control is left `unknown`. */
   fullyEvidenced: boolean;
-  /** Number of controls whose state could not be determined. */
+  /** Number of required controls whose state could not be determined. */
   unknownCount: number;
   stages: DarkFactoryStageResult[];
   controls: DarkFactoryControlResult[];

@@ -129,7 +129,6 @@ test('readWorkflowFiles: caps how many workflow files it reads', () => {
 test('stage 1: an empty repository reports its delivery controls absent, not unknown', () => {
 	withRepo({ 'README.md': '' }, root => {
 		assert.equal(stateOf(root, 'ci-workflows'), 'absent');
-		assert.equal(stateOf(root, 'codeowners'), 'absent');
 		assert.equal(stateOf(root, 'dependabot'), 'absent');
 		assert.equal(stateOf(root, 'devcontainer'), 'absent');
 	});
@@ -157,24 +156,50 @@ test('stage 1: other ecosystems\' test commands are recognised', () => {
 	}
 });
 
-test('stage 1: a call to a reusable workflow is detected', () => {
-	withRepo({ '.github/workflows/build.yml': 'jobs:\n  build:\n    uses: acme/platform/.github/workflows/node.yml@v1\n' }, root => {
-		assert.equal(stateOf(root, 'reusable-workflows'), 'present');
+test('stage 1: CODEOWNERS and reusable workflows are no longer observed at all', () => {
+	withRepo({ 'CODEOWNERS': '* @team\n', '.github/workflows/build.yml': 'jobs:\n  build:\n    uses: acme/platform/.github/workflows/node.yml@v1\n' }, root => {
+		const { observations } = collectDarkFactoryFileSignals(root);
+		assert.equal('codeowners' in observations, false);
+		assert.equal('reusable-workflows' in observations, false);
 	});
 });
 
-test('stage 1: a local composite action is not mistaken for a reusable workflow', () => {
-	withRepo({ '.github/workflows/build.yml': 'jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n' }, root => {
-		assert.equal(stateOf(root, 'reusable-workflows'), 'absent');
-	});
-});
-
-test('stage 1: CODEOWNERS is found in any of the locations GitHub accepts', () => {
-	for (const location of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
-		withRepo({ [location]: '* @team\n' }, root => {
-			assert.equal(stateOf(root, 'codeowners'), 'present', `expected ${location} to be found`);
+test('stage 1: Renovate counts as automated dependency updates, like Dependabot', () => {
+	for (const location of ['.github/dependabot.yml', 'renovate.json', '.github/renovate.json5', '.renovaterc']) {
+		withRepo({ [location]: '{}\n' }, root => {
+			assert.equal(stateOf(root, 'dependabot'), 'present', `expected ${location} to be found`);
 		});
 	}
+});
+
+test('stage 1: the coding agent setup workflow counts as a reproducible environment, like a dev container', () => {
+	withRepo({ '.devcontainer/devcontainer.json': '{}' }, root => assert.equal(stateOf(root, 'devcontainer'), 'present'));
+	withRepo({ '.github/workflows/copilot-setup-steps.yml': 'jobs: {}\n' }, root => assert.equal(stateOf(root, 'devcontainer'), 'present'));
+});
+
+test('stage 1: infrastructure as code does not apply to a repository that deploys nothing', () => {
+	// A desktop app or a library: it builds, tests and publishes, but provisions nothing.
+	withRepo({
+		'.github/workflows/build.yml': CI_WORKFLOW,
+		'.github/workflows/release.yml': 'jobs:\n  r:\n    steps:\n      - run: npm publish\n      - uses: docker/build-push-action@v6\n      - uses: azure/login@v2\n',
+	}, root => {
+		assert.equal(stateOf(root, 'infrastructure-as-code'), 'not-applicable');
+	});
+	withRepo({ 'README.md': '' }, root => assert.equal(stateOf(root, 'infrastructure-as-code'), 'not-applicable'));
+});
+
+test('stage 1: infrastructure as code is missing once a workflow deploys without any', () => {
+	for (const step of ['uses: azure/webapps-deploy@v3', 'run: kubectl apply -f app.yaml', 'run: az containerapp update --name app', 'run: terraform apply -auto-approve', 'run: helm upgrade --install app ./chart']) {
+		withRepo({ '.github/workflows/deploy.yml': `jobs:\n  d:\n    steps:\n      - ${step}\n` }, root => {
+			assert.equal(stateOf(root, 'infrastructure-as-code'), 'absent', `expected "${step}" to count as a deployment`);
+		});
+	}
+});
+
+test('stage 1: a deploying repository with infrastructure definitions has the control', () => {
+	withRepo({ '.github/workflows/deploy.yml': 'jobs:\n  d:\n    steps:\n      - uses: azure/webapps-deploy@v3\n', 'infra/main.bicep': '' }, root => {
+		assert.equal(stateOf(root, 'infrastructure-as-code'), 'present');
+	});
 });
 
 test('stage 1: infrastructure as code is detected from a root .tf file', () => {
@@ -201,7 +226,7 @@ test('stage 1: a CodeQL workflow is detected however it is pinned', () => {
 	});
 });
 
-test('stage 1: build-provenance attestations are detected', () => {
+test('stage 4: build-provenance attestations are detected', () => {
 	withRepo({ '.github/workflows/release.yml': 'jobs:\n  r:\n    steps:\n      - uses: actions/attest-build-provenance@v1\n' }, root => {
 		assert.equal(stateOf(root, 'artifact-attestations'), 'present');
 	});
@@ -259,7 +284,11 @@ test('stage 3: the API-only controls are left unanswered by the filesystem tier'
 		assert.equal('branch-protection' in observations, false);
 		assert.equal('human-review-enforced' in observations, false);
 		assert.equal('agent-authored-pull-requests' in observations, false);
-		assert.equal('environment-protection-rules' in observations, false);
+	});
+	// Protection rules are an API fact; the filesystem tier only speaks up to say
+	// there is no deployment to protect.
+	withRepo({ '.github/workflows/deploy.yml': 'jobs:\n  deploy:\n    environment: production\n' }, root => {
+		assert.equal('environment-protection-rules' in collectDarkFactoryFileSignals(root).observations, false);
 	});
 });
 
@@ -293,6 +322,31 @@ test('stage 4: implementation-only agents leave the independent-evaluator contro
 	withRepo({ '.github/agents/refactor.agent.md': '# refactor' }, root => {
 		assert.equal(stateOf(root, 'custom-agents'), 'present');
 		assert.equal(stateOf(root, 'independent-evaluator-agent'), 'absent');
+	});
+});
+
+test('stage 4: an AI reviewer wired into a workflow or configured as a tool is an independent evaluator', () => {
+	withRepo({ '.github/workflows/review.yml': 'jobs:\n  r:\n    steps:\n      - run: gh pr edit "$PR" --add-reviewer @copilot\n' }, root => {
+		assert.equal(stateOf(root, 'independent-evaluator-agent'), 'present');
+	});
+	withRepo({ '.github/workflows/sec.yml': 'jobs:\n  r:\n    steps:\n      - uses: anthropics/claude-code-security-review@main\n' }, root => {
+		assert.equal(stateOf(root, 'independent-evaluator-agent'), 'present');
+	});
+	withRepo({ '.coderabbit.yaml': 'reviews: {}\n' }, root => {
+		assert.equal(stateOf(root, 'independent-evaluator-agent'), 'present');
+	});
+});
+
+test('stage 4: deployment environments do not apply where nothing is deployed', () => {
+	withRepo({ '.github/workflows/build.yml': CI_WORKFLOW }, root => {
+		assert.equal(stateOf(root, 'deployment-environments'), 'not-applicable');
+		assert.equal(stateOf(root, 'environment-protection-rules'), 'not-applicable');
+	});
+});
+
+test('stage 4: a deploying workflow without a named environment leaves the control absent', () => {
+	withRepo({ '.github/workflows/deploy.yml': 'jobs:\n  d:\n    steps:\n      - uses: azure/webapps-deploy@v3\n' }, root => {
+		assert.equal(stateOf(root, 'deployment-environments'), 'absent');
 	});
 });
 
@@ -330,21 +384,11 @@ test('facts: static cloud credentials are only reported when OIDC is not used', 
 	});
 });
 
-test('facts: agent file names are collected for the evaluator check', () => {
-	withRepo({
-		'.github/agents/refactor.agent.md': '',
-		'.github/agents/test-expert.agent.md': '',
-		'.github/agents/notes.txt': '',
-	}, root => {
-		assert.deepEqual((collectDarkFactoryFileSignals(root).facts.agentFileNames ?? []).sort(), ['refactor.agent.md', 'test-expert.agent.md']);
-	});
-});
-
 test('collectDarkFactoryFileSignals: a non-existent path yields observations rather than throwing', () => {
 	const missing = path.join(process.cwd(), 'dark-factory-does-not-exist-xyz');
 	const { observations, facts } = collectDarkFactoryFileSignals(missing);
 	assert.equal(observations['ci-workflows'].state, 'absent');
-	assert.deepEqual(facts.agentFileNames, []);
+	assert.deepEqual(facts.writeAllWorkflows, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -412,7 +456,6 @@ test('readGitOriginUrl: undefined when the gitdir pointer leads nowhere', () => 
 test('agents: a README in .github/agents is not counted as an agent definition', () => {
 	withRepo({ '.github/agents/README.md': '# how to add an agent' }, root => {
 		assert.equal(stateOf(root, 'custom-agents'), 'absent');
-		assert.deepEqual(collectDarkFactoryFileSignals(root).facts.agentFileNames, []);
 	});
 });
 
@@ -422,8 +465,7 @@ test('agents: a README alongside real agents does not inflate the count or mask 
 		'.github/agents/refactor.agent.md': '',
 		'.github/agents/test-expert.agent.md': '',
 	}, root => {
-		const { observations, facts } = collectDarkFactoryFileSignals(root);
-		assert.deepEqual((facts.agentFileNames ?? []).sort(), ['refactor.agent.md', 'test-expert.agent.md']);
+		const { observations } = collectDarkFactoryFileSignals(root);
 		assert.match(observations['custom-agents'].detail ?? '', /^2 agent definition/);
 		assert.equal(observations['independent-evaluator-agent'].state, 'present');
 	});
@@ -468,7 +510,7 @@ test('unreadable: a workflows directory that cannot be read reports unknown, not
 			const { observations } = collectDarkFactoryFileSignals(root);
 			assert.equal(observations['ci-workflows'].state, 'unknown');
 			assert.equal(observations['ci-test-execution'].state, 'unknown');
-			assert.equal(observations['reusable-workflows'].state, 'unknown');
+			assert.equal(observations['infrastructure-as-code'].state, 'unknown', 'whether anything deploys could not be read');
 			assert.equal(observations['deployment-environments'].state, 'unknown');
 			assert.equal(observations['agentic-workflows'].state, 'unknown');
 		});

@@ -332,7 +332,7 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.overview.scannedMany', 4), '4 repositories scanned');
 	assert.equal(t('readiness.overview.atStage', 2, 0), '2 at Stage 0');
 	assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 with anti-patterns');
-	assert.equal(t('readiness.overview.hint'), 'Click a repository to see what blocks its next stage.');
+	assert.equal(t('readiness.overview.hint'), 'Click a repository to see every stage and its checks.');
 	assert.equal(t('readiness.disclaimer.headline'), 'A checklist, not a green light.');
 	assert.equal(t('readiness.disclaimer.body'), 'For each repository this shows which safeguards are already in place (reviews, CI checks, agent instructions) and what is still missing for the next stage. It never says a repo is ready to run without people watching, so Stage 5 is never given out.');
 	assert.equal(t('readiness.about.title'), '📋 What this measures');
@@ -341,7 +341,19 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.action.hint'), 'Pick the items above, then open a new Copilot Chat with a prompt to implement them. Nothing is sent until you press Enter.');
 	assert.equal(t('readiness.action.draft'), '🤖 Draft Copilot Chat prompt');
 	assert.equal(t('readiness.action.selectFirst'), '🤖 Select at least one item first');
-	assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), 'Include CODEOWNERS in the Copilot prompt');
+	assert.equal(t('readiness.action.includeItem', 'CI workflows'), 'Include CI workflows in the Copilot prompt');
+	assert.equal(t('readiness.ladder.title'), 'All stages and their checks');
+	assert.equal(t('readiness.stage.progress', 2, 5), '2 of 5 in place');
+	assert.equal(t('readiness.stage.missing', 1), '1 missing');
+	assert.equal(t('readiness.stage.next'), 'Next stage');
+	assert.equal(t('readiness.stage.notAssessed'), 'Not assessed by this scan');
+	assert.equal(t('readiness.state.present'), 'In place');
+	assert.equal(t('readiness.state.absent'), 'Missing');
+	assert.equal(t('readiness.state.unknown'), 'Not checked');
+	assert.equal(t('readiness.state.notApplicable'), 'Not applicable');
+	assert.equal(t('readiness.tag.recommended'), 'Recommended');
+	assert.equal(t('readiness.tag.recommendedHint'), 'Good practice, but it does not block this stage.');
+	assert.equal(t('readiness.repo.otherHost'), 'remote is not on GitHub, so GitHub-specific checks are not run');
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('readiness.summary.missingForStage', 3, 1), '进入第 1 阶段还缺 3 项');
@@ -350,13 +362,25 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 		assert.equal(t('readiness.overview.scannedMany', 4), '已扫描 4 个仓库');
 		assert.equal(t('readiness.overview.atStage', 2, 0), '2 个处于第 0 阶段');
 		assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 个存在反模式');
-		assert.equal(t('readiness.overview.hint'), '点击仓库，查看阻碍其进入下一阶段的因素。');
+		assert.equal(t('readiness.overview.hint'), '点击仓库，查看每个阶段及其检查项。');
 		assert.equal(t('readiness.disclaimer.headline'), '这是一份检查清单，而不是绿灯。');
 		assert.equal(t('readiness.about.title'), '📋 衡量内容');
 		assert.equal(t('readiness.about.stage5'), '第 5 阶段永远不会被授予：其决定性证据无法由机器检测。');
 		assert.equal(t('readiness.action.draft'), '🤖 起草 Copilot Chat 提示词');
 		assert.equal(t('readiness.action.selectFirst'), '🤖 请先至少选择一项');
-		assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), '在 Copilot 提示词中包含 CODEOWNERS');
+		assert.equal(t('readiness.action.includeItem', 'CI workflows'), '在 Copilot 提示词中包含 CI workflows');
+		assert.equal(t('readiness.ladder.title'), '所有阶段及其检查项');
+		assert.equal(t('readiness.stage.progress', 2, 5), '已具备 2/5 项');
+		assert.equal(t('readiness.stage.missing', 1), '缺少 1 项');
+		assert.equal(t('readiness.stage.next'), '下一阶段');
+		assert.equal(t('readiness.stage.notAssessed'), '本次扫描不评估');
+		assert.equal(t('readiness.state.present'), '已具备');
+		assert.equal(t('readiness.state.absent'), '缺失');
+		assert.equal(t('readiness.state.unknown'), '未检查');
+		assert.equal(t('readiness.state.notApplicable'), '不适用');
+		assert.equal(t('readiness.tag.recommended'), '建议');
+		assert.equal(t('readiness.tag.recommendedHint'), '良好实践，但不会阻碍此阶段。');
+		assert.equal(t('readiness.repo.otherHost'), '远程仓库不在 GitHub 上，因此不运行 GitHub 专属检查');
 	} finally {
 		mock.setLanguage('en');
 	}

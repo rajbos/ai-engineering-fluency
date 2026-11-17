@@ -33,8 +33,10 @@ export class DarkFactoryTab {
 		if (!this.available) { return ''; }
 		return `<div id="tab-panel-readiness" class="tab-panel"${activeTab !== 'readiness' ? ' style="display:none"' : ''}>
 			<div class="section">
-				<div class="section-title"><span class="codicon codicon-shield"></span><span>${localize('usage.tab.readiness')}</span></div>
-				<button class="button secondary" id="btn-refresh-readiness">${localize('nav.btnRefresh')}</button>
+				<div class="section-title">
+					<span class="codicon codicon-shield"></span><span>${localize('usage.tab.readiness')}</span>
+					<button class="button secondary df-refresh" id="btn-refresh-readiness">${localize('nav.btnRefresh')}</button>
+				</div>
 				<div id="readiness-content"></div>
 			</div>
 		</div>`;
