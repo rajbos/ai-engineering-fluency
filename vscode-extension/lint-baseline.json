@@ -51,7 +51,7 @@
 			"vscode-extension/src/backend/services/syncService.ts": 4,
 			"vscode-extension/src/backend/settings.ts": 1,
 			"vscode-extension/src/backend/teamServerConfigPanel.ts": 1,
-			"vscode-extension/src/extension.ts": 172,
+			"vscode-extension/src/extension.ts": 171,
 			"vscode-extension/src/githubPrService.ts": 7,
 			"vscode-extension/src/types/jsdom.d.ts": 2,
 			"vscode-extension/src/types/json.d.ts": 2,

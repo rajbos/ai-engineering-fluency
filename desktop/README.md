@@ -35,9 +35,17 @@ feed one server while VS Code and VS Code Insiders feed others.
 - **Sign in with GitHub** uses the OAuth device flow (scope `read:user`); the
   token is encrypted with Windows' credential protection (Electron
   `safeStorage`) under `%APPDATA%\AI Engineering Fluency\team-server-token.bin`.
-  Settings live next to it in `team-server.json`. The build needs a GitHub OAuth
-  App client ID with device flow enabled in `GITHUB_OAUTH_CLIENT_ID`
-  (`src/teamServer.ts`); `AIEF_GITHUB_CLIENT_ID` overrides it for development.
+  Settings live next to it in `team-server.json`.
+- **OAuth client ID (publisher setup, once):** device-flow sign-in goes through
+  one GitHub OAuth App owned by whoever publishes the app, with "Enable Device
+  Flow" ticked. Its client ID is public and ships in the build as
+  `GITHUB_OAUTH_CLIENT_ID` (`src/teamServer.ts`); people installing the app
+  never set it, they only sign in. `AIEF_GITHUB_CLIENT_ID` overrides it for
+  development. Until it is set, the sign-in button is disabled.
+- Each upload sends the daily rollups to `/api/upload` and the fluency score
+  (the one the **Fluency Score** view shows) to `/api/fluency-score`, the same
+  two calls the extension makes. They succeed or fail independently and the
+  status shows both.
 - Uploads run a minute after launch, then every 15 minutes, and on
   **Upload to team server now**. The tray shows the last result.
 

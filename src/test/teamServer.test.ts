@@ -4,6 +4,7 @@ import type * as fs from 'fs';
 
 import { DailyRollupBuilder } from '../teamServer/dailyRollupBuilder';
 import { buildTeamServerEntries, canonicalTeamServerUrl } from '../teamServer/teamServerEntries';
+import { buildFluencyScorePayload } from '../teamServer/fluencyScorePayload';
 import { computeBackendSharingPolicy, hashMachineIdForTeam, hashWorkspaceIdForTeam } from '../teamServer/sharingProfile';
 import type { SessionFileCache } from '../types';
 
@@ -132,4 +133,18 @@ test('buildTeamServerEntries: soloFull keeps raw IDs and names; the default edit
 test('canonicalTeamServerUrl: trailing slashes and host case do not create a second endpoint', () => {
 	assert.equal(canonicalTeamServerUrl('https://Fluency.Example.com/'), 'https://fluency.example.com');
 	assert.equal(canonicalTeamServerUrl(' https://x.example.com/team// '), 'https://x.example.com/team');
+});
+
+test('buildFluencyScorePayload: sends stages, labels and tips but never the per-category evidence', () => {
+	const payload = buildFluencyScorePayload({
+		overallStage: 3,
+		overallLabel: 'Stage 3',
+		categories: [{ category: 'Agentic', icon: 'A', stage: 3, tips: ['try plan mode'], evidence: ['used agent mode in secret-repo'] } as never],
+	}, new Date('2026-11-17T10:00:00Z'));
+	assert.deepEqual(payload, {
+		overallStage: 3,
+		overallLabel: 'Stage 3',
+		categories: [{ category: 'Agentic', icon: 'A', stage: 3, tips: ['try plan mode'] }],
+		computedAt: '2026-11-17T10:00:00.000Z',
+	});
 });

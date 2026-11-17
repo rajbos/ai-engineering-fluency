@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { DailyRollupBuilder } from '../../src/teamServer/dailyRollupBuilder';
 import { buildTeamServerEntries, canonicalTeamServerUrl } from '../../src/teamServer/teamServerEntries';
 import { SharingServerUploadService } from '../../src/teamServer/sharingServerUploadService';
+import { buildFluencyScorePayload, type FluencyScoreSource } from '../../src/teamServer/fluencyScorePayload';
 import { computeBackendSharingPolicy, parseBackendSharingProfile, type BackendSharingProfile } from '../../src/teamServer/sharingProfile';
 import { estimateTokensFromText, getModelFromRequest } from '../../src/tokenEstimation';
 import { discoverSessionFiles, getSessionFileCacheForRollups } from '../../cli/src/helpers';
@@ -41,10 +42,12 @@ export interface TeamServerStatus {
 }
 
 /**
- * GitHub OAuth App used for the device-flow sign-in. OAuth client IDs are public (the device
- * flow has no client secret), so it lives in source. Create the app under
+ * GitHub OAuth App used for the device-flow sign-in. This is the *publisher's* app, registered
+ * once and shipped in every build — the person installing the desktop app never sets it; they
+ * only sign in, and uploads use their own token. OAuth client IDs are public (the device flow
+ * has no client secret), so it lives in source. Register the app under
  * Settings → Developer settings → OAuth Apps with "Enable Device Flow" ticked, then paste its
- * client ID here. `AIEF_GITHUB_CLIENT_ID` overrides it for development.
+ * client ID here. `AIEF_GITHUB_CLIENT_ID` overrides it for development only.
  */
 const GITHUB_OAUTH_CLIENT_ID = '';
 
@@ -205,6 +208,8 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 export interface TeamServerSyncHooks {
     /** Called whenever the status changes, so the tray and settings page can update. */
     onStatusChange: (status: TeamServerStatus) => void;
+    /** The fluency score the Fluency Score panel shows; uploaded to `/api/fluency-score` after the rollups. */
+    getFluencyScore: () => Promise<FluencyScoreSource>;
 }
 
 export class DesktopTeamServerSync {
@@ -351,13 +356,35 @@ export class DesktopTeamServerSync {
         const token = loadToken()!;
         const settings = this.file;
         this.setStatus({ ...this.status, state: 'syncing', message: 'Uploading…' });
+        // The rollups and the fluency score are separate POSTs with separate outcomes, as in the
+        // extension: a failing score must not hide a failing rollup upload, or the reverse.
+        let rollupMessage: string | undefined;
+        let rollupError: string | undefined;
         try {
-            const message = await uploadToTeamServer(settings, token, this.uploader);
-            this.setStatus({ state: 'ok', message, lastSyncAt: Date.now() });
+            rollupMessage = await uploadToTeamServer(settings, token, this.uploader);
         } catch (err) {
-            this.setStatus({ state: 'error', message: err instanceof Error ? err.message : String(err), lastSyncAt: this.status.lastSyncAt });
+            rollupError = err instanceof Error ? err.message : String(err);
+        }
+        const scoreError = await this.uploadFluencyScore(settings, token);
+        if (rollupError || scoreError) {
+            const message = [rollupError, scoreError && `Fluency score: ${scoreError}`].filter(Boolean).join(' ');
+            this.setStatus({ state: 'error', message, lastSyncAt: this.status.lastSyncAt });
+        } else {
+            this.setStatus({ state: 'ok', message: `${rollupMessage} Fluency score uploaded.`, lastSyncAt: Date.now() });
         }
         return this.status;
+    }
+
+    /** Upload the fluency score. Returns an error message, or undefined on success. */
+    private async uploadFluencyScore(settings: StoredSettingsFile, token: string): Promise<string | undefined> {
+        let payload;
+        try {
+            payload = buildFluencyScorePayload(await this.hooks.getFluencyScore());
+        } catch (err) {
+            return `could not compute it (${err instanceof Error ? err.message : String(err)})`;
+        }
+        const stored = await this.uploader.uploadFluencyScore(canonicalTeamServerUrl(settings.endpointUrl), token, payload, log, warn);
+        return stored ? undefined : 'the server did not store it (see the log).';
     }
 }
 

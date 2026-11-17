@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeTheme, protoc
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
-import { buildDiagnosticReport, buildPanelHtml as buildPanelPage, sessionEditorName, VSCODE_THEME_VARS, PANEL_ASSET_PREFIX, type PanelId } from './panelPage';
+import { buildDiagnosticReport, buildPanelHtml as buildPanelPage, computeFluencyScore, sessionEditorName, VSCODE_THEME_VARS, PANEL_ASSET_PREFIX, type PanelId } from './panelPage';
 import { checkForUpdates, getUpdateState, installUpdate, startUpdateChecks } from './updater';
 import { DesktopTeamServerSync, isGitHubSignInConfigured, type TeamServerStatus } from './teamServer';
 import { buildTeamServerPageHtml } from './teamServerPage';
@@ -14,11 +14,12 @@ import {
     buildChartPayload,
     buildEfficiencyPayload,
     getSessionBackingPath,
+    buildCustomizationMatrix,
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
 import { withUsageAnalysisViewStats } from '../../cli/src/usageAnalysisView';
-import type { DailyTokenStats, DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { DailyTokenStats, DetailedStats, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../src/types';
 import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
@@ -61,6 +62,8 @@ let currentPanel: PanelId = 'details';
 let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
+// Customization matrix for the fluency score; `undefined` is a valid result (no recent workspaces).
+let cachedCustomizationMatrix: { value: WorkspaceCustomizationMatrix | undefined } | null = null;
 let cachedChartPayload: object | null = null;
 // Session-derived inputs behind both the Chart and Efficiency payloads, from one session walk.
 let cachedViewStats: ViewStats | null = null;
@@ -246,6 +249,21 @@ async function loadUsageStats(): Promise<UsageAnalysisStats> {
     return cachedUsageStats;
 }
 
+function getCustomizationMatrix(): Promise<WorkspaceCustomizationMatrix | undefined> {
+    return shareInFlight('customization', loadCustomizationMatrix);
+}
+
+async function loadCustomizationMatrix(): Promise<WorkspaceCustomizationMatrix | undefined> {
+    expireCachesOnDateChange();
+    while (!cachedCustomizationMatrix) {
+        await computeForCurrentFiles(
+            async files => ({ value: await buildCustomizationMatrix(files) }),
+            (matrix) => { cachedCustomizationMatrix ??= matrix; },
+        );
+    }
+    return cachedCustomizationMatrix.value;
+}
+
 /**
  * Chart payload, computed once and reused. Building it walks every session file,
  * which on a large history blocks the main process for a long time — doing that
@@ -344,6 +362,7 @@ function expireCachesOnDateChange(): void {
     if (cachedDataDay !== '') {
         cachedStats = null;
         cachedUsageStats = null;
+        cachedCustomizationMatrix = null;
         cachedChartPayload = null;
         cachedViewStats = null;
         cachedEfficiencyPayload = null;
@@ -415,6 +434,7 @@ async function refreshStats(): Promise<void> {
         // refresh spans midnight, and the next read must then expire them.
         cachedDataDay = toLocalDayKey(stats.lastUpdated);
         cachedUsageStats = null; // reset so it recomputes on next access
+        cachedCustomizationMatrix = null;
         cachedChartPayload = null;
         cachedViewStats = null;
         cachedEfficiencyPayload = null;
@@ -429,7 +449,7 @@ function buildPanelHtml(panel: PanelId): Promise<string> {
     return buildPanelPage(
         panel,
         { locale: app.getLocale(), isDark: nativeTheme.shouldUseDarkColors },
-        { getStats, getChartPayload, getEfficiencyPayload, getUsageStats, getSessionFiles },
+        { getStats, getChartPayload, getEfficiencyPayload, getUsageStats, getSessionFiles, getCustomizationMatrix },
         app.getVersion(),
     );
 }
@@ -1016,7 +1036,11 @@ app.whenReady().then(async () => {
 
     registerProtocol();
     registerIpcHandlers();
-    teamServerSync = new DesktopTeamServerSync({ onStatusChange: onTeamServerStatus });
+    teamServerSync = new DesktopTeamServerSync({
+        onStatusChange: onTeamServerStatus,
+        // The same score the Fluency Score panel shows, from the same cached usage stats.
+        getFluencyScore: () => computeFluencyScore({ getUsageStats, getCustomizationMatrix }),
+    });
     registerTeamServerIpc(teamServerSync);
     Menu.setApplicationMenu(buildAppMenu());
 
