@@ -4,8 +4,8 @@
  */
 /// <reference types="sql.js" />
 import * as fs from 'fs';
-import * as path from 'path';
 import initSqlJs from 'sql.js';
+import { SqlJsLoader } from './sqlJsLoader';
 
 export type SqlJsStatic = initSqlJs.SqlJsStatic;
 export type SqlDatabase = initSqlJs.Database;
@@ -16,8 +16,7 @@ export type SqlDatabase = initSqlJs.Database;
 export type SqlJsDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string; walMtimeMs: number; walSize: number };
 
 export abstract class SqlJsDbCacheBase {
-	protected _sqlJsModule: SqlJsStatic | null = null;
-	protected _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private readonly _sqlJs = new SqlJsLoader();
 	protected _dbCache: SqlJsDbCache | null = null;
 	protected _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
 	// A single trailing slot for the most recent WAL-blind (`walIncluded: false`) parsed Database —
@@ -35,30 +34,14 @@ export abstract class SqlJsDbCacheBase {
 	 * The cache is reset on failure so a transient error is retryable.
 	 */
 	async initSqlJs(): Promise<SqlJsStatic> {
-		if (this._sqlJsModule) { return this._sqlJsModule; }
-		if (!this._sqlJsInitPromise) {
-			this._sqlJsInitPromise = (async () => {
-				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-				let wasmBinary: Uint8Array | undefined;
-				if (fs.existsSync(wasmPath)) {
-					wasmBinary = fs.readFileSync(wasmPath);
-				}
-				const module = await initSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
-				this._sqlJsModule = module;
-				return module;
-			})().catch(err => {
-				this._sqlJsInitPromise = null;
-				throw err;
-			});
-		}
-		return this._sqlJsInitPromise;
+		return this._sqlJs.load();
 	}
 
 	dispose(): void {
 		this.closeDbCache();
 		this.releasePendingTransientDb();
 		this._dbCacheInflight.clear();
-		this._sqlJsInitPromise = null;
+		this._sqlJs.clearPending();
 	}
 
 	protected closeDb(db: SqlDatabase): void {
@@ -97,8 +80,8 @@ export type SqlJsFileDbEntry = { db: SqlDatabase; mtimeMs: number; size: number 
  * per path, re-opened only when the file's mtime/size change, with single-flight dedup.
  */
 export abstract class SqlJsFileDbCacheBase {
-	protected _sqlJsModule: SqlJsStatic | null = null;
-	protected _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	// The factory defers to `createSqlJs` at call time so a subclass override is honoured.
+	private readonly _sqlJs = new SqlJsLoader(config => this.createSqlJs(config));
 	protected _dbCache: Map<string, SqlJsFileDbEntry> = new Map();
 	protected _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
 
@@ -108,7 +91,7 @@ export abstract class SqlJsFileDbCacheBase {
 		}
 		this._dbCache.clear();
 		this._dbCacheInflight.clear();
-		this._sqlJsInitPromise = null;
+		this._sqlJs.clearPending();
 	}
 
 	/** Factory for the sql.js module; overridable so a subclass can inject a stub. */
@@ -118,23 +101,7 @@ export abstract class SqlJsFileDbCacheBase {
 
 	/** Lazily initialise and cache the sql.js WASM module. */
 	async initSqlJs(): Promise<SqlJsStatic> {
-		if (this._sqlJsModule) { return this._sqlJsModule; }
-		if (!this._sqlJsInitPromise) {
-			this._sqlJsInitPromise = (async () => {
-				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-				let wasmBinary: Uint8Array | undefined;
-				try {
-					wasmBinary = await fs.promises.readFile(wasmPath);
-				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
-				const module = await this.createSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
-				this._sqlJsModule = module;
-				return module;
-			})().catch(err => {
-				this._sqlJsInitPromise = null;
-				throw err;
-			});
-		}
-		return this._sqlJsInitPromise;
+		return this._sqlJs.load();
 	}
 
 	protected closeDb(db: SqlDatabase): void {

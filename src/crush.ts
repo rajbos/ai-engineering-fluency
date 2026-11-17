@@ -18,6 +18,7 @@ import type { ModelUsage } from './types';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import type { UriLike } from './opencode';
 import { normalizePath } from './utils/pathUtils';
+import { SqlJsLoader } from './utils/sqlJsLoader';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -32,8 +33,7 @@ export interface CrushProject {
 }
 
 export class CrushDataAccess {
-	private _sqlJsModule: SqlJsStatic | null = null;
-	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private readonly _sqlJs = new SqlJsLoader();
 	private _dbCache: Map<string, CrushDbCacheEntry> = new Map();
 	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
 	private readonly extensionUri: UriLike;
@@ -48,7 +48,7 @@ export class CrushDataAccess {
 		}
 		this._dbCache.clear();
 		this._dbCacheInflight.clear();
-		this._sqlJsInitPromise = null;
+		this._sqlJs.clearPending();
 	}
 
 	private closeDb(db: SqlDatabase): void {
@@ -204,23 +204,7 @@ export class CrushDataAccess {
 	 * The cache is reset on failure so a transient error is retryable.
 	 */
 	async initSqlJs(): Promise<SqlJsStatic> {
-		if (this._sqlJsModule) { return this._sqlJsModule; }
-		if (!this._sqlJsInitPromise) {
-			this._sqlJsInitPromise = (async () => {
-				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-				let wasmBinary: Uint8Array | undefined;
-				if (fs.existsSync(wasmPath)) {
-					wasmBinary = fs.readFileSync(wasmPath);
-				}
-				const module = await initSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
-				this._sqlJsModule = module;
-				return module;
-			})().catch(err => {
-				this._sqlJsInitPromise = null;
-				throw err;
-			});
-		}
-		return this._sqlJsInitPromise;
+		return this._sqlJs.load();
 	}
 
 	/**
