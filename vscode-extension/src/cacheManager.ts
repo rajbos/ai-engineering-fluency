@@ -33,6 +33,10 @@ export interface CacheManagerDeps {
 	// src/machineParseLock.ts). Undefined disables cross-host coordination, which is what tests
 	// get by default so they never touch the real ~/.copilot-token-tracker.
 	machineLockDir?: string;
+	// Lock identity and clock, injectable so tests can race two windows of one edition in one
+	// process and step time past the stall limits. Default: vscode.env.sessionId and Date.now.
+	lockOwnerId?: string;
+	now?: () => number;
 }
 
 /** True when two entries describe the same version of a file (same mtime and size). */
@@ -99,6 +103,9 @@ export class CacheManager {
 	// ...and no leader may hold the lock longer than this, progress or not (a cold-boot parse of
 	// thousands of files takes minutes, not an hour).
 	static readonly REFRESH_LOCK_MAX_HOLD_MS = 60 * 60 * 1000;
+	// How long one post-parse phase (stats, snapshot save, checkpoint wait) may keep the heartbeat
+	// counting as progress; see whileRefreshBusy().
+	static readonly REFRESH_BUSY_PROGRESS_BUDGET_MS = 15 * 60 * 1000;
 	private static readonly LEADER_HEARTBEAT_MS = 30 * 1000;
 	// How long a leader waits for another host's in-progress parse before parsing anyway. The views
 	// already show the cached snapshot meanwhile; a hung peer is taken over sooner via its stall rule.
@@ -143,6 +150,10 @@ export class CacheManager {
 	private lastLoadedSnapshotMtime = 0;
 	// Set by noteRefreshProgress(), consumed (written as progressAt) by the next renewRefreshLock().
 	private refreshProgressPending = false;
+	// Nesting count and start time of in-flight post-parse phases; see whileRefreshBusy().
+	private refreshBusyCount = 0;
+	private refreshBusySince = 0;
+	private refreshBusyEpoch = 0;
 	// Whether this window currently holds the machine-wide parse lock (see acquireMachineParseLock()).
 	private holdsMachineParseLock = false;
 	private leaderHeartbeat: NodeJS.Timeout | undefined;
@@ -425,8 +436,10 @@ export class CacheManager {
 	 * write must not race a checkpoint's — see checkpointSettlePromise's doc comment.
 	 */
 	async awaitInFlightCheckpoint(): Promise<void> {
-		if (this.checkpointSettlePromise) {
-			await this.checkpointSettlePromise;
+		const pending = this.checkpointSettlePromise;
+		if (pending) {
+			// A slow checkpoint write is the leader still working — see whileRefreshBusy().
+			await this.whileRefreshBusy(() => pending);
 		}
 	}
 
@@ -529,7 +542,9 @@ export class CacheManager {
 	 * closes that gap: a successful end-of-refresh save now leaves nothing dirty behind it.
 	 */
 	async saveAndAccountForRefresh(): Promise<boolean> {
-		return this.saveAndAccount();
+		// The end-of-refresh snapshot write the leader awaits before releasing its lock: keep the
+		// lock's progress alive through it — see whileRefreshBusy().
+		return this.whileRefreshBusy(() => this.saveAndAccount());
 	}
 
 	/**
@@ -705,6 +720,7 @@ export class CacheManager {
 	 */
 	async acquireRefreshLock(): Promise<boolean> {
 		this.refreshProgressPending = false;
+		this.resetRefreshBusy();
 		return this.acquireLock(this.getRefreshLockPath(), {
 			stallMs: CacheManager.REFRESH_LOCK_STALL_MS,
 			maxHoldMs: CacheManager.REFRESH_LOCK_MAX_HOLD_MS,
@@ -713,7 +729,58 @@ export class CacheManager {
 
 	/** This window's identity for every lock it takes (see src/fileLock.ts). */
 	private get lockOwner(): LockOwner {
-		return { id: vscode.env.sessionId, pid: process.pid, host: this.getPeerHostId() };
+		return { id: this.deps.lockOwnerId ?? vscode.env.sessionId, pid: process.pid, host: this.getPeerHostId() };
+	}
+
+	private now(): number {
+		return (this.deps.now ?? Date.now)();
+	}
+
+	/**
+	 * Run a post-parse phase (stats computation, snapshot save, checkpoint wait) during which no
+	 * per-file progress is reported but the leader is still doing its job. While any such phase is
+	 * in flight, each heartbeat counts as progress, so another window does not judge the leader
+	 * stalled and re-parse everything while it is still saving — but only for
+	 * REFRESH_BUSY_PROGRESS_BUDGET_MS after the phase began. An await that never settles therefore
+	 * still loses the lock: budget plus REFRESH_LOCK_STALL_MS later, well before the max-hold cap.
+	 */
+	async whileRefreshBusy<T>(work: () => Promise<T>): Promise<T> {
+		const end = this.beginRefreshBusy();
+		try {
+			return await work();
+		} finally {
+			end();
+		}
+	}
+
+	/**
+	 * whileRefreshBusy() for a phase that isn't one call. Returns the idempotent end function. A
+	 * phase left open by a throw is closed when the refresh lock is next acquired or released.
+	 */
+	beginRefreshBusy(): () => void {
+		if (this.refreshBusyCount++ === 0) { this.refreshBusySince = this.now(); }
+		const epoch = this.refreshBusyEpoch;
+		let ended = false;
+		return () => {
+			if (ended || epoch !== this.refreshBusyEpoch) { return; }
+			ended = true;
+			this.refreshBusyCount--;
+			this.refreshProgressPending = true; // finishing a phase is progress
+		};
+	}
+
+	/** Close every open busy phase (a new leader cycle starts, or this one ends). */
+	private resetRefreshBusy(): void {
+		this.refreshBusyCount = 0;
+		this.refreshBusyEpoch++;
+	}
+
+	/** Whether the current heartbeat should record progress (and consume the pending flag). */
+	private takeRefreshProgress(): boolean {
+		const busy = this.refreshBusyCount > 0 && this.now() - this.refreshBusySince <= CacheManager.REFRESH_BUSY_PROGRESS_BUDGET_MS;
+		const progress = this.refreshProgressPending || busy;
+		this.refreshProgressPending = false;
+		return progress;
 	}
 
 	/**
@@ -732,12 +799,11 @@ export class CacheManager {
 	 * whether this window still owns the refresh lock.
 	 */
 	async renewRefreshLock(): Promise<boolean> {
-		const progress = this.refreshProgressPending;
-		this.refreshProgressPending = false;
+		const progress = this.takeRefreshProgress();
 		const owned = await this.renewLock(this.getRefreshLockPath(), progress);
 		if (this.holdsMachineParseLock) {
 			const machinePath = this.getMachineParseLockPath();
-			if (machinePath && !(await renewFileLock(machinePath, this.lockOwner, { progress }))) {
+			if (machinePath && !(await renewFileLock(machinePath, this.lockOwner, { progress }, { now: () => this.now() }))) {
 				// Taken over by another host (it judged us stuck). Never release its lock later.
 				this.holdsMachineParseLock = false;
 				this.deps.log('Machine-wide parse lock was taken over by another host');
@@ -756,7 +822,7 @@ export class CacheManager {
 
 	/** Refresh a lock file's timestamp, but only while this window still owns it. */
 	private async renewLock(lockPath: string, progress = false): Promise<boolean> {
-		return renewFileLock(lockPath, this.lockOwner, { progress });
+		return renewFileLock(lockPath, this.lockOwner, { progress }, { now: () => this.now() });
 	}
 
 	/**
@@ -765,6 +831,7 @@ export class CacheManager {
 	 * leadership it was taken under, including on dispose.
 	 */
 	async releaseRefreshLock(): Promise<void> {
+		this.resetRefreshBusy();
 		await this.releaseLock(this.getRefreshLockPath());
 		await this.finishCrossHostParse();
 	}
@@ -777,6 +844,7 @@ export class CacheManager {
 	private async acquireLock(lockPath: string, options: Pick<FileLockOptions, 'stallMs' | 'maxHoldMs'> = {}): Promise<boolean> {
 		return acquireFileLock(lockPath, this.lockOwner, {
 			...options,
+			now: () => this.now(),
 			log: (m) => this.deps.log(m),
 			warn: (m) => this.deps.warn(m),
 		});
@@ -839,6 +907,7 @@ export class CacheManager {
 		const result = await waitForFileLock(lockPath, this.lockOwner, {
 			maxWaitMs: options.maxWaitMs,
 			pollMs: options.pollMs,
+			now: () => this.now(),
 			stallMs: PARSE_LOCK_STALL_MS,
 			maxHoldMs: PARSE_LOCK_MAX_HOLD_MS,
 			log: (m) => this.deps.log(m),
@@ -853,7 +922,10 @@ export class CacheManager {
 			},
 		});
 		this.holdsMachineParseLock = result.acquired;
-		if (!result.acquired) {
+		if (result.unavailable) {
+			// tryAcquireFileLock() already warned once with the OS error; no wait happened.
+			this.deps.log('Machine-wide parse lock unavailable; parsing without cross-host coordination');
+		} else if (!result.acquired) {
 			this.deps.log(`Machine-wide parse lock still held after ${Math.round(result.waitedMs / 1000)}s; parsing without it`);
 		} else if (result.waitedMs > 0 && announced) {
 			this.deps.log(`Acquired machine-wide parse lock after waiting ${Math.round(result.waitedMs / 1000)}s`);

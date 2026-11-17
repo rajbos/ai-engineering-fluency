@@ -13,6 +13,7 @@ import {
 	readFileLock,
 	releaseFileLock,
 	renewFileLock,
+	tryAcquireFileLock,
 } from '../fileLock';
 import {
 	beginMachineParse,
@@ -393,4 +394,70 @@ test('peer snapshots: only exact-format peers with an existing snapshot are list
 // Keep the exported default in sync with the documented 5-minute contract.
 test('default stale threshold is 5 minutes', () => {
 	assert.equal(DEFAULT_LOCK_STALE_MS, 5 * 60 * 1000);
+});
+
+// --- Unusable lock directory: give up at once, warn once -------------------------------------
+
+/** A lock dir that can never be created: a path under a regular file (ENOTDIR on every OS). */
+function unusableLockDir(root: string): string {
+	const file = path.join(root, 'not-a-dir');
+	fs.writeFileSync(file, 'x');
+	return path.join(file, 'locks');
+}
+
+test('tryAcquireFileLock: reports unavailable (not held) when the lock dir cannot be created', async () => {
+	const dir = tmpDir();
+	try {
+		const warnings: string[] = [];
+		const lockPath = path.join(unusableLockDir(dir), 'a.lock');
+		assert.equal(await tryAcquireFileLock(lockPath, desktop, { warn: m => warnings.push(m) }), 'unavailable');
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0], /Unexpected error acquiring lock a\.lock/);
+		assert.equal(await acquireFileLock(lockPath, desktop, { warn: () => {} }), false);
+	} finally { cleanup(dir); }
+});
+
+test('tryAcquireFileLock: reports held (retryable) for a live holder', async () => {
+	const dir = tmpDir();
+	try {
+		const lockPath = path.join(dir, 'a.lock');
+		assert.equal(await tryAcquireFileLock(lockPath, vscodeStable, { isOwnerAlive: alive }), 'acquired');
+		assert.equal(await tryAcquireFileLock(lockPath, desktop, { isOwnerAlive: alive }), 'held');
+	} finally { cleanup(dir); }
+});
+
+test('waitForFileLock: an unusable lock dir returns at once, without polling, after one warning', async () => {
+	const dir = tmpDir();
+	try {
+		const warnings: string[] = [];
+		let slept = 0;
+		const started = Date.now();
+		const result = await waitForFileLock(path.join(unusableLockDir(dir), 'a.lock'), desktop, {
+			maxWaitMs: 120_000,
+			pollMs: 200,
+			warn: m => warnings.push(m),
+			sleep: async () => { slept++; },
+			onWait: () => assert.fail('must not wait on an unusable lock'),
+		});
+		assert.equal(result.acquired, false);
+		assert.equal(result.unavailable, true);
+		assert.equal(slept, 0, 'no poll');
+		assert.ok(Date.now() - started < 2000, 'returns immediately');
+		assert.equal(warnings.length, 1, 'warned once, not per poll');
+	} finally { cleanup(dir); }
+});
+
+test('beginMachineParse: an unusable lock dir returns at once and logs one warning', async () => {
+	const dir = tmpDir();
+	try {
+		const logs: string[] = [];
+		const started = Date.now();
+		const turn = await beginMachineParse(desktop, { lockDir: unusableLockDir(dir), maxWaitMs: 120_000, pollMs: 200, log: m => logs.push(m) });
+		assert.equal(turn.acquired, false);
+		assert.equal(turn.unavailable, true);
+		assert.ok(Date.now() - started < 2000, 'returns immediately');
+		assert.equal(logs.filter(l => /Unexpected error acquiring lock/.test(l)).length, 1, 'one warning');
+		turn.noteProgress();
+		await turn.end();
+	} finally { cleanup(dir); }
 });

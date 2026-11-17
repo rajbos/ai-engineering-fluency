@@ -30,13 +30,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-	acquireFileLock,
 	type FileLockOptions,
 	type LockOwner,
 	type LockRecord,
 	readFileLock,
 	releaseFileLock,
 	renewFileLock,
+	tryAcquireFileLock,
 } from './fileLock';
 
 export const MACHINE_PARSE_LOCK_FILE = 'session-parse.lock';
@@ -68,6 +68,12 @@ export interface WaitForLockOptions extends FileLockOptions {
 export interface WaitForLockResult {
 	acquired: boolean;
 	waitedMs: number;
+	/**
+	 * True when the lock could not be taken at all (unwritable or invalid lock directory). The wait
+	 * then ends at once, without polling: no holder exists to wait for, and every retry would only
+	 * fail and warn again.
+	 */
+	unavailable?: boolean;
 	/** The holder seen on the last failed attempt, when we had to wait. */
 	lastHolder?: LockRecord | null;
 }
@@ -80,7 +86,8 @@ const defaultSleep = (ms: number) => new Promise<void>(resolve => {
 /**
  * Acquire a lock, waiting while a live holder has it. Every poll re-runs the takeover rules, so a
  * holder that dies, goes silent or stops making progress is taken over well before `maxWaitMs`.
- * Returns `acquired: false` only when a live, progressing holder still has it at the deadline.
+ * Returns `acquired: false` when a live, progressing holder still has it at the deadline, or at
+ * once with `unavailable: true` when the lock cannot be created at all.
  */
 export async function waitForFileLock(lockPath: string, owner: LockOwner, options: WaitForLockOptions): Promise<WaitForLockResult> {
 	const now = options.now ?? Date.now;
@@ -88,8 +95,12 @@ export async function waitForFileLock(lockPath: string, owner: LockOwner, option
 	const start = now();
 	let lastHolder: LockRecord | null | undefined;
 	for (;;) {
-		if (await acquireFileLock(lockPath, owner, options)) {
+		const attempt = await tryAcquireFileLock(lockPath, owner, options);
+		if (attempt === 'acquired') {
 			return { acquired: true, waitedMs: now() - start, ...(lastHolder !== undefined ? { lastHolder } : {}) };
+		}
+		if (attempt === 'unavailable') {
+			return { acquired: false, unavailable: true, waitedMs: now() - start };
 		}
 		lastHolder = await readFileLock(lockPath);
 		const waitedMs = now() - start;
@@ -103,8 +114,10 @@ export async function waitForFileLock(lockPath: string, owner: LockOwner, option
 
 /** One host's turn at the heavy parse, from {@link beginMachineParse}. */
 export interface MachineParseSession {
-	/** False when the wait ran out (or the lock dir is unusable); the caller parses anyway. */
+	/** False when the wait ran out or the lock dir is unusable; the caller parses anyway. */
 	readonly acquired: boolean;
+	/** True when the lock dir is unusable (the turn returned at once, without waiting). */
+	readonly unavailable: boolean;
 	readonly waitedMs: number;
 	/** Report parse progress; the next heartbeat records it so peers don't judge this host hung. */
 	noteProgress(): void;
@@ -149,7 +162,9 @@ export async function beginMachineParse(owner: LockOwner, options: BeginMachineP
 			log(`Waiting for ${holder && typeof holder.host === 'string' ? holder.host : 'another host'} to finish its session parse`);
 		},
 	});
-	if (!result.acquired) {
+	if (result.unavailable) {
+		log('Machine-wide parse lock unavailable; parsing without cross-host coordination');
+	} else if (!result.acquired) {
 		log(`Machine-wide parse lock still held after ${Math.round(result.waitedMs / 1000)}s; parsing without it`);
 	}
 	let progressPending = false;
@@ -165,6 +180,7 @@ export async function beginMachineParse(owner: LockOwner, options: BeginMachineP
 	let ended = false;
 	return {
 		acquired: result.acquired,
+		unavailable: result.unavailable === true,
 		waitedMs: result.waitedMs,
 		noteProgress: () => { progressPending = true; },
 		end: async () => {

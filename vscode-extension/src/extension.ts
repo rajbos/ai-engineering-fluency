@@ -6071,10 +6071,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		this.showLoadingTooltipForStep('computing', silent);
 
+		// No per-file progress from here to the end of the save: keep the leader's locks alive meanwhile.
+		const endBusy = this.cacheManager.beginRefreshBusy();
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 		const published = await this.publishRefreshResult(
 			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
 		);
+		endBusy();
 		if (!published) { return undefined; }
 
 		const refreshElapsedSec = ((Date.now() - refreshStartMs) / 1000).toFixed(1);

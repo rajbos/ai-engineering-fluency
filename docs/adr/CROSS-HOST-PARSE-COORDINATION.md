@@ -58,9 +58,23 @@ optimization, never a correctness requirement. Parse-lock holders declare
 `stallMs` = 3 minutes and `maxHoldMs` = 45 minutes, so a hung holder is taken over in minutes
 instead of holding everyone up for the full wait.
 
+A lock directory that cannot be used at all (`EACCES`, `ENOTDIR`, `EPERM`, a read-only disk) is
+not treated as "held": `tryAcquireFileLock()` reports `'unavailable'`, warns once, and the wait
+returns at once, so the host parses straight away instead of polling out the whole wait.
+
 The VS Code refresh-leader lock declares `stallMs` = 5 minutes and `maxHoldMs` = 60 minutes. The
 parse's per-file progress callback (`buildProgressCallback()` → `noteRefreshProgress()`) feeds
 `progressAt`, so a leader that is alive but stuck is taken over by another window.
+
+After the last file, the leader still computes stats, publishes, writes the snapshot and waits
+for a checkpoint before it releases the lock, and none of that is per-file progress. Those phases
+run as **busy** phases (`CacheManager.beginRefreshBusy()` / `whileRefreshBusy()`, used by the
+extension's stats + publish step, `saveAndAccountForRefresh()` and `awaitInFlightCheckpoint()`).
+While one is open, each heartbeat counts as progress, so a second window doesn't take over and
+re-parse mid-save. A busy phase only counts for 15 minutes
+(`REFRESH_BUSY_PROGRESS_BUDGET_MS`). An await that never settles is therefore still taken over,
+about 20 minutes in (budget plus the 5-minute stall limit), well before the 60-minute cap. A
+phase left open by a throw is closed when the refresh lock is next acquired or released.
 
 ### 3. Snapshots stay per host; peers *read* compatible ones
 

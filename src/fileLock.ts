@@ -148,14 +148,26 @@ function buildRecord(owner: LockOwner, options: FileLockOptions): LockRecord {
 	return record;
 }
 
-/** Atomic create. Resolves true on success, false on a non-EEXIST failure; rethrows EEXIST. */
-async function createLockFile(lockPath: string, owner: LockOwner, options: FileLockOptions): Promise<boolean> {
+/** Outcome of a single acquire attempt; see {@link tryAcquireFileLock}. */
+export type LockAttempt =
+	/** This owner now holds the lock. */
+	| 'acquired'
+	/** A live holder has it (or another contender is breaking it right now): worth retrying. */
+	| 'held'
+	/** The lock cannot be taken at all (EACCES, ENOTDIR, EPERM, read-only disk, …): retrying won't help. */
+	| 'unavailable';
+
+type CreateResult = 'created' | 'exists' | 'failed';
+
+/** Atomic create; reports an existing file apart from any other failure. */
+async function createLockFile(lockPath: string, owner: LockOwner, options: FileLockOptions, onError: (err: unknown) => void): Promise<CreateResult> {
 	try {
 		await fs.promises.writeFile(lockPath, JSON.stringify(buildRecord(owner, options)), { flag: 'wx' });
-		return true;
+		return 'created';
 	} catch (err: unknown) {
-		if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') { throw err; }
-		return false;
+		if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') { return 'exists'; }
+		onError(err);
+		return 'failed';
 	}
 }
 
@@ -169,29 +181,44 @@ const BREAK_MESSAGES: Record<LockBreakReason, string> = {
 
 /**
  * Try to take the lock. Returns true when this owner now holds it, false when a live holder has it
- * (or the file system refused). Breaks a dead, stale, stuck or corrupt lock and then competes for
- * the fresh create like any other contender, so two hosts breaking the same stale lock at once
- * still produce exactly one winner.
+ * or the file system refused. Use {@link tryAcquireFileLock} to tell those two apart.
  */
 export async function acquireFileLock(lockPath: string, owner: LockOwner, options: FileLockOptions = {}): Promise<boolean> {
+	return (await tryAcquireFileLock(lockPath, owner, options)) === 'acquired';
+}
+
+/**
+ * Try to take the lock once. Breaks a dead, stale, stuck or corrupt lock and then competes for the
+ * fresh create like any other contender, so two hosts breaking the same stale lock at once still
+ * produce exactly one winner. Reports `'unavailable'` (after one warning) when the lock directory or
+ * file cannot be created at all, so a caller that would otherwise poll can give up immediately.
+ */
+export async function tryAcquireFileLock(lockPath: string, owner: LockOwner, options: FileLockOptions = {}): Promise<LockAttempt> {
 	const log = options.log ?? (() => { /* silent */ });
+	const onError = (err: unknown) => {
+		const message = err instanceof Error ? err.message : String(err);
+		(options.warn ?? log)(`Unexpected error acquiring lock ${path.basename(lockPath)}: ${message}`);
+	};
 	try {
 		await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-		return await createLockFile(lockPath, owner, options);
 	} catch (err: unknown) {
-		if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') {
-			const message = err instanceof Error ? err.message : String(err);
-			(options.warn ?? log)(`Unexpected error acquiring lock ${path.basename(lockPath)}: ${message}`);
-			return false;
-		}
+		onError(err);
+		return 'unavailable';
 	}
+	const created = await createLockFile(lockPath, owner, options, onError);
+	if (created !== 'exists') { return created === 'created' ? 'acquired' : 'unavailable'; }
 	const record = await readFileLock(lockPath);
 	if (record === undefined) {
 		// Released between our create attempt and the read: one more try, no loop.
-		try { return await createLockFile(lockPath, owner, options); } catch { return false; }
+		return toAttempt(await createLockFile(lockPath, owner, options, onError));
 	}
-	if (!evaluateLock(record, options)) { return false; }
-	return breakAndAcquire(lockPath, owner, options, log);
+	if (!evaluateLock(record, options)) { return 'held'; }
+	return breakAndAcquire(lockPath, owner, options, log, onError);
+}
+
+function toAttempt(result: CreateResult): LockAttempt {
+	if (result === 'created') { return 'acquired'; }
+	return result === 'exists' ? 'held' : 'unavailable';
 }
 
 /** A break mutex older than this belongs to a contender that died mid-break. */
@@ -204,27 +231,30 @@ const BREAK_MUTEX_STALE_MS = 30 * 1000;
  * mutex the lock is re-read and re-judged, so a contender that arrives after another already broke
  * it sees the fresh lock and backs off.
  */
-async function breakAndAcquire(lockPath: string, owner: LockOwner, options: FileLockOptions, log: (m: string) => void): Promise<boolean> {
+async function breakAndAcquire(
+	lockPath: string, owner: LockOwner, options: FileLockOptions, log: (m: string) => void, onError: (err: unknown) => void,
+): Promise<LockAttempt> {
 	const mutexPath = `${lockPath}.break`;
 	try {
 		await fs.promises.writeFile(mutexPath, JSON.stringify({ sessionId: owner.id, pid: owner.pid, timestamp: (options.now ?? Date.now)() }), { flag: 'wx' });
-	} catch {
+	} catch (err: unknown) {
+		if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') { onError(err); return 'unavailable'; }
 		// Another contender is breaking it right now (or died doing so: clear that for the next try).
 		try {
 			const stat = await fs.promises.stat(mutexPath);
 			if (Date.now() - stat.mtimeMs > BREAK_MUTEX_STALE_MS) { await fs.promises.unlink(mutexPath); }
 		} catch { /* gone already */ }
-		return false;
+		return 'held';
 	}
 	try {
 		const record = await readFileLock(lockPath);
 		if (record !== undefined) {
 			const reason = evaluateLock(record, options);
-			if (!reason) { return false; }
+			if (!reason) { return 'held'; }
 			log(`Breaking lock ${path.basename(lockPath)} (${BREAK_MESSAGES[reason]}${record?.host ? `, held by ${record.host}` : ''})`);
 			try { await fs.promises.unlink(lockPath); } catch { /* removed by its owner meanwhile */ }
 		}
-		try { return await createLockFile(lockPath, owner, options); } catch { return false; }
+		return toAttempt(await createLockFile(lockPath, owner, options, onError));
 	} finally {
 		try { await fs.promises.unlink(mutexPath); } catch { /* already gone */ }
 	}
