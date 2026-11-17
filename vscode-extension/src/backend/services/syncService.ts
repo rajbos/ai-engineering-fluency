@@ -23,6 +23,7 @@ import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
 import { buildSharingServerActivity, estimateEntryCostUsd } from './sharingServerActivity';
 import { getPricingSourceForEditor } from '../../../../src/chartDataBuilder';
+import { isCopilotFusionAutoSession, resolveCopilotRouterModel } from '../../../../src/hydrafusion';
 import modelPricingData from '../../../../src/modelPricing.json';
 import type { ModelPricing } from '../../../../src/types';
 import { SyncLock } from './syncLock';
@@ -1234,12 +1235,13 @@ ctx: { workspaceId: string; machineId: string; userId: string | undefined; edito
 ): number {
 let defaultModel = 'unknown';
 let failedLines = 0;
+const fusionAuto = isCopilotFusionAutoSession(lines);
 for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
 if (!isEventRecord(event)) { failedLines++; continue; }
-defaultModel = this.updateCliDefaultModel(event, defaultModel);
+defaultModel = resolveCopilotRouterModel(this.updateCliDefaultModel(event, defaultModel), fusionAuto);
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }

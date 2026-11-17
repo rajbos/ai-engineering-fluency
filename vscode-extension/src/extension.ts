@@ -229,7 +229,7 @@ import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
+import { analyzeHydraFusionSession, aiuToUsd, isCopilotFusionAutoSession, resolveCopilotRouterModel } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath, setCopilotCliOtelLogger } from '../../src/copilotCliOtel';
 import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
@@ -1183,7 +1183,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v86: Claude Code sessions from the VS Code extension (entrypoint claude-vscode) are labelled
 	// 'Claude Code (VS Code)' instead of 'Claude Code' (#2479): cache hits skip re-analysis, so existing
 	// entries would keep the old editor key until their file changed.
-	private static readonly CACHE_VERSION = 86;
+	// v87: Copilot app sessions that selected `auto` and were routed by Copilot Fusion are attributed
+	// to `hydrafusion` (Copilot Fusion) instead of `auto`: existing entries keep `auto` until re-parsed.
+	private static readonly CACHE_VERSION = 87;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -9652,8 +9654,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
 		let cliSessionEffort: string | undefined;
 
-		cliSessionModel = this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel);
-		const modelRef = { value: cliSessionModel };
+		const fusionAuto = isCopilotFusionAutoSession(lines);
+		cliSessionModel = resolveCopilotRouterModel(this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel), fusionAuto);
+		const modelRef = { value: cliSessionModel, fusionAuto };
 		const effortRef = { value: cliSessionEffort };
 
 		const subAgentOutputTokenMap = new Map<string, number>();
@@ -9693,7 +9696,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return null;
 	}
 
-	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
+	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
 		const subAgentStarted = event.type === 'subagent.started';
 		let turnAdded = false;
 		if (event.type === 'session.model_change') { this.updateCliSessionRefs(event, modelRef, effortRef); }
@@ -9714,8 +9717,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		turns[turns.length - 1].mcpTools.push({ server: event.data?.mcpServer || 'unknown', tool: event.data?.toolName || event.toolName || 'unknown' });
 	}
 
-	private updateCliSessionRefs(event: any, modelRef: { value: string }, effortRef: { value: string | undefined }): void {
-		if (typeof event.data?.newModel === 'string') { modelRef.value = event.data.newModel; }
+	private updateCliSessionRefs(event: any, modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }): void {
+		if (typeof event.data?.newModel === 'string') { modelRef.value = resolveCopilotRouterModel(event.data.newModel, modelRef.fusionAuto); }
 		if (typeof event.data?.reasoningEffort === 'string') { effortRef.value = event.data.reasoningEffort; }
 	}
 
