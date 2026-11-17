@@ -31,7 +31,8 @@
  * this owner, so a holder that was taken over can never delete or overwrite its successor's lock.
  * (The read-then-write in renew is not atomic; the window is a few microseconds and the worst case
  * is one heartbeat re-stamping a lock that was broken in that instant, which the next contender's
- * staleness check resolves.)
+ * staleness check resolves.) The renew write itself is atomic (temp file + rename), so a peer never
+ * reads a half-written heartbeat and mistakes a live lock for a corrupt one.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -275,10 +276,42 @@ export async function renewFileLock(
 	const now = (options.now ?? Date.now)();
 	const next: LockRecord = { ...record, pid: owner.pid, timestamp: now };
 	if (renew.progress) { next.progressAt = now; }
+	if (await replaceFileAtomically(lockPath, JSON.stringify(next))) { return true; }
+	// The write failed (e.g. a peer kept the file open through every retry). That costs one beat, not
+	// the lock: report ownership from what is on disk, so the caller does not wrongly conclude it was
+	// taken over.
+	return (await readFileLock(lockPath))?.sessionId === owner.id;
+}
+
+/** Rename attempts before giving up; Windows refuses a replace while a reader has the target open. */
+const RENAME_ATTEMPTS = 5;
+const RENAME_RETRY_MS = 10;
+
+/**
+ * Replace `filePath` with `content` so a concurrent reader sees either the old or the new content,
+ * never an empty or partial file: write a uniquely named sibling temp file, then rename it over the
+ * target. An in-place `writeFile` truncates first, and a peer that read the lock in that instant
+ * would judge it corrupt and break a live lock. On Windows the rename fails with EPERM/EBUSY/EACCES
+ * while another process has the target open, so it is retried briefly. Returns false (and removes
+ * the temp file) when the replace could not be done.
+ */
+async function replaceFileAtomically(filePath: string, content: string): Promise<boolean> {
+	const tempPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
 	try {
-		await fs.promises.writeFile(lockPath, JSON.stringify(next));
-		return true;
+		await fs.promises.writeFile(tempPath, content, { flag: 'wx' });
+		for (let attempt = 1; ; attempt++) {
+			try {
+				await fs.promises.rename(tempPath, filePath);
+				return true;
+			} catch (err: unknown) {
+				const code = (err as NodeJS.ErrnoException)?.code;
+				const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+				if (!transient || attempt >= RENAME_ATTEMPTS) { throw err; }
+				await new Promise(resolve => setTimeout(resolve, RENAME_RETRY_MS));
+			}
+		}
 	} catch {
+		try { await fs.promises.unlink(tempPath); } catch { /* never created, or already renamed */ }
 		return false;
 	}
 }

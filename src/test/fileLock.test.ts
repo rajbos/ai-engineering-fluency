@@ -38,8 +38,19 @@ const vscodeStable: LockOwner = { id: 'stable-window', pid: 1001, host: 'vscode-
 const vscodeInsiders: LockOwner = { id: 'insiders-window', pid: 1002, host: 'vscode-insiders' };
 const desktop: LockOwner = { id: 'desktop-run', pid: 1003, host: 'desktop' };
 
+/**
+ * Read the lock as a test oracle. Renew replaces the file by rename, which on Windows can briefly
+ * refuse a concurrent open (EPERM/EBUSY) while a heartbeat timer is running, so retry those.
+ */
 function readRecord(lockPath: string): LockRecord {
-	return JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+		} catch (err: unknown) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if ((code !== 'EPERM' && code !== 'EBUSY') || attempt >= 20) { throw err; }
+		}
+	}
 }
 
 test('acquire: creates the lock with the owner identity, legacy field names and progress fields', async () => {
@@ -196,6 +207,47 @@ test('renew: preserves acquiredAt and metadata, and only stamps progressAt when 
 		await renewFileLock(lockPath, vscodeStable, { progress: true }, { now: () => 300 });
 		record = readRecord(lockPath);
 		assert.deepEqual([record.acquiredAt, record.progressAt, record.timestamp], [100, 300, 300]);
+	} finally { cleanup(dir); }
+});
+
+test('renew: a concurrent reader never sees a partial or empty lock', async () => {
+	const dir = tmpDir();
+	try {
+		const lockPath = path.join(dir, 'a.lock');
+		// Large metadata widens the window an in-place truncate-then-write would expose.
+		const meta = { padding: 'x'.repeat(16 * 1024) };
+		assert.equal(await acquireFileLock(lockPath, vscodeStable, { isOwnerAlive: alive, meta }), true);
+
+		let renewing = true;
+		let renews = 0;
+		const writer = (async () => {
+			for (let i = 0; i < 50; i++) {
+				assert.equal(await renewFileLock(lockPath, vscodeStable, { progress: i % 2 === 0 }), true, `renew ${i} keeps the lock`);
+				renews++;
+			}
+			renewing = false;
+		})();
+
+		let reads = 0;
+		const corrupt: string[] = [];
+		const reader = async () => {
+			while (renewing) {
+				const record = await readFileLock(lockPath);
+				// `undefined` (open refused mid-rename on Windows) reads as "released", which the
+				// acquire path answers with a `wx` create that fails EEXIST: harmless. `null` is the
+				// "corrupt" verdict that lets a peer break a live lock, and must never happen.
+				if (record === null) { corrupt.push('readFileLock returned null'); }
+				else if (record && record.sessionId !== 'stable-window') { corrupt.push(`unexpected owner ${String(record.sessionId)}`); }
+				reads++;
+			}
+		};
+		await Promise.all([writer, reader(), reader()]);
+
+		assert.equal(renews, 50);
+		assert.ok(reads > 0, 'the readers actually ran');
+		assert.deepEqual(corrupt, []);
+		assert.equal(readRecord(lockPath).sessionId, 'stable-window');
+		assert.deepEqual(fs.readdirSync(dir), ['a.lock'], 'no temp files left behind');
 	} finally { cleanup(dir); }
 });
 
