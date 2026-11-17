@@ -230,7 +230,7 @@ import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
+import { analyzeHydraFusionSession, aiuToUsd, isCopilotFusionAutoSession, resolveCopilotRouterModel } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath, setCopilotCliOtelLogger } from '../../src/copilotCliOtel';
 import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
@@ -277,6 +277,7 @@ import { RepoHeatmapPanel, createRepoHeatmapHost } from './repoHeatmapPanel';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { getMachineLockDir } from '../../src/machineParseLock';
 import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
@@ -1183,7 +1184,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v86: Claude Code sessions from the VS Code extension (entrypoint claude-vscode) are labelled
 	// 'Claude Code (VS Code)' instead of 'Claude Code' (#2479): cache hits skip re-analysis, so existing
 	// entries would keep the old editor key until their file changed.
-	private static readonly CACHE_VERSION = 86;
+	// v87: Copilot app sessions that selected `auto` and were routed by Copilot Fusion are attributed
+	// to `hydrafusion` (Copilot Fusion) instead of `auto`: existing entries keep `auto` until re-parsed.
+	private static readonly CACHE_VERSION = 87;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -1594,7 +1597,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 24;
 	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
 	private _followerResyncTimer: NodeJS.Timeout | undefined;
-	private _refreshHeartbeat: NodeJS.Timeout | undefined;
 
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
@@ -2790,6 +2792,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
 				}
 			},
+			machineLockDir: getMachineLockDir(),
 		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
@@ -5772,7 +5775,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let isLeader = false;
 		try { isLeader = await this.cacheManager.acquireRefreshLock(); }
 		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
-		this.startRefreshHeartbeat(isLeader);
+		await this.beginRefreshTurn(isLeader);
 
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
@@ -6071,10 +6074,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		this.showLoadingTooltipForStep('computing', silent);
 
+		// No per-file progress from here to the end of the save: keep the leader's locks alive meanwhile.
+		const endBusy = this.cacheManager.beginRefreshBusy();
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 		const published = await this.publishRefreshResult(
 			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
 		);
+		endBusy();
 		if (!published) { return undefined; }
 
 		const refreshElapsedSec = ((Date.now() - refreshStartMs) / 1000).toFixed(1);
@@ -6138,21 +6144,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Start (leader) or clear (follower) the periodic heartbeat that renews the
 	 * refresh leader lock so a legitimately long parse is not treated as stale by
-	 * another window.
+	 * another window. Progress reported by the parse (buildProgressCallback()) is
+	 * written along with it, so a leader that is alive but stuck is taken over.
+	 *
+	 * A leader then takes its machine-wide parse turn: it waits (bounded) for another VS Code
+	 * edition's or the desktop app's in-progress parse and reuses a compatible peer snapshot (see
+	 * src/machineParseLock.ts). releaseRefreshLock() ends that turn. Never in sample-data mode,
+	 * whose fixture parse must neither wait on nor mix with real data.
 	 */
-	private startRefreshHeartbeat(isLeader: boolean): void {
-		this.stopRefreshHeartbeat();
-		if (!isLeader) { return; }
-		this._refreshHeartbeat = setInterval(() => {
-			void this.cacheManager.renewRefreshLock();
-		}, 30 * 1000);
+	private async beginRefreshTurn(isLeader: boolean): Promise<void> {
+		this.cacheManager.startLeaderHeartbeat(isLeader);
+		if (isLeader && !this.isSampleDataModeActive()) { await this.cacheManager.coordinateCrossHostParse(); }
 	}
 
 	private stopRefreshHeartbeat(): void {
-		if (this._refreshHeartbeat) {
-			clearInterval(this._refreshHeartbeat);
-			this._refreshHeartbeat = undefined;
-		}
+		this.cacheManager.stopLeaderHeartbeat();
 	}
 
 	/**
@@ -6195,6 +6201,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let lastProgressSentMs = 0;
 		let lastPercentage = -1;
 		return (completed: number, total: number) => {
+			this.cacheManager.noteRefreshProgress(); // keeps the leader's locks from looking hung
 			const percentage = Math.round((completed / total) * 100);
 			if (!silent) {
 				// Only touch the status bar text when the rounded percentage actually
@@ -9642,8 +9649,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
 		let cliSessionEffort: string | undefined;
 
-		cliSessionModel = this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel);
-		const modelRef = { value: cliSessionModel };
+		const fusionAuto = isCopilotFusionAutoSession(lines);
+		cliSessionModel = resolveCopilotRouterModel(this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel), fusionAuto);
+		const modelRef = { value: cliSessionModel, fusionAuto };
 		const effortRef = { value: cliSessionEffort };
 
 		const subAgentOutputTokenMap = new Map<string, number>();
@@ -9683,7 +9691,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return null;
 	}
 
-	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
+	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
 		const subAgentStarted = event.type === 'subagent.started';
 		let turnAdded = false;
 		if (event.type === 'session.model_change') { this.updateCliSessionRefs(event, modelRef, effortRef); }
@@ -9704,8 +9712,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		turns[turns.length - 1].mcpTools.push({ server: event.data?.mcpServer || 'unknown', tool: event.data?.toolName || event.toolName || 'unknown' });
 	}
 
-	private updateCliSessionRefs(event: any, modelRef: { value: string }, effortRef: { value: string | undefined }): void {
-		if (typeof event.data?.newModel === 'string') { modelRef.value = event.data.newModel; }
+	private updateCliSessionRefs(event: any, modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }): void {
+		if (typeof event.data?.newModel === 'string') { modelRef.value = resolveCopilotRouterModel(event.data.newModel, modelRef.fusionAuto); }
 		if (typeof event.data?.reasoningEffort === 'string') { effortRef.value = event.data.reasoningEffort; }
 	}
 

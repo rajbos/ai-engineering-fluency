@@ -10,7 +10,9 @@ import {
 	aiuToUsd,
 	analyzeHydraFusionSession,
 	containsHydraFusionEvents,
+	isCopilotFusionAutoSession,
 	matchHydraFusionTurnsToChatTurns,
+	resolveCopilotRouterModel,
 	nanoAiuToAiu,
 } from '../hydrafusion';
 
@@ -136,6 +138,44 @@ describe('containsHydraFusionEvents', () => {
 			line('assistant.message', { content: 'hi' }),
 		].join('\n');
 		assert.equal(containsHydraFusionEvents(ordinary), false);
+	});
+});
+
+// Shapes copied from a Copilot app 1.0.106 session (November 2026): Fusion "Standard" writes
+// `selectedModel: "auto"` and only credits Fusion in the routing reason.
+const fusionAutoResolved = JSON.stringify({ type: 'session.auto_mode_resolved', data: {
+	chosenModel: 'gpt-6.1-sol', selectionReason: 'Copilot Fusion selected GPT-6.1 Sol since the task has high complexity.',
+	routingMethod: 'auto_v2', fallback: false } });
+const plainAutoResolved = JSON.stringify({ type: 'session.auto_mode_resolved', data: {
+	chosenModel: 'gpt-6.1-sol', selectionReason: 'Selected GPT-6.1 Sol for this task.', routingMethod: 'auto_v2' } });
+
+describe('isCopilotFusionAutoSession', () => {
+	test('detects Fusion from the routing reason, given lines or whole content', () => {
+		const lines = [JSON.stringify({ type: 'session.start', data: { selectedModel: 'auto' } }), fusionAutoResolved];
+		assert.equal(isCopilotFusionAutoSession(lines), true);
+		assert.equal(isCopilotFusionAutoSession(lines.join('\n')), true);
+	});
+
+	test('detects a session that has fusion events', () => {
+		assert.equal(isCopilotFusionAutoSession([JSON.stringify({ type: 'session.fusion_resolved', data: { fusionId: 'f1' } })]), true);
+	});
+
+	test('a plain Auto routing decision, or a session without one, is not Fusion', () => {
+		assert.equal(isCopilotFusionAutoSession([plainAutoResolved]), false);
+		assert.equal(isCopilotFusionAutoSession([JSON.stringify({ type: 'user.message', data: { content: '"selectionReason":"Copilot Fusion' } })]), false);
+		assert.equal(isCopilotFusionAutoSession([]), false);
+	});
+});
+
+describe('resolveCopilotRouterModel', () => {
+	test('maps auto to hydrafusion only for a Fusion session', () => {
+		assert.equal(resolveCopilotRouterModel('auto', true), 'hydrafusion');
+		assert.equal(resolveCopilotRouterModel('auto', false), 'auto');
+	});
+
+	test('leaves a concrete model alone even in a Fusion session', () => {
+		assert.equal(resolveCopilotRouterModel('gpt-6.1-sol', true), 'gpt-6.1-sol');
+		assert.equal(resolveCopilotRouterModel('hydrafusion', false), 'hydrafusion');
 	});
 });
 

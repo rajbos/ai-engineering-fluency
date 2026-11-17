@@ -284,6 +284,37 @@ export function containsHydraFusionEvents(content: string): boolean {
 	return content.includes('fusion_resolved') || content.includes('fusion_phase_completed') || content.includes('fusion_completed');
 }
 
+/** The model id usage is attributed to when a session ran through Copilot Fusion. */
+export const COPILOT_FUSION_MODEL_ID = 'hydrafusion';
+
+/**
+ * Marks a `session.auto_mode_resolved` event written by Copilot Fusion. Since November 2026
+ * the Copilot app writes `selectedModel: "auto"` for a Fusion session instead of
+ * `hydrafusion`. The only sign of Fusion left is this routing reason, for example
+ * "Copilot Fusion selected GPT-6.1 Sol since the task has high complexity.".
+ */
+const FUSION_AUTO_REASON = /"selectionReason"\s*:\s*"Copilot Fusion\b/;
+
+/**
+ * True when a Copilot CLI / Copilot app session that selected `auto` was actually routed
+ * by Copilot Fusion: a routing decision credits Fusion, or the session has fusion events.
+ * Callers pass the result to {@link resolveCopilotRouterModel}.
+ */
+export function isCopilotFusionAutoSession(content: string | readonly string[]): boolean {
+	const lines = typeof content === 'string' ? [content] : content;
+	return lines.some(line =>
+		(line.includes('auto_mode_resolved') && FUSION_AUTO_REASON.test(line)) || containsHydraFusionEvents(line));
+}
+
+/**
+ * Maps the session-level model selection to the id usage is attributed to: `auto` becomes
+ * {@link COPILOT_FUSION_MODEL_ID} when {@link isCopilotFusionAutoSession} said Fusion ran
+ * the session. Any other model, and `auto` without that evidence, is returned unchanged.
+ */
+export function resolveCopilotRouterModel(model: string, fusionAuto: boolean): string {
+	return fusionAuto && model === 'auto' ? COPILOT_FUSION_MODEL_ID : model;
+}
+
 function buildPhase(entry: { data: RawRecord; timestamp: string | null }, finalSourcePhaseId: string | null): HydraFusionPhase {
 	const d = entry.data;
 	const phaseId = asString(d.phaseId) ?? '';

@@ -30,6 +30,8 @@ import {
 } from '../../src/loadingHtml';
 import { getEditorIconByName } from '../../src/editorIcons';
 import { resolvedLocale } from '../../cli/src/l10n';
+import { beginMachineParse } from '../../src/machineParseLock';
+import type { LockOwner } from '../../src/fileLock';
 
 // In dev mode use a local userData directory so cache files never conflict
 // between hot-reload restarts (the default %APPDATA%\Electron is shared with
@@ -55,6 +57,27 @@ protocol.registerSchemesAsPrivileged([
 // OS associates the taskbar button (and its icon) with this app rather than the
 // generic electron.exe identity it would otherwise inherit when run unpackaged.
 const APP_ID = 'com.rajbos.ai-engineering-fluency';
+// Prefix of this process's identities in the machine-wide parse lock; each parse turn gets its own
+// id, so a stats load and a refresh overlapping in this process take turns like two hosts would.
+const PARSE_LOCK_ID_PREFIX = `desktop-${process.pid}-${randomBytes(6).toString('hex')}`;
+let parseTurnCounter = 0;
+
+/**
+ * Run a full session parse inside a machine-wide parse turn shared with VS Code stable/Insiders
+ * (src/machineParseLock.ts): wait briefly for a host already parsing the same session files instead
+ * of competing with it, and report progress so a hung parse here is taken over by them. The desktop
+ * fills its own cli-cache.json (a different format from the VS Code snapshot), so it gains the
+ * serialization, not the other host's parsed entries.
+ */
+async function inMachineParseTurn<T>(parse: (noteProgress: () => void) => Promise<T>): Promise<T> {
+    const owner: LockOwner = { id: `${PARSE_LOCK_ID_PREFIX}-${++parseTurnCounter}`, pid: process.pid, host: 'desktop' };
+    const turn = await beginMachineParse(owner, { log: (m) => console.log(`[parse-lock] ${m}`) });
+    try {
+        return await parse(() => turn.noteProgress());
+    } finally {
+        await turn.end();
+    }
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -222,7 +245,13 @@ async function loadStats(): Promise<DetailedStats> {
     while (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
         await computeForCurrentFiles(
-            files => calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files))),
+            files => {
+                const onProgress = buildLoadingProgressCallback(detectLoadingEditors(files));
+                return inMachineParseTurn(noteProgress => calculateDetailedStats(files, (done, total) => {
+                    noteProgress();
+                    onProgress(done, total);
+                }));
+            },
             // A refresh may have stored fresher stats while this ran; prefer those.
             (stats) => { cachedStats ??= stats; },
         );
@@ -423,7 +452,7 @@ async function refreshStats(): Promise<void> {
     isRefreshing = true;
     try {
         const files = await discoverSessionFiles();
-        const stats = await calculateDetailedStats(files);
+        const stats = await inMachineParseTurn(noteProgress => calculateDetailedStats(files, noteProgress));
         // Swap everything in one synchronous step, so no reader can pair the new
         // file list with stats, usage or chart data computed from the old one.
         dataGeneration++;

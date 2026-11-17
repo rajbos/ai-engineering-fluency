@@ -26,6 +26,7 @@ import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
 import { normalizePathForComparison } from './utils/pathUtils';
 import { readDbBufferWithWalFingerprint } from './utils/sqliteWal';
+import { SqlJsLoader } from './utils/sqlJsLoader';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -88,8 +89,7 @@ export class CursorDataAccess {
 	// How long a db path stays demoted to the sql.js fallback after a failed read-only attempt.
 	private static readonly READ_ONLY_RETRY_COOLDOWN_MS = 5 * 60_000;
 
-	private _sqlJsModule: SqlJsStatic | null = null;
-	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private readonly _sqlJs = new SqlJsLoader();
 
 	// Read-only node:sqlite backend. `undefined` = not yet probed, `null` = require('node:sqlite')
 	// failed (older Electron without native SQLite support) so every db path uses the sql.js
@@ -147,7 +147,7 @@ export class CursorDataAccess {
 		this._composerCache.clear();
 		this._composerInflight.clear();
 		this._readOnlyUnsupportedDbs.clear();
-		this._sqlJsInitPromise = null;
+		this._sqlJs.clearPending();
 		for (const entry of this._sqlJsDbCache.values()) {
 			try { entry.db.close(); } catch { /* ignore */ }
 		}
@@ -216,23 +216,7 @@ export class CursorDataAccess {
 	// ── sql.js init ───────────────────────────────────────────────────────────
 
 	async initSqlJs(): Promise<SqlJsStatic> {
-		if (this._sqlJsModule) { return this._sqlJsModule; }
-		if (!this._sqlJsInitPromise) {
-			this._sqlJsInitPromise = (async () => {
-				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-				let wasmBinary: Uint8Array | undefined;
-				if (fs.existsSync(wasmPath)) {
-					wasmBinary = fs.readFileSync(wasmPath);
-				}
-				const module = await initSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
-				this._sqlJsModule = module;
-				return module;
-			})().catch(err => {
-				this._sqlJsInitPromise = null;
-				throw err;
-			});
-		}
-		return this._sqlJsInitPromise;
+		return this._sqlJs.load();
 	}
 
 	// ── Query backends ────────────────────────────────────────────────────────

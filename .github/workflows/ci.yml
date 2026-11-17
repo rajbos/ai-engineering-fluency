@@ -849,7 +849,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check the gated job results
-        uses: ./.github/actions/check-gated-results
+        uses: $/.github/actions/check-gated-results
         with:
           gate-name: check-changes
           gate-result: ${{ needs.check-changes.result }}

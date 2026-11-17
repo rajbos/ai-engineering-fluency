@@ -16,6 +16,7 @@ import {
 	selectRepoRoots,
 } from '../../src/darkFactoryService';
 import type { RepoPrInfo, RepoPrStatsResult } from '../../src/githubPrService';
+import { DARK_FACTORY_CATALOGUE_VERSION } from '../../../src/darkFactoryReadiness';
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -245,7 +246,7 @@ test('indexPrStats: an unauthenticated result contributes nothing', () => {
 
 test('indexPrStats: keys are lower-cased and carry the per-repo error through', () => {
 	const index = indexPrStats(prStats([{ owner: 'RajBos', repo: 'Demo', totalPrs: 4, aiAuthoredPrs: 1, error: 'denied' }]));
-	assert.deepEqual(index.get('rajbos/demo'), { totalPrs: 4, aiAuthoredPrs: 1, error: 'denied' });
+	assert.deepEqual(index.get('rajbos/demo'), { totalPrs: 4, aiAuthoredPrs: 1, aiReviewRequestedPrs: 0, error: 'denied' });
 });
 
 // ---------------------------------------------------------------------------
@@ -270,6 +271,42 @@ test('scan: leaves nameWithOwner unset for a repository with no GitHub remote', 
 	const repo = makeRepo({}, 'https://gitlab.com/rajbos/elsewhere.git');
 	const report = scanDarkFactoryReadiness({ workspacePaths: [repo], now: FIXED_NOW });
 	assert.equal(report.repos[0].nameWithOwner, undefined);
+	assert.equal(report.repos[0].hosting, 'other');
+});
+
+test('scan: records where each repository is hosted', () => {
+	const onGitHub = makeRepo({}, 'git@github.com:rajbos/demo.git');
+	const local = makeRepo({});
+	const report = scanDarkFactoryReadiness({ workspacePaths: [onGitHub, local], now: FIXED_NOW });
+	const hostingOf = (root: string) => report.repos.find(r => r.repoRoot === path.resolve(root))?.hosting;
+	assert.equal(hostingOf(onGitHub), 'github');
+	assert.equal(hostingOf(local), 'unknown');
+});
+
+test('scan: GitHub-specific controls are not reported missing for a repository hosted elsewhere', () => {
+	const files = { 'README.md': '' };
+	const stateOn = (remote: string | undefined, id: string) => scanDarkFactoryReadiness({ workspacePaths: [makeRepo(files, remote)], now: FIXED_NOW })
+		.repos[0].controls.find(c => c.id === id)?.state;
+	assert.equal(stateOn('https://github.com/rajbos/demo.git', 'ci-workflows'), 'absent');
+	assert.equal(stateOn(undefined, 'ci-workflows'), 'absent', 'a repository with no remote may still be headed for GitHub');
+	assert.equal(stateOn('https://gitlab.com/rajbos/elsewhere.git', 'ci-workflows'), 'unknown');
+	assert.equal(stateOn('https://gitlab.com/rajbos/elsewhere.git', 'issue-forms'), 'unknown');
+	assert.equal(stateOn('https://gitlab.com/rajbos/elsewhere.git', 'agent-instructions'), 'absent', 'host-neutral controls are still judged');
+});
+
+test('scan: AI review requests already fetched satisfy the independent-evaluator control', () => {
+	const repo = makeRepo({}, 'https://github.com/rajbos/demo.git');
+	const evaluatorState = (aiReviewRequestedPrs: number) => scanDarkFactoryReadiness({
+		workspacePaths: [repo],
+		prStats: prStats([{ owner: 'rajbos', repo: 'demo', totalPrs: 20, aiReviewRequestedPrs }]),
+		now: FIXED_NOW,
+	}).repos[0].controls.find(c => c.id === 'independent-evaluator-agent')?.state;
+	assert.equal(evaluatorState(6), 'present');
+	assert.equal(evaluatorState(0), 'unknown', 'no review requests is not proof that nothing reviews');
+});
+
+test('readinessScopeKey: carries the catalogue version, so a report scored against an older catalogue is not replayed', () => {
+	assert.ok(readinessScopeKey([makeRepo({})]).endsWith(`@${DARK_FACTORY_CATALOGUE_VERSION}`));
 });
 
 test('scan: resolves an enterprise remote when the enterprise URI is configured', () => {
