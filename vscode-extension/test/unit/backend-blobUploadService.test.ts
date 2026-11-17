@@ -146,12 +146,13 @@ test('uploadSessionFiles skips upload when within frequency window', async () =>
 test('uploadSessionFiles returns failure when getContainerClient throws', async () => {
 	const warnings: string[] = [];
 	const svc = new BlobUploadService(() => {}, (m) => warnings.push(m), makeContext());
-	// Force the containerClient creation to fail
-	const badCredential = {} as any; // Will fail when BlobServiceClient tries to use it
+	// Force the containerClient creation to fail without touching the network: a real
+	// BlobServiceClient with a bogus credential retries against Azure and can hang CI.
+	(svc as any).getContainerClient = async () => { throw new Error('container client unavailable'); };
 	const result = await svc.uploadSessionFiles(
 		'teststorage',
 		enabledSettings,
-		badCredential,
+		{} as any,
 		['/fake/session.json'],
 		'm1',
 		'ds1'
