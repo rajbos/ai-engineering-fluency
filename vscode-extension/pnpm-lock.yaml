@@ -13,7 +13,7 @@ overrides:
   form-data: '>=4.0.6'
   browserslist: '>=4.29.3'
   shell-quote: '>=1.8.4'
-  '@azure/msal-node': '>=7.1.0'
+  '@azure/msal-node': '>=7.1.0 <8'
   '@babel/core': '>=7.29.6'
   brace-expansion: '>=5.0.12'
   js-yaml: '>=4.3.2 <5.0.0'

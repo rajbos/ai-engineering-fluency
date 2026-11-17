@@ -58,10 +58,10 @@
       },
       "MessagePack": {
         "type": "Transitive",
-        "resolved": "2.5.301",
-        "contentHash": "WUnJgmYc06ngIxZxLe9sa0P6rOTyOZIQn8SuDvJSjyMn7e8/AdlNAdt81WPUhWKeQ7hDkgxKU1vTrJqX/4L79A==",
+        "resolved": "2.5.303",
+        "contentHash": "kpIHwsflNKnWD8OyA8BjPspMG5PYXycxuftnkJk0e5sW8OLHa3CMovuYiRI/4NJ4al1AyW88Ai2g+WCwTaWzFg==",
         "dependencies": {
-          "MessagePack.Annotations": "2.5.301",
+          "MessagePack.Annotations": "2.5.303",
           "Microsoft.Bcl.AsyncInterfaces": "6.0.0",
           "Microsoft.NET.StringTools": "17.6.3",
           "System.Collections.Immutable": "6.0.0",
@@ -72,8 +72,8 @@
       },
       "MessagePack.Annotations": {
         "type": "Transitive",
-        "resolved": "2.5.301",
-        "contentHash": "3PyBiSeKTfvtyzUv3+9eXGIw7vBBZ0GAc4k3+RVT0tz2vKv3l0pviiA2b6DrmHyDvj1Au8lSVDDw/wKPMxUQ4A=="
+        "resolved": "2.5.303",
+        "contentHash": "Pc0i3x9lo5cKmfd6i3NmGpmOXxtK3VKEtEnuWSC8wTokjJGBK4qqcHKOfe0GTODSVQpGi0PazPLCV4N3dWXnlw=="
       },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",
@@ -1446,7 +1446,7 @@
         "type": "Project",
         "dependencies": {
           "Community.VisualStudio.Toolkit": "[17.0.76.303, )",
-          "MessagePack": "[2.5.301, )",
+          "MessagePack": "[2.5.303, )",
           "Microsoft.IO.Redist": "[6.0.1, )",
           "Microsoft.VSSDK.BuildTools": "[17.6.2164, )",
           "Microsoft.VisualStudio.SDK": "[17.6.36389, )",
