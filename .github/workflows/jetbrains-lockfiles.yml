@@ -1,0 +1,169 @@
+name: JetBrains Plugin - Lockfile sync
+
+# jetbrains-plugin/ uses Gradle dependency locking (build.gradle.kts,
+# settings.gradle.kts). Dependabot bumps versions in the build scripts but does
+# not regenerate the *.lockfile pins, so every Gradle bump fails CI with
+# "Dependency version enforced by Dependency Locking" until someone runs
+# `./gradlew dependencies --write-locks` by hand. This workflow does that for
+# Dependabot's Gradle PRs and commits the result back to the PR branch.
+#
+# Two jobs, so the token that can push never shares a job with Gradle:
+#   regenerate - read-only token; runs Gradle (which executes the build
+#                scripts and the plugins Dependabot just bumped) and uploads
+#                ONLY the three lockfiles as an artifact.
+#   commit     - write token; never runs Gradle. Copies those three files in by
+#                name, commits and pushes, then comments on the PR.
+#
+# A push made with GITHUB_TOKEN does not start new workflow runs, so the PR's
+# checks stay attached to the old (failing) commit. Re-running those runs does
+# not help either: a re-run uses the original commit. The comment therefore asks
+# a maintainer to close and reopen the PR, which fires `reopened` and runs every
+# check against the fixed commit. That re-run of this workflow is a no-op.
+on:
+  pull_request:
+    paths:
+      - 'jetbrains-plugin/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    name: Regenerate Gradle lockfiles
+    # Only Dependabot's own pushes to its own Gradle branches in this repo.
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/gradle/jetbrains-plugin/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Validate Gradle wrapper JAR
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          min-wrapper-count: 1
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+
+      - name: Regenerate lockfiles
+        working-directory: jetbrains-plugin
+        run: ./gradlew dependencies --write-locks --quiet > /dev/null
+
+      - name: Check for lockfile changes
+        id: diff
+        run: |
+          if git diff --quiet -- jetbrains-plugin/'*.lockfile'; then
+            echo "Lockfiles already match the build scripts."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- jetbrains-plugin/'*.lockfile'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload lockfiles
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jetbrains-lockfiles
+          path: |
+            jetbrains-plugin/gradle.lockfile
+            jetbrains-plugin/buildscript-gradle.lockfile
+            jetbrains-plugin/settings-gradle.lockfile
+          if-no-files-found: error
+          retention-days: 1
+
+  commit:
+    name: Commit lockfiles and ask for a check re-run
+    needs: regenerate
+    if: needs.regenerate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Dependabot-triggered runs get a read-only token unless the workflow
+      # asks for more; these two are the minimum to push and to comment.
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      # Check out the exact commit the lockfiles were generated from. If
+      # Dependabot pushed again meanwhile, the push below is rejected as a
+      # non-fast-forward and the newer push's own run takes over.
+      - name: Checkout PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Download lockfiles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: jetbrains-lockfiles
+          path: ${{ runner.temp }}/lockfiles
+
+      - name: Commit and push
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          SRC: ${{ runner.temp }}/lockfiles
+        run: |
+          # Copy only the three known files, by name; nothing else from the
+          # artifact can reach the repository.
+          for f in gradle.lockfile buildscript-gradle.lockfile settings-gradle.lockfile; do
+            if [ -f "$SRC/$f" ]; then cp "$SRC/$f" "jetbrains-plugin/$f"; fi
+          done
+          if git diff --quiet -- jetbrains-plugin/; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- jetbrains-plugin/gradle.lockfile jetbrains-plugin/buildscript-gradle.lockfile jetbrains-plugin/settings-gradle.lockfile
+          git commit -m 'build(jetbrains): regenerate Gradle lockfiles' \
+            -m 'Generated by the "JetBrains Plugin - Lockfile sync" workflow with `./gradlew dependencies --write-locks`.'
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+
+      - name: Ask for a check re-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          cat > "$RUNNER_TEMP/comment.md" <<EOF
+          ### Gradle lockfiles regenerated
+
+          This update changed dependency versions that \`jetbrains-plugin/\` pins with Gradle dependency locking, so the lockfiles were regenerated with \`./gradlew dependencies --write-locks\` and committed to this branch ([workflow run]($RUN_URL)).
+
+          **Checks have not run on that commit yet.** A commit pushed by a workflow does not start new check runs, and re-running the failed checks would test the old commit again. To run every check on the new commit, **close this pull request and reopen it**.
+
+          Dependabot will no longer rebase this PR on its own because another account has committed to it. Comment \`@dependabot recreate\` to start over; this workflow then runs again.
+          EOF
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
