@@ -456,6 +456,11 @@ const SNAPSHOT_HEAD_BYTES = 4096;
 let snapshotPath: string | undefined;
 /** Consumed bytes (summed over files) at the last write, so an unchanged index is not rewritten. */
 let persistedBytes = -1;
+/**
+ * Bumped whenever persistedBytes is reset, so a save still finishing from before the reset does not mark
+ * the new state as already saved (which would skip the next real write).
+ */
+let persistGeneration = 0;
 
 interface OtelSnapshot {
 	version: number;
@@ -467,6 +472,7 @@ interface OtelSnapshot {
 export function setCopilotCliOtelSnapshotPath(file: string | undefined): void {
 	snapshotPath = file;
 	persistedBytes = -1;
+	persistGeneration++;
 }
 
 async function hashFileHead(file: string, length: number): Promise<string> {
@@ -557,6 +563,7 @@ async function persistSnapshot(): Promise<void> {
 	if (!target || !cachedIndex) { return; }
 	const total = sumOffsets(fileOffsets);
 	if (total === persistedBytes) { return; }
+	const generation = persistGeneration;
 	// Copy now: the index is updated in place by later refreshes while the hashes below are being read.
 	const offsets = new Map(fileOffsets);
 	const sessions = JSON.stringify([...cachedIndex]);
@@ -569,7 +576,7 @@ async function persistSnapshot(): Promise<void> {
 		const tmp = `${target}.${process.pid}.tmp`;
 		await fs.promises.writeFile(tmp, `{"version":${SNAPSHOT_VERSION},"files":${JSON.stringify(files)},"sessions":${sessions}}`);
 		await fs.promises.rename(tmp, target);
-		persistedBytes = total;
+		if (generation === persistGeneration) { persistedBytes = total; }
 		otelLog?.(`OTel index saved to disk (${cachedIndex.size} sessions, ${formatMb(JSON.stringify(files).length + sessions.length)})`);
 	} catch (error) {
 		// Read-only storage, a vanished file: it is tried again after the next load.
@@ -610,6 +617,7 @@ export function clearCopilotCliOtelCache(): void {
 	indexReady = false;
 	loadStartedAt = 0;
 	persistedBytes = -1;
+	persistGeneration++;
 	cachedAt = 0;
 	inFlightLoad = null;
 	fileOffsets = new Map();

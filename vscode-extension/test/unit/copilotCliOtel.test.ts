@@ -489,6 +489,22 @@ test('a saved OTel index drops unsafe or malformed session entries but keeps the
 	});
 });
 
+test('a save still finishing after a reset does not stop the next index from being saved', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		writeOtelSpans(path.join(homeDir, '.copilot', 'otel'), [chatSpan(SESSION_ID)]);
+		const first = path.join(homeDir, 'storage', 'first.json');
+		const second = path.join(homeDir, 'storage', 'second.json');
+		t.after(() => setCopilotCliOtelSnapshotPath(undefined));
+		setCopilotCliOtelSnapshotPath(first);
+		await loadCopilotCliOtelIndex(); // its save is still running when the reset below happens
+		clearCopilotCliOtelCache();
+		setCopilotCliOtelSnapshotPath(second);
+		await waitForFile(first);
+		await loadCopilotCliOtelIndex(); // same export, same byte count as the save that just finished
+		await waitForFile(second);
+	});
+});
+
 test('an unreadable OTel snapshot is logged and rebuilt; a missing one stays silent', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		const messages: string[] = [];
