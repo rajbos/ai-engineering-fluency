@@ -92,12 +92,12 @@ jobs:
       reason: ${{ steps.gate.outputs.reason }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.22.4
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/workflows/scripts
           sparse-checkout-cone-mode: false
@@ -138,7 +138,7 @@ jobs:
       issues: write # create a `risk: *` label the first time it is needed
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.22.4
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -175,7 +175,7 @@ jobs:
       # for `git diff base...head`. No persisted credentials: nothing below
       # needs to fetch, and the model must not find a token in .git/config.
       - name: Checkout base commit
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.pr.outputs.base_sha }}
           fetch-depth: 0
@@ -233,7 +233,7 @@ jobs:
           fi
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.node-version.outputs.version }}
 

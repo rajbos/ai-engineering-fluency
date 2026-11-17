@@ -28,19 +28,19 @@ jobs:
       
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@v2.22.4
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
       with:
         egress-policy: audit
 
     - name: Checkout current repository
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         path: current-repo
         fetch-depth: 0
         
     - name: Checkout vscode-copilot-chat repository
       # Untrusted third-party content: parsed as data only, never fed to an agent.
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: microsoft/vscode-copilot-chat
         path: vscode-copilot-chat
@@ -79,7 +79,7 @@ jobs:
 
     - name: Create Pull Request
       if: steps.changes.outputs.changed == 'true'
-      uses: peter-evans/create-pull-request@v8.1.2
+      uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
       with:
         path: current-repo
         branch: sync-toolnames

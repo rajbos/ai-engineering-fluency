@@ -5,12 +5,15 @@ applyTo: ".github/workflows/**"
 # Action Dependencies Are Locked in `actions.lock`
 
 Every action a workflow (or an in-repo composite action) uses is pinned to a commit
-in `.github/workflows/actions.lock` ([docs](https://gh.io/actions-lockfile)), so
-`uses:` lines reference full version tags (`actions/checkout@v7.0.1`), not SHAs.
+in `.github/workflows/actions.lock` ([docs](https://gh.io/actions-lockfile)). `uses:`
+lines also stay pinned to a full commit SHA with a version comment
+(`actions/checkout@<sha> # v7.0.1`), which CodeQL and OpenSSF Scorecard check for.
 
 - After adding a workflow or adding/changing/removing a `uses:` line, run
-  `gh actions-lock` (extension: `gh extension install github/gh-actions-lock`) and
-  commit the regenerated lockfile with the workflow change. Never edit it by hand.
+  `gh actions-lock --no-narrow` (extension: `gh extension install github/gh-actions-lock`)
+  and commit the regenerated lockfile with the workflow change. `--no-narrow`
+  keeps the SHA pins. Without it the tool rewrites them to tags. Its
+  `sha-as-ref` warnings are expected. Never edit the lockfile by hand.
 - Reference same-repo actions as `uses: $/.github/actions/<name>`, not `./…`:
   `$/` is pinned to the workflow's commit and lockable. `.github/actionlint.yaml`
   silences actionlint's not-yet-supported error for this form.

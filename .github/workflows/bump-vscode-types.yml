@@ -25,12 +25,12 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.22.4
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Pick the newest @types/vscode past the cooldown
         id: bump
@@ -38,13 +38,13 @@ jobs:
 
       - name: Setup pnpm
         if: steps.bump.outputs.changed == 'true'
-        uses: pnpm/action-setup@v6.1.1
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: '11.2.2'
 
       - name: Setup Node.js
         if: steps.bump.outputs.changed == 'true'
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: '.nvmrc'
 
@@ -55,7 +55,7 @@ jobs:
 
       - name: Create Pull Request
         if: steps.bump.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v8.1.2
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
         with:
           branch: update/vscode-types
           add-paths: |

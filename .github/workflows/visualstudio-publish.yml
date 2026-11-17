@@ -40,20 +40,20 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.22.4
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.1.1
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: '11.2.2'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -141,7 +141,7 @@ jobs:
       # ── Build Visual Studio extension (MSBuild / VSSDK) ───────────────────
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v3.0.0
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: Restore NuGet packages
         working-directory: visualstudio-extension
@@ -185,7 +185,7 @@ jobs:
 
       - name: Upload .vsix as workflow artifact
         if: steps.vsix.outputs.vsix_path != ''
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visualstudio-vsix-${{ steps.version.outputs.local_version }}
           path: ${{ steps.vsix.outputs.vsix_path }}

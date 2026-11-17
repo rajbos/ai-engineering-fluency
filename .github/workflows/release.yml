@@ -49,19 +49,19 @@ jobs:
     
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@v2.22.4
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
       with:
         egress-policy: audit
 
     - name: Checkout code
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@v6.1.1
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       with:
         version: '11.2.2'
     - name: Setup Node.js
-      uses: actions/setup-node@v7.1.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: '.nvmrc'
         cache: 'pnpm'
@@ -270,7 +270,7 @@ jobs:
 
     - name: Upload VSIX as workflow artifact
       if: inputs.vs_only != true
-      uses: actions/upload-artifact@v7.0.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: vsix-package
         path: |
@@ -358,18 +358,18 @@ jobs:
 
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@v2.22.4
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
       with:
         egress-policy: audit
 
     - name: Checkout code
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
 
     # The exact artifact uploaded by the release job; no re-packaging happens here.
     - name: Download VSIX workflow artifact
-      uses: actions/download-artifact@v8.0.2
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         name: vsix-package
         path: dist
@@ -403,15 +403,15 @@ jobs:
     
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@v2.22.4
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
       with:
         egress-policy: audit
 
     - name: Checkout code
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@v6.1.1
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       with:
         version: '11.2.2'
     - name: Check marketplace version
@@ -443,7 +443,7 @@ jobs:
         echo "✅ Version check passed: $LOCAL_VERSION is newer than marketplace $MARKETPLACE_VERSION"
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7.1.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: '.nvmrc'
         cache: 'pnpm'
@@ -456,7 +456,7 @@ jobs:
     # Publish the exact bytes the attest job attested: take the VSIX from the workflow
     # artifact (not a re-package), and verify the attestation again right before publishing.
     - name: Download VSIX workflow artifact
-      uses: actions/download-artifact@v8.0.2
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         name: vsix-package
         path: .
@@ -605,19 +605,19 @@ jobs:
 
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@v2.22.4
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
       with:
         egress-policy: audit
 
     - name: Checkout code
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@v6.1.1
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       with:
         version: '11.2.2'
     - name: Setup Node.js
-      uses: actions/setup-node@v7.1.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: '.nvmrc'
         cache: 'pnpm'
@@ -675,7 +675,7 @@ jobs:
     # ── Build Visual Studio extension (MSBuild / VSSDK) ───────────────────
 
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v3.0.0
+      uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
     - name: Restore NuGet packages
       working-directory: visualstudio-extension
@@ -725,7 +725,7 @@ jobs:
         Write-Host "✅ Uploaded to GitHub release"
 
     - name: Upload .vsix as workflow artifact
-      uses: actions/upload-artifact@v7.0.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: visualstudio-vsix
         path: ${{ steps.vsix.outputs.vsix_path }}

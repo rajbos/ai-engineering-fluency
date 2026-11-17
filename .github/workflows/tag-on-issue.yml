@@ -18,12 +18,12 @@ jobs:
       issues: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.22.4
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
       - name: Tag user on new issue
-        uses: devops-actions/issue-comment-tag@v0.1.10
+        uses: devops-actions/issue-comment-tag@3a605c5f21e15e5b963c866421bf4189bcc32310 # v0.1.10
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           team: ${{ vars.TAG_USER }}
