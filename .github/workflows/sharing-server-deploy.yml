@@ -44,12 +44,12 @@ jobs:
       deploy: ${{ steps.diff.outputs.deploy }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -99,7 +99,7 @@ jobs:
       allow_custom_domain: ${{ steps.env.outputs.allow_custom_domain }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
@@ -163,20 +163,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        uses: pnpm/action-setup@v6.1.1
         with:
           version: '11.2.2'
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -243,18 +243,18 @@ jobs:
       image: ${{ steps.image-ref.outputs.image }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        uses: docker/setup-buildx-action@v4.4.1
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        uses: docker/login-action@v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -262,7 +262,7 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        uses: docker/metadata-action@v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/copilot-sharing-server
           tags: |
@@ -276,7 +276,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: sharing-server
           push: true
@@ -318,12 +318,12 @@ jobs:
       ARM_USE_OIDC:        "true"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Check Azure credentials
         id: prereqs
@@ -339,7 +339,7 @@ jobs:
 
       - name: Setup Terraform
         if: steps.prereqs.outputs.configured == 'true'
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        uses: hashicorp/setup-terraform@v4.0.1
 
       - name: Terraform init
         if: steps.prereqs.outputs.configured == 'true'
@@ -358,7 +358,7 @@ jobs:
       # authenticates separately via ARM_USE_OIDC and does not need this login.
       - name: Azure Login
         if: steps.prereqs.outputs.configured == 'true'
-        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        uses: azure/login@v3.1.0
         with:
           client-id:       ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id:       ${{ secrets.AZURE_TENANT_ID }}

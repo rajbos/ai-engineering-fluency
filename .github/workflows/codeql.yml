@@ -62,15 +62,15 @@ jobs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
       - name: Check which compiled sources changed
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        uses: dorny/paths-filter@v4.0.3
         id: filter
         with:
           filters: |
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Block all outbound calls except allowed)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: block
           # Allowlist inferred from the harden-runner audit output of the 10 most
@@ -170,20 +170,20 @@ jobs:
             www.jetbrains.com:443
 
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           sparse-checkout: ${{ matrix.sparse-checkout }}
 
       - name: Set up Java 21 (Temurin)
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        uses: actions/setup-java@v6.2.0
         with:
           java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Gradle
         if: matrix.language == 'java-kotlin'
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        uses: gradle/actions/setup-gradle@v6.4.1
         with:
           # CodeQL needs to observe an actual compiler invocation between the
           # init and analyze steps. If this action restores a previous run's
@@ -196,7 +196,7 @@ jobs:
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/init@v4.39.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -252,7 +252,7 @@ jobs:
       # test project (mirrors .github/workflows/visualstudio-build.yml).
       - name: Add MSBuild to PATH
         if: matrix.language == 'csharp'
-        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+        uses: microsoft/setup-msbuild@v3.0.0
 
       # Unlike the Gradle build cache disabled above, caching the NuGet global
       # packages folder is safe under CodeQL tracing: it only avoids
@@ -261,7 +261,7 @@ jobs:
       # real, so the extractor keeps seeing source.
       - name: Cache NuGet packages (C#)
         if: matrix.language == 'csharp'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('visualstudio-extension/**/*.csproj') }}
@@ -300,7 +300,7 @@ jobs:
       # through to CodeQL's default build-mode.
       - name: Autobuild
         if: matrix.language != 'csharp' && matrix.language != 'java-kotlin'
-        uses: github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/autobuild@v4.39.3
 
       # ℹ️ Command-line programs to run using the OS shell.
       # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
@@ -313,7 +313,7 @@ jobs:
       #   ./location_of_script_within_repo/buildscript.sh
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/analyze@v4.39.3
         with:
           category: "/language:${{matrix.language}}"
 
@@ -334,17 +334,17 @@ jobs:
     if: always()
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       # The composite action below is a local action (./.github/actions/...),
       # which needs the repo checked out at this path to be found at all -
       # without this, the step fails with "Can't find 'action.yml' ...".
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
       - name: Check the gated job results
-        uses: ./.github/actions/check-gated-results
+        uses: $/.github/actions/check-gated-results
         with:
           gate-name: check-changes (Select languages)
           gate-result: ${{ needs.check-changes.result }}

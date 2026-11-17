@@ -2,6 +2,21 @@
 applyTo: ".github/workflows/**"
 ---
 
+# Action Dependencies Are Locked in `actions.lock`
+
+Every action a workflow (or an in-repo composite action) uses is pinned to a commit
+in `.github/workflows/actions.lock` ([docs](https://gh.io/actions-lockfile)), so
+`uses:` lines reference full version tags (`actions/checkout@v7.0.1`), not SHAs.
+
+- After adding a workflow or adding/changing/removing a `uses:` line, run
+  `gh actions-lock` (extension: `gh extension install github/gh-actions-lock`) and
+  commit the regenerated lockfile with the workflow change. Never edit it by hand.
+- Reference same-repo actions as `uses: $/.github/actions/<name>`, not `./…`:
+  `$/` is pinned to the workflow's commit and lockable. `.github/actionlint.yaml`
+  silences actionlint's not-yet-supported error for this form.
+- `.github/workflows/actions-lock.yml` runs `gh actions-lock --verify` on PRs.
+  Dependabot updates the lockfile entry together with the workflow it bumps.
+
 # pnpm Publishing via OIDC (Trusted Publishing)
 
 This repository publishes the CLI package to npm using GitHub Actions OIDC trusted publishing — no `NPM_TOKEN` secret is required. The CLI uses pnpm as the package manager; publishing is done via `pnpm publish`.

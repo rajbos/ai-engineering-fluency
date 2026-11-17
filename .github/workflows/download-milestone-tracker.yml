@@ -25,20 +25,20 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.x'
 
       - name: Restore last announced milestone
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: .cache/download-milestone-state.json
           key: download-milestone-state-${{ github.run_id }}
@@ -103,7 +103,7 @@ jobs:
       # once we've successfully announced it.
       - name: Save milestone state
         if: steps.milestone.outputs.milestone_reached == 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@v6.1.0
         with:
           path: .cache/download-milestone-state.json
           key: download-milestone-state-${{ github.run_id }}

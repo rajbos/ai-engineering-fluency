@@ -44,12 +44,12 @@ jobs:
     # If you do not check out your code, Copilot will do this for you.
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           # Never write the token to .git/config in the first place, rather than
           # writing it and deleting it later. Removing it in the graphify step
@@ -92,11 +92,11 @@ jobs:
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        uses: pnpm/action-setup@v6.1.1
         with:
           version: '11.2.2'
       - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ steps.node-version.outputs.version }}
           cache: ${{ steps.lockfiles.outputs.pnpm == 'true' && 'pnpm' || '' }}
@@ -149,7 +149,7 @@ jobs:
         id: playwright-cache
         if: steps.playwright-install.outcome == 'success'
         continue-on-error: true
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('.github/workflows/dependencies/playwright/package-lock.json') }}
@@ -194,7 +194,7 @@ jobs:
       - name: Set up Python for graphify
         id: graphify-python
         continue-on-error: true
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        uses: actions/setup-python@v7.1.0
         with:
           # Pinned, not '3.x': the interpreter minor decides which wheels resolve,
           # so floating it would silently change what gets installed.
@@ -528,7 +528,7 @@ jobs:
 
       - name: Restore agent sessions cache
         id: restore-agent-sessions-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ./usage-data/agent-sessions.json
           key: agent-sessions-${{ github.repository }}-${{ steps.cache-date.outputs.date }}
@@ -545,7 +545,7 @@ jobs:
 
       - name: Save agent sessions cache
         if: steps.restore-agent-sessions-cache.outputs.cache-hit != 'true' && hashFiles('./usage-data/agent-sessions.json') != ''
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@v6.1.0
         with:
           path: ./usage-data/agent-sessions.json
           key: agent-sessions-${{ github.repository }}-${{ steps.cache-date.outputs.date }}
