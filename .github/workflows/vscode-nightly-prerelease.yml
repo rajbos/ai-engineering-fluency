@@ -223,7 +223,7 @@ jobs:
         path: dist
 
     - name: Generate SBOMs, attest, and verify
-      uses: ./.github/actions/vsix-attest
+      uses: $/.github/actions/vsix-attest
       with:
         vsix-path: dist/${{ needs.build.outputs.vsix_file }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
