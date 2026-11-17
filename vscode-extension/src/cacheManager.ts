@@ -5,8 +5,16 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
 import type { SessionFileCache } from '../../src/types';
+import { acquireFileLock, type FileLockOptions, type LockOwner, releaseFileLock, renewFileLock } from '../../src/fileLock';
+import {
+	getMachineParseLockPath,
+	listPeerSnapshots,
+	PARSE_LOCK_MAX_HOLD_MS,
+	PARSE_LOCK_STALL_MS,
+	publishPeerSnapshot,
+	waitForFileLock,
+} from '../../src/machineParseLock';
 import { mergePlaceholderDetails } from './detailsOnlyCache';
 import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
 
@@ -21,6 +29,10 @@ export interface CacheManagerDeps {
 	// why a peer-detected clear would otherwise leave them silently stale. Optional so existing
 	// callers with no such caches (and every test's makeManager()) need not supply it.
 	onPeerClearDetected?: () => void;
+	// Machine-wide lock directory shared with the other VS Code edition and the desktop app (see
+	// src/machineParseLock.ts). Undefined disables cross-host coordination, which is what tests
+	// get by default so they never touch the real ~/.copilot-token-tracker.
+	machineLockDir?: string;
 }
 
 /** True when two entries describe the same version of a file (same mtime and size). */
@@ -80,6 +92,18 @@ function capToNewestEntries(merged: Record<string, SessionFileCache>, maxEntries
 
 export class CacheManager {
 	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
+	// Refresh-leader lock takeover rules beyond the 5-minute heartbeat timeout (see src/fileLock.ts):
+	// a leader whose parse reports no progress (noteRefreshProgress()) for this long is hung even
+	// though its heartbeat timer still fires...
+	static readonly REFRESH_LOCK_STALL_MS = 5 * 60 * 1000;
+	// ...and no leader may hold the lock longer than this, progress or not (a cold-boot parse of
+	// thousands of files takes minutes, not an hour).
+	static readonly REFRESH_LOCK_MAX_HOLD_MS = 60 * 60 * 1000;
+	private static readonly LEADER_HEARTBEAT_MS = 30 * 1000;
+	// How long a leader waits for another host's in-progress parse before parsing anyway. The views
+	// already show the cached snapshot meanwhile; a hung peer is taken over sooner via its stall rule.
+	private static readonly MACHINE_PARSE_MAX_WAIT_MS = 2 * 60 * 1000;
+	private static readonly MACHINE_PARSE_POLL_MS = 2 * 1000;
 	private static readonly SNAPSHOT_MAX_ENTRIES = 20_000;
 
 	// Checkpoint constants: save every N new entries or every M milliseconds, whichever comes first.
@@ -117,6 +141,13 @@ export class CacheManager {
 	private readonly cacheVersion: number;
 	private readonly policy: CachePolicy<SessionFileCache>;
 	private lastLoadedSnapshotMtime = 0;
+	// Set by noteRefreshProgress(), consumed (written as progressAt) by the next renewRefreshLock().
+	private refreshProgressPending = false;
+	// Whether this window currently holds the machine-wide parse lock (see acquireMachineParseLock()).
+	private holdsMachineParseLock = false;
+	private leaderHeartbeat: NodeJS.Timeout | undefined;
+	// Last-merged mtime per peer snapshot path, so an unchanged peer snapshot isn't re-read.
+	private readonly peerSnapshotMtimes = new Map<string, number>();
 	// The durable clear epoch (see getClearEpochPath()) this window's in-memory cache is known
 	// consistent with. Starts at 0 (nothing loaded yet) and is seeded from disk by
 	// loadCacheFromStorage(), advanced locally by deleteSharedSnapshot() (this window clearing),
@@ -673,16 +704,46 @@ export class CacheManager {
 	 * false if another window already holds it (this window should follow).
 	 */
 	async acquireRefreshLock(): Promise<boolean> {
-		return this.acquireLock(this.getRefreshLockPath());
+		this.refreshProgressPending = false;
+		return this.acquireLock(this.getRefreshLockPath(), {
+			stallMs: CacheManager.REFRESH_LOCK_STALL_MS,
+			maxHoldMs: CacheManager.REFRESH_LOCK_MAX_HOLD_MS,
+		});
+	}
+
+	/** This window's identity for every lock it takes (see src/fileLock.ts). */
+	private get lockOwner(): LockOwner {
+		return { id: vscode.env.sessionId, pid: process.pid, host: this.getPeerHostId() };
 	}
 
 	/**
-	 * Renew (heartbeat) the refresh leader lock so a legitimately long-running parse
-	 * is not mistaken for a stale lock by another window. Only renews a lock we own.
-	 * Returns true if the lock is still owned by us after the renew attempt.
+	 * Record that the leader's parse made progress. Cheap and synchronous (called per parsed file);
+	 * the next heartbeat writes it to the refresh and machine-wide locks as `progressAt`. Without
+	 * this, the heartbeat would only prove the process's timer is alive, so a parse wedged on an
+	 * await that never settles would keep its locks forever — see `REFRESH_LOCK_STALL_MS`.
+	 */
+	noteRefreshProgress(): void {
+		this.refreshProgressPending = true;
+	}
+
+	/**
+	 * Heartbeat for the refresh-leader lock and (when held) the machine-wide parse lock. Writes
+	 * `progressAt` only when `noteRefreshProgress()` was called since the last heartbeat. Returns
+	 * whether this window still owns the refresh lock.
 	 */
 	async renewRefreshLock(): Promise<boolean> {
-		return this.renewLock(this.getRefreshLockPath());
+		const progress = this.refreshProgressPending;
+		this.refreshProgressPending = false;
+		const owned = await this.renewLock(this.getRefreshLockPath(), progress);
+		if (this.holdsMachineParseLock) {
+			const machinePath = this.getMachineParseLockPath();
+			if (machinePath && !(await renewFileLock(machinePath, this.lockOwner, { progress }))) {
+				// Taken over by another host (it judged us stuck). Never release its lock later.
+				this.holdsMachineParseLock = false;
+				this.deps.log('Machine-wide parse lock was taken over by another host');
+			}
+		}
+		return owned;
 	}
 
 	/**
@@ -694,140 +755,31 @@ export class CacheManager {
 	}
 
 	/** Refresh a lock file's timestamp, but only while this window still owns it. */
-	private async renewLock(lockPath: string): Promise<boolean> {
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			if (lock.sessionId !== vscode.env.sessionId) {
-				return false;
-			}
-			await fs.promises.writeFile(
-				lockPath,
-				JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }),
-			);
-			return true;
-		} catch {
-			return false;
-		}
+	private async renewLock(lockPath: string, progress = false): Promise<boolean> {
+		return renewFileLock(lockPath, this.lockOwner, { progress });
 	}
 
-	/** Release the refresh leader lock, but only if we own it. */
+	/**
+	 * Release the refresh leader lock, but only if we own it. Also ends this window's machine-wide
+	 * parse turn, if it took one (see coordinateCrossHostParse()): the turn never outlives the
+	 * leadership it was taken under, including on dispose.
+	 */
 	async releaseRefreshLock(): Promise<void> {
-		return this.releaseLock(this.getRefreshLockPath());
+		await this.releaseLock(this.getRefreshLockPath());
+		await this.finishCrossHostParse();
 	}
 
 	/**
-	 * Generic atomic lock acquisition shared by the cache-save lock and the
-	 * refresh leader lock.
+	 * Generic atomic lock acquisition shared by the cache-save lock, the refresh leader lock and the
+	 * GitHub-snapshot leases. The primitive (atomic create, dead/recycled-pid check, 5-minute
+	 * heartbeat timeout, stall and max-hold takeover, corrupt-lock recovery) lives in src/fileLock.ts.
 	 */
-	private async acquireLock(lockPath: string): Promise<boolean> {
-		try {
-			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-			return await this.writeLockFile(lockPath);
-		} catch (err: unknown) {
-			const errCode = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
-			if (errCode !== 'EEXIST') {
-				const message = err instanceof Error ? err.message : String(err);
-				this.deps.warn(`Unexpected error acquiring cache lock: ${message}`);
-				return false;
-			}
-			return this.handleExistingLock(lockPath);
-		}
-	}
-
-	private async writeLockFile(lockPath: string): Promise<boolean> {
-		try {
-			await fs.promises.writeFile(
-				lockPath,
-				JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }),
-				{ flag: 'wx' },
-			);
-			return true;
-		} catch (err: unknown) {
-			if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'EEXIST') { throw err; }
-			return false;
-		}
-	}
-
-	private checkOwnerAlive(pid: unknown): boolean {
-		if (typeof pid !== 'number') { return true; }
-		try {
-			process.kill(pid, 0);
-		} catch (killErr: unknown) {
-			if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') {
-				return false; // Process no longer exists
-			}
-			return true; // EPERM means process exists but is owned by another user
-		}
-		// A PID being alive is not enough on its own: Windows reuses PIDs
-		// aggressively, so after a reboot or crash a stale lock can appear "owned" by
-		// an unrelated new process, forcing every window into follower mode. On
-		// Windows, only treat the lock as live when the PID's image is an
-		// Electron-family host OR the current process itself (tests / same-process
-		// re-acquire). A live but clearly-foreign image (e.g. cmd.exe) means the
-		// PID was recycled and the lock is stale.
-		if (process.platform === 'win32') {
-			return pid === process.pid || this.isWindowsHostProcess(pid);
-		}
-		return true;
-	}
-
-	/**
-	 * Windows-only check that a PID belongs to a VS Code/Electron host process.
-	 * Uses tasklist's CSV output; on any failure we assume the owner is alive so
-	 * we never break a lock that is genuinely in use.
-	 */
-	private isWindowsHostProcess(pid: number): boolean {
-		try {
-			const out = execFileSync(
-				'tasklist',
-				['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
-				{ encoding: 'utf-8', timeout: 5000, windowsHide: true },
-			);
-			// No match → "INFO: No tasks are running which match the specified criteria."
-			if (!out.startsWith('"')) { return false; }
-			const image = (out.split('","')[0] ?? '').replace(/^"/, '').toLowerCase();
-			return /code|codium|electron|windsurf|cursor|kiro|antigravity|vibe|tray/.test(image);
-		} catch {
-			return true; // Can't verify — err on the side of not breaking the lock
-		}
-	}
-
-	private async handleExistingLock(lockPath: string): Promise<boolean> {
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = this.parseLockContent(content);
-			if (!lock) {
-				// Corrupt/empty lock (e.g. owner killed between atomic create and
-				// write). The staleness checks below can never run on unparseable
-				// content, so without this branch the file would block every
-				// acquire attempt forever, forcing all windows into follower mode.
-				this.deps.log('Breaking corrupt cache lock (unparseable content)');
-				await fs.promises.unlink(lockPath);
-				return this.writeLockFile(lockPath);
-			}
-			const staleThreshold = 5 * 60 * 1000;
-			const ownerAlive = this.checkOwnerAlive(lock.pid);
-			const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
-			if (!ownerAlive || isTimestampStale) {
-				this.deps.log(ownerAlive ? 'Breaking stale cache lock' : 'Breaking stale cache lock (owner process no longer running)');
-				await fs.promises.unlink(lockPath);
-				return this.writeLockFile(lockPath);
-			}
-		} catch {
-			// Can't read lock file — might have been deleted by the owner already
-		}
-		return false;
-	}
-
-	private parseLockContent(content: string): { sessionId?: unknown; pid?: unknown; timestamp: number } | undefined {
-		try {
-			const lock = JSON.parse(content);
-			if (!lock || typeof lock !== 'object' || typeof lock.timestamp !== 'number') { return undefined; }
-			return lock;
-		} catch {
-			return undefined;
-		}
+	private async acquireLock(lockPath: string, options: Pick<FileLockOptions, 'stallMs' | 'maxHoldMs'> = {}): Promise<boolean> {
+		return acquireFileLock(lockPath, this.lockOwner, {
+			...options,
+			log: (m) => this.deps.log(m),
+			warn: (m) => this.deps.warn(m),
+		});
 	}
 
 	/**
@@ -839,15 +791,172 @@ export class CacheManager {
 
 	/** Generic lock release shared by the cache-save and refresh leader locks. */
 	private async releaseLock(lockPath: string): Promise<void> {
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			if (lock.sessionId === vscode.env.sessionId) {
-				await fs.promises.unlink(lockPath);
-			}
-		} catch {
-			// Lock file already gone or unreadable — nothing to do
+		return releaseFileLock(lockPath, this.lockOwner);
+	}
+
+	// --- Cross-host (machine-wide) parse coordination -------------------------------------------
+	// See src/machineParseLock.ts for the design. The per-edition refresh lock above still picks one
+	// leader among this edition's windows; that leader then also takes the machine-wide parse lock so
+	// VS Code stable, Insiders and the desktop app don't all run the heavy parse at once, and merges
+	// a compatible peer edition's snapshot so files it already parsed become cache hits.
+
+	/** Machine-wide lock directory, or undefined when cross-host coordination is disabled. */
+	private getMachineLockDir(): string | undefined {
+		return this.deps.machineLockDir ?? undefined;
+	}
+
+	private getMachineParseLockPath(): string | undefined {
+		const dir = this.getMachineLockDir();
+		return dir ? getMachineParseLockPath(dir) : undefined;
+	}
+
+	/**
+	 * This host's id in the machine-wide registry: one per VS Code edition and cache identity, the
+	 * same granularity as the snapshot it advertises (`appName` differs between stable and Insiders).
+	 */
+	getPeerHostId(): string {
+		return `vscode-${vscode.env.appName ?? 'code'}-${this.getCacheIdentifier()}`;
+	}
+
+	/**
+	 * Exact snapshot format string. Peers only merge each other's snapshots when this matches, i.e.
+	 * same snapshot schema, same parse-cache version and same cache identity (prod never reads dev).
+	 */
+	getPeerSnapshotFormat(): string {
+		return `vscode-session-cache/schema${CacheManager.SNAPSHOT_SCHEMA_VERSION}/cache${this.cacheVersion}/${this.getCacheIdentifier()}`;
+	}
+
+	/**
+	 * Become the machine-wide parse holder, waiting (bounded) while another host's live, progressing
+	 * parse holds it. Returns true when acquired, false when coordination is disabled or the wait ran
+	 * out (the caller parses anyway — waiting is an optimization, never a correctness requirement).
+	 * `onWait` runs every poll, so the caller can keep its own refresh lock's progress alive.
+	 */
+	async acquireMachineParseLock(options: { maxWaitMs: number; pollMs: number; onWait?: () => void }): Promise<boolean> {
+		const lockPath = this.getMachineParseLockPath();
+		if (!lockPath) { return false; }
+		let announced = false;
+		const result = await waitForFileLock(lockPath, this.lockOwner, {
+			maxWaitMs: options.maxWaitMs,
+			pollMs: options.pollMs,
+			stallMs: PARSE_LOCK_STALL_MS,
+			maxHoldMs: PARSE_LOCK_MAX_HOLD_MS,
+			log: (m) => this.deps.log(m),
+			warn: (m) => this.deps.warn(m),
+			onWait: (holder) => {
+				if (!announced) {
+					announced = true;
+					const who = holder && typeof holder.host === 'string' ? holder.host : 'another host';
+					this.deps.log(`Waiting for ${who} to finish its session parse before parsing here`);
+				}
+				options.onWait?.();
+			},
+		});
+		this.holdsMachineParseLock = result.acquired;
+		if (!result.acquired) {
+			this.deps.log(`Machine-wide parse lock still held after ${Math.round(result.waitedMs / 1000)}s; parsing without it`);
+		} else if (result.waitedMs > 0 && announced) {
+			this.deps.log(`Acquired machine-wide parse lock after waiting ${Math.round(result.waitedMs / 1000)}s`);
 		}
+		return result.acquired;
+	}
+
+	/**
+	 * Start (leader) or just clear (follower) the 30s heartbeat that renews the refresh-leader lock
+	 * and, while held, the machine-wide parse lock — see renewRefreshLock().
+	 */
+	startLeaderHeartbeat(isLeader: boolean): void {
+		this.stopLeaderHeartbeat();
+		if (!isLeader) { return; }
+		this.leaderHeartbeat = setInterval(() => { void this.renewRefreshLock(); }, CacheManager.LEADER_HEARTBEAT_MS);
+		if (typeof this.leaderHeartbeat.unref === 'function') { this.leaderHeartbeat.unref(); }
+	}
+
+	stopLeaderHeartbeat(): void {
+		if (this.leaderHeartbeat) {
+			clearInterval(this.leaderHeartbeat);
+			this.leaderHeartbeat = undefined;
+		}
+	}
+
+	/**
+	 * Called by the refresh leader before its heavy parse: waits (bounded) for another host's parse
+	 * to finish, takes the machine-wide parse lock, then merges compatible peer snapshots so the
+	 * files that host just parsed are cache hits here. Never throws; a no-op when disabled.
+	 */
+	async coordinateCrossHostParse(): Promise<void> {
+		if (!this.getMachineLockDir()) { return; }
+		try {
+			await this.acquireMachineParseLock({
+				maxWaitMs: CacheManager.MACHINE_PARSE_MAX_WAIT_MS,
+				pollMs: CacheManager.MACHINE_PARSE_POLL_MS,
+				// Waiting on a live peer is legitimate progress for this edition's refresh lock.
+				onWait: () => this.noteRefreshProgress(),
+			});
+			await this.loadPeerSnapshotsIfChanged();
+		} catch (err) {
+			this.deps.warn(`Cross-host parse coordination failed, parsing without it: ${err}`);
+		}
+	}
+
+	/** Called by the refresh leader after its snapshot save: release the parse lock, advertise the snapshot. */
+	async finishCrossHostParse(): Promise<void> {
+		try {
+			await this.releaseMachineParseLock();
+			await this.publishPeerSnapshotInfo();
+		} catch (err) {
+			this.deps.warn(`Failed to finish cross-host parse coordination: ${err}`);
+		}
+	}
+
+	/** Release the machine-wide parse lock if this window holds it. */
+	async releaseMachineParseLock(): Promise<void> {
+		const lockPath = this.getMachineParseLockPath();
+		if (!lockPath || !this.holdsMachineParseLock) { return; }
+		this.holdsMachineParseLock = false;
+		await releaseFileLock(lockPath, this.lockOwner);
+	}
+
+	/** Advertise this edition's snapshot to peer hosts. Best-effort; a no-op when disabled. */
+	async publishPeerSnapshotInfo(): Promise<void> {
+		const dir = this.getMachineLockDir();
+		if (!dir) { return; }
+		try { await fs.promises.access(this.getSharedSnapshotPath()); } catch { return; }
+		await publishPeerSnapshot(dir, {
+			hostId: this.getPeerHostId(),
+			snapshotPath: this.getSharedSnapshotPath(),
+			format: this.getPeerSnapshotFormat(),
+			updatedAt: Date.now(),
+		});
+	}
+
+	/**
+	 * Merge entries from compatible peer editions' snapshots (read-only) into the in-memory cache,
+	 * using the same newest-mtime / tombstone rules as this edition's own shared snapshot. Skips a
+	 * peer snapshot not newer than this edition's last cache clear, so a "Clear Cache" here is not
+	 * undone by a peer's pre-clear data. Returns the number of entries merged.
+	 */
+	async loadPeerSnapshotsIfChanged(): Promise<number> {
+		const dir = this.getMachineLockDir();
+		if (!dir || this.clearInProgress) { return 0; }
+		const peers = await listPeerSnapshots(dir, this.getPeerSnapshotFormat(), this.getPeerHostId());
+		const generationAtStart = this.cacheClearGeneration;
+		let merged = 0;
+		for (const peer of peers) {
+			if (path.resolve(peer.snapshotPath) === path.resolve(this.getSharedSnapshotPath())) { continue; }
+			let mtimeMs: number;
+			try { mtimeMs = (await fs.promises.stat(peer.snapshotPath)).mtimeMs; } catch { continue; }
+			if (mtimeMs <= (this.peerSnapshotMtimes.get(peer.snapshotPath) ?? 0) || mtimeMs <= this.clearEpoch) { continue; }
+			const entries = await this.readSnapshotEntries(peer.snapshotPath);
+			this.peerSnapshotMtimes.set(peer.snapshotPath, mtimeMs);
+			if (!entries || this.cacheClearGeneration !== generationAtStart || this.clearInProgress) { continue; }
+			const count = this.mergeSnapshotEntries(entries);
+			if (count > 0) {
+				this.deps.log(`Warmed cache from ${peer.hostId}'s snapshot: merged ${count} entr${count === 1 ? 'y' : 'ies'}`);
+			}
+			merged += count;
+		}
+		return merged;
 	}
 
 	// Persistent cache storage methods
@@ -1549,7 +1658,11 @@ export class CacheManager {
 	 * schema/cache version.
 	 */
 	async readSharedSnapshot(): Promise<Record<string, SessionFileCache> | undefined> {
-		const snapshotPath = this.getSharedSnapshotPath();
+		return this.readSnapshotEntries(this.getSharedSnapshotPath());
+	}
+
+	/** readSharedSnapshot() for any snapshot path (this edition's or a compatible peer's). */
+	private async readSnapshotEntries(snapshotPath: string): Promise<Record<string, SessionFileCache> | undefined> {
 		try {
 			const content = await fs.promises.readFile(snapshotPath, 'utf-8');
 			const envelope = JSON.parse(content);

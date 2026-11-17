@@ -276,6 +276,7 @@ import { RepoHeatmapPanel, createRepoHeatmapHost } from './repoHeatmapPanel';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { getMachineLockDir } from '../../src/machineParseLock';
 import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
@@ -1593,7 +1594,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 24;
 	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
 	private _followerResyncTimer: NodeJS.Timeout | undefined;
-	private _refreshHeartbeat: NodeJS.Timeout | undefined;
 
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
@@ -2789,6 +2789,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
 				}
 			},
+			machineLockDir: getMachineLockDir(),
 		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
@@ -5771,7 +5772,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let isLeader = false;
 		try { isLeader = await this.cacheManager.acquireRefreshLock(); }
 		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
-		this.startRefreshHeartbeat(isLeader);
+		await this.beginRefreshTurn(isLeader);
 
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
@@ -6137,21 +6138,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Start (leader) or clear (follower) the periodic heartbeat that renews the
 	 * refresh leader lock so a legitimately long parse is not treated as stale by
-	 * another window.
+	 * another window. Progress reported by the parse (buildProgressCallback()) is
+	 * written along with it, so a leader that is alive but stuck is taken over.
+	 *
+	 * A leader then takes its machine-wide parse turn: it waits (bounded) for another VS Code
+	 * edition's or the desktop app's in-progress parse and reuses a compatible peer snapshot (see
+	 * src/machineParseLock.ts). releaseRefreshLock() ends that turn. Never in sample-data mode,
+	 * whose fixture parse must neither wait on nor mix with real data.
 	 */
-	private startRefreshHeartbeat(isLeader: boolean): void {
-		this.stopRefreshHeartbeat();
-		if (!isLeader) { return; }
-		this._refreshHeartbeat = setInterval(() => {
-			void this.cacheManager.renewRefreshLock();
-		}, 30 * 1000);
+	private async beginRefreshTurn(isLeader: boolean): Promise<void> {
+		this.cacheManager.startLeaderHeartbeat(isLeader);
+		if (isLeader && !this.isSampleDataModeActive()) { await this.cacheManager.coordinateCrossHostParse(); }
 	}
 
 	private stopRefreshHeartbeat(): void {
-		if (this._refreshHeartbeat) {
-			clearInterval(this._refreshHeartbeat);
-			this._refreshHeartbeat = undefined;
-		}
+		this.cacheManager.stopLeaderHeartbeat();
 	}
 
 	/**
@@ -6194,6 +6195,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let lastProgressSentMs = 0;
 		let lastPercentage = -1;
 		return (completed: number, total: number) => {
+			this.cacheManager.noteRefreshProgress(); // keeps the leader's locks from looking hung
 			const percentage = Math.round((completed / total) * 100);
 			if (!silent) {
 				// Only touch the status bar text when the rounded percentage actually
