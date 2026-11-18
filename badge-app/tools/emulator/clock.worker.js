@@ -8,6 +8,9 @@
 // simulator's own handler.
 self.emuClockTarget = 0;
 self.addEventListener('message', (event) => {
+	// Only the page that started this dedicated worker can post to it (its messages carry an empty
+	// origin); anything naming another origin is ignored rather than allowed to move the clock.
+	if (event.origin && event.origin !== self.location.origin) { return; }
 	const data = event.data;
 	if (data && typeof data.clockTarget === 'number') {
 		self.emuClockTarget = data.clockTarget;

@@ -156,21 +156,24 @@ test('clock.worker.js takes clock messages for itself and passes everything else
 	const source = fs.readFileSync(path.join(__dirname, '..', 'clock.worker.js'), 'utf8');
 	const order = [];
 	const listeners = [];
-	const self = { addEventListener: (type, fn) => { order.push(`listen:${type}`); listeners.push(fn); } };
+	const self = { location: { origin: 'http://127.0.0.1:1234' }, addEventListener:(type, fn) => { order.push(`listen:${type}`); listeners.push(fn); } };
 	const run = new Function('self', 'importModule', `return (async () => { ${source.replace(/await import\(/, 'await importModule(')} })();`);
 	await run(self, async (url) => { order.push(`import:${url}`); });
 	assert.deepEqual(order, ['listen:message', 'import:/simulator/micropython.worker.js']);
 	assert.equal(self.emuClockTarget, 0);
-	const deliver = (data) => {
+	const deliver = (data, origin = '') => {
 		let stopped = false;
-		listeners[0]({ data, stopImmediatePropagation: () => { stopped = true; } });
+		listeners[0]({ data, origin, stopImmediatePropagation: () => { stopped = true; } });
 		return stopped;
 	};
 	assert.equal(deliver({ clockTarget: 3500 }), true);
 	assert.equal(self.emuClockTarget, 3500);
+	assert.equal(deliver({ clockTarget: 4000 }, 'http://127.0.0.1:1234'), true);
+	assert.equal(self.emuClockTarget, 4000);
 	assert.equal(deliver({ buttons: 8 }), false, 'button messages must still reach the simulator');
 	assert.equal(deliver({ clockTarget: '9' }), false);
-	assert.equal(self.emuClockTarget, 3500);
+	assert.equal(deliver({ clockTarget: 9000 }, 'https://evil.example'), false, 'another origin cannot move the clock');
+	assert.equal(self.emuClockTarget, 4000);
 });
 
 test('mergeReports replaces earlier badge entries and keeps the webview ones', () => {
