@@ -20,7 +20,8 @@
  *   --json              Also print changeset.json to stdout.
  *
  * Writes into <out-dir>:
- *   changeset.json  Structured facts: files, stats, matched signals, baseline.
+ *   changeset.json  Structured facts: files, stats, matched signals, baseline,
+ *                   and the repository instruction files that apply.
  *   changeset.md    The same facts as markdown, for pasting into a prompt.
  *   changeset.diff  The unified diff (truncated at --max-diff-bytes).
  *
@@ -96,6 +97,91 @@ function compilePatterns(patterns) {
 
 function matchesAny(compiled, filePath) {
   return compiled.some((re) => re.test(filePath));
+}
+
+// ── repository guidance ────────────────────────────────────────────────────
+
+/**
+ * Read the comma-separated `applyTo` globs from an `.instructions.md` file's
+ * YAML frontmatter. No frontmatter or no `applyTo` means it applies nowhere
+ * automatically, so it is not selected.
+ */
+function parseApplyTo(text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!match) return [];
+  const line = /^applyTo:\s*(.+)$/m.exec(match[1]);
+  if (!line) return [];
+  return line[1]
+    .trim()
+    .replace(/^(['"])(.*)\1$/, '$2')
+    .split(',')
+    .map((glob) => glob.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Pick the repository instruction files that govern the changed paths, so the
+ * reviewer judges the change against this repository's documented conventions
+ * (for example `uses: $/.github/actions/<name>` in workflows) instead of
+ * generic expectations.
+ *
+ * - `AGENTS.md` files apply to every path under their directory (the root one
+ *   always applies).
+ * - `.github/copilot-instructions.md` always applies.
+ * - `.github/instructions/*.instructions.md` apply when their `applyTo` globs
+ *   match a changed path (old or new name).
+ *
+ * `readFile(path)` returns the file's text from the BASE commit, so a PR
+ * cannot add or rewrite the conventions it is judged against. A selected file
+ * that the PR itself edits is flagged `changedInPr`.
+ */
+function selectGuidance(guidancePaths, readFile, files) {
+  const changed = new Set();
+  for (const file of files) {
+    changed.add(file.path);
+    if (file.oldPath) changed.add(file.oldPath);
+  }
+  const changedList = [...changed];
+  const selected = [];
+
+  for (const guidancePath of [...guidancePaths].sort()) {
+    const base = path.posix.basename(guidancePath);
+    let reason = null;
+    if (base === 'AGENTS.md') {
+      const dir = path.posix.dirname(guidancePath);
+      if (dir === '.') reason = 'repository-wide instructions';
+      else if (changedList.some((p) => p.startsWith(`${dir}/`))) {
+        reason = `instructions for \`${dir}/\``;
+      }
+    } else if (guidancePath === '.github/copilot-instructions.md') {
+      reason = 'repository-wide instructions';
+    } else if (/^\.github\/instructions\/[^/]+\.instructions\.md$/.test(guidancePath)) {
+      const text = readFile(guidancePath);
+      const globs = text ? parseApplyTo(text) : [];
+      const compiled = compilePatterns(globs);
+      if (globs.length && changedList.some((p) => matchesAny(compiled, p))) {
+        reason = `applyTo ${globs.map((g) => `\`${g}\``).join(', ')}`;
+      }
+    }
+    if (reason) {
+      selected.push({ path: guidancePath, reason, changedInPr: changed.has(guidancePath) });
+    }
+  }
+  return selected;
+}
+
+/** The guidance files that exist in the base commit (or HEAD when there is none). */
+function listGuidance(ref) {
+  const out = git(['ls-tree', '-r', '--name-only', '-z', ref], { allowFailure: true }) || '';
+  return out
+    .split('\0')
+    .filter(
+      (p) =>
+        p === '.github/copilot-instructions.md' ||
+        /(^|\/)AGENTS\.md$/.test(p) ||
+        /^\.github\/instructions\/[^/]+\.instructions\.md$/.test(p)
+    )
+    .filter((p) => !/(^|\/)node_modules\//.test(p));
 }
 
 // ── argument parsing ───────────────────────────────────────────────────────
@@ -466,6 +552,27 @@ function renderMarkdown(changeset) {
   }
   lines.push('');
 
+  lines.push('## Repository conventions that apply');
+  lines.push('');
+  const guidance = changeset.guidance || [];
+  if (guidance.length === 0) {
+    lines.push('_None found._');
+  } else {
+    lines.push(
+      'Read these from the repository root (the base commit) before calling ' +
+        'anything a defect. A pattern they document is this repository\'s ' +
+        'convention, not a bug, even if generic tooling or docs disagree.'
+    );
+    lines.push('');
+    for (const g of guidance) {
+      const note = g.changedInPr
+        ? ' — **changed by this PR**: judge against the base version; the PR\'s edits to it are under review'
+        : '';
+      lines.push(`- ${codeSpan(g.path)} (${g.reason})${note}`);
+    }
+  }
+  lines.push('');
+
   lines.push('## Files');
   lines.push('');
   lines.push('| Status | File | +/- | Level | Areas |');
@@ -508,6 +615,12 @@ function main() {
   const signals = classify(files, config);
   const size = sizeAssessment(files, config.sizeThresholds);
   const baseline = computeBaseline(signals, size, files);
+  const guidanceRef = base || head;
+  const guidance = selectGuidance(
+    listGuidance(guidanceRef),
+    (p) => git(['show', `${guidanceRef}:${p}`], { allowFailure: true }),
+    files
+  );
 
   const stats = {
     files: files.length,
@@ -540,6 +653,7 @@ function main() {
     size,
     signals,
     baseline,
+    guidance,
     files,
     diff: {
       path: path.join(opts.outDir, 'changeset.diff'),
@@ -582,4 +696,6 @@ module.exports = {
   classify,
   codeSpan,
   refArg,
+  parseApplyTo,
+  selectGuidance,
 };
