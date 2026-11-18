@@ -39,6 +39,7 @@ jobs:
       contents: write      # push the version bump branch, open the PR, create the release
       pull-requests: write # open the version bump PR
       id-token: write      # required for OIDC authentication to the npm registry
+      attestations: write  # attest the npm tarball (also attached to the GitHub release)
     defaults:
       run:
         working-directory: sharing-server
@@ -157,13 +158,55 @@ jobs:
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pack once and publish that exact tarball, so the file attested below, the file
+      # npm serves and the file attached to the GitHub release are the same bytes.
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          PACK_DIR="$RUNNER_TEMP/npm-pack"
+          rm -rf "$PACK_DIR" && mkdir -p "$PACK_DIR"
+          pnpm pack --pack-destination "$PACK_DIR"
+          shopt -s nullglob
+          TARBALLS=("$PACK_DIR"/*.tgz)
+          if [ ${#TARBALLS[@]} -ne 1 ]; then
+            echo "::error::Expected exactly one tarball in $PACK_DIR, found ${#TARBALLS[@]}"
+            exit 1
+          fi
+          TARBALL="${TARBALLS[0]}"
+          echo "sha256 $(sha256sum "$TARBALL" | cut -d' ' -f1)  $TARBALL"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+
+      # GitHub build-provenance attestation for the tarball (verifiable with
+      # `gh attestation verify`), on top of the npm provenance `--provenance` adds.
+      - name: Attest and verify the npm tarball
+        if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
+        uses: $/.github/actions/attest-files
+        with:
+          subject-path: ${{ steps.pack.outputs.tarball }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to npm
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
-        run: pnpm publish --provenance --access public --no-git-checks
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: pnpm publish "$TARBALL" --provenance --access public --no-git-checks
 
       - name: Dry run publish
         if: ${{ inputs.dry_run }}
-        run: pnpm publish --provenance --access public --no-git-checks --dry-run
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: pnpm publish "$TARBALL" --provenance --access public --no-git-checks --dry-run
+
+      # Before anything else is promoted (version-bump PR, GitHub release): prove npm
+      # serves the attested tarball and holds its SLSA provenance.
+      - name: Verify the published package matches the attested tarball
+        if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PACKAGE_NAME=$(node -p 'require("./package.json").name')
+          bash ../.github/workflows/scripts/verify-npm-publish.sh "$PACKAGE_NAME" "$VERSION" "$TARBALL"
 
       - name: Commit version bump and create PR
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' && steps.trigger_type.outputs.is_tag != 'true' }}
@@ -206,11 +249,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
           TAG_NAME="sharing-server/v${VERSION}"
+          # Attach the attested tarball npm serves, so `gh attestation verify` works on the download.
           gh release create "$TAG_NAME" \
             --title "Sharing server v${VERSION}" \
-            --notes-file /tmp/release_notes.md
+            --notes-file /tmp/release_notes.md \
+            "$TARBALL"
           echo "✅ GitHub release created: $TAG_NAME"
 
       - name: Summary

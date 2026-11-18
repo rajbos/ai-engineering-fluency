@@ -407,7 +407,49 @@ Not covered: messages the desktop sends *to* a view (such as `loadingStep` and
 `sessionFilesLoaded`), and clicking the views' controls (the render check only loads
 each page).
 
-## VS Code extension release provenance
+## Release provenance (artifact attestations)
+
+Every file this repository releases carries a Sigstore-backed GitHub build-provenance
+attestation, tying its SHA-256 digest to the repository, workflow, commit and runner:
+
+| Release | Workflow | Attested file | Where the attestation is made |
+|---|---|---|---|
+| VS Code extension (stable + nightly) | `release.yml`, `vscode-nightly-prerelease.yml` | VSIX (+ SBOM attestation) | separate `attest` job, `.github/actions/vsix-attest` |
+| Visual Studio extension | `release.yml`, `visualstudio-publish.yml` | VSIX | separate attest job, `.github/actions/attest-files` |
+| JetBrains plugin | `jetbrains-publish.yml` | plugin ZIP | separate `attest` job, `.github/actions/attest-files` |
+| Desktop app | `desktop-publish.yml` | Windows installer `.exe` | separate `attest` job, `.github/actions/attest-files` |
+| CLI npm package | `cli-publish.yml` | npm tarball | publish job (it already holds `id-token` for npm) |
+| Sharing server npm package | `sharing-server-publish.yml` | npm tarball | publish job (it already holds `id-token` for npm) |
+| Sharing server container image | `sharing-server-deploy.yml` | `ghcr.io/rajbos/copilot-sharing-server` digest | build job, also pushed to GHCR |
+
+Each attestation is verified in the same run, pinned to this repository, the signing
+workflow file, the run's ref and GitHub-hosted runners
+(`gh attestation verify --signer-workflow … --source-ref … --deny-self-hosted-runners`).
+`attest-files` then downloads the same-named asset from the GitHub release and verifies
+it too, so a release asset that is not the attested bytes fails the run.
+
+For the npm packages the workflow packs once and publishes that exact tarball with
+`--provenance`, so npm also records its own SLSA provenance. After publishing,
+`.github/workflows/scripts/verify-npm-publish.sh` checks that the registry's `integrity`
+equals the attested tarball's SHA-512 and that npm holds a SLSA v1 provenance for it,
+before the version-bump PR or GitHub release is created. The tarball is attached to the
+GitHub release. The sharing-server image is verified before the deploy job promotes its
+digest to Azure.
+
+Not covered yet: the Visual Studio and JetBrains marketplace uploads happen in the build
+job, before the attest job runs, so those publishes are not gated on verification the
+way the VS Code `publish` job is. The desktop app's `latest.yml` and `.blockmap` update
+metadata are not attested (`latest.yml` already carries the installer's SHA-512).
+
+To verify a download (needs the [GitHub CLI](https://cli.github.com/)):
+
+```sh
+gh attestation verify <file> --repo rajbos/ai-engineering-fluency
+gh attestation verify oci://ghcr.io/rajbos/copilot-sharing-server:latest --repo rajbos/ai-engineering-fluency
+npm audit signatures   # in a project that installed the npm package
+```
+
+### VS Code extension VSIX
 
 Every VS Code extension VSIX built by `release.yml` and the nightly pre-release
 workflow ships with SPDX JSON SBOMs and Sigstore-backed GitHub attestations
@@ -417,15 +459,6 @@ the VSIX workflow artifact, and the `publish` job re-verifies the same artifact
 before it publishes to the Marketplace or Open VSX. The job that builds the VSIX
 can neither sign nor publish it. SBOMs are attached to the
 GitHub release (nightlies keep them as the `vsix-sbom` workflow artifact).
-
-To verify a downloaded VSIX (needs the [GitHub CLI](https://cli.github.com/)):
-
-```sh
-gh attestation verify <file>.vsix --repo rajbos/ai-engineering-fluency
-```
-
-This proves the file was built by this repository's GitHub Actions workflows from
-the recorded commit. It does not cover the Visual Studio, JetBrains or CLI releases.
 
 ## Sharing server
 

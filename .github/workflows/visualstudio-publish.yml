@@ -37,6 +37,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write  # needed to create GitHub release on tag push
+    outputs:
+      version: ${{ steps.version.outputs.local_version }}
+      is_tag: ${{ steps.version.outputs.is_tag }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -374,3 +377,41 @@ jobs:
           } else {
             "## ❌ Build failed — no .vsix produced" >> $env:GITHUB_STEP_SUMMARY
           }
+
+  attest:
+    name: VSIX Provenance Attestation
+    needs: publish
+    # Signs the VSIX the publish job uploaded as a workflow artifact; it runs no build or
+    # dependency install itself and is the only job that can sign. On a tag push it also
+    # downloads the VSIX from the GitHub release and verifies it, proving the release
+    # asset is the attested file. A dry run attests nothing.
+    if: inputs.dry_run != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # read the release assets for verification
+      id-token: write       # Sigstore keyless signing for the attestation
+      attestations: write   # store the attestation
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download VSIX workflow artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: visualstudio-vsix-${{ needs.publish.outputs.version }}
+          path: dist
+
+      - name: Attest and verify the VSIX
+        uses: $/.github/actions/attest-files
+        with:
+          subject-path: dist/*.vsix
+          release-tag: ${{ needs.publish.outputs.is_tag == 'true' && format('vs/v{0}', needs.publish.outputs.version) || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

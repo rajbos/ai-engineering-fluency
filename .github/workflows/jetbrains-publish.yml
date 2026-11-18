@@ -324,6 +324,9 @@ jobs:
     needs: [build-cli-windows, build-cli-macos-arm64, build-cli-macos-x64, build-cli-linux, build-webview]
     permissions:
       contents: write   # needed to create GitHub release on tag push
+    outputs:
+      plugin_version: ${{ steps.version.outputs.plugin_version }}
+      is_tag: ${{ steps.version.outputs.is_tag }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -514,3 +517,44 @@ jobs:
               echo "| **Marketplace** | ⏭️ Skipped |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 4 — Provenance attestation for the plugin ZIP
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Signs the ZIP the build job uploaded as a workflow artifact; it runs no build or
+  # dependency install itself and is the only job that can sign. On a tag push it also
+  # downloads the ZIP from the GitHub release and verifies it, proving the release asset
+  # is the attested file. A dry run attests nothing.
+  attest:
+    name: Plugin ZIP Provenance Attestation
+    needs: build-and-publish
+    if: inputs.dry_run != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # read the release assets for verification
+      id-token: write       # Sigstore keyless signing for the attestation
+      attestations: write   # store the attestation
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download plugin ZIP workflow artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: jetbrains-plugin-${{ needs.build-and-publish.outputs.plugin_version }}
+          path: dist
+
+      - name: Attest and verify the plugin ZIP
+        uses: $/.github/actions/attest-files
+        with:
+          subject-path: dist/*.zip
+          release-tag: ${{ needs.build-and-publish.outputs.is_tag == 'true' && format('jetbrains/v{0}', needs.build-and-publish.outputs.plugin_version) || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
