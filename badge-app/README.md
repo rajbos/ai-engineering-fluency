@@ -78,6 +78,16 @@ button presses between them, are in `tools/emulator/lib/scenarios.js`; add a
 `shot` there when you add a screen. A run fails if the app prints a traceback
 or stops drawing.
 
+The app runs on a virtual clock in the emulator, so its screenshots are the
+same pixels on every run: `badge.ticks` stands still while buttons are pressed
+and only moves 33 ms per frame when the emulator lets it, and each shot is
+taken 2.5 s of that clock after the last button press, once the slides, bar
+grow-ins and the spider chart's intro have finished. Animations that never
+stop (the radar's spin, the skyline's sway, sonar pings) are caught at the same
+moment each time. A `{ wait: <ms> }` step lets the clock run on between two
+inputs. The app itself is unchanged; on the badge `badge.ticks` is the real
+clock.
+
 In CI, a pull request that touches `badge-app/` runs it in the `ui-checks`
 job: it renders the app at the merge base and at the PR head, and the changed
 screens appear in the same screenshot comment as the webviews.
