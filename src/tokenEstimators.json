@@ -108,6 +108,10 @@
     "gpt-6.1-terra": 0.25,
     "claude-fable-5.2": 0.24,
     "gemini-4-carbon": 0.25,
-    "gemini-4-hydrogen": 0.25
+    "gemini-4-hydrogen": 0.25,
+    "gpt-6.2-astra": 0.25,
+    "gpt-6.2-sol": 0.25,
+    "mai-code-2": 0.25,
+    "mai-code-2-flash": 0.25
   }
 }

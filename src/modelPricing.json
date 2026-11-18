@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-11-16",
+    "lastUpdated": "2026-11-18",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1458,6 +1458,48 @@
         "Gemini 4 Hydrogen"
       ],
       "cachedInputCostPerMillion": 0.075
+    },
+    "gpt-6.2-astra": {
+      "inputCostPerMillion": 8.0,
+      "outputCostPerMillion": 40.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6.2 Astra"
+      ],
+      "cachedInputCostPerMillion": 0.4,
+      "cacheCreationCostPerMillion": 10.0
+    },
+    "gpt-6.2-sol": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6.2 Sol"
+      ],
+      "cachedInputCostPerMillion": 0.1,
+      "cacheCreationCostPerMillion": 2.5
+    },
+    "mai-code-2": {
+      "inputCostPerMillion": 0.5,
+      "outputCostPerMillion": 2.5,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "MAI Code 2"
+      ],
+      "cachedInputCostPerMillion": 0.025
+    },
+    "mai-code-2-flash": {
+      "inputCostPerMillion": 0.05,
+      "outputCostPerMillion": 0.25,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "MAI Code 2 Flash"
+      ],
+      "cachedInputCostPerMillion": 0.005
     }
   }
 }
