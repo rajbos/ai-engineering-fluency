@@ -1695,4 +1695,7 @@
   ,"openviking-write": "OpenViking: Write"
   ,"get_session_automation": "Automation Session"
   ,"mcp__terminal__stop_terminal_tab": "Stop Terminal Tab"
+  ,"computer-use-exec_js": "JavaScript Execution"
+  ,"enable_computer_use": "Enable Computer Use"
+  ,"get_syntax_docs": "Get Syntax Docs"
 }
