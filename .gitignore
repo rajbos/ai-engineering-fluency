@@ -6,6 +6,9 @@ desktop/.dev-profile
 desktop/electron-stdout.log
 desktop/electron-stderr.log
 desktop/release
+# Temporary HOME and pages of scripts/validate-desktop-render.js (kept out of the
+# OS temp dir, which the session readers refuse to read from)
+desktop/.render-check-*/
 .impeccable/
 .vscode-test/
 *.vsix

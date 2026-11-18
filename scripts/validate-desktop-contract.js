@@ -48,9 +48,12 @@ const STATUSES = ['hidden', 'gap', 'no-op'];
 
 class ConfigError extends Error {}
 
-/** View names the desktop app bundles, from `WEBVIEW_BUNDLES` in desktop/esbuild.js. */
-function readDesktopViews() {
-  const src = fs.readFileSync(path.join(DESKTOP_DIR, 'esbuild.js'), 'utf8');
+/**
+ * View names the desktop app bundles, from `WEBVIEW_BUNDLES` in desktop/esbuild.js.
+ * `desktopDir` reads another checkout's desktop/ (the visual diff's baseline worktree).
+ */
+function readDesktopViews(desktopDir = DESKTOP_DIR) {
+  const src = fs.readFileSync(path.join(desktopDir, 'esbuild.js'), 'utf8');
   const block = src.match(/const\s+WEBVIEW_BUNDLES\s*=\s*\[([\s\S]*?)\]/);
   if (!block) {
     throw new ConfigError('Could not find WEBVIEW_BUNDLES in desktop/esbuild.js — has it moved?');

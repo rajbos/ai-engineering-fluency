@@ -231,7 +231,7 @@ rule out machine load.
 | Job | Checks |
 |---|---|
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
-| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** (extension changes); **badge emulator screenshots vs the merge base** (`badge-app/` changes, see [badge-app/README.md](../badge-app/README.md#try-it-in-the-emulator)) |
+| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** (extension changes); **badge emulator screenshots vs the merge base** (`badge-app/` changes, see [badge-app/README.md](../badge-app/README.md#try-it-in-the-emulator)); **desktop panel screenshots vs the merge base** (`desktop/` changes, see [Desktop app](#desktop-app)) |
 | `ui-checks-comment.yml` (`workflow_run`, same-repo PRs) | posts the screenshots as a PR comment (holds `GH_PAT`; runs from the default branch) |
 | `desktop-build` (`desktop-build.yml`) | desktop type-check, **desktop message contract**, **webview page shell**, production build, **headless render of every view**, build-output check; host view sync (informational) |
 | `validate-skills` / `security-classification` | **every skill that ships scripts has a `SECURITY.md` or an exempt/pending entry** (`node scripts/validate-skill-security.js`, over all skills) |
@@ -371,7 +371,9 @@ or from the repo root, `./build.ps1 -Project desktop -Target test`.
 - **`check:render`** (`scripts/validate-desktop-render.js`) — builds every panel's
   page with the desktop's own `buildPanelHtml` (`desktop/src/panelPage.ts`) over
   session files written to a temporary HOME (a populated history and an empty one),
-  loads each page in headless Chromium in the dark and light theme, and fails on a
+  loads each page in headless Chromium in the dark and light theme (with the
+  browser's color scheme set to match, because the app's theme tokens follow
+  `prefers-color-scheme` as Electron does), and fails on a
   script or console error, a failed request, an empty `#root` or a codicon font that
   does not load. The app serves a page from `app://panel` and its scripts from
   `app://static`; the check reproduces that two-origin split with two local servers
@@ -380,6 +382,19 @@ or from the repo root, `./build.ps1 -Project desktop -Target test`.
   visual-diff harness finds it (a global install, or the locked install under
   `.github/workflows/dependencies/playwright`). It is not part of `pnpm run check`,
   because of that build and browser; `desktop-build` runs it. It never opens Electron.
+  The temporary HOME is a git-ignored `desktop/.render-check-*` folder rather than
+  the OS temp directory, because the session readers refuse files under the temp
+  directory (`src/utils/safeFileRead.ts`); there the populated scenario read as empty.
+- **Desktop screenshots on PRs** (`scripts/desktop-visual-diff.js`) — for a PR
+  touching `desktop/`, CI's `ui-checks` job builds the desktop app at the merge base
+  (in a temporary `git worktree`) and at the head, runs the render check on both
+  with `--screenshots` (same fixture sessions, same pinned clock), compares them
+  with the visual-view-diff harness and adds the `desktop-*` panels to the same
+  report, artifact and PR screenshot comment as the webviews and the badge. It
+  fails when the head's panels do not render; visual changes are only reported.
+  Run it locally after `pnpm install` in `vscode-extension/`, `cli/` and `desktop/`:
+  `node scripts/desktop-visual-diff.js` (output in `visual-output/`). Changes to
+  the shared webviews or `src/` are screenshotted by the webview diff instead.
 - **`check:views`** — the `sync-host-views` skill, which reports extension views
   the desktop (like Visual Studio and JetBrains) does not ship, and desktop views
   that are bundled but not in `PANEL_MENU` or the other way round.

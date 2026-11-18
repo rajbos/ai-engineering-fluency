@@ -38,10 +38,13 @@ jobs:
       # change schedule the full extension build and the Playwright suite for
       # nothing. badge-relevant is the badge app: it adds the emulator
       # screenshots to ui-checks without building the extension.
+      # desktop-relevant is the desktop app: it adds the desktop panel
+      # screenshots to ui-checks.
       ci-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.ci-relevant == 'true' }}
       coverage-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.coverage-relevant == 'true' }}
       duplication-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.duplication-relevant == 'true' }}
       badge-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.badge-relevant == 'true' }}
+      desktop-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.desktop-relevant == 'true' }}
       sharing-server-relevant: ${{ steps.filter.outputs.sharing-server-relevant == 'true' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -125,6 +128,20 @@ jobs:
             # browser and the screenshot comparison.
             badge-relevant:
               - 'badge-app/**'
+              - '.github/skills/visual-view-diff/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/dependencies/playwright/**'
+            # Gates the desktop screenshot steps in ui-checks: the app's own
+            # host code (page shell, theme, hidden controls), the render check
+            # and diff scripts that take the screenshots, and the visual-view-diff
+            # code they reuse. A change to the shared webviews or src/ is already
+            # screenshotted by the webview diff, so it does not add the desktop
+            # panels too (they would only repeat the same change).
+            desktop-relevant:
+              - 'desktop/**'
+              - 'scripts/validate-desktop-render.js'
+              - 'scripts/validate-desktop-contract.js'
+              - 'scripts/desktop-visual-diff.js'
               - '.github/skills/visual-view-diff/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/dependencies/playwright/**'
@@ -422,10 +439,11 @@ jobs:
     # workflows depend on the changelog scripts to write and read the
     # changelog sections that become the GitHub release notes;
     # fetch-copilot-memories.test.js covers that script's pure helpers.
+    # desktop-visual-diff.test.js covers the desktop screenshot helpers.
     # (loc-stats.test.js runs in its own loc-stats.yml workflow.)
     - name: Run repository script tests
       shell: bash
-      run: node --test scripts/release-changelog.test.js scripts/sync-changelog.test.js scripts/fetch-copilot-memories.test.js scripts/bump-vscode-types.test.js
+      run: node --test scripts/release-changelog.test.js scripts/sync-changelog.test.js scripts/fetch-copilot-memories.test.js scripts/bump-vscode-types.test.js scripts/desktop-visual-diff.test.js
 
     - name: Verify build outputs exist
       shell: bash
@@ -617,8 +635,9 @@ jobs:
   #
   # The changed folders decide which screenshots it takes: the webview steps
   # run for an extension change (ci-relevant), the badge emulator steps for a
-  # badge-app change (badge-relevant), and both land in one report, artifact
-  # and PR comment. The job keeps its name for a badge-only change because
+  # badge-app change (badge-relevant), the desktop panel steps for a desktop
+  # app change (desktop-relevant), and all land in one report, artifact and PR
+  # comment. The job keeps its name for a badge- or desktop-only change because
   # ui-checks-comment.yml finds the run by it.
   ui-checks:
     name: Webview UI checks
@@ -627,7 +646,9 @@ jobs:
     needs: check-changes
     if: >-
       github.event_name == 'pull_request'
-      && (needs.check-changes.outputs.ci-relevant == 'true' || needs.check-changes.outputs.badge-relevant == 'true')
+      && (needs.check-changes.outputs.ci-relevant == 'true'
+        || needs.check-changes.outputs.badge-relevant == 'true'
+        || needs.check-changes.outputs.desktop-relevant == 'true')
     permissions:
       contents: read # read-only and secret-free: this job runs the PR's own code
     # One ui-checks run per PR at a time; the older head's screenshots are
@@ -666,15 +687,28 @@ jobs:
       with:
         node-version-file: '.nvmrc'
         cache: 'pnpm'
-        cache-dependency-path: vscode-extension/pnpm-lock.yaml
+        cache-dependency-path: |
+          vscode-extension/pnpm-lock.yaml
+          cli/pnpm-lock.yaml
+          desktop/pnpm-lock.yaml
 
     - name: Test screenshot comment rendering
       run: node --test .github/workflows/scripts/visual-diff-comment.test.js
 
     - name: Install dependencies
-      if: needs.check-changes.outputs.ci-relevant == 'true'
+      if: needs.check-changes.outputs.ci-relevant == 'true' || needs.check-changes.outputs.desktop-relevant == 'true'
       working-directory: vscode-extension
       run: pnpm install --frozen-lockfile --ignore-scripts
+
+    # The desktop app imports the CLI's stats logic from source and bundles the
+    # extension's webviews, so its screenshots need all three packages.
+    # --ignore-scripts also skips Electron's binary download: the panels are
+    # rendered in Playwright's Chromium, never in an Electron window.
+    - name: Install CLI and desktop dependencies
+      if: needs.check-changes.outputs.desktop-relevant == 'true'
+      run: |
+        (cd cli && pnpm install --frozen-lockfile --ignore-scripts)
+        (cd desktop && pnpm install --frozen-lockfile --ignore-scripts)
 
     # The Chromium build Playwright downloads is pinned by the locked Playwright
     # version, so the lock file hash is an exact cache key - a hit means the
@@ -745,6 +779,18 @@ jobs:
     - name: Badge emulator screenshots vs merge base
       if: needs.check-changes.outputs.badge-relevant == 'true'
       run: node badge-app/tools/emulator/badge-diff.js --base "$BASE_REF"
+      env:
+        BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+
+    # Runs after the webview diff, which clears visual-output/ when it starts,
+    # and merges the desktop panels (desktop-*) into its report. Builds the
+    # desktop app at the merge base and at the head and screenshots every panel
+    # with the headless render check (scripts/validate-desktop-render.js), in
+    # dark and light, populated and empty. Like the badge step it gates on the
+    # head's panels failing to render; panel changes themselves are reported.
+    - name: Desktop app screenshots vs merge base
+      if: needs.check-changes.outputs.desktop-relevant == 'true'
+      run: node scripts/desktop-visual-diff.js --base "$BASE_REF"
       env:
         BASE_REF: origin/${{ github.event.pull_request.base.ref }}
 
