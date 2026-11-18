@@ -163,6 +163,13 @@ jobs:
       - name: Pack npm tarball
         id: pack
         run: |
+          # Publishing a tarball skips the hooks `pnpm publish` runs around its own pack
+          # (prepack/prepare/postpack still run here). Fail rather than silently drop one.
+          HOOKS=$(node -p 'Object.keys(require("./package.json").scripts||{}).filter(s=>["prepublishOnly","prepublish","publish","postpublish"].includes(s)).join(" ")')
+          if [ -n "$HOOKS" ]; then
+            echo "::error::package.json defines publish lifecycle scripts ($HOOKS) that tarball publishing would skip. Move them to prepack or run them explicitly here."
+            exit 1
+          fi
           PACK_DIR="$RUNNER_TEMP/npm-pack"
           rm -rf "$PACK_DIR" && mkdir -p "$PACK_DIR"
           pnpm pack --pack-destination "$PACK_DIR"
