@@ -18,7 +18,11 @@ Assess how risky the pull request in this workspace is and record your verdict.
    `collect-changeset.js` before starting this session, so step 1 of the skill
    is done. Read, in this order:
    - `pr-risk/changeset.md` — the facts: files, churn, matched sensitive areas,
-     and the mechanical baseline level
+     the mechanical baseline level, and the repository conventions that apply
+   - every file listed under "Repository conventions that apply" (`AGENTS.md`
+     and the matching `.github/instructions/*.instructions.md`), from the
+     repository root. A pattern they document is this repository's convention,
+     not a defect
    - `pr-risk/changeset.diff` — the actual diff
    - the changed files themselves, whenever the diff alone does not tell you
      whether a change is safe
