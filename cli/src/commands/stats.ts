@@ -19,7 +19,7 @@ export const statsCommand = new Command('stats')
 
 		// Show search paths if verbose
 		if (options.verbose && !json) {
-			const paths = getDiagnosticPaths();
+			const paths = await getDiagnosticPaths();
 			console.log(chalk.dim('Search paths:'));
 			for (const p of paths) {
 				const status = p.exists ? chalk.green('✅') : chalk.dim('❌');

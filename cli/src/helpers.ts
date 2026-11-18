@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
+import { discoverWslSessionFiles, getWslDiagnosticRows, isWslScanAllowedByEnvironment } from '../../src/wslDiscovery';
 import { findWorkspacePathForDiscoveredPath, type IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { findRepositoryRemoteForFolder, resolveExactWorkspacePath } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
@@ -88,7 +89,11 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 /** Create session discovery instance for CLI */
 function createSessionDiscovery(): SessionDiscovery {
-	return new SessionDiscovery({ log, warn, error, ecosystems: getEcosystems() });
+	return new SessionDiscovery({
+		log, warn, error, ecosystems: getEcosystems(),
+		// Windows only; running WSL distros only (never starts one). Off via --no-wsl or AI_ENGINEERING_FLUENCY_WSL=0.
+		getExtraSessionFiles: async () => isWslScanAllowedByEnvironment() ? discoverWslSessionFiles({ log }) : [],
+	});
 }
 
 /** Discover all session files on this machine */
@@ -289,9 +294,11 @@ export async function buildCustomizationMatrix(
 }
 
 /** Get diagnostic candidate paths info */
-export function getDiagnosticPaths(): { path: string; exists: boolean; source: string }[] {
+export async function getDiagnosticPaths(): Promise<{ path: string; exists: boolean; source: string }[]> {
 	const discovery = createSessionDiscovery();
-	return discovery.getDiagnosticCandidatePaths();
+	const local = discovery.getDiagnosticCandidatePaths();
+	// Running WSL distros (Windows only, never starts one); skipped with --no-wsl / AI_ENGINEERING_FLUENCY_WSL=0.
+	return isWslScanAllowedByEnvironment() ? [...local, ...await getWslDiagnosticRows({ log })] : local;
 }
 
 /** What an adapter knows about one session beyond its token counts. */

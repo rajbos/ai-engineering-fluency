@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import type { ModelUsage, ChatTurn, VendorSessionStats, SessionDurationData } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { MistralVibeDataAccess, type VibeSessionStats } from '../mistralvibe';
+import { describeWslSessionPath } from '../wslDiscovery';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 
@@ -39,8 +40,10 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
 		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
+		// Make the origin visible for sessions read from a WSL distro / an AoE sandbox store.
+		const source = describeWslSessionPath(sessionFile);
 		return {
-			title: meta.title,
+			title: source ? `[${source.label}] ${meta.title ?? ''}`.trim() : meta.title,
 			firstInteraction: meta.firstInteraction,
 			lastInteraction: meta.lastInteraction,
 		};

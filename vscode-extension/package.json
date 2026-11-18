@@ -434,6 +434,11 @@
           "default": "",
           "description": "%config.backend.sharingServer.endpointUrl.description%"
         },
+        "aiEngineeringFluency.wsl.scanRunningDistros": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.wsl.scanRunningDistros.description%"
+        },
         "aiEngineeringFluency.sampleDataDirectory": {
           "type": "string",
           "default": "",
