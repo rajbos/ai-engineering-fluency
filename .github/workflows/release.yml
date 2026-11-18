@@ -861,3 +861,41 @@ jobs:
           "## ❌ Build failed — no .vsix produced" >> $env:GITHUB_STEP_SUMMARY
         }
 
+
+  attest-visualstudio:
+    name: Visual Studio VSIX Provenance Attestation
+    needs: [release, build-visualstudio]
+    # Like the VS Code `attest` job: signs the VSIX the build job uploaded, runs no build
+    # or dependency install itself, and is the only job here that can sign it. It then
+    # downloads the same file from the GitHub release and verifies that too, so the
+    # release asset is proven to be the attested bytes.
+    if: inputs.vscode_only != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # read the release assets for verification
+      id-token: write       # Sigstore keyless signing for the attestation
+      attestations: write   # store the attestation
+
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+      with:
+        egress-policy: audit
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Download Visual Studio VSIX workflow artifact
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: visualstudio-vsix
+        path: dist
+
+    - name: Attest and verify the Visual Studio VSIX
+      uses: $/.github/actions/attest-files
+      with:
+        subject-path: dist/*.vsix
+        release-tag: ${{ needs.release.outputs.tag_name }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}

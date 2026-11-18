@@ -25,6 +25,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write # create the GitHub release and upload its assets
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     # One desktop publish at a time, never cancelled midway: two versions must
     # not race each other to the shared update feed.
     concurrency:
@@ -219,3 +221,41 @@ jobs:
           }
           gh release upload desktop-latest release/feed/latest.yml --clobber
           if ($LASTEXITCODE -ne 0) { throw "Uploading the update feed failed" }
+
+  # Signs the installer the build job uploaded as a workflow artifact; it runs no build
+  # or dependency install itself and is the only job that can sign. On a tag push it also
+  # downloads the installer from the GitHub release and verifies it, proving the release
+  # asset is the attested file. Only the installer is attested: latest.yml and the
+  # blockmap are updater metadata, and latest.yml already carries the installer's sha512.
+  attest:
+    name: Installer Provenance Attestation
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # read the release assets for verification
+      id-token: write       # Sigstore keyless signing for the attestation
+      attestations: write   # store the attestation
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download installer workflow artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-windows-installer
+          path: dist
+
+      - name: Attest and verify the installer
+        uses: $/.github/actions/attest-files
+        with:
+          subject-path: dist/AI-Engineering-Fluency-Setup-${{ needs.build.outputs.version }}.exe
+          release-tag: ${{ github.event_name == 'push' && github.ref_type == 'tag' && format('desktop/v{0}', needs.build.outputs.version) || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
