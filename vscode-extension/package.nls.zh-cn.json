@@ -460,6 +460,8 @@
   "usage.copyFailed": "无法将路径复制到剪贴板。",
   "usage.copyFailed.retry": "重新复制",
   "logviewer.summary.interactions": "交互次数",
+  "logviewer.turn.delegatedInstruction": "委派指令（自动生成）",
+  "logviewer.turn.user": "用户",
   "logviewer.summary.editorMode": "编辑器模式",
   "logviewer.summary.estimatedTokens": "预计令牌数",
   "logviewer.summary.actualTokens": "实际令牌数",

@@ -856,6 +856,8 @@ test('l10n: environmental methodology keys resolve in English', () => {
 test('l10n: log viewer summary card labels resolve in English', () => {
 	const expected: Record<string, string> = {
 		'logviewer.summary.interactions': 'Interactions',
+		'logviewer.turn.delegatedInstruction': 'Delegated instruction (automated)',
+		'logviewer.turn.user': 'User',
 		'logviewer.summary.editorMode': 'Editor Mode',
 		'logviewer.summary.estimatedTokens': 'Estimated Tokens',
 		'logviewer.summary.actualTokens': 'Actual Tokens',
@@ -962,6 +964,8 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	try {
 		const expected: Record<string, string> = {
 			'logviewer.summary.interactions': '交互次数',
+			'logviewer.turn.delegatedInstruction': '委派指令（自动生成）',
+			'logviewer.turn.user': '用户',
 			'logviewer.summary.editorMode': '编辑器模式',
 			'logviewer.summary.estimatedTokens': '预计令牌数',
 			'logviewer.summary.actualTokens': '实际令牌数',

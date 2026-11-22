@@ -438,7 +438,7 @@ import {
   type ViewRegressionProbeSnapshot,
 } from './viewRegression';
 // --- Backend & UI ---
-import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
+import { assertViewableSessionTurns, createExtensionApi, type AiFluencyExtensionApi, type ExtensionPointButton } from './extensionPoints';
 import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
 import { deferWhileApplyingSettings } from './backend/settingsBatch';
 import { BackendFacade } from './backend/facade';
@@ -1243,6 +1243,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY = 'worktrees.backgroundScan.lastNotifiedBytes';
 	private logViewerPanel?: vscode.WebviewPanel;
 	private logViewerSessionFilePath: string = '';
+	private logViewerStrict = false;
 	private logViewerCurrentData?: SessionLogData;
 	public openCode!: OpenCodeDataAccess;
 	public crush!: CrushDataAccess;
@@ -9444,7 +9445,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Extract full session log data including chat turns for the log viewer.
 	 */
-	private async getSessionLogData(sessionFile: string): Promise<SessionLogData> {
+	private async getSessionLogData(sessionFile: string, strict = false): Promise<SessionLogData> {
 		// Use pre-enriched details from the diagnostics cache when available — it carries
 		// hierarchy data (parentInfo, childInfo) populated by enrichSessionHierarchy /
 		// enrichPiSessionHierarchy during the background load.
@@ -9457,12 +9458,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			const eco = this.findEcosystem(sessionFile);
 			if (eco?.buildTurns) {
-				const result = await eco.buildTurns(sessionFile);
+				const result = await eco.buildTurns(sessionFile, { includeSidechainInstructions: strict });
+				assertViewableSessionTurns(result.turns, strict);
 				return this.buildBaseLogData(details, result.turns, undefined, undefined, eco, sessionFile, result.actualTokens);
 			}
 
 			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) {
+				assertViewableSessionTurns([], strict);
 				return this.buildBaseLogData(details, [], undefined);
 			}
 
@@ -9483,14 +9486,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 				turns = this.buildJsonSessionTurns(sessionContent);
 			}
 		} catch (error) {
+			if (strict) { throw error; }
 			this.warn(`Error extracting chat turns from ${sessionFile}: ${error}`);
 		}
 
+		assertViewableSessionTurns(turns, strict);
 		let usageAnalysis: SessionUsageAnalysis | undefined;
 		try {
 			const mtimeMs = new Date(details.modified).getTime();
 			usageAnalysis = await this.getUsageAnalysisFromSessionCached(sessionFile, mtimeMs, details.size);
 		} catch (usageError) {
+			if (strict) { throw usageError; }
 			this.warn(`Error loading usage analysis for ${sessionFile}: ${usageError}`);
 		}
 
@@ -11197,7 +11203,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number): Promise<void> {
+	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number, strict = false): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
 			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
@@ -11213,7 +11219,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			return;
 		}
 		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
+		this.logViewerCurrentData = undefined;
 		this.logViewerSessionFilePath = sessionFilePath;
+		this.logViewerStrict = strict;
 		this.logViewerPanel = vscode.window.createWebviewPanel(
 			'copilotLogViewer', `Session: ${path.basename(sessionFilePath)}`,
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
@@ -11231,13 +11239,20 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 		const panel = this.logViewerPanel;
 		panel.webview.html = this.getLoadingHtml(panel.webview);
-		void (async () => {
-			const logData = await this.getSessionLogData(sessionFilePath);
-			if (this.logViewerPanel !== panel) { return; }
+		const loading = (async () => {
+			const logData = await this.getSessionLogData(sessionFilePath, strict);
+			if (this.logViewerPanel !== panel) {
+				if (strict) { throw new Error('Session viewer was closed or replaced before loading completed.'); }
+				return;
+			}
 			this.logViewerCurrentData = logData;
 			panel.title = `Session: ${logData.title || path.basename(sessionFilePath)}`;
 			panel.webview.html = this.getLogViewerHtml(panel.webview, logData, focusedTurnNumber);
 		})();
+		if (strict) {
+			try { await loading; }
+			catch (error) { if (this.logViewerPanel === panel) { panel.dispose(); } throw error; }
+		}
 	}
 
 	private async handleLogViewerMessage(message: any): Promise<void> {
@@ -11263,7 +11278,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			}
 			case 'refreshSession': {
 				try {
-					const newData = await this.getSessionLogData(sessionFilePath);
+					const newData = await this.getSessionLogData(sessionFilePath, this.logViewerStrict);
 					this.logViewerCurrentData = newData;
 					if (this.logViewerPanel) {
 						this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, newData);
@@ -16164,10 +16179,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
 
   tokenTracker.log("Extension activation complete");
 
-  return {
-    registerButton: (button: ExtensionPointButton, handler: () => void | Promise<void>) =>
-      tokenTracker.registerExtensionPointButton(button, handler),
-  };
+  return createExtensionApi(tokenTracker);
 }
 
 export function deactivate() {

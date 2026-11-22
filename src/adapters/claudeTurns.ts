@@ -23,7 +23,8 @@ export interface ClaudeAssistantTurnData {
 export function buildClaudeChatTurns(
 	events: any[],
 	processAssistantEvents: (pendingAssistantEvents: any[]) => ClaudeAssistantTurnData,
-	estimateTokens: (text: string, model?: string) => number
+	estimateTokens: (text: string, model?: string) => number,
+	includeSidechainInstructions = false
 ): ChatTurn[] {
 	const turns: ChatTurn[] = [];
 	let currentUserEvent: any = null;
@@ -32,7 +33,7 @@ export function buildClaudeChatTurns(
 	let lastEventTime: string | null = null;
 
 	for (const event of events) {
-		if (event.type === 'user' && !event.isSidechain && event.message?.role === 'user' && isHumanUserTurn(event)) {
+		if (isInstructionEvent(event, includeSidechainInstructions)) {
 			const turn = buildTurnFromEvents(currentUserEvent, pendingAssistantEvents, processAssistantEvents, turns.length + 1, estimateTokens, lastEventTime);
 			if (turn) { turns.push(turn); }
 			currentUserEvent = event;
@@ -47,6 +48,11 @@ export function buildClaudeChatTurns(
 	if (finalTurn) { turns.push(finalTurn); }
 
 	return turns;
+}
+
+function isInstructionEvent(event: { type?: unknown; isSidechain?: unknown; message?: { role?: unknown } }, includeSidechainInstructions: boolean): boolean {
+	return event.type === 'user' && (!event.isSidechain || includeSidechainInstructions)
+		&& event.message?.role === 'user' && isHumanUserTurn(event);
 }
 
 /** Moves the turn end forward for assistant and tool-result events that follow the human message. */
@@ -83,6 +89,7 @@ function buildTurnFromEvents(
 		completionTokens: actualOutputTokens
 	} : undefined;
 	return {
+		...(userEvent.isSidechain ? { instructionSource: 'delegated' as const } : {}),
 		turnNumber,
 		timestamp: userEvent.timestamp ? new Date(userEvent.timestamp).toISOString() : null,
 		...(lastEventTime && !Number.isNaN(Date.parse(lastEventTime)) ? { endTimestamp: new Date(lastEventTime).toISOString() } : {}),

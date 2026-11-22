@@ -239,9 +239,9 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return [{ path: this.claudeCode.getClaudeCodeProjectsDir(), source: 'Claude Code' }];
 	}
 
-	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
+	async buildTurns(sessionFile: string, options?: { includeSidechainInstructions?: boolean }): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const events = await readClaudeCodeEventsForAnalysis(sessionFile);
-		const turns = buildClaudeChatTurns(events, pending => this.processAssistantEventsForTurn(pending), this.estimateTokensFn);
+		const turns = buildClaudeChatTurns(events, pending => this.processAssistantEventsForTurn(pending), this.estimateTokensFn, options?.includeSidechainInstructions);
 		return { turns };
 	}
 
