@@ -112,6 +112,7 @@
     "gpt-6.2-astra": 0.25,
     "gpt-6.2-sol": 0.25,
     "mai-code-2": 0.25,
-    "mai-code-2-flash": 0.25
+    "mai-code-2-flash": 0.25,
+    "gemini-4-neon": 0.25
   }
 }
