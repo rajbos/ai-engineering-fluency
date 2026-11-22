@@ -1520,6 +1520,8 @@ export interface ActualUsage {
 
 // Chat turn information for log viewer
 export interface ChatTurn {
+  /** Viewer-only delegated instructions, not a human interaction. Absent for metrics parsing. */
+  instructionSource?: 'delegated';
   turnNumber: number;
   timestamp: string | null;
   /** ISO time of the last assistant/tool event of this turn, when the source records it. Absent means unknown, never an estimate. */

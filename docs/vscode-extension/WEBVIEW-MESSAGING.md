@@ -211,6 +211,40 @@ Companion extensions acquire the public API via
 `src/extensionPoints.ts`) and call `registerButton(...)` to add a navigation button to every
 panel's toolbar.
 
+The API also exposes `openSessionLog(sessionFilePath: string): Promise<void>` to open
+the existing session viewer, not a raw editor tab. Pass an absolute path recovered
+by the companion's session scanner to a regular `.json` or `.jsonl` file. Claude
+Code JSONL sessions and Copilot CLI `events.jsonl` use the viewer's existing
+parsers. For this viewer entrypoint only, Claude sidechain instructions under
+`subagents/` are included and labeled **Delegated instruction (automated)**,
+with their assistant responses and tool activity. Metrics and other callers
+retain the strict human-turn filter: delegated instructions do not become human
+interactions. Refreshing an API-opened viewer preserves this inspection mode.
+The path is not restricted to a
+particular home directory; the caller is responsible for selecting a session, not
+passing unchecked webview input.
+
+Calls are serialized, not dropped. The promise resolves after the session data has
+loaded and the viewer HTML has been assigned. Invalid input, missing/unreadable
+files, sessions with no viewable chat turns, extraction/rendering failures, and a viewer closed or replaced during loading
+reject the promise so the companion can show an explicit error. UUID-only pointer
+files, binary sources and virtual session identifiers are not supported by this
+filesystem entrypoint. Existing `registerButton` behavior is unchanged.
+
+Activate the extension first and feature-detect the method: older installed releases
+export only `registerButton`. This API addition is recorded under Unreleased and
+will ship with the next extension release; it does not itself cut a release.
+
+```typescript
+const extension = vscode.extensions.getExtension('RobBos.ai-engineering-fluency');
+if (!extension) { throw new Error('AI Engineering Fluency is not installed.'); }
+const api = await extension.activate();
+if (typeof api?.openSessionLog !== 'function') {
+  throw new Error('Update AI Engineering Fluency to a version with openSessionLog.');
+}
+await api.openSessionLog(sessionFilePath);
+```
+
 Button *data* reaches an already-open panel through **two** paths now:
 
 - **Inline bootstrap**, for the first paint: `window.__EXTENSION_POINT_BUTTONS__`

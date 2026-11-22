@@ -5,6 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Companion extension API: `openSessionLog(sessionFilePath)` opens the existing session viewer from an absolute JSON/JSONL session path, including Claude Code subagent logs and Copilot CLI `events.jsonl`. It awaits loading and propagates errors to the caller; `registerButton` remains unchanged. Viewer-only Claude sidechain instructions are labeled as automated delegation, without changing human-interaction metrics.
 - Team Server: every uploaded rollup now also carries a per-row **cost estimate** (`estimatedCostUsd`, from the public price list), the extension **version** (`clientVersion`) and validated **activity counters** (`activity`: sessions, ask/edit/agent/plan/CLI mode counts, tool-call and MCP-call counts by tool/server name). All counts, no content. The Team Server shows models, editors, repositories, tools and MCP servers as team totals next to your own numbers on Team Insights, and per user on the admin dashboard. The **Configure Team Server Backend** panel lists the new fields; the scope is documented in `docs/sharing-server/TEAM-DATA-SCOPE.md`.
 - Fluency Score: the score and AI coding toolbox share blocks are now one **Share** section with a Score/Toolbox switch, placed above the page footer. Both can copy a summary and share to social media, the toolbox card can now be exported as a PNG, and the score's share strings are localized.
 

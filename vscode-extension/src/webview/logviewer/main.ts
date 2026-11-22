@@ -56,6 +56,7 @@ subAgentCost?: number;
 };
 
 type ChatTurn = {
+instructionSource?: 'delegated';
 turnNumber: number;
 timestamp: string | null;
 mode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent';
@@ -1361,7 +1362,7 @@ ${actualUsageHtml}
 
 <div class="turn-content">
 <div class="message user-message">
-<div class="message-label">👤 User</div>
+<div class="message-label">${turn.instructionSource === 'delegated' ? '🤖 ' + escapeHtml(localize('logviewer.turn.delegatedInstruction')) : '👤 ' + escapeHtml(localize('logviewer.turn.user'))}</div>
 <div class="message-text">${escapeHtml(turn.userMessage) || '<em>No message</em>'}</div>
 </div>
 

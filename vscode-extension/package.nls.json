@@ -397,6 +397,8 @@
   "usage.copyFailed": "Could not copy the path to the clipboard.",
   "usage.copyFailed.retry": "Copy Again",
   "logviewer.summary.interactions": "Interactions",
+  "logviewer.turn.delegatedInstruction": "Delegated instruction (automated)",
+  "logviewer.turn.user": "User",
   "logviewer.summary.editorMode": "Editor Mode",
   "logviewer.summary.estimatedTokens": "Estimated Tokens",
   "logviewer.summary.actualTokens": "Actual Tokens",
