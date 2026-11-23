@@ -53,6 +53,20 @@ function readRecord(lockPath: string): LockRecord {
 	}
 }
 
+/**
+ * Poll the lock until `predicate` holds, for timer-driven writes whose timing a busy machine
+ * stretches. Fails with `message` (and the last record) if it never holds within `timeoutMs`.
+ */
+async function waitForRecord(lockPath: string, predicate: (record: LockRecord) => boolean, message: string, timeoutMs = 5000): Promise<LockRecord> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const record = readRecord(lockPath);
+		if (predicate(record)) { return record; }
+		if (Date.now() >= deadline) { assert.fail(`${message}; last record: ${JSON.stringify(record)}`); }
+		await new Promise(r => setTimeout(r, 5));
+	}
+}
+
 test('acquire: creates the lock with the owner identity, legacy field names and progress fields', async () => {
 	const dir = tmpDir();
 	try {
@@ -368,21 +382,27 @@ test('beginMachineParse: heartbeat records progress only when reported, end() re
 		const lockPath = getMachineParseLockPath(dir);
 		assert.equal(readRecord(lockPath).stallMs, PARSE_LOCK_STALL_MS);
 
+		// Wait for the beats themselves rather than a fixed real-time interval: a busy machine can
+		// delay a 10ms timer (and a Windows rename retry) well past any sleep.
 		now = 2000;
-		await new Promise(r => setTimeout(r, 40));
-		let record = readRecord(lockPath);
-		assert.equal(record.timestamp, 2000, 'heartbeat renews the timestamp');
+		let record = await waitForRecord(lockPath, r => r.timestamp === 2000, 'heartbeat renews the timestamp');
 		assert.equal(record.progressAt, 1000, 'no progress reported, so progressAt is unchanged');
 
 		turn.noteProgress();
 		now = 3000;
-		await new Promise(r => setTimeout(r, 40));
-		record = readRecord(lockPath);
-		assert.equal(record.progressAt, 3000, 'reported progress reaches the lock on the next beat');
+		await waitForRecord(lockPath, r => r.progressAt === 3000, 'reported progress reaches the lock on the next beat');
+
+		// A later no-progress beat must not write back the progressAt it read before the progress beat.
+		now = 4000;
+		record = await waitForRecord(lockPath, r => r.timestamp === 4000, 'heartbeat keeps renewing');
+		assert.equal(record.progressAt, 3000, 'recorded progress survives the following beats');
 
 		await turn.end();
 		await turn.end(); // idempotent
 		assert.equal(fs.existsSync(lockPath), false);
+		// A beat that was in flight at end() must not recreate the released lock.
+		await new Promise(r => setTimeout(r, 50));
+		assert.equal(fs.existsSync(lockPath), false, 'released lock stays released');
 	} finally { cleanup(dir); }
 });
 
