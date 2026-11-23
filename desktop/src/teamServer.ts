@@ -70,8 +70,6 @@ export const DEFAULT_TEAM_SERVER_SETTINGS: TeamServerSettings = {
     lookbackDays: 30,
 };
 
-const PROFILES: readonly TeamServerProfile[] = ['soloFull', 'teamAnonymized', 'teamPseudonymous', 'teamIdentified'];
-
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -436,5 +434,3 @@ async function uploadToTeamServer(settings: StoredSettingsFile, token: string, u
     const failedNote = filesFailed > 0 ? ` (${filesFailed} session file(s) could not be read)` : '';
     return `${result.message}${failedNote}`;
 }
-
-export const TEAM_SERVER_PROFILES = PROFILES;
