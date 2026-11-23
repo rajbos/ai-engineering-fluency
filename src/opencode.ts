@@ -105,7 +105,8 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 	 */
 	async statSessionFile(sessionFile: string): Promise<fs.Stats> {
 		if (this.isOpenCodeDbSession(sessionFile)) {
-			return fs.promises.stat(this.getOpenCodeDbPath());
+			const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
+			return fs.promises.stat(dbPath);
 		}
 		return fs.promises.stat(sessionFile);
 	}
