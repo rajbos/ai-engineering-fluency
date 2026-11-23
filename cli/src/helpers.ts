@@ -1059,4 +1059,4 @@ export { ENVIRONMENTAL } from './constants';
 export { modelPricing, tokenEstimators, toolNameMap };
 
 /** Cache lifecycle — re-export for use in commands */
-export { loadCache, saveCache, disableCache, getCacheStats } from './cliCache';
+export { loadCache, saveCache, saveCacheOnSignals, disableCache, getCacheStats } from './cliCache';

@@ -423,7 +423,7 @@ The CLI writes two files under `~/.copilot-token-tracker/` (the folder name pred
 
 | File | Contents | Lifetime |
 |---|---|---|
-| `cli-cache.json` | Parsed per-file results, keyed on file path and modification time, so unchanged files are not re-parsed. Holds at most 2,000 entries. | Until the file changes. Discarded automatically when a new CLI version changes the cache format. |
+| `cli-cache.json` | Parsed per-file results, keyed on file path and modification time, so unchanged files are not re-parsed. Holds at most 20,000 entries. Saved every 30 seconds during a long run and when the CLI is stopped with Ctrl+C or `SIGTERM`, so an interrupted run keeps its progress. | Until the file changes. Discarded automatically when a new CLI version changes the cache format. |
 | `omp-segment-cache.json` | Last `segment` output. | `--ttl` minutes (default 5). |
 
 To bypass the parse cache for one run, use `--no-cache`. To reset everything, delete the folder — it is rebuilt on the next run. The [library entry point](#programmatic-use) keeps its cache in memory and never touches these files.

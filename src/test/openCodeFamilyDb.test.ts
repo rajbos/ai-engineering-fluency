@@ -5,7 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { WalSqlJsDbCacheBase, readSessionMetadataRow } from '../openCodeFamilyDb';
 import type { SqlDatabase } from '../utils/sqlJsDbCache';
-import type { WalReadResult } from '../utils/sqliteWal';
+import { readDbBufferWithWalFingerprint, type WalReadResult } from '../utils/sqliteWal';
+import { OpenCodeDataAccess } from '../opencode';
 
 const SESSION_DDL = 'CREATE TABLE session (id TEXT PRIMARY KEY, slug TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, project_id TEXT, directory TEXT);';
 
@@ -172,5 +173,114 @@ test('refreshDb falls back to the cached database (none here) when the file cann
 	} finally {
 		cache.dispose();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+/**
+ * A cache whose reads come back WAL-blind (`walIncluded: false`), as they do when the db and
+ * WAL together exceed the merge cap, with a controllable clock and a read counter (#2710).
+ */
+class WalBlindCache extends TestCache {
+	reads = 0;
+	clock = 1_000_000;
+	blind = true;
+	protected override now(): number { return this.clock; }
+	protected override async readDbBuffer(dbPath: string): Promise<WalReadResult> {
+		this.reads++;
+		const result = await readDbBufferWithWalFingerprint(dbPath);
+		return this.blind ? { ...result, walIncluded: false } : result;
+	}
+	currentDb(dbPath: string, stats: fs.Stats) { return this.getCurrentDb(dbPath, stats); }
+	get pending() { return this._pendingTransientDb; }
+}
+
+test('a WAL-blind parse is reused while its fingerprint is unchanged, but never installed as the settled cache', async () => {
+	const fixture = createFixture();
+	const cache = new WalBlindCache();
+	try {
+		const stats = fs.statSync(fixture.dbPath);
+		const db = await cache.refresh(fixture.dbPath, stats);
+		assert.ok(db);
+		assert.equal(cache.cache, null, 'a WAL-blind read stays out of _dbCache');
+		assert.equal(cache.pending, db);
+		assert.equal(cache.current(fixture.dbPath, stats), false, 'it never counts as the settled cache');
+
+		cache.clock += WalSqlJsDbCacheBase.TRANSIENT_DB_REUSE_MS - 1;
+		assert.equal(cache.currentDb(fixture.dbPath, stats), db, 'reused inside the window');
+		assert.equal(cache.reads, 1);
+	} finally {
+		cache.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('a WAL-blind parse is not reused once the db changes, the window lapses, or it is released', async () => {
+	const fixture = createFixture();
+	const cache = new WalBlindCache();
+	try {
+		const stats = fs.statSync(fixture.dbPath);
+		const db = await cache.refresh(fixture.dbPath, stats);
+		assert.ok(db);
+		assert.equal(cache.currentDb(fixture.dbPath, { mtimeMs: stats.mtimeMs, size: stats.size + 1 } as fs.Stats), null, 'different db size');
+		assert.equal(cache.currentDb(fixture.dbPath, { mtimeMs: stats.mtimeMs + 1, size: stats.size } as fs.Stats), null, 'different db mtime');
+		assert.equal(cache.currentDb(path.join(fixture.tmpDir, 'other.db'), stats), null, 'different path');
+
+		fs.writeFileSync(fixture.dbPath + '-wal', Buffer.alloc(16));
+		assert.equal(cache.currentDb(fixture.dbPath, stats), null, 'a WAL that appeared or grew forces a re-read');
+		fs.rmSync(fixture.dbPath + '-wal');
+		assert.equal(cache.currentDb(fixture.dbPath, stats), db, 'same fingerprint again');
+
+		cache.clock += WalSqlJsDbCacheBase.TRANSIENT_DB_REUSE_MS;
+		assert.equal(cache.currentDb(fixture.dbPath, stats), null, 'the reuse window has lapsed');
+
+		cache.clock -= WalSqlJsDbCacheBase.TRANSIENT_DB_REUSE_MS;
+		cache.dispose();
+		assert.equal(cache.currentDb(fixture.dbPath, stats), null, 'a released transient db is never served');
+	} finally {
+		cache.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('a WAL-complete read replaces the transient parse and becomes the settled cache', async () => {
+	const fixture = createFixture();
+	const cache = new WalBlindCache();
+	try {
+		const stats = fs.statSync(fixture.dbPath);
+		const blind = await cache.refresh(fixture.dbPath, stats);
+		assert.ok(blind);
+		// A later read that did fold in the WAL (e.g. it shrank under the cap).
+		cache.blind = false;
+		const complete = await cache.refresh(fixture.dbPath, stats);
+		assert.ok(complete);
+		assert.equal(cache.pending, null, 'the transient parse is released');
+		assert.equal(cache.cache?.db, complete);
+		assert.equal(cache.currentDb(fixture.dbPath, stats), complete);
+	} finally {
+		cache.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('OpenCodeDataAccess reads an over-cap database once for many session queries, not once per query (#2710)', async () => {
+	const fixture = createFixture();
+	fs.renameSync(fixture.dbPath, path.join(fixture.tmpDir, 'opencode.db'));
+	let reads = 0;
+	class WalBlindOpenCode extends OpenCodeDataAccess {
+		override getOpenCodeDataDir(): string { return fixture.tmpDir; }
+		protected override async readDbBuffer(dbPath: string): Promise<WalReadResult> {
+			reads++;
+			return { ...(await readDbBufferWithWalFingerprint(dbPath)), walIncluded: false };
+		}
+	}
+	const openCode = new WalBlindOpenCode(null as any);
+	try {
+		for (let i = 0; i < 5; i++) {
+			assert.equal((await openCode.readOpenCodeDbSession('ses_1'))?.title, 'Fixture title');
+		}
+		assert.equal(reads, 1, 'one read and parse serves every query while nothing changed');
+	} finally {
+		openCode.dispose();
+		fixture.cleanup();
 	}
 });

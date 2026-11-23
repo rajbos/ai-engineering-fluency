@@ -6,6 +6,8 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ### Bug Fixes
 - Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
+- An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once per run instead of once per session query, so `all --json` no longer runs for many minutes on a large OpenCode store (#2710)
+- The session cache (`cli-cache.json`) is now saved every 30 seconds during a run and when the CLI is stopped with Ctrl+C or `SIGTERM`, and is written atomically, so a run killed by a caller's timeout keeps its progress. It now holds up to 20,000 entries instead of 2,000, so large histories are no longer re-parsed on every run (#2710)
 
 ## [0.7.1] - 2026-10-27
 
