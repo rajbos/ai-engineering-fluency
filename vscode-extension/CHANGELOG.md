@@ -4,7 +4,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
-## [0.20.0] - 2026-11-22
+## [0.20.0] - 2026-11-23
 
 ### Features
 - Companion extension API: `openSessionLog(sessionFilePath)` opens the existing session viewer from an absolute JSON/JSONL session path, including Claude Code subagent logs and Copilot CLI `events.jsonl`. It awaits loading and propagates errors to the caller; `registerButton` remains unchanged. Viewer-only Claude sidechain instructions are labeled as automated delegation, without changing human-interaction metrics.
