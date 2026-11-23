@@ -4,6 +4,7 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { MistralVibeDataAccess, type VibeSessionStats } from '../mistralvibe';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { detectVibeSessionEditorVariant } from '../workspaceHelpers';
 
 export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'mistralvibe';
@@ -14,6 +15,15 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	handles(sessionFile: string): boolean {
 		return this.mistralVibe.isVibeSessionFile(sessionFile);
+	}
+
+	/**
+	 * The Vibe CLI and the local Vibe Desktop app write to the same session tree and are
+	 * indistinguishable by path — only meta.json's `runtime_path` ("session_api" for the
+	 * desktop app) tells them apart.
+	 */
+	getDisplayName(sessionFile: string): string {
+		return detectVibeSessionEditorVariant(sessionFile);
 	}
 
 	getBackingPath(sessionFile: string): string {
@@ -43,6 +53,7 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 			title: meta.title,
 			firstInteraction: meta.firstInteraction,
 			lastInteraction: meta.lastInteraction,
+			workspacePath: meta.workspacePath,
 		};
 	}
 

@@ -43,7 +43,7 @@ The source of truth for supported platforms is
 | `gemini-cli`   | Gemini CLI           | jsonl  | `~/.gemini/tmp/*/chats/session-*.jsonl` |
 | `antigravity`  | Antigravity          | jsonl  | `~/.gemini/antigravity/brain/*/.system_generated/logs/transcript.jsonl` |
 | `opencode`     | OpenCode             | json / jsonl | `<xdg-data>/opencode/storage/session/**/ses_*.json`; also `opencode.db` (SQLite, via `node:sqlite`) |
-| `mistral-vibe` | Mistral Vibe         | json   | `<VIBE_HOME or ~/.vibe>/logs/session/*/meta.json` (only `meta.json`; `messages.jsonl` is never read) |
+| `mistral-vibe` | Mistral Vibe (CLI + Vibe Desktop) | json   | `<VIBE_HOME or ~/.vibe>/logs/session/*/meta.json` and `.../unified/<uuid>/meta.json` (only `meta.json`; `messages.jsonl` is never read). Desktop sessions are the unified ones with `runtime_path: "session_api"` |
 
 **Not validated by this skill** (DB / binary formats that need the adapters'
 own parsers, so a generic JSON walker can't read them): `crush` (SQLite),

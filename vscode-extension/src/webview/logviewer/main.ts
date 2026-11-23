@@ -718,7 +718,7 @@ function buildActualTokensCard(data: SessionLogData, stats: SummaryStats): strin
 		return `<div class="summary-card">
 <div class="summary-label">✅ ${localize('logviewer.summary.actualTokens')}</div>
 <div class="summary-value">${formatCompact(sessionActualTokens)}</div>
-<div class="summary-sub">${data.editorName === 'Mistral Vibe' ? 'From session data' : 'Actual API tokens from Copilot CLI usage data'}</div>
+<div class="summary-sub">${data.editorName === 'Mistral Vibe' || data.editorName === 'Mistral Vibe Desktop' ? 'From session data' : 'Actual API tokens from Copilot CLI usage data'}</div>
 </div>`;
 	}
 	return '';

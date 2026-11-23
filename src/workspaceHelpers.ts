@@ -1139,6 +1139,48 @@ function readClaudeCodeEditorVariant(filePath: string): string | undefined {
 	return undefined;
 }
 
+/** Editor label for Mistral Vibe sessions written by the local desktop app (Vibe Desktop). */
+export const MISTRAL_VIBE_DESKTOP_LABEL = 'Mistral Vibe Desktop';
+/** Editor label for Mistral Vibe CLI sessions. */
+export const MISTRAL_VIBE_LABEL = 'Mistral Vibe';
+
+/**
+ * Mistral Vibe's CLI and the local Vibe Desktop app share <vibe home>/logs/session/ (both the
+ * legacy and the unified layout) and are indistinguishable by path alone — only meta.json's
+ * `runtime_path` field tells them apart: "session_api" is written by the desktop app's session
+ * API. Like detectClaudeCodeEditorVariant, a definitive answer is cached per path; a meta.json
+ * with no runtime_path is deliberately not cached (the field may appear later).
+ */
+export function detectVibeSessionEditorVariant(filePath: string): string {
+	const known = vibeSessionVariantCache.get(filePath);
+	if (known !== undefined) { return known; }
+	const found = readVibeSessionEditorVariant(filePath);
+	if (found !== undefined) {
+		if (vibeSessionVariantCache.size >= VIBE_SESSION_VARIANT_CACHE_MAX) { vibeSessionVariantCache.clear(); }
+		vibeSessionVariantCache.set(filePath, found);
+		return found;
+	}
+	return MISTRAL_VIBE_LABEL;
+}
+
+/** Test hook: forget remembered variants so a test can rewrite a file at the same path. */
+export function resetVibeSessionEditorVariantCacheForTests(): void { vibeSessionVariantCache.clear(); }
+
+const vibeSessionVariantCache = new Map<string, string>();
+const VIBE_SESSION_VARIANT_CACHE_MAX = 50_000;
+
+/** Reads `runtime_path` from a vibe session meta.json; `undefined` when none is recorded (or it is unreadable). */
+function readVibeSessionEditorVariant(filePath: string): string | undefined {
+	try {
+		const normalized = normalizePathForComparison(filePath);
+		if (!normalized.endsWith('/meta.json') || !normalized.includes('/logs/session/')) { return undefined; }
+		const meta = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+		if (meta?.runtime_path === 'session_api') { return MISTRAL_VIBE_DESKTOP_LABEL; }
+		return undefined;
+	} catch { /* file unreadable — fall back to default */ }
+	return undefined;
+}
+
 /**
  * $CODEX_HOME / $HERMES_HOME as their adapters use them (codexcli.ts getCodexHome,
  * hermes.ts getConfigDir): the raw value when non-blank — relative values stay relative,
@@ -1167,13 +1209,15 @@ function vibeAgentHome(value: string | undefined): string | undefined {
  * CLI detectors.
  * @internal
  */
-export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env, filePath?: string): string | undefined {
 	const codexHome = rawAgentHome(env['CODEX_HOME']);
 	const codexPrefix = codexHome === undefined ? undefined : joinedChildPrefixForComparison(codexHome);
 	if (codexPrefix !== undefined && lowerPath.startsWith(codexPrefix) &&
 		CODEX_HOME_OWNED_CHILD_RE.test(lowerPath.slice(codexPrefix.length))) { return 'Codex CLI'; }
 	const vibeHome = vibeAgentHome(env['VIBE_HOME']);
-	if (vibeHome && lowerPath.startsWith(joinedChildPrefixForComparison(path.join(vibeHome, 'logs', 'session')))) { return 'Mistral Vibe'; }
+	if (vibeHome && lowerPath.startsWith(joinedChildPrefixForComparison(path.join(vibeHome, 'logs', 'session')))) {
+		return filePath ? detectVibeSessionEditorVariant(filePath) : MISTRAL_VIBE_LABEL;
+	}
 	const hermesHome = rawAgentHome(env['HERMES_HOME']);
 	if (hermesHome && lowerPath.startsWith(`${normalizePathForComparison(path.join(hermesHome, 'state.db'))}#`)) { return 'Hermes'; }
 	return undefined;
@@ -1183,7 +1227,7 @@ export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.
  * Detect terminal CLI agents with dedicated data stores from a lower-cased normalised path.
  * @internal
  */
-function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
+function detectCliAgentStoreFromPath(lowerPath: string, filePath?: string): string | undefined {
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
 	// Kilo Code (OpenCode fork): virtual DB session paths <...>/.local/share/kilo/kilo.db#ses_<id>.
 	// Checked here so it wins over any generic substring fallbacks further down.
@@ -1203,7 +1247,7 @@ function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	// before the loose 'code' substring fallbacks in detectIDEEditorSource /
 	// detectVSCodeVariantFromPath ('codex' contains 'code' and would misclassify as VS Code).
 	if (lowerPath.includes('/.codex/')) { return 'Codex CLI'; }
-	return detectRelocatedAgentHomeFromPath(lowerPath);
+	return detectRelocatedAgentHomeFromPath(lowerPath, process.env, filePath);
 }
 
 /**
@@ -1219,7 +1263,7 @@ function detectToolEditorFromPath(
 	const copilotFamily = detectCopilotFamilyFromPath(lowerPath);
 	if (copilotFamily) { return copilotFamily; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
-	const cliAgent = detectCliAgentStoreFromPath(lowerPath);
+	const cliAgent = detectCliAgentStoreFromPath(lowerPath, filePath);
 	if (cliAgent) { return cliAgent; }
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
@@ -1230,7 +1274,7 @@ function detectToolEditorFromPath(
 	if (lowerPath.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
-	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	if (lowerPath.includes('/.vibe/logs/session/')) { return detectVibeSessionEditorVariant(filePath); }
 	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/
 	// but Antigravity sessions are under ~/.gemini/antigravity/brain/ which is more specific.
 	if (lowerPath.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
@@ -1261,12 +1305,14 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  * Determine the editor type from a session file path.
  * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI',
  *          'JetBrains', 'OpenCode', 'Claude Code', 'Claude Desktop', 'Continue',
- *          'Mistral Vibe', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', 'Cline',
+ *          'Mistral Vibe', 'Mistral Vibe Desktop', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', 'Cline',
  *          or 'Unknown'.
  * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
  * and are distinguished by the `entrypoint` field inside the session file, not the path
- * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated
- * feature (claude-code-sessions, formerly local-agent-mode-sessions) and is still
+ * (see detectClaudeCodeEditorVariant). Likewise 'Mistral Vibe' (CLI) and 'Mistral Vibe
+ * Desktop' share ~/.vibe/logs/session/ and are distinguished by meta.json's `runtime_path`
+ * field (see detectVibeSessionEditorVariant). 'Claude Desktop Cowork' is a separate,
+ * unrelated feature (claude-code-sessions, formerly local-agent-mode-sessions) and is still
  * detected purely by path.
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
