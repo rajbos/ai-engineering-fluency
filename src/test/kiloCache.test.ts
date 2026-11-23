@@ -4,6 +4,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { KiloDataAccess } from '../kilo';
+import type { ReadOnlySqliteReader } from '../utils/readOnlySqlite';
+
+/**
+ * The tests below cover the sql.js fallback's WAL merge/throttle cache, which only runs when the
+ * read-only node:sqlite backend can't be used; simulate a runtime without node:sqlite.
+ */
+function forceSqlJsFallback(access: KiloDataAccess): void {
+	(access as unknown as { readOnlySqlite: ReadOnlySqliteReader }).readOnlySqlite.getNodeSqliteModule = () => null;
+}
 
 /**
  * Real WAL-mode `kilo.db`-shaped fixture (real `session` table, real node:sqlite writer) — Kilo
@@ -41,6 +50,7 @@ test('a WAL write made inside the throttle window eventually becomes visible onc
 
 		const access = new KiloDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getKiloDataDir = () => fixture.tmpDir;
+		forceSqlJsFallback(access);
 
 		const first = await access.readKiloDbSession('s1');
 		assert.equal(first?.title, 'Original title');
@@ -70,6 +80,7 @@ test('the sql.js DB cache reuses the parsed Database across a throttled read ins
 
 		const access = new KiloDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getKiloDataDir = () => fixture.tmpDir;
+		forceSqlJsFallback(access);
 
 		let dbConstructions = 0;
 		const realInitSqlJs = access.initSqlJs.bind(access);
@@ -89,7 +100,7 @@ test('the sql.js DB cache reuses the parsed Database across a throttled read ins
 		assert.equal(dbConstructions, 1, 'the first read parses the db once');
 
 		// Touch the live WAL (grows it) WITHOUT letting sqliteWal's own merge throttle window
-		// lapse — the cheap fresh-stat pre-check in getKiloDb() will see the WAL has moved and
+		// lapse — the cheap fresh-stat pre-check in getSqlJsDb() will see the WAL has moved and
 		// attempt a read, but that read will be served from sqliteWal's own throttle under the
 		// SAME original fingerprint as before, since nothing has actually settled/changed yet.
 		fixture.writer.exec("INSERT INTO session VALUES ('s2', 'slug-2', 'other', 2, 2, 'p1', '/dir')");
@@ -113,6 +124,7 @@ test('the -wal size is part of the Kilo DB cache key, not just its mtime (Fix 1b
 
 		const access = new KiloDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getKiloDataDir = () => fixture.tmpDir;
+		forceSqlJsFallback(access);
 
 		const first = await access.readKiloDbSession('s1');
 		assert.equal(first?.title, 'first');

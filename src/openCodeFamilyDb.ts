@@ -2,14 +2,18 @@
  * Shared SQLite helpers for the OpenCode-family stores (OpenCode and Kilo Code).
  *
  * Both editors keep sessions in a single WAL-mode SQLite database with the same
- * `session` table layout, and cache one parsed sql.js instance keyed on the
- * main file plus WAL fingerprint. The cache refresh and freshness checks and the session
- * metadata query are identical for both, so they live here once.
+ * `session`/`message`/`part` table layout. Queries go through a copy-free read-only
+ * `node:sqlite` connection first, which sees uncheckpointed WAL rows with no size cap (#2710);
+ * when that backend is unavailable (e.g. an Electron host without `node:sqlite`) or fails for
+ * the file, they fall back to one parsed sql.js instance keyed on the main file plus WAL
+ * fingerprint. The queries, the cache refresh and the freshness checks are identical for
+ * both editors, so they live here once.
  */
-/// <reference types="sql.js" />
 import * as fs from 'fs';
 import { getWalStat, readDbBufferWithWalFingerprint, WAL_MERGE_MIN_INTERVAL_MS, type WalReadResult } from './utils/sqliteWal';
+import type initSqlJs from 'sql.js';
 import { SqlJsDbCacheBase, type SqlDatabase } from './utils/sqlJsDbCache';
+import { ReadOnlySqliteReader, type SqliteQueryParam } from './utils/readOnlySqlite';
 
 /**
  * {@link SqlJsDbCacheBase} plus the stat and fingerprint checks used to decide
@@ -30,6 +34,14 @@ export abstract class WalSqlJsDbCacheBase extends SqlJsDbCacheBase {
 	 * full for every single session query (#2710).
 	 */
 	private _transientFingerprint: { db: SqlDatabase; path: string; mtimeMs: number; size: number; walMtimeMs: number; walSize: number; parsedAt: number } | null = null;
+
+	/** The preferred, copy-free read-only `node:sqlite` backend; see {@link queryRows}. */
+	protected readonly readOnlySqlite = new ReadOnlySqliteReader();
+
+	override dispose(): void {
+		super.dispose();
+		this.readOnlySqlite.clear();
+	}
 
 	/** Injectable clock, for tests of the transient reuse window. */
 	protected now(): number { return Date.now(); }
@@ -161,6 +173,96 @@ export abstract class WalSqlJsDbCacheBase extends SqlJsDbCacheBase {
 		this._dbCache = { db, path: dbPath, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize };
 		return db;
 	}
+
+	/**
+	 * The parsed sql.js database for `dbPath` (the fallback backend), re-reading it only when
+	 * the file or its WAL changed. Single-flight, so concurrent callers share one read.
+	 */
+	protected async getSqlJsDb(dbPath: string): Promise<SqlDatabase | null> {
+		const stats = this.statDbFile(dbPath);
+		if (!stats) { return this.getCachedDbForPath(dbPath); }
+
+		const current = this.getCurrentDb(dbPath, stats);
+		if (current) { return current; }
+
+		const cacheKey = this.getDbCacheKey(dbPath, stats);
+		const inflight = this._dbCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const createDbPromise = this.refreshDb(dbPath, stats);
+		this._dbCacheInflight.set(cacheKey, createDbPromise);
+		try {
+			return await createDbPromise;
+		} finally {
+			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
+				this._dbCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
+	/**
+	 * Runs `sql` against `dbPath` and returns its rows as objects: through read-only
+	 * `node:sqlite` when it can be used, otherwise through the cached sql.js parse. Returns
+	 * `null` when there is no database or the query failed on both backends.
+	 */
+	protected async queryRows(dbPath: string, sql: string, params: SqliteQueryParam[] = []): Promise<Array<Record<string, unknown>> | null> {
+		if (this.statDbFile(dbPath)) {
+			const rows = this.readOnlySqlite.query(dbPath, sql, params);
+			if (rows) { return rows; }
+		}
+		const db = await this.getSqlJsDb(dbPath);
+		if (!db) { return null; }
+		try {
+			const result = db.exec(sql, params as initSqlJs.SqlValue[]);
+			if (result.length === 0) { return []; }
+			const { columns, values } = result[0];
+			return values.map(row => {
+				const obj: Record<string, unknown> = {};
+				columns.forEach((col, i) => { obj[col] = row[i]; });
+				return obj;
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	/** One session's metadata row, or null when there is no database or no such session. */
+	protected async readSessionMetadata(dbPath: string, sessionId: string): Promise<SessionMetadataRow | null> {
+		const rows = await this.queryRows(dbPath, SESSION_METADATA_SQL, [sessionId]);
+		return rows && rows.length > 0 ? toSessionMetadataRow(rows[0]) : null;
+	}
+
+	/** Every message of a session, oldest first, with `id` and `time.created` filled from the row. */
+	protected async readSessionMessages(dbPath: string, sessionId: string): Promise<Array<Record<string, unknown>>> {
+		return this.readDataRows(dbPath, 'SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC', sessionId);
+	}
+
+	/** Every part of a message, oldest first, with `id` and `time.created` filled from the row. */
+	protected async readMessageParts(dbPath: string, messageId: string): Promise<Array<Record<string, unknown>>> {
+		return this.readDataRows(dbPath, 'SELECT id, data, time_created FROM part WHERE message_id = ? ORDER BY time_created ASC', messageId);
+	}
+
+	/** Every session id in the database. */
+	protected async readSessionIds(dbPath: string): Promise<string[]> {
+		const rows = await this.queryRows(dbPath, 'SELECT id FROM session');
+		return rows ? rows.map(row => row.id as string) : [];
+	}
+
+	private async readDataRows(dbPath: string, sql: string, id: string): Promise<Array<Record<string, unknown>>> {
+		const rows = await this.queryRows(dbPath, sql, [id]);
+		if (!rows) { return []; }
+		try {
+			return rows.map(row => {
+				const data = JSON.parse(row.data as string);
+				data.id = row.id;
+				data.time = data.time || {};
+				data.time.created = data.time.created || row.time_created;
+				return data;
+			});
+		} catch {
+			return [];
+		}
+	}
 }
 
 /** Session metadata as stored in an OpenCode-family `session` table row. */
@@ -173,27 +275,33 @@ export interface SessionMetadataRow {
 	time: { created: unknown; updated: unknown };
 }
 
+const SESSION_METADATA_SQL = 'SELECT id, slug, title, time_created, time_updated, project_id, directory FROM session WHERE id = ?';
+
+function toSessionMetadataRow(obj: Record<string, unknown>): SessionMetadataRow {
+	return {
+		id: obj.id,
+		slug: obj.slug,
+		title: obj.title,
+		projectID: obj.project_id,
+		directory: obj.directory,
+		time: { created: obj.time_created, updated: obj.time_updated }
+	};
+}
+
 /**
- * Read one session's metadata row from an OpenCode-family `session` table.
- * Returns null when there is no database, no such session, or the query fails.
+ * Read one session's metadata row from an OpenCode-family `session` table in a parsed
+ * sql.js database. Returns null when there is no database, no such session, or the query fails.
  */
 export function readSessionMetadataRow(db: SqlDatabase | null, sessionId: string): SessionMetadataRow | null {
 	if (!db) { return null; }
 	try {
-		const result = db.exec('SELECT id, slug, title, time_created, time_updated, project_id, directory FROM session WHERE id = ?', [sessionId]);
+		const result = db.exec(SESSION_METADATA_SQL, [sessionId]);
 		if (result.length === 0 || result[0].values.length === 0) { return null; }
 		const row = result[0].values[0];
 		const cols = result[0].columns;
 		const obj: Record<string, unknown> = {};
 		for (let i = 0; i < cols.length; i++) { obj[cols[i]] = row[i]; }
-		return {
-			id: obj.id,
-			slug: obj.slug,
-			title: obj.title,
-			projectID: obj.project_id,
-			directory: obj.directory,
-			time: { created: obj.time_created, updated: obj.time_updated }
-		};
+		return toSessionMetadataRow(obj);
 	} catch {
 		return null;
 	}

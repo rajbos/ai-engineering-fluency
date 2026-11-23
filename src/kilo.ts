@@ -25,8 +25,7 @@ import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 
-import { type SqlDatabase } from './utils/sqlJsDbCache';
-import { WalSqlJsDbCacheBase, readSessionMetadataRow } from './openCodeFamilyDb';
+import { WalSqlJsDbCacheBase } from './openCodeFamilyDb';
 
 /** Minimal URI interface required by KiloDataAccess (subset of vscode.Uri). */
 export interface KiloUriLike {
@@ -104,98 +103,31 @@ export class KiloDataAccess extends WalSqlJsDbCacheBase {
 	}
 
 	/**
-	 * Returns a cached SQL.Database instance for kilo.db, re-opening only when
-	 * the file's mtime changes. This avoids reading and parsing the entire DB file
-	 * on every query.
-	 *
-	 * Uses single-flight deduplication to prevent concurrent calls from each re-reading
-	 * the DB file and leaving instances unclosed.
-	 */
-	private async getKiloDb(): Promise<SqlDatabase | null> {
-		const dbPath = this.getKiloDbPath();
-		const stats = this.statDbFile(dbPath);
-		if (!stats) { return this.getCachedDbForPath(dbPath); }
-
-		const current = this.getCurrentDb(dbPath, stats);
-		if (current) { return current; }
-
-		const cacheKey = this.getDbCacheKey(dbPath, stats);
-		const inflight = this._dbCacheInflight.get(cacheKey);
-		if (inflight) { return inflight; }
-
-		const createDbPromise = this.refreshDb(dbPath, stats);
-		this._dbCacheInflight.set(cacheKey, createDbPromise);
-		try {
-			return await createDbPromise;
-		} finally {
-			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
-				this._dbCacheInflight.delete(cacheKey);
-			}
-		}
-	}
-
-	/**
 	 * Read session metadata from the Kilo Code SQLite database.
 	 */
 	async readKiloDbSession(sessionId: string): Promise<any | null> {
-		return readSessionMetadataRow(await this.getKiloDb(), sessionId);
+		return this.readSessionMetadata(this.getKiloDbPath(), sessionId);
 	}
 
 	/**
 	 * Read all Kilo Code messages from the SQLite database for a given session.
 	 */
 	async readKiloDbMessages(sessionId: string): Promise<any[]> {
-		const db = await this.getKiloDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC', [sessionId]);
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => {
-				const data = JSON.parse(row[1] as string);
-				data.id = row[0];
-				data.time = data.time || {};
-				data.time.created = data.time.created || row[2];
-				return data;
-			});
-		} catch {
-			return [];
-		}
+		return this.readSessionMessages(this.getKiloDbPath(), sessionId);
 	}
 
 	/**
 	 * Read all Kilo Code parts from the SQLite database for a given message.
 	 */
 	async readKiloDbParts(messageId: string): Promise<any[]> {
-		const db = await this.getKiloDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id, data, time_created FROM part WHERE message_id = ? ORDER BY time_created ASC', [messageId]);
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => {
-				const data = JSON.parse(row[1] as string);
-				data.id = row[0];
-				data.time = data.time || {};
-				data.time.created = data.time.created || row[2];
-				return data;
-			});
-		} catch {
-			return [];
-		}
+		return this.readMessageParts(this.getKiloDbPath(), messageId);
 	}
 
 	/**
 	 * Discover all session IDs from the Kilo Code SQLite database.
 	 */
 	async discoverKiloDbSessions(): Promise<string[]> {
-		const db = await this.getKiloDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id FROM session');
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => row[0] as string);
-		} catch {
-			return [];
-		}
+		return this.readSessionIds(this.getKiloDbPath());
 	}
 
 	/**

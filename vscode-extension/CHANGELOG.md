@@ -6,6 +6,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Bug Fixes
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
+- OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
 
 ## [0.20.0] - 2026-11-23
 

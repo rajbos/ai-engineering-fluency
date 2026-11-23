@@ -7,6 +7,8 @@ import { WalSqlJsDbCacheBase, readSessionMetadataRow } from '../openCodeFamilyDb
 import type { SqlDatabase } from '../utils/sqlJsDbCache';
 import { readDbBufferWithWalFingerprint, type WalReadResult } from '../utils/sqliteWal';
 import { OpenCodeDataAccess } from '../opencode';
+import { KiloDataAccess } from '../kilo';
+import type { ReadOnlySqliteReader } from '../utils/readOnlySqlite';
 
 const SESSION_DDL = 'CREATE TABLE session (id TEXT PRIMARY KEY, slug TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, project_id TEXT, directory TEXT);';
 
@@ -274,6 +276,8 @@ test('OpenCodeDataAccess reads an over-cap database once for many session querie
 		}
 	}
 	const openCode = new WalBlindOpenCode(null as any);
+	// This covers the sql.js fallback, which only runs without a usable node:sqlite.
+	(openCode as unknown as { readOnlySqlite: ReadOnlySqliteReader }).readOnlySqlite.getNodeSqliteModule = () => null;
 	try {
 		for (let i = 0; i < 5; i++) {
 			assert.equal((await openCode.readOpenCodeDbSession('ses_1'))?.title, 'Fixture title');
@@ -282,5 +286,134 @@ test('OpenCodeDataAccess reads an over-cap database once for many session querie
 	} finally {
 		openCode.dispose();
 		fixture.cleanup();
+	}
+});
+
+/**
+ * A WAL-mode OpenCode-family store whose writer stays open with auto-checkpointing off, so every
+ * row lives only in the `-wal` sidecar: exactly what a WAL-blind read of the main file misses.
+ */
+function createUncheckpointedWalStore(fileName: string) {
+	const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-family-wal-'));
+	const dbPath = path.join(tmpDir, fileName);
+	const writer = new DatabaseSync(dbPath);
+	writer.exec('PRAGMA journal_mode=WAL;');
+	writer.exec('PRAGMA wal_autocheckpoint=0;');
+	writer.exec(SESSION_DDL);
+	writer.exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);');
+	writer.exec('CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, time_created INTEGER, data TEXT);');
+	writer.exec("INSERT INTO session VALUES ('ses_wal', 'slug', 'Only in the WAL', 100, 200, 'proj', '/dir')");
+	writer.prepare('INSERT INTO message VALUES (?, ?, ?, ?)').run('msg_1', 'ses_wal', 300, JSON.stringify({ role: 'user' }));
+	writer.prepare('INSERT INTO part VALUES (?, ?, ?, ?)').run('prt_1', 'msg_1', 400, JSON.stringify({ type: 'text', text: 'hi' }));
+	return {
+		tmpDir,
+		dbPath,
+		cleanup: () => {
+			try { writer.close(); } catch { /* ignore */ }
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		},
+	};
+}
+
+/** Counts sql.js fallback reads and points the data dir at the fixture. */
+class CountingOpenCode extends OpenCodeDataAccess {
+	reads = 0;
+	constructor(private readonly dir: string) { super(null as any); }
+	override getOpenCodeDataDir(): string { return this.dir; }
+	protected override async readDbBuffer(dbPath: string): Promise<WalReadResult> {
+		this.reads++;
+		return readDbBufferWithWalFingerprint(dbPath);
+	}
+	get readOnly(): ReadOnlySqliteReader { return this.readOnlySqlite; }
+}
+
+test('OpenCode reads uncheckpointed WAL rows through read-only node:sqlite, with no sql.js read (#2710)', async () => {
+	const fixture = createUncheckpointedWalStore('opencode.db');
+	const openCode = new CountingOpenCode(fixture.tmpDir);
+	try {
+		assert.ok(fs.statSync(fixture.dbPath + '-wal').size > 0, 'fixture setup: the rows must still be pending in the WAL');
+
+		assert.equal((await openCode.readOpenCodeDbSession('ses_wal'))?.title, 'Only in the WAL');
+		assert.deepEqual(await openCode.discoverOpenCodeDbSessions(), ['ses_wal']);
+		assert.deepEqual(await openCode.readOpenCodeDbMessages('ses_wal'), [{ role: 'user', id: 'msg_1', time: { created: 300 } }]);
+		assert.deepEqual(await openCode.readOpenCodeDbParts('msg_1'), [{ type: 'text', text: 'hi', id: 'prt_1', time: { created: 400 } }]);
+
+		assert.equal(openCode.reads, 0, 'the sql.js fallback must not read the db file at all');
+		assert.equal(openCode.readOnly.hasDemotionEntry(fixture.dbPath), false);
+	} finally {
+		openCode.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('Kilo reads uncheckpointed WAL rows through read-only node:sqlite', async () => {
+	const fixture = createUncheckpointedWalStore('kilo.db');
+	const kilo = new KiloDataAccess(null as any);
+	kilo.getKiloDataDir = () => fixture.tmpDir;
+	try {
+		assert.equal((await kilo.readKiloDbSession('ses_wal'))?.title, 'Only in the WAL');
+		assert.deepEqual(await kilo.discoverKiloDbSessions(), ['ses_wal']);
+		assert.equal((await kilo.readKiloDbMessages('ses_wal'))[0]?.id, 'msg_1');
+		assert.equal((await kilo.readKiloDbParts('msg_1'))[0]?.text, 'hi');
+	} finally {
+		kilo.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('a failed read-only open falls back to sql.js and demotes the db instead of re-probing every query', async () => {
+	const fixture = createFixture();
+	const dbPath = path.join(fixture.tmpDir, 'opencode.db');
+	fs.renameSync(fixture.dbPath, dbPath);
+	const openCode = new CountingOpenCode(fixture.tmpDir);
+	let openAttempts = 0;
+	class FailingDatabaseSync {
+		constructor() {
+			openAttempts++;
+			throw new Error('simulated SQLITE_READONLY_CANTINIT');
+		}
+	}
+	openCode.readOnly.getNodeSqliteModule = () => ({ DatabaseSync: FailingDatabaseSync }) as unknown as typeof import('node:sqlite');
+	try {
+		for (let i = 0; i < 3; i++) {
+			assert.equal((await openCode.readOpenCodeDbSession('ses_1'))?.title, 'Fixture title', 'the sql.js fallback still answers');
+		}
+		assert.equal(openAttempts, 1, 'the read-only backend is probed once, then the db is demoted for the cooldown');
+		assert.equal(openCode.reads, 1, 'the fallback parses the db once and serves every query from it');
+		assert.equal(openCode.readOnly.isDemoted(dbPath), true);
+	} finally {
+		openCode.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('without node:sqlite every query goes through the sql.js fallback', async () => {
+	const fixture = createFixture();
+	fs.renameSync(fixture.dbPath, path.join(fixture.tmpDir, 'opencode.db'));
+	const openCode = new CountingOpenCode(fixture.tmpDir);
+	openCode.readOnly.getNodeSqliteModule = () => null;
+	try {
+		assert.equal((await openCode.readOpenCodeDbSession('ses_1'))?.title, 'Fixture title');
+		assert.deepEqual(await openCode.discoverOpenCodeDbSessions(), ['ses_1']);
+		assert.equal(await openCode.readOpenCodeDbSession('ses_missing'), null);
+		assert.equal(openCode.reads, 1);
+	} finally {
+		openCode.dispose();
+		fixture.cleanup();
+	}
+});
+
+test('a missing database yields no rows and does not demote the read-only backend', async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-family-missing-'));
+	const openCode = new CountingOpenCode(tmpDir);
+	try {
+		assert.equal(await openCode.readOpenCodeDbSession('ses_1'), null);
+		assert.deepEqual(await openCode.readOpenCodeDbMessages('ses_1'), []);
+		assert.deepEqual(await openCode.discoverOpenCodeDbSessions(), []);
+		assert.equal(openCode.readOnly.hasDemotionEntry(path.join(tmpDir, 'opencode.db')), false);
+	} finally {
+		openCode.dispose();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
 });
