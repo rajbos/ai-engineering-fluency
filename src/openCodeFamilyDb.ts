@@ -8,7 +8,7 @@
  */
 /// <reference types="sql.js" />
 import * as fs from 'fs';
-import { getWalStat, readDbBufferWithWalFingerprint, type WalReadResult } from './utils/sqliteWal';
+import { getWalStat, readDbBufferWithWalFingerprint, WAL_MERGE_MIN_INTERVAL_MS, type WalReadResult } from './utils/sqliteWal';
 import { SqlJsDbCacheBase, type SqlDatabase } from './utils/sqlJsDbCache';
 
 /**
@@ -16,6 +16,51 @@ import { SqlJsDbCacheBase, type SqlDatabase } from './utils/sqlJsDbCache';
  * whether the cached database still matches the file (and its WAL) on disk.
  */
 export abstract class WalSqlJsDbCacheBase extends SqlJsDbCacheBase {
+	/**
+	 * How long a WAL-blind (`walIncluded: false`) parse may be reused while the db and WAL
+	 * fingerprint stay exactly the same. Matches the merge throttle in sqliteWal.ts, which already
+	 * serves a merged buffer this stale, so reuse adds no staleness the WAL-complete path lacks.
+	 */
+	static readonly TRANSIENT_DB_REUSE_MS = WAL_MERGE_MIN_INTERVAL_MS;
+
+	/**
+	 * The fingerprint `_pendingTransientDb` was parsed from, and when. Kept beside it (not in
+	 * `_dbCache`) so a WAL-blind read is never treated as settled, yet an unchanged one is not
+	 * re-read and re-parsed on every query. Without this, a db+WAL over the merge cap was read in
+	 * full for every single session query (#2710).
+	 */
+	private _transientFingerprint: { db: SqlDatabase; path: string; mtimeMs: number; size: number; walMtimeMs: number; walSize: number; parsedAt: number } | null = null;
+
+	/** Injectable clock, for tests of the transient reuse window. */
+	protected now(): number { return Date.now(); }
+
+	/** Reads the db bytes plus the fingerprint they came from; overridable so tests can simulate a WAL-blind read. */
+	protected readDbBuffer(dbPath: string): Promise<WalReadResult> {
+		return readDbBufferWithWalFingerprint(dbPath);
+	}
+
+	/**
+	 * The parsed database to serve without re-reading `dbPath`, or `null` when it must be read:
+	 * the settled `_dbCache` while it matches the db and WAL on disk, otherwise the last
+	 * WAL-blind parse while its exact fingerprint still matches and it is younger than
+	 * {@link TRANSIENT_DB_REUSE_MS}. Re-reading an unchanged fingerprint would give the same bytes.
+	 * The window only bounds how long a failed merge (rather than the size cap) stays unretried.
+	 */
+	protected getCurrentDb(dbPath: string, stats: fs.Stats): SqlDatabase | null {
+		if (this.isCachedDbCurrent(dbPath, stats)) {
+			return this._dbCache?.db ?? null;
+		}
+		const transient = this._transientFingerprint;
+		if (!transient || transient.db !== this._pendingTransientDb || transient.path !== dbPath) { return null; }
+		if (this.now() - transient.parsedAt >= WalSqlJsDbCacheBase.TRANSIENT_DB_REUSE_MS) { return null; }
+		const wal = getWalStat(dbPath);
+		const unchanged = transient.mtimeMs === stats.mtimeMs
+			&& transient.size === stats.size
+			&& transient.walMtimeMs === wal.mtimeMs
+			&& transient.walSize === wal.size;
+		return unchanged ? transient.db : null;
+	}
+
 	/** Stat the database file; drops the cache when the cached file has disappeared. */
 	protected statDbFile(dbPath: string): fs.Stats | null {
 		try {
@@ -67,7 +112,7 @@ export abstract class WalSqlJsDbCacheBase extends SqlJsDbCacheBase {
 			// stamping it with the current WAL state would make a stale cache entry look current —
 			// permanently hiding any WAL writes that land after this read but before the throttle
 			// window lapses (see #2036 review notes on src/utils/sqliteWal.ts).
-			result = await readDbBufferWithWalFingerprint(dbPath);
+			result = await this.readDbBuffer(dbPath);
 		} catch {
 			return this.getCachedDbForPath(dbPath);
 		}
@@ -106,11 +151,13 @@ export abstract class WalSqlJsDbCacheBase extends SqlJsDbCacheBase {
 			// trailing transient slot instead.
 			this.releasePendingTransientDb();
 			this._pendingTransientDb = db;
+			this._transientFingerprint = { db, path: dbPath, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize, parsedAt: this.now() };
 			return db;
 		}
 
 		this.closeDbCache();
 		this.releasePendingTransientDb();
+		this._transientFingerprint = null;
 		this._dbCache = { db, path: dbPath, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize };
 		return db;
 	}

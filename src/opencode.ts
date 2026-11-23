@@ -80,9 +80,8 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 		const stats = this.statDbFile(dbPath);
 		if (!stats) { return this.getCachedDbForPath(dbPath); }
 
-		if (this.isCachedDbCurrent(dbPath, stats)) {
-			return this._dbCache?.db ?? null;
-		}
+		const current = this.getCurrentDb(dbPath, stats);
+		if (current) { return current; }
 
 		const cacheKey = this.getDbCacheKey(dbPath, stats);
 		const inflight = this._dbCacheInflight.get(cacheKey);
