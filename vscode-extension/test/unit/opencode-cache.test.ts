@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { OpenCodeDataAccess } from '../../../src/opencode';
+import type { ReadOnlySqliteReader } from '../../../src/utils/readOnlySqlite';
 
 type HarnessOptions = {
 	delayInit?: boolean;
@@ -298,6 +299,8 @@ test('a WAL write made inside the throttle window eventually becomes visible onc
 
 		const access = new OpenCodeDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getOpenCodeDataDir = () => fixture.tmpDir;
+		// These cover the sql.js fallback cache, which only runs without a usable node:sqlite.
+		(access as unknown as { readOnlySqlite: ReadOnlySqliteReader }).readOnlySqlite.getNodeSqliteModule = () => null;
 
 		const first = await access.readOpenCodeDbSession('s1');
 		assert.equal(first?.title, 'Original title');
@@ -331,6 +334,8 @@ test('the sql.js DB cache reuses the parsed Database across a throttled read ins
 
 		const access = new OpenCodeDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getOpenCodeDataDir = () => fixture.tmpDir;
+		// These cover the sql.js fallback cache, which only runs without a usable node:sqlite.
+		(access as unknown as { readOnlySqlite: ReadOnlySqliteReader }).readOnlySqlite.getNodeSqliteModule = () => null;
 
 		let dbConstructions = 0;
 		const realInitSqlJs = access.initSqlJs.bind(access);
@@ -350,7 +355,7 @@ test('the sql.js DB cache reuses the parsed Database across a throttled read ins
 		assert.equal(dbConstructions, 1, 'the first read parses the db once');
 
 		// Touch the live WAL (grows it) WITHOUT letting sqliteWal's own merge throttle window
-		// lapse — the cheap fresh-stat pre-check in getOpenCodeDb() will see the WAL has moved and
+		// lapse — the cheap fresh-stat pre-check in getSqlJsDb() will see the WAL has moved and
 		// attempt a read, but that read will be served from sqliteWal's own throttle under the
 		// SAME original fingerprint as before, since nothing has actually settled/changed yet.
 		fixture.writer.exec("INSERT INTO session VALUES ('s2', 'slug-2', 'other', 2, 2, 'p1', '/dir')");
@@ -374,6 +379,8 @@ test('the -wal size is part of the OpenCode DB cache key, not just its mtime (Fi
 
 		const access = new OpenCodeDataAccess({ fsPath: '', path: '', scheme: 'file' });
 		access.getOpenCodeDataDir = () => fixture.tmpDir;
+		// These cover the sql.js fallback cache, which only runs without a usable node:sqlite.
+		(access as unknown as { readOnlySqlite: ReadOnlySqliteReader }).readOnlySqlite.getNodeSqliteModule = () => null;
 
 		const first = await access.readOpenCodeDbSession('s1');
 		assert.equal(first?.title, 'first');

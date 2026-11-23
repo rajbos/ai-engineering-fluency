@@ -27,6 +27,7 @@ import type { UriLike } from './opencode';
 import { normalizePathForComparison } from './utils/pathUtils';
 import { readDbBufferWithWalFingerprint } from './utils/sqliteWal';
 import { SqlJsLoader } from './utils/sqlJsLoader';
+import { ReadOnlySqliteReader } from './utils/readOnlySqlite';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -86,24 +87,12 @@ export interface CursorBubble {
 
 export class CursorDataAccess {
 	private static readonly COMPOSER_CACHE_MAX_ENTRIES = 2000;
-	// How long a db path stays demoted to the sql.js fallback after a failed read-only attempt.
-	private static readonly READ_ONLY_RETRY_COOLDOWN_MS = 5 * 60_000;
-
 	private readonly _sqlJs = new SqlJsLoader();
 
-	// Read-only node:sqlite backend. `undefined` = not yet probed, `null` = require('node:sqlite')
-	// failed (older Electron without native SQLite support) so every db path uses the sql.js
-	// fallback instead.
-	private _nodeSqliteModule: typeof import('node:sqlite') | null | undefined;
-	// Per-db-path memo of a failed read-only open/query (e.g. SQLITE_READONLY_CANTINIT when the
-	// -shm sidecar can't be initialised read-only), so a db that can't use the read-only backend
-	// doesn't retry that probe on every call — it falls straight to sql.js instead.
-	// Stores when the failure happened rather than a bare flag: the demotion expires after
-	// READ_ONLY_RETRY_COOLDOWN_MS so a *transient* failure (e.g. SQLITE_BUSY while the writer
-	// holds an exclusive lock during its own checkpoint) doesn't strand this db on the expensive
-	// copy-based fallback for the rest of the process's life — which would reintroduce exactly
-	// the multi-GB copies this class exists to avoid.
-	private readonly _readOnlyUnsupportedDbs: Map<string, number> = new Map();
+	// Preferred, copy-free read-only node:sqlite backend (see src/utils/readOnlySqlite.ts). It
+	// returns null when node:sqlite is unavailable or a db path is temporarily demoted after a
+	// failed read-only open/query, and every query then falls back to sql.js.
+	private readonly _readOnly = new ReadOnlySqliteReader();
 
 	// Cache of already-parsed composer data blobs. A single session read makes ~4 calls into
 	// readComposerData (getTokens/countInteractions/getModelUsage/getSessionMeta, see
@@ -146,7 +135,7 @@ export class CursorDataAccess {
 	dispose(): void {
 		this._composerCache.clear();
 		this._composerInflight.clear();
-		this._readOnlyUnsupportedDbs.clear();
+		this._readOnly.clear();
 		this._sqlJs.clearPending();
 		for (const entry of this._sqlJsDbCache.values()) {
 			try { entry.db.close(); } catch { /* ignore */ }
@@ -243,55 +232,17 @@ export class CursorDataAccess {
 		try { return fs.statSync(dbPath); } catch { return null; }
 	}
 
-	private getNodeSqliteModule(): typeof import('node:sqlite') | null {
-		if (this._nodeSqliteModule === undefined) {
-			try {
-				this._nodeSqliteModule = require('node:sqlite') as typeof import('node:sqlite');
-			} catch {
-				this._nodeSqliteModule = null;
-			}
-		}
-		return this._nodeSqliteModule;
-	}
-
 	/**
-	 * True while `dbPath` is still demoted to the sql.js fallback after a recent read-only
-	 * failure. The demotion expires so a transient failure doesn't become permanent.
-	 */
-	private isReadOnlyDemoted(dbPath: string): boolean {
-		const failedAt = this._readOnlyUnsupportedDbs.get(dbPath);
-		if (failedAt === undefined) { return false; }
-		if (Date.now() - failedAt < CursorDataAccess.READ_ONLY_RETRY_COOLDOWN_MS) { return true; }
-		this._readOnlyUnsupportedDbs.delete(dbPath);
-		return false;
-	}
-
-	/**
-	 * Preferred backend: a read-only `node:sqlite` connection against the live db file. This
-	 * sees another process's pending WAL frames directly, cross-process, with zero copies, and
-	 * mutates neither the main db nor the WAL. Opens, queries and closes immediately for every
-	 * call — never caches the handle, since a long-lived reader can block the writer's own WAL
-	 * checkpointing and make its WAL grow. Returns `null` when this backend can't be used for
-	 * `dbPath` (node:sqlite unavailable, or the open/query failed — e.g. `SQLITE_READONLY_CANTINIT`
-	 * when the `-shm` sidecar can't be initialised read-only), so the caller can fall back to sql.js.
+	 * Preferred backend: a read-only `node:sqlite` query against the live db file, which sees
+	 * pending WAL frames with zero copies. Returns `null` when this backend can't be used for
+	 * `dbPath`, so the caller can fall back to sql.js — see {@link ReadOnlySqliteReader.query}.
 	 */
 	private queryReadOnly(dbPath: string, sql: string, params: QueryParam[]): QueryResult | null {
-		const mod = this.getNodeSqliteModule();
-		if (!mod || this.isReadOnlyDemoted(dbPath)) { return null; }
-		let db: import('node:sqlite').DatabaseSync | undefined;
-		try {
-			db = new mod.DatabaseSync(dbPath, { readOnly: true });
-			const rows = db.prepare(sql).all(...(params as import('node:sqlite').SQLInputValue[])) as Array<Record<string, unknown>>;
-			if (rows.length === 0) { return EMPTY_RESULT; }
-			const columns = Object.keys(rows[0]);
-			const values = rows.map(row => columns.map(col => row[col]));
-			return { columns, values };
-		} catch {
-			this._readOnlyUnsupportedDbs.set(dbPath, Date.now());
-			return null;
-		} finally {
-			if (db) { try { db.close(); } catch { /* ignore */ } }
-		}
+		const rows = this._readOnly.query(dbPath, sql, params);
+		if (!rows) { return null; }
+		if (rows.length === 0) { return EMPTY_RESULT; }
+		const columns = Object.keys(rows[0]);
+		return { columns, values: rows.map(row => columns.map(col => row[col])) };
 	}
 
 	/** Closes and drops the cached sql.js Database for `dbPath`, if any. */

@@ -11,8 +11,7 @@ import { normalizePathForComparison } from './workspaceHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { readTextFileWithSizeGuardSync } from './utils/safeFileRead';
 
-import { type SqlDatabase } from './utils/sqlJsDbCache';
-import { WalSqlJsDbCacheBase, readSessionMetadataRow } from './openCodeFamilyDb';
+import { WalSqlJsDbCacheBase } from './openCodeFamilyDb';
 
 /** Minimal URI interface required by OpenCodeDataAccess (subset of vscode.Uri). */
 export interface UriLike {
@@ -49,6 +48,11 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 		return path.join(xdgDataHome, 'opencode');
 	}
 
+	/** Absolute path of the opencode.db SQLite database file. */
+	getOpenCodeDbPath(): string {
+		return path.join(this.getOpenCodeDataDir(), 'opencode.db');
+	}
+
 	/**
 	 * Check if a session file is an OpenCode session file.
 	 * OpenCode sessions are stored in ~/.local/share/opencode/storage/session/ (JSON)
@@ -68,98 +72,31 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 	}
 
 	/**
-	 * Returns a cached SQL.Database instance for opencode.db, re-opening only when
-	 * the file's mtime changes. This avoids reading and parsing the entire DB file
-	 * on every query (which was the primary cause of ~700ms-per-call latency).
-	 *
-	 * Uses single-flight deduplication to prevent concurrent calls from each re-reading
-	 * the DB file and leaving instances unclosed.
-	 */
-	private async getOpenCodeDb(): Promise<SqlDatabase | null> {
-		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-		const stats = this.statDbFile(dbPath);
-		if (!stats) { return this.getCachedDbForPath(dbPath); }
-
-		const current = this.getCurrentDb(dbPath, stats);
-		if (current) { return current; }
-
-		const cacheKey = this.getDbCacheKey(dbPath, stats);
-		const inflight = this._dbCacheInflight.get(cacheKey);
-		if (inflight) { return inflight; }
-
-		const createDbPromise = this.refreshDb(dbPath, stats);
-		this._dbCacheInflight.set(cacheKey, createDbPromise);
-		try {
-			return await createDbPromise;
-		} finally {
-			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
-				this._dbCacheInflight.delete(cacheKey);
-			}
-		}
-	}
-
-	/**
 	 * Read session metadata from the OpenCode SQLite database.
 	 */
 	async readOpenCodeDbSession(sessionId: string): Promise<any | null> {
-		return readSessionMetadataRow(await this.getOpenCodeDb(), sessionId);
+		return this.readSessionMetadata(this.getOpenCodeDbPath(), sessionId);
 	}
 
 	/**
 	 * Read all OpenCode messages from the SQLite database for a given session.
 	 */
 	async readOpenCodeDbMessages(sessionId: string): Promise<any[]> {
-		const db = await this.getOpenCodeDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC', [sessionId]);
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => {
-				const data = JSON.parse(row[1] as string);
-				data.id = row[0];
-				data.time = data.time || {};
-				data.time.created = data.time.created || row[2];
-				return data;
-			});
-		} catch {
-			return [];
-		}
+		return this.readSessionMessages(this.getOpenCodeDbPath(), sessionId);
 	}
 
 	/**
 	 * Read all OpenCode parts from the SQLite database for a given message.
 	 */
 	async readOpenCodeDbParts(messageId: string): Promise<any[]> {
-		const db = await this.getOpenCodeDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id, data, time_created FROM part WHERE message_id = ? ORDER BY time_created ASC', [messageId]);
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => {
-				const data = JSON.parse(row[1] as string);
-				data.id = row[0];
-				data.time = data.time || {};
-				data.time.created = data.time.created || row[2];
-				return data;
-			});
-		} catch {
-			return [];
-		}
+		return this.readMessageParts(this.getOpenCodeDbPath(), messageId);
 	}
 
 	/**
 	 * Discover all session IDs from the OpenCode SQLite database.
 	 */
 	async discoverOpenCodeDbSessions(): Promise<string[]> {
-		const db = await this.getOpenCodeDb();
-		if (!db) { return []; }
-		try {
-			const result = db.exec('SELECT id FROM session');
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => row[0] as string);
-		} catch {
-			return [];
-		}
+		return this.readSessionIds(this.getOpenCodeDbPath());
 	}
 
 	/**
@@ -168,8 +105,7 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 	 */
 	async statSessionFile(sessionFile: string): Promise<fs.Stats> {
 		if (this.isOpenCodeDbSession(sessionFile)) {
-			const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-			return fs.promises.stat(dbPath);
+			return fs.promises.stat(this.getOpenCodeDbPath());
 		}
 		return fs.promises.stat(sessionFile);
 	}
