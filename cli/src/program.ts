@@ -16,7 +16,7 @@ import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
 import { memoryFilesCommand } from './commands/memoryFiles';
 import { skillSuggestionsCommand } from './commands/skillSuggestions';
-import { loadCache, saveCache, disableCache } from './helpers';
+import { loadCache, saveCache, saveCacheOnSignals, disableCache } from './helpers';
 import { setWslScanDisabled } from '../../src/wslDiscovery';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -39,6 +39,7 @@ export function createProgram(): Command {
 			disableCache();
 		} else {
 			loadCache();
+			saveCacheOnSignals();
 		}
 	});
 	program.hook('postAction', () => {

@@ -33,5 +33,6 @@ We aim to acknowledge reports promptly and will keep you updated as the issue is
 
 - [Secret scanning](https://docs.github.com/en/code-security/secret-scanning) is enabled on this repository.
 - Dependencies are kept up to date via Dependabot and reviewed with `dependency-review` on pull requests.
+- Released files (VSIX packages, the JetBrains plugin ZIP, the desktop installer, the npm tarballs and the sharing-server container image) carry [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations). Verify a download with `gh attestation verify <file> --repo rajbos/ai-engineering-fluency`; see [docs/VALIDATION.md](./docs/VALIDATION.md#release-provenance-artifact-attestations).
 
 For general bug reports and support questions that are not security-related, please use [GitHub Issues](https://github.com/rajbos/ai-engineering-fluency/issues) as described in [SUPPORT.md](./SUPPORT.md).

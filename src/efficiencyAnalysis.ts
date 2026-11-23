@@ -2031,6 +2031,18 @@ export interface ModelComparison {
 	verdict: { winner: 'a' | 'b' | 'tie'; wins: { a: number; b: number } } | null;
 }
 
+type ComparisonOutcome = Pick<ModelComparisonRow, 'deltaPct' | 'winner' | 'significant'>;
+
+/** Outcome when both sides have a value: percent delta vs. the larger magnitude, then a winner outside the noise band. */
+function compareBothValues(a: number, b: number, goodDirection: 'up' | 'down'): ComparisonOutcome {
+	const baseline = Math.max(Math.abs(a), Math.abs(b));
+	if (baseline === 0) { return { deltaPct: 0, winner: 'tie', significant: false }; }
+	const deltaPct = ((b - a) / baseline) * 100;
+	if (Math.abs(deltaPct) < COMPARE_NOISE_PCT) { return { deltaPct, winner: 'tie', significant: false }; }
+	const bIsBetter = goodDirection === 'down' ? b < a : b > a;
+	return { deltaPct, winner: bIsBetter ? 'b' : 'a', significant: true };
+}
+
 function comparisonRow(
 	id: ModelComparisonMetricId,
 	label: string,
@@ -2040,25 +2052,9 @@ function comparisonRow(
 	unit: DeltaUnit,
 	goodDirection: 'up' | 'down',
 ): ModelComparisonRow {
-	let deltaPct: number | null = null;
-	let winner: ModelComparisonRow['winner'] = null;
-	let significant = false;
-	if (a !== null && b !== null) {
-		const baseline = Math.max(Math.abs(a), Math.abs(b));
-		if (baseline === 0) {
-			deltaPct = 0;
-			winner = 'tie';
-		} else {
-			deltaPct = ((b - a) / baseline) * 100;
-			if (Math.abs(deltaPct) < COMPARE_NOISE_PCT) {
-				winner = 'tie';
-			} else {
-				const bIsBetter = goodDirection === 'down' ? b < a : b > a;
-				winner = bIsBetter ? 'b' : 'a';
-				significant = true;
-			}
-		}
-	}
+	const { deltaPct, winner, significant }: ComparisonOutcome = a !== null && b !== null
+		? compareBothValues(a, b, goodDirection)
+		: { deltaPct: null, winner: null, significant: false };
 	return { id, label, description, a, b, unit, goodDirection, deltaPct, winner, significant };
 }
 

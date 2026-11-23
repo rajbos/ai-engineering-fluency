@@ -82,6 +82,7 @@ export const EDITOR_LOGOS: Readonly<Record<string, EditorLogo>> = {
 	'Kiro CLI': KIRO,
 	'MS Scout (Copilot CLI)': MICROSOFT,
 	'Mistral Vibe': { light: mistral },
+	'Mistral Vibe Desktop': { light: mistral },
 	'OpenCode': { light: opencode, dark: opencodeDark },
 	'Pi': { light: pi, dark: piDark },
 	'SSMS': MICROSOFT,

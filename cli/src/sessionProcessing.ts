@@ -45,7 +45,7 @@ function isCopilotCliPath(filePath: string): boolean {
 /** Quiet by default: parsing problems surface as a null result, not console output. */
 const warn = (_msg: string) => { /* quiet by default */ };
 
-/** Where processSessionFile looks up and stores parsed results, keyed by path + mtime + size. */
+/** Where processSessionFile looks up and stores parsed results, keyed by path plus a {@link sessionCacheStamp}. */
 export interface SessionDataCache {
 	get(filePath: string, mtime: number, size: number): SessionData | null;
 	set(filePath: string, mtime: number, size: number, data: SessionData): void;
@@ -98,6 +98,44 @@ function resolveModel(request: any): string {
 export function getSessionBackingPath(filePath: string): string {
 	const eco = getEcosystems().find(e => e.handles(filePath));
 	return eco ? eco.getBackingPath(filePath) : filePath;
+}
+
+/**
+ * Cheap per-session last-activity time from the owning adapter, or null when the
+ * adapter has no such lookup (then the file's own mtime is the right signal).
+ */
+export async function getSessionLastActivity(filePath: string): Promise<Date | null> {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	if (!eco?.getLastActivity) { return null; }
+	try {
+		return await eco.getLastActivity(filePath);
+	} catch {
+		return null;
+	}
+}
+
+/** The `size` half of a cache stamp keyed on a DB-backed session's own activity (it has no file size of its own). */
+export const DB_SESSION_STAMP_SIZE = 0;
+
+/**
+ * The (mtime, size) a parsed session is cached under. A regular file uses its own stat. A
+ * DB-backed (virtual) session whose adapter reports its own last activity uses that time
+ * instead: the shared database's mtime and size move whenever ANY session in it changes, so
+ * keying on them invalidated every cached session of a busy database on each write, and the
+ * CLI re-parsed thousands of unchanged sessions every run (#2710). A virtual session with no
+ * known activity keeps the database stat, as before.
+ */
+export function sessionCacheStamp(version: { mtimeMs: number; size: number; activityMs?: number }): { mtimeMs: number; size: number } {
+	return version.activityMs !== undefined
+		? { mtimeMs: version.activityMs, size: DB_SESSION_STAMP_SIZE }
+		: { mtimeMs: version.mtimeMs, size: version.size };
+}
+
+/** {@link sessionCacheStamp} for a session, looking up a DB-backed session's own activity. */
+async function lookupSessionCacheStamp(filePath: string, stats: { mtimeMs: number; size: number }): Promise<{ mtimeMs: number; size: number }> {
+	if (getSessionBackingPath(filePath) === filePath) { return { mtimeMs: stats.mtimeMs, size: stats.size }; }
+	const last = await getSessionLastActivity(filePath);
+	return sessionCacheStamp({ mtimeMs: stats.mtimeMs, size: stats.size, activityMs: last?.getTime() });
 }
 
 /**
@@ -210,9 +248,12 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 	const { verbose = false, cache = noCache } = options;
 	try {
 		const stats = await statSessionFile(filePath);
+		// Taken before parsing, so a session written to mid-parse is re-parsed next time rather
+		// than its older data being kept under the newer stamp.
+		const stamp = await lookupSessionCacheStamp(filePath, stats);
 
 		// Check the cache before doing any parsing
-		const cached = cache.get(filePath, stats.mtimeMs, stats.size);
+		const cached = cache.get(filePath, stamp.mtimeMs, stamp.size);
 		if (cached) {
 			return cached;
 		}
@@ -242,7 +283,7 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 				editorSource: getEditorSourceFromPath(filePath),
 				dailyFractions: (await eco.getDailyFractions?.(filePath)) ?? { [mtimeDateKey]: 1.0 },
 			};
-			cache.set(filePath, stats.mtimeMs, stats.size, ecoResult);
+			cache.set(filePath, stamp.mtimeMs, stamp.size, ecoResult);
 			return ecoResult;
 		}
 
@@ -369,7 +410,7 @@ export async function processSessionFile(filePath: string, options: ProcessSessi
 			editorSource: getEditorSourceFromPath(filePath),
 			dailyFractions,
 		};
-		cache.set(filePath, stats.mtimeMs, stats.size, sessionData);
+		cache.set(filePath, stamp.mtimeMs, stamp.size, sessionData);
 		return sessionData;
 	} catch {
 		return null;

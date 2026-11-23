@@ -51,6 +51,12 @@ export interface SessionDiscoveryDeps {
 	getExtraSessionFiles?: () => Promise<string[]>;
 }
 
+/** Status label for one installed (or missing) editor extension in the startup log. */
+function describeExtensionStatus(extension: { isActive: boolean } | undefined): string {
+	if (!extension) { return '❌ Not found'; }
+	return extension.isActive ? '✅ Active' : '⏳ Loading';
+}
+
 /** What one discovery pass observed; published to the instance only if the pass is still current. */
 interface DiscoveryPassStatus { hadError: boolean }
 
@@ -162,9 +168,7 @@ export class SessionDiscovery {
 		if (!copilotExtension && !copilotChatExtension) {
 			this.deps.log('⚠️ GitHub Copilot extensions not found');
 		} else {
-			const copilotStatus = copilotExtension ? (copilotExtension.isActive ? '✅ Active' : '⏳ Loading') : '❌ Not found';
-			const chatStatus = copilotChatExtension ? (copilotChatExtension.isActive ? '✅ Active' : '⏳ Loading') : '❌ Not found';
-			this.deps.log(`GitHub Copilot: ${copilotStatus}, Chat: ${chatStatus}`);
+			this.deps.log(`GitHub Copilot: ${describeExtensionStatus(copilotExtension)}, Chat: ${describeExtensionStatus(copilotChatExtension)}`);
 		}
 
 		const isCodespaces = process.env.CODESPACES === 'true';

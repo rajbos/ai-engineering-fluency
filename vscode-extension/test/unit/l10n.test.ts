@@ -297,6 +297,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('whatsNew.release.0.18.2.headline'), 'See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.');
 	assert.equal(t('whatsNew.release.0.18.3.headline'), 'A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.');
 	assert.equal(t('whatsNew.release.0.19.2.headline'), 'A maintenance release: Badge Setup now previews your fluency chart with a 30/90-day range and guides you to install the badge app before syncing. No new screens.');
+	assert.equal(t('whatsNew.release.0.20.0.headline'), 'AI Readiness shows the full stage ladder, the Chart view can filter by editor, and companion extensions can open session logs.');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI Readiness');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.");
 	assert.equal(t('whatsNew.release.0.19.0.headline'), "Usage Analysis is now organized into Usage, Workspace, GitHub and Coaching groups, with banded sections, official editor logos in the Chart view and Copilot budget for every signed-in GitHub account.");
@@ -313,6 +314,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('whatsNew.release.0.18.2.headline'), '在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。');
 		assert.equal(t('whatsNew.release.0.18.3.headline'), '一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。');
 		assert.equal(t('whatsNew.release.0.19.2.headline'), '一个维护版本：徽章设置现在可预览你的熟练度图表（30/90 天范围），并引导你先安装徽章应用再同步。没有新增界面。');
+		assert.equal(t('whatsNew.release.0.20.0.headline'), 'AI 就绪度显示完整的阶段阶梯，图表视图可以按编辑器筛选，配套扩展可以打开会话日志。');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI 就绪度');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), '在使用分析中逐个扫描仓库的交付与治理控制措施，查看进入下一阶段的阻碍和无法核实的项目。与个人熟练度评分分开显示。');
 		assert.equal(t('whatsNew.release.0.19.0.headline'), "使用分析现在按“使用”“工作区”“GitHub”“辅导”分组，各部分按区块排列；图表视图显示官方编辑器图标，并为每个已登录的 GitHub 账户显示 Copilot 预算。");
@@ -332,7 +334,7 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.overview.scannedMany', 4), '4 repositories scanned');
 	assert.equal(t('readiness.overview.atStage', 2, 0), '2 at Stage 0');
 	assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 with anti-patterns');
-	assert.equal(t('readiness.overview.hint'), 'Click a repository to see what blocks its next stage.');
+	assert.equal(t('readiness.overview.hint'), 'Click a repository to see every stage and its checks.');
 	assert.equal(t('readiness.disclaimer.headline'), 'A checklist, not a green light.');
 	assert.equal(t('readiness.disclaimer.body'), 'For each repository this shows which safeguards are already in place (reviews, CI checks, agent instructions) and what is still missing for the next stage. It never says a repo is ready to run without people watching, so Stage 5 is never given out.');
 	assert.equal(t('readiness.about.title'), '📋 What this measures');
@@ -341,7 +343,19 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.action.hint'), 'Pick the items above, then open a new Copilot Chat with a prompt to implement them. Nothing is sent until you press Enter.');
 	assert.equal(t('readiness.action.draft'), '🤖 Draft Copilot Chat prompt');
 	assert.equal(t('readiness.action.selectFirst'), '🤖 Select at least one item first');
-	assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), 'Include CODEOWNERS in the Copilot prompt');
+	assert.equal(t('readiness.action.includeItem', 'CI workflows'), 'Include CI workflows in the Copilot prompt');
+	assert.equal(t('readiness.ladder.title'), 'All stages and their checks');
+	assert.equal(t('readiness.stage.progress', 2, 5), '2 of 5 in place');
+	assert.equal(t('readiness.stage.missing', 1), '1 missing');
+	assert.equal(t('readiness.stage.next'), 'Next stage');
+	assert.equal(t('readiness.stage.notAssessed'), 'Not assessed by this scan');
+	assert.equal(t('readiness.state.present'), 'In place');
+	assert.equal(t('readiness.state.absent'), 'Missing');
+	assert.equal(t('readiness.state.unknown'), 'Not checked');
+	assert.equal(t('readiness.state.notApplicable'), 'Not applicable');
+	assert.equal(t('readiness.tag.recommended'), 'Recommended');
+	assert.equal(t('readiness.tag.recommendedHint'), 'Good practice, but it does not block this stage.');
+	assert.equal(t('readiness.repo.otherHost'), 'remote is not on GitHub, so GitHub-specific checks are not run');
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('readiness.summary.missingForStage', 3, 1), '进入第 1 阶段还缺 3 项');
@@ -350,13 +364,25 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 		assert.equal(t('readiness.overview.scannedMany', 4), '已扫描 4 个仓库');
 		assert.equal(t('readiness.overview.atStage', 2, 0), '2 个处于第 0 阶段');
 		assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 个存在反模式');
-		assert.equal(t('readiness.overview.hint'), '点击仓库，查看阻碍其进入下一阶段的因素。');
+		assert.equal(t('readiness.overview.hint'), '点击仓库，查看每个阶段及其检查项。');
 		assert.equal(t('readiness.disclaimer.headline'), '这是一份检查清单，而不是绿灯。');
 		assert.equal(t('readiness.about.title'), '📋 衡量内容');
 		assert.equal(t('readiness.about.stage5'), '第 5 阶段永远不会被授予：其决定性证据无法由机器检测。');
 		assert.equal(t('readiness.action.draft'), '🤖 起草 Copilot Chat 提示词');
 		assert.equal(t('readiness.action.selectFirst'), '🤖 请先至少选择一项');
-		assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), '在 Copilot 提示词中包含 CODEOWNERS');
+		assert.equal(t('readiness.action.includeItem', 'CI workflows'), '在 Copilot 提示词中包含 CI workflows');
+		assert.equal(t('readiness.ladder.title'), '所有阶段及其检查项');
+		assert.equal(t('readiness.stage.progress', 2, 5), '已具备 2/5 项');
+		assert.equal(t('readiness.stage.missing', 1), '缺少 1 项');
+		assert.equal(t('readiness.stage.next'), '下一阶段');
+		assert.equal(t('readiness.stage.notAssessed'), '本次扫描不评估');
+		assert.equal(t('readiness.state.present'), '已具备');
+		assert.equal(t('readiness.state.absent'), '缺失');
+		assert.equal(t('readiness.state.unknown'), '未检查');
+		assert.equal(t('readiness.state.notApplicable'), '不适用');
+		assert.equal(t('readiness.tag.recommended'), '建议');
+		assert.equal(t('readiness.tag.recommendedHint'), '良好实践，但不会阻碍此阶段。');
+		assert.equal(t('readiness.repo.otherHost'), '远程仓库不在 GitHub 上，因此不运行 GitHub 专属检查');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -832,6 +858,8 @@ test('l10n: environmental methodology keys resolve in English', () => {
 test('l10n: log viewer summary card labels resolve in English', () => {
 	const expected: Record<string, string> = {
 		'logviewer.summary.interactions': 'Interactions',
+		'logviewer.turn.delegatedInstruction': 'Delegated instruction (automated)',
+		'logviewer.turn.user': 'User',
 		'logviewer.summary.editorMode': 'Editor Mode',
 		'logviewer.summary.estimatedTokens': 'Estimated Tokens',
 		'logviewer.summary.actualTokens': 'Actual Tokens',
@@ -938,6 +966,8 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	try {
 		const expected: Record<string, string> = {
 			'logviewer.summary.interactions': '交互次数',
+			'logviewer.turn.delegatedInstruction': '委派指令（自动生成）',
+			'logviewer.turn.user': '用户',
 			'logviewer.summary.editorMode': '编辑器模式',
 			'logviewer.summary.estimatedTokens': '预计令牌数',
 			'logviewer.summary.actualTokens': '实际令牌数',

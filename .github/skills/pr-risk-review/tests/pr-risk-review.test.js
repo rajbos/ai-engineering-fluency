@@ -16,6 +16,8 @@ const {
   parseNameStatusZ,
   classify,
   codeSpan,
+  parseApplyTo,
+  selectGuidance,
 } = require('../collect-changeset.js');
 
 const SKILL_DIR = path.resolve(__dirname, '..');
@@ -296,4 +298,69 @@ test('codeSpan: a backslash before a pipe cannot split the row', () => {
     assert.ok(!/\\(?!u\{)/.test(span), `${JSON.stringify(name)} -> ${span}`);
     assert.ok(span.includes('\\u{5C}'), span);
   }
+});
+
+// ── repository guidance selection ───────────────────────────────────────────
+
+test('parseApplyTo: reads comma-separated globs from frontmatter only', () => {
+  assert.deepEqual(
+    parseApplyTo('---\napplyTo: "sharing-server/**,docs/sharing-server/**"\n---\n# x'),
+    ['sharing-server/**', 'docs/sharing-server/**']
+  );
+  assert.deepEqual(parseApplyTo('---\r\napplyTo: .github/workflows/**\r\n---\r\n'), [
+    '.github/workflows/**',
+  ]);
+  assert.deepEqual(parseApplyTo('# no frontmatter\napplyTo: "src/**"'), []);
+  assert.deepEqual(parseApplyTo('---\ndescription: x\n---\n'), []);
+});
+
+test('selectGuidance: picks root, nested AGENTS.md and matching instructions', () => {
+  const texts = {
+    '.github/instructions/workflows.instructions.md': '---\napplyTo: ".github/workflows/**"\n---\n',
+    '.github/instructions/cli.instructions.md': '---\napplyTo: "cli/**"\n---\n',
+    '.github/instructions/sharing-server.instructions.md':
+      '---\napplyTo: "sharing-server/**,docs/sharing-server/**"\n---\n',
+  };
+  const paths = [
+    'AGENTS.md',
+    'sharing-server/AGENTS.md',
+    '.github/copilot-instructions.md',
+    ...Object.keys(texts),
+  ];
+  const selected = selectGuidance(paths, (p) => texts[p] ?? null, [
+    { path: '.github/workflows/release.yml' },
+    { path: 'docs/sharing-server/NEW.md', oldPath: 'docs/OLD.md' },
+  ]);
+  assert.deepEqual(
+    selected.map((g) => g.path),
+    [
+      '.github/copilot-instructions.md',
+      '.github/instructions/sharing-server.instructions.md',
+      '.github/instructions/workflows.instructions.md',
+      'AGENTS.md',
+    ]
+  );
+  assert.ok(selected.every((g) => g.changedInPr === false));
+});
+
+test('selectGuidance: flags guidance the PR edits and matches renamed-from paths', () => {
+  const selected = selectGuidance(
+    ['AGENTS.md', 'sharing-server/AGENTS.md'],
+    () => null,
+    [{ path: 'docs/moved.md', oldPath: 'sharing-server/src/a.ts' }, { path: 'AGENTS.md' }]
+  );
+  assert.deepEqual(
+    selected.map((g) => [g.path, g.changedInPr]),
+    [
+      ['AGENTS.md', true],
+      ['sharing-server/AGENTS.md', false],
+    ]
+  );
+});
+
+test('selectGuidance: a nested AGENTS.md does not match a sibling prefix', () => {
+  const selected = selectGuidance(['sharing-server/AGENTS.md'], () => null, [
+    { path: 'sharing-server-tools/x.js' },
+  ]);
+  assert.deepEqual(selected, []);
 });

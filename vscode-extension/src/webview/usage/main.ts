@@ -28,7 +28,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AgentSource, AgentUsage, AutomaticCompactionStats, AvailableToolEntry, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView, ToolCurationAnalysis } from '../../../../src/types';
+import type { AgentSource, AgentUsage, AutomaticCompactionStats, TodaySessionSummary, AvailableToolEntry, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView, ToolCurationAnalysis } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
@@ -103,31 +103,6 @@ type UsageAnalysisPeriod = {
 	contextWindow?: ContextWindowStats;
 	contextPressure?: ContextPressureStats;
 	modelEfficiency?: ModelEfficiencyUsage;
-};
-
-type TodaySessionSummary = {
-	title: string | null;
-	filePath: string;
-	interactions: number;
-	toolCalls: number;
-	inputTokens: number;
-	outputTokens: number;
-	thinkingTokens: number;
-	cachedTokens: number;
-	totalTokens: number;
-	estimatedCost: number;
-	editor: string;
-	models: string[];
-	lastActivity: string;
-	truncationCount?: number;
-	maxRequestInputTokens?: number;
-	contextTier?: string;
-	contextWindowLimit?: number;
-	contextReachedTokens?: number;
-	durationMs?: number;
-	activeDurationMs?: number;
-	workspace?: string;
-	subAgentCalls?: number;
 };
 
 type InsightSeverity = 'tip' | 'opportunity' | 'celebration';

@@ -2,7 +2,12 @@
 
 Mistral Vibe (<https://github.com/mistralai/mistral-vibe>) is a terminal coding agent. Parsed by `src/mistralvibe.ts` and `src/adapters/mistralVibeAdapter.ts`.
 
-## Location
+Newer Vibe versions — including the local desktop app (Vibe Desktop), which writes
+`runtime_path: "session_api"` in `meta.json` and is labelled "Mistral Vibe Desktop" — use the
+**unified session store** instead; see
+[mistral-vibe-desktop-session-schema.md](mistral-vibe-desktop-session-schema.md).
+
+## Location (legacy layout)
 
 `<VIBE_HOME or ~/.vibe>/logs/session/session_<YYYYMMDD>_<HHMMSS>_<id8>/`
 

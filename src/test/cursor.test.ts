@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { UriLike } from '../opencode';
 import { CursorDataAccess } from '../cursor';
+import type { ReadOnlySqliteReader } from '../utils/readOnlySqlite';
 
 const FAKE_URI: UriLike = { fsPath: '', path: '', scheme: 'file' };
 
@@ -182,7 +183,7 @@ test('falls back to sql.js when node:sqlite is unavailable, and still returns co
 
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron).
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const virtualPath = `${fixture.dbPath}#${composerId}`;
 		const data = await access.readComposerData(virtualPath);
@@ -208,7 +209,7 @@ test('a db path that fails to open read-only is only probed once, not retried on
 				throw new Error('simulated read-only open failure');
 			}
 		}
-		(access as unknown as { getNodeSqliteModule: () => { DatabaseSync: unknown } }).getNodeSqliteModule = () => (
+		(access as unknown as { _readOnly: { getNodeSqliteModule: () => { DatabaseSync: unknown } } })._readOnly.getNodeSqliteModule = () => (
 			{ DatabaseSync: FailingDatabaseSync }
 		);
 		access.getCursorDbPath = () => dbPath;
@@ -229,25 +230,22 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 		const access = new CursorDataAccess(FAKE_URI);
 		// Force the read-only backend to fail once, as a transient SQLITE_BUSY would while the
 		// writer holds an exclusive lock during its own checkpoint.
-		const accessInternals = access as unknown as {
-			_readOnlyUnsupportedDbs: Map<string, number>;
-			isReadOnlyDemoted(dbPath: string): boolean;
-		};
-		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now());
+		const readOnly = (access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly;
+		readOnly.demote(fixture.dbPath, Date.now());
 		assert.equal(
-			accessInternals.isReadOnlyDemoted(fixture.dbPath), true,
+			readOnly.isDemoted(fixture.dbPath), true,
 			'a just-failed db should be demoted to the sql.js fallback'
 		);
 
 		// Past the cooldown the demotion must lapse — otherwise one transient failure strands this
 		// db on the copy-based fallback forever, reintroducing the multi-GB copies (#2033).
-		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now() - 6 * 60_000);
+		readOnly.demote(fixture.dbPath, Date.now() - 6 * 60_000);
 		assert.equal(
-			accessInternals.isReadOnlyDemoted(fixture.dbPath), false,
+			readOnly.isDemoted(fixture.dbPath), false,
 			'the demotion must expire so the copy-free backend is retried'
 		);
 		assert.equal(
-			accessInternals._readOnlyUnsupportedDbs.has(fixture.dbPath), false,
+			readOnly.hasDemotionEntry(fixture.dbPath), false,
 			'the lapsed entry should be cleared rather than accumulating'
 		);
 	} finally {
@@ -256,8 +254,8 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 });
 
 test('a failed read-only open demotes the db only temporarily — the REAL query path retries the native backend once the cooldown expires', async () => {
-	// Unlike the test above (which only pokes the private _readOnlyUnsupportedDbs map and the
-	// isReadOnlyDemoted predicate directly), this exercises the actual public query path end to
+	// Unlike the test above (which only pokes the private reader's demotion map and its
+	// isDemoted predicate directly), this exercises the actual public query path end to
 	// end with an injected failing/recovering backend and a controllable clock, so a regression
 	// that left queryReadOnly permanently bypassed after one failure would be caught here.
 	const fixture = createCursorDbFixture();
@@ -280,10 +278,11 @@ test('a failed read-only open demotes the db only temporarily — the REAL query
 				}
 				this.real = new RealDatabaseSync(dbPath, options);
 			}
+			exec(sql: string) { return this.real.exec(sql); }
 			prepare(sql: string) { return this.real.prepare(sql); }
 			close() { return this.real.close(); }
 		}
-		(access as unknown as { getNodeSqliteModule: () => { DatabaseSync: unknown } }).getNodeSqliteModule = () => (
+		(access as unknown as { _readOnly: { getNodeSqliteModule: () => { DatabaseSync: unknown } } })._readOnly.getNodeSqliteModule = () => (
 			{ DatabaseSync: ControllableDatabaseSync }
 		);
 
@@ -331,7 +330,7 @@ test('the sql.js fallback backend caches a parsed Database per db path instead o
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron) — every query below must go
 		// through the sql.js fallback.
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const dbCounter = installDbConstructionCounter(access);
 
@@ -369,7 +368,7 @@ test('a transient read failure is not cached as "composer not found" — it is r
 		const access = new CursorDataAccess(FAKE_URI);
 		// Force every query through the sql.js fallback, and make its very first load fail —
 		// simulating a momentary error (e.g. a transient lock) rather than a genuinely missing row.
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 		let initAttempts = 0;
 		const realInitSqlJs = access.initSqlJs.bind(access);
 		access.initSqlJs = async () => {
@@ -455,7 +454,7 @@ test('the sql.js fallback reuses the parsed Database across a throttled read ins
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron) — every query below must go
 		// through the sql.js fallback and its per-db-path Database cache (getSqlJsDb).
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const dbCounter = installDbConstructionCounter(access);
 
@@ -512,7 +511,7 @@ test('a WAL-blind plain read (merge failed, nothing cached) is not persisted as 
 		write('v2'); // pending only in the WAL from here on
 
 		const access = new CursorDataAccess(FAKE_URI);
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const virtualPath = `${fixture.dbPath}#${composerId}`;
 		const composerCache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;

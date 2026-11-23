@@ -17,7 +17,11 @@ The publisher for pull requests is the `ui-checks` job in
 `.github/workflows/ci.yml`: it runs this diff against the PR's merge base and
 posts the before/after/diff images as one comment on the PR (replaced on every
 push) through `gh pr comment --attach`, rendered by
-`.github/workflows/scripts/visual-diff-comment.js`. An agent opening a UI PR
+`.github/workflows/scripts/visual-diff-comment.js`. Other surfaces merge their
+screenshots into the same report with `lib/report.js`'s `mergeReportSection`
+under a view prefix: the badge emulator (`badge-*`,
+`badge-app/tools/emulator/badge-diff.js`) and the desktop app's panels
+(`desktop-*`, `scripts/desktop-visual-diff.js`). An agent opening a UI PR
 does not have to attach screenshots by hand — it has to make sure the change is
 *visible* to this harness (see "States" below) and say in the PR body which
 views it expects to change.

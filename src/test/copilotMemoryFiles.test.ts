@@ -147,6 +147,65 @@ test('discoverMemoryFilesInUserPath treats a literal "session" folder as session
 	assert.equal(entries[0].sessionId, undefined);
 });
 
+// ---------------------------------------------------------------------------
+// Workspace-hash discovery edge cases (memories/ sub-folder classification)
+// ---------------------------------------------------------------------------
+
+function memoriesDir(userPath: string, hash: string): string {
+	return path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories');
+}
+
+test('discoverMemoryFilesInUserPath returns [] when the workspaceStorage folder or a hash\'s memories folder is missing', () => {
+	const noStorage = mkTmpDir('memowl-user-');
+	assert.deepEqual(discoverMemoryFilesInUserPath(noStorage), []);
+
+	const noMemories = mkTmpDir('memowl-user-');
+	// The extension folder exists but has no memory-tool/memories under it.
+	fs.mkdirSync(path.join(noMemories, 'workspaceStorage', 'hash-a', 'GitHub.copilot-chat', 'memory-tool'), { recursive: true });
+	writeFile(path.join(noMemories, 'workspaceStorage', 'hash-a', 'GitHub.copilot-chat', 'stray.md'), '# Not a memory');
+	assert.deepEqual(discoverMemoryFilesInUserPath(noMemories), []);
+});
+
+test('discoverMemoryFilesInUserPath returns [] for empty memories and scope folders', () => {
+	const userPath = mkTmpDir('memowl-user-');
+	fs.mkdirSync(memoriesDir(userPath, 'empty-memories'), { recursive: true });
+	fs.mkdirSync(path.join(memoriesDir(userPath, 'empty-scopes'), 'repo'), { recursive: true });
+	fs.mkdirSync(path.join(memoriesDir(userPath, 'empty-scopes'), 'session'), { recursive: true });
+	fs.mkdirSync(path.join(memoriesDir(userPath, 'empty-scopes'), SESSION_FOLDER_NAME), { recursive: true });
+	assert.deepEqual(discoverMemoryFilesInUserPath(userPath), []);
+});
+
+test('discoverMemoryFilesInUserPath keeps only .md files in recognized scope folders from a mixed memories folder', () => {
+	const userPath = mkTmpDir('memowl-user-');
+	const hash = 'mixed-hash';
+	const memories = memoriesDir(userPath, hash);
+	// Matching entries.
+	writeFile(path.join(memories, 'repo', 'conventions.md'), '# Conventions');
+	writeFile(path.join(memories, 'repo', 'UPPER.MD'), '# Upper-case extension');
+	writeFile(path.join(memories, 'session', 'scratch.md'), '# Scratch');
+	writeFile(path.join(memories, SESSION_FOLDER_NAME, 'plan.md'), '# Plan');
+	// Non-matching entries.
+	writeFile(path.join(memories, 'repo', 'notes.txt'), 'not markdown');
+	writeFile(path.join(memories, 'repo', 'nested', 'deep.md'), '# Nested folders are not walked');
+	writeFile(path.join(memories, 'loose.md'), '# Directly under memories/, outside any scope folder');
+	writeFile(path.join(memories, 'not-a-session', 'note.md'), '# Unrecognized folder');
+	writeFile(path.join(memories, Buffer.from('not-a-uuid', 'utf8').toString('base64'), 'note.md'), '# Base64 but not a UUID');
+	writeFile(path.join(memories, 'repo.md'), '# A file named like a scope folder');
+
+	const entries = discoverMemoryFilesInUserPath(userPath);
+	const summary = entries
+		.map(e => `${e.scope}|${e.sessionId ?? '-'}|${e.workspaceHash}|${path.basename(e.path)}`)
+		.sort();
+	assert.deepEqual(summary, [
+		'repo|-|mixed-hash|UPPER.MD',
+		'repo|-|mixed-hash|conventions.md',
+		'session|-|mixed-hash|scratch.md',
+		`session|${SESSION_UUID}|mixed-hash|plan.md`,
+	]);
+	// No workspace.json/meta.json, so there is no resolved workspace name.
+	assert.ok(entries.every(e => e.workspaceName === undefined));
+});
+
 test('discoverMemoryFilesInUserPath merges memory files across multiple coexisting extension-folder spellings, not just the first match', () => {
 	const userPath = mkTmpDir('memowl-user-');
 

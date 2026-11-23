@@ -29,7 +29,7 @@ const { renderApp, withEmulator, parseArgs } = require('./emulator');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SKILL_DIR = path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff');
-const { renderMarkdownReport } = require(path.join(SKILL_DIR, 'lib', 'report.js'));
+const { renderMarkdownReport, mergeReportSection } = require(path.join(SKILL_DIR, 'lib', 'report.js'));
 const APP_PATH = 'badge-app/fluency';
 const VIEW_PREFIX = 'badge-';
 
@@ -84,16 +84,7 @@ function copyPngs(fromDir, toDir) {
 
 /** The webview report with its badge entries replaced by these comparisons. */
 function mergeReports(existing, badge) {
-	const keep = (existing?.comparisons || []).filter((c) => !String(c.view).startsWith(VIEW_PREFIX));
-	const comparisons = [...keep, ...badge.comparisons];
-	const count = (status) => comparisons.filter((c) => c.status === status).length;
-	return {
-		...(existing || {}),
-		generatedAt: badge.generatedAt,
-		threshold: existing?.threshold ?? badge.threshold,
-		summary: { changed: count('changed'), unchanged: count('unchanged'), added: count('added'), removed: count('removed') },
-		comparisons,
-	};
+	return mergeReportSection(existing, badge, VIEW_PREFIX);
 }
 
 /** Parses a JSON file, or returns null when it does not exist; read directly rather than checked first. */

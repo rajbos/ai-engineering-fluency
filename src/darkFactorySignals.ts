@@ -46,8 +46,37 @@ const AGENTS_DIR = path.join('.github', 'agents');
 const TEST_STEP_PATTERN =
 	/\b(?:npm|yarn|pnpm)\s+(?:run\s+)?test|\bnpm\s+run\s+test:|\bpytest\b|\bdotnet\s+test\b|\bgo\s+test\b|\.\/gradlew\s+\S*test|\bgradle\s+\S*test|\bmvn\b[^\n]*\btest\b|\bcargo\s+test\b|\bbundle\s+exec\s+rspec\b|\btox\b|\bctest\b/i;
 
-/** A call to a reusable workflow in another repository. */
-const REUSABLE_WORKFLOW_PATTERN = /^\s*uses:\s*[\w.-]+\/[\w.-]+\/\.github\/workflows\//m;
+/**
+ * A workflow that deploys to cloud infrastructure: a deploy action, or a deploy
+ * command from a cloud or cluster CLI. Heuristic. Sign-in actions on their own
+ * are left out on purpose (a workflow may sign in only to read data), and so is
+ * publishing a package or a container image, which ships an artefact without
+ * provisioning anything.
+ */
+const INFRASTRUCTURE_DEPLOY_PATTERN = new RegExp([
+	'azure/(?:webapps-deploy|functions-action|k8s-deploy|aks-set-context|arm-deploy|container-apps-deploy-action|static-web-apps-deploy)@',
+	'aws-actions/(?:amazon-ecs-deploy-task-definition|aws-cloudformation-github-deploy)@',
+	'google-github-actions/(?:deploy-[\\w-]+|get-gke-credentials)@',
+	'hashicorp/setup-terraform@',
+	'pulumi/actions@',
+	'cloudflare/wrangler-action@',
+	'superfly/flyctl-actions',
+	'\\bterraform\\s+(?:apply|plan)\\b',
+	'\\bpulumi\\s+up\\b',
+	'\\bkubectl\\s+(?:apply|rollout|set\\s+image)\\b',
+	'\\bhelm\\s+(?:upgrade|install)\\b',
+	'\\baz\\s+(?:deployment|webapp|functionapp|containerapp|aks|staticwebapp)\\b',
+	'\\baws\\s+(?:cloudformation|ecs|lambda|eks)\\b',
+	'\\bgcloud\\s+(?:run|app|functions)\\s+deploy\\b',
+	'\\b(?:cdk|serverless|sls|flyctl|wrangler)\\s+deploy\\b',
+].join('|'), 'i');
+
+/**
+ * A workflow that puts an AI reviewer on pull requests: Copilot code review
+ * requested by name, or a dedicated AI review action. Heuristic.
+ */
+const AI_REVIEW_WORKFLOW_PATTERN =
+	/copilot-pull-request-reviewer|--add-reviewer[\s=]+["']?@?copilot|anthropics\/claude-code-security-review|coderabbit/i;
 
 /** The CodeQL action, however it is pinned. */
 const CODEQL_PATTERN = /github\/codeql-action/i;
@@ -234,8 +263,20 @@ function observeWorkflowPattern(scan: WorkflowScan, pattern: RegExp, label: stri
 // Per-stage collection
 // ---------------------------------------------------------------------------
 
-/** Candidate locations GitHub accepts for a CODEOWNERS file. */
-const CODEOWNERS_PATHS = ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS'];
+/** Dependabot or Renovate configuration, in the locations each tool reads. */
+const DEPENDENCY_UPDATE_PATHS = [
+	'.github/dependabot.yml', '.github/dependabot.yaml',
+	'renovate.json', 'renovate.json5', '.renovaterc', '.renovaterc.json', '.github/renovate.json', '.github/renovate.json5',
+];
+
+/** A dev container, or the setup workflow the Copilot coding agent starts from. */
+const ENVIRONMENT_PATHS = [
+	'.devcontainer', '.devcontainer.json',
+	'.github/workflows/copilot-setup-steps.yml', '.github/workflows/copilot-setup-steps.yaml',
+];
+
+/** Configuration files of AI code-review tools that review every pull request. */
+const AI_REVIEW_CONFIG_PATHS = ['.coderabbit.yaml', '.coderabbit.yml'];
 
 /** Markers of infrastructure described as code. Heuristic — deliberately strict. */
 const IAC_PATHS = [
@@ -249,31 +290,50 @@ const SPEC_PATHS = ['specs', 'spec', 'docs/specs'];
 /** Directories that hold executable acceptance scenarios. */
 const ACCEPTANCE_PATHS = ['features', 'acceptance', 'e2e', 'tests/acceptance', 'test/acceptance', 'tests/e2e', 'test/e2e'];
 
-/** Infrastructure described as code, either at the repository root or in a conventional directory. */
-function observeInfrastructureAsCode(repoRoot: string): DarkFactoryObservation {
+/** Shown when a deployment control is skipped because the repository deploys nothing. */
+const NO_DEPLOYMENT_DETAIL = 'No workflow deploys to cloud infrastructure, so this does not apply here.';
+
+/**
+ * Whether the repository deploys to infrastructure at all. A desktop app, a
+ * library or an extension has nothing to describe as code and no environment to
+ * gate, so the deployment controls only apply once a workflow is seen deploying.
+ * `unknown` when the workflows could not all be read.
+ */
+function observeInfrastructureDeployment(scan: WorkflowScan): DarkFactoryObservation {
+	return observeWorkflowPattern(scan, INFRASTRUCTURE_DEPLOY_PATTERN, 'deploys to cloud infrastructure');
+}
+
+/**
+ * Infrastructure described as code, either at the repository root or in a
+ * conventional directory. When none is found, the answer depends on whether
+ * anything is deployed: missing where a workflow deploys, not applicable where
+ * nothing does.
+ */
+function observeInfrastructureAsCode(repoRoot: string, deployment: DarkFactoryObservation): DarkFactoryObservation {
 	const { entries, inconclusive } = listDir(repoRoot);
 	if (entries.some(name => hasExtension(name, ['.tf', '.bicep']))) {
 		return { state: 'present', detail: 'Infrastructure definitions in the repository root' };
 	}
 	const byDirectory = observePath(repoRoot, IAC_PATHS, 'any');
-	if (byDirectory.state !== 'absent' || !inconclusive) { return byDirectory; }
-	return { state: 'unknown', detail: 'The repository root could not be listed in full' };
+	if (byDirectory.state !== 'absent') { return byDirectory; }
+	if (inconclusive) { return { state: 'unknown', detail: 'The repository root could not be listed in full' }; }
+	if (deployment.state === 'present') {
+		return { state: 'absent', detail: `${deployment.detail}, but no infrastructure definitions were found` };
+	}
+	return deployment.state === 'unknown' ? deployment : { state: 'not-applicable', detail: NO_DEPLOYMENT_DETAIL };
 }
 
-function collectStage1(repoRoot: string, scan: WorkflowScan): Record<string, DarkFactoryObservation> {
+function collectStage1(repoRoot: string, scan: WorkflowScan, deployment: DarkFactoryObservation): Record<string, DarkFactoryObservation> {
 	const workflowCount = scan.files.length;
 	return {
 		'ci-workflows': workflowCount > 0
 			? { state: 'present', detail: `${workflowCount} workflow file(s) in ${WORKFLOWS_DIR}` }
 			: negativeObservation(scan.unreadable, `No workflow files in ${WORKFLOWS_DIR}`, `${WORKFLOWS_DIR} could not be listed in full`),
 		'ci-test-execution': observeWorkflowPattern(scan, TEST_STEP_PATTERN, 'runs a test suite'),
-		'reusable-workflows': observeWorkflowPattern(scan, REUSABLE_WORKFLOW_PATTERN, 'calls a reusable workflow'),
-		'codeowners': observePath(repoRoot, CODEOWNERS_PATHS, 'file'),
-		'dependabot': observePath(repoRoot, ['.github/dependabot.yml', '.github/dependabot.yaml'], 'file'),
-		'devcontainer': observePath(repoRoot, ['.devcontainer', '.devcontainer.json'], 'any'),
-		'infrastructure-as-code': observeInfrastructureAsCode(repoRoot),
+		'dependabot': observePath(repoRoot, DEPENDENCY_UPDATE_PATHS, 'file'),
+		'devcontainer': observePath(repoRoot, ENVIRONMENT_PATHS, 'any'),
+		'infrastructure-as-code': observeInfrastructureAsCode(repoRoot, deployment),
 		'code-scanning': observeWorkflowPattern(scan, CODEQL_PATTERN, 'runs CodeQL'),
-		'artifact-attestations': observeWorkflowPattern(scan, ATTESTATION_PATTERN, 'produces attestations'),
 	};
 }
 
@@ -313,17 +373,50 @@ function observeAgenticWorkflows(repoRoot: string, scan: WorkflowScan): DarkFact
 	);
 }
 
-function collectStage4(repoRoot: string, scan: WorkflowScan, agents: AgentListing): Record<string, DarkFactoryObservation> {
+/**
+ * Something other than the implementing agent that judges a change: a review,
+ * test or security agent, an AI reviewer wired into a workflow, or an AI review
+ * tool's configuration. Copilot code review switched on through a ruleset
+ * leaves no file, which is why the catalogue turns `absent` here into `unknown`.
+ */
+function observeIndependentEvaluator(repoRoot: string, scan: WorkflowScan, agents: AgentListing): DarkFactoryObservation {
 	const evaluators = evaluatorAgentNames(agents.names);
+	if (evaluators.length > 0) { return { state: 'present', detail: `Evaluator agent(s): ${evaluators.slice(0, 3).join(', ')}` }; }
+	const byWorkflow = observeWorkflowPattern(scan, AI_REVIEW_WORKFLOW_PATTERN, 'requests an AI review');
+	if (byWorkflow.state === 'present') { return byWorkflow; }
+	const byConfig = observePath(repoRoot, AI_REVIEW_CONFIG_PATHS, 'file');
+	if (byConfig.state === 'present') { return byConfig; }
+	return negativeObservation(
+		agents.inconclusive || byWorkflow.state === 'unknown' || byConfig.state === 'unknown',
+		'No review agent, AI review workflow or AI review configuration found',
+		'Not every agent and workflow definition could be read, so this could not be determined',
+	);
+}
+
+/**
+ * A named environment is a gate on a deployment. Where nothing is deployed
+ * there is nothing to gate, so the control (and its protection rules) does not
+ * apply unless a workflow declares an environment anyway.
+ */
+function observeDeploymentEnvironments(scan: WorkflowScan, deployment: DarkFactoryObservation): DarkFactoryObservation {
+	const declared = observeWorkflowPattern(scan, ENVIRONMENT_PATTERN, 'targets a named environment');
+	if (declared.state !== 'absent' || deployment.state !== 'absent') { return declared; }
+	return { state: 'not-applicable', detail: NO_DEPLOYMENT_DETAIL };
+}
+
+function collectStage4(repoRoot: string, scan: WorkflowScan, agents: AgentListing, deployment: DarkFactoryObservation): Record<string, DarkFactoryObservation> {
+	const environments = observeDeploymentEnvironments(scan, deployment);
 	return {
 		'issue-forms': observeDirEntries(repoRoot, '.github/ISSUE_TEMPLATE', name => hasExtension(name, ['.yml', '.yaml']), 'Issue Form(s)'),
 		'versioned-specifications': observePath(repoRoot, SPEC_PATHS, 'dir'),
 		'executable-acceptance': observePath(repoRoot, ACCEPTANCE_PATHS, 'dir'),
-		'independent-evaluator-agent': evaluators.length > 0
-			? { state: 'present', detail: `Evaluator agent(s): ${evaluators.slice(0, 3).join(', ')}` }
-			: negativeObservation(agents.inconclusive, 'No review, test or security agent defined', `${AGENTS_DIR} could not be listed in full`),
+		'independent-evaluator-agent': observeIndependentEvaluator(repoRoot, scan, agents),
 		'agentic-workflows': observeAgenticWorkflows(repoRoot, scan),
-		'deployment-environments': observeWorkflowPattern(scan, ENVIRONMENT_PATTERN, 'targets a named environment'),
+		'deployment-environments': environments,
+		// Protection rules are an API fact, so the filesystem tier only answers when
+		// there is no environment to protect in the first place.
+		...(environments.state === 'not-applicable' ? { 'environment-protection-rules': environments } : {}),
+		'artifact-attestations': observeWorkflowPattern(scan, ATTESTATION_PATTERN, 'produces attestations'),
 	};
 }
 
@@ -456,8 +549,7 @@ interface AgentListing {
  * customization scanner already uses (`src/customizationPatterns.json`), so a
  * repository that does not follow the `*.agent.md` convention is still seen.
  * Documentation files that happen to live in the folder are excluded, since
- * counting a README as an agent would both inflate `custom-agents` and raise a
- * spurious "no independent evaluator" finding.
+ * counting a README as an agent would inflate `custom-agents`.
  */
 function listAgentFiles(repoRoot: string): AgentListing {
 	const { entries, inconclusive } = listDir(path.join(repoRoot, AGENTS_DIR));
@@ -470,9 +562,8 @@ function listAgentFiles(repoRoot: string): AgentListing {
 	};
 }
 
-function collectFacts(scan: WorkflowScan, agentFileNames: string[]): DarkFactoryRepoFacts {
+function collectFacts(scan: WorkflowScan): DarkFactoryRepoFacts {
 	return {
-		agentFileNames,
 		writeAllWorkflows: scan.files.filter(w => WRITE_ALL_PERMISSIONS_PATTERN.test(w.content)).map(w => w.name),
 		longLivedCredentialWorkflows: scan.files
 			.filter(w => STATIC_CLOUD_CREDENTIAL_PATTERN.test(w.content) && !OIDC_TOKEN_PATTERN.test(w.content))
@@ -490,14 +581,15 @@ function collectFacts(scan: WorkflowScan, agentFileNames: string[]): DarkFactory
 export function collectDarkFactoryFileSignals(repoRoot: string): DarkFactoryFileSignals {
 	const scan = readWorkflowFiles(repoRoot);
 	const agents = listAgentFiles(repoRoot);
+	const deployment = observeInfrastructureDeployment(scan);
 
 	return {
 		observations: {
-			...collectStage1(repoRoot, scan),
+			...collectStage1(repoRoot, scan, deployment),
 			...collectStage2(repoRoot),
 			...collectStage3(repoRoot, agents),
-			...collectStage4(repoRoot, scan, agents),
+			...collectStage4(repoRoot, scan, agents, deployment),
 		},
-		facts: collectFacts(scan, agents.names),
+		facts: collectFacts(scan),
 	};
 }

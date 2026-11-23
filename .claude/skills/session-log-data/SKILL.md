@@ -1,6 +1,6 @@
 ---
 name: session-log-data
-description: Describes the data files available in the coding agent environment after copilot-setup-steps runs. Use when analyzing downloaded session logs or aggregated usage data.
+description: Describes the data files available in the coding agent environment after copilot-setup-steps runs (session logs, aggregated usage data, agent sessions) and the graphify code knowledge graph it builds. Use when analyzing downloaded session logs or aggregated usage data, or for structural code questions in the coding agent environment.
 ---
 
 # Session Log Data Skill
@@ -15,6 +15,12 @@ Use this skill when you need to:
 - Debug token tracking or usage issues using real data
 - Understand model usage distribution across a team
 - Calculate estimated costs from usage data
+
+## Coding Agent Data Sources
+
+When running as the GitHub Copilot Coding Agent (bootstrapped via `.github/workflows/copilot-setup-steps.yml`), extra data may be hydrated into the workspace: `./session-logs/`, `./usage-data/usage-agg-daily.json` and `./usage-data/agent-sessions.json`. They are **not** present in local development, and the Azure-backed ones only exist when the `copilot` GitHub environment has `COPILOT_STORAGE_ACCOUNT` configured (`agent-sessions.json` comes from the GitHub API and does not need it). The rest of this skill documents their schemas, analysis examples and cost estimation. Check that the files exist before relying on them.
+
+These hydrated files are generated output, not source. `session-logs/` and `usage-data/` are git-ignored; **never commit or force-add them** to a PR.
 
 ## Data Availability
 
@@ -189,6 +195,20 @@ Before using the data, check if the files exist:
 ```
 
 If neither directory exists, Azure Storage is not configured. See the `azure-storage-loader` skill and `docs/features/BLOB-UPLOAD.md` for setup instructions.
+
+## Code knowledge graph (graphify)
+
+The same setup workflow builds a code-only graphify knowledge graph at **`.graphify-agent/graph.json`** (local AST parsing, no secrets, non-blocking — it can be missing if the build failed; then fall back to ordinary file search). For structural questions (what calls a symbol, what a change reaches) prefer it over fanning `grep` across the tree:
+
+```bash
+export GRAPHIFY_OUT=.graphify-agent
+graphify query "how does the CLI attribute per-model cost"
+graphify explain "getModelUsageFromSession"
+graphify affected "src/tokenEstimation.ts"     # blast radius
+graphify path "extension.ts" "modelPricing.json"
+```
+
+The graph is a setup-time snapshot and covers code only (not docs). Refresh it with `GRAPHIFY_OUT=.graphify-agent graphify extract . --code-only --no-viz`. CI builds into `.graphify-agent/`; never build into the default `graphify-out/` (it is git-ignored, nothing in it is committed, and a stale local copy there is not the CI graph), and do not use `graphify update .` for this.
 
 ## Related Files
 

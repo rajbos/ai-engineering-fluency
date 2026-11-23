@@ -18,7 +18,7 @@
   "license": "MIT",
   "dependencies": {
     "@azure/data-tables": "^13.3.2",
-    "@azure/identity": "^4.13.1"
+    "@azure/identity": "^4.14.1"
   },
   "overrides": {
     "uuid": "^14.0.0"

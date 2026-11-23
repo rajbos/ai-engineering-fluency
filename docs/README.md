@@ -9,7 +9,7 @@ tags: [documentation, index]
 
 # Documentation
 
-This directory contains all documentation for the GitHub Copilot Token Tracker / AI Engineering Fluency project.
+This directory contains all documentation for the AI Engineering Fluency project.
 
 ## Core Reference
 
@@ -23,7 +23,7 @@ Essential reference documents covering the data model, scoring rules, and tracke
 | [USAGE-ANALYSIS.md](USAGE-ANALYSIS.md) | Guide to the Usage Analysis Dashboard features and tracked metrics |
 | [COPILOT-CLI-FORMAT-CHANGES.md](COPILOT-CLI-FORMAT-CHANGES.md) | Breaking changes to Copilot CLI session log format and their impact |
 | [COPILOT-CLI-OTEL-EXPORT.md](COPILOT-CLI-OTEL-EXPORT.md) | Enabling Copilot CLI's OpenTelemetry file export for exact token counts |
-| [VALIDATION.md](VALIDATION.md) | What each check catches, and the one-command release preflight (`npm run preflight`) |
+| [VALIDATION.md](VALIDATION.md) | What each check catches, and the one-command release preflight (`pnpm run preflight`) |
 | [REPO-HEALTH-SCAN.md](REPO-HEALTH-SCAN.md) | Daily code-health scan (8 topics) → one issue → one PR, via GitHub Actions or a local Claude Code routine |
 
 ## Component Documentation
@@ -115,6 +115,7 @@ Decisions and plans captured during development. Every ADR starts with a **Statu
 |---|---|---|
 | [adr/ANALYSIS-WORKER.md](adr/ANALYSIS-WORKER.md) | Implemented | Why session parsing and workspace scans run on worker threads, and how that is kept from regressing |
 | [adr/SQLITE-WAL-READS.md](adr/SQLITE-WAL-READS.md) | Implemented | Why sql.js reads of data.db/opencode.db must merge pending WAL frames first |
+| [adr/CROSS-HOST-PARSE-COORDINATION.md](adr/CROSS-HOST-PARSE-COORDINATION.md) | Implemented | How VS Code stable, Insiders and the desktop app share one machine-wide parse lock, and why snapshots stay per host |
 | [adr/TOOL-EXECUTION-STATS.md](adr/TOOL-EXECUTION-STATS.md) | Implemented | Per-tool failure counts and latency histograms (reliability, latency, MCP health, cost-vs-speed panels): data sources, additive design, phased plan |
 | [adr/LOCALIZATION-ARCHITECTURE.md](adr/LOCALIZATION-ARCHITECTURE.md) | Accepted | Repo-wide localization standard: the four runtime tiers and one source of truth |
 | [adr/INSIGHTS-CATALOG-LOCALIZATION.md](adr/INSIGHTS-CATALOG-LOCALIZATION.md) | Implemented | How the Insights catalog is localized without giving up insightsEngine.ts's purity |

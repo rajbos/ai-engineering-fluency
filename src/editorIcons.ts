@@ -30,6 +30,7 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Kiro': '👻',
 	'Kiro CLI': '👻',
 	'Mistral Vibe': '🔥',
+	'Mistral Vibe Desktop': '🖥️',
 	'MS Scout (Copilot CLI)': '🔭',
 	'OpenCode': '🟢',
 	'Pi': 'π',

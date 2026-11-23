@@ -85,4 +85,24 @@ function renderMarkdownReport(report) {
 	return lines.join('\n');
 }
 
-module.exports = { renderMarkdownReport };
+/**
+ * Merges one surface's comparisons into the report the webview diff wrote, so
+ * several surfaces (webviews, badge screens, desktop panels) share one report,
+ * artifact and PR comment. Every existing entry whose view starts with `prefix`
+ * is replaced by `section`'s comparisons; everything else is kept. `existing`
+ * may be null when no earlier report was written.
+ */
+function mergeReportSection(existing, section, prefix) {
+	const keep = (existing?.comparisons || []).filter((c) => !String(c.view).startsWith(prefix));
+	const comparisons = [...keep, ...section.comparisons];
+	const count = (status) => comparisons.filter((c) => c.status === status).length;
+	return {
+		...(existing || {}),
+		generatedAt: section.generatedAt,
+		threshold: existing?.threshold ?? section.threshold,
+		summary: { changed: count('changed'), unchanged: count('unchanged'), added: count('added'), removed: count('removed') },
+		comparisons,
+	};
+}
+
+module.exports = { renderMarkdownReport, mergeReportSection };

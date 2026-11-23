@@ -23,7 +23,7 @@ of the wire or actually click the thing. That is what the checks below add.
 ## One command before a release
 
 ```bash
-cd vscode-extension && npm run preflight
+cd vscode-extension && pnpm run preflight
 ```
 
 Runs everything, in stages, on your machine, against your real editor data. It
@@ -31,11 +31,11 @@ does **not** stop at the first failure — a release decision needs the whole
 picture, so it runs every check and prints one verdict at the end.
 
 ```bash
-npm run preflight -- --list          # what it would run, and why each one exists
-npm run preflight -- --quick         # skip the slow browser stage (~2 min faster)
-npm run preflight -- --stage local   # only the checks that need real editor data
-npm run preflight -- --skip visual   # everything except one check
-npm run preflight -- --json          # machine-readable
+pnpm run preflight --list             # what it would run, and why each one exists
+pnpm run preflight --quick            # skip the slow browser stage (~2 min faster)
+pnpm run preflight --stage local      # only the checks that need real editor data
+pnpm run preflight --skip visual      # everything except one check
+pnpm run preflight --json             # machine-readable
 ```
 
 Exit codes: `0` release-ready, `1` a required check failed, `2` preflight could
@@ -59,31 +59,31 @@ this is meant to prevent.
 
 | Check | Command | Catches |
 |---|---|---|
-| `types` | `npm run check-types` | type errors |
+| `types` | `pnpm run check-types` | type errors |
 | `lint` | `pnpm run lint` | lint errors, and ESLint warnings growing past `lint-baseline.json` |
-| `json` | `npm run lint:json` | malformed data files |
-| `l10n` | `npm run lint:l10n` | localization keys out of sync |
-| `compile` | `npm run compile` | build failures |
-| `contract` | `npm run check:contract` | **a message with no handler on the other side** |
+| `json` | `pnpm run lint:json` | malformed data files |
+| `l10n` | `pnpm run lint:l10n` | localization keys out of sync |
+| `compile` | `pnpm run compile` | build failures |
+| `contract` | `pnpm run check:contract` | **a message with no handler on the other side** |
 
 ### `test` — the unit suite
 
 | Check | Command |
 |---|---|
-| `unit` | `npm run test:node` |
+| `unit` | `pnpm run test:node` |
 
 ### `ui` — what the panels actually do when you click them
 
 | Check | Command | Catches |
 |---|---|---|
-| `interaction` | `npm run check:interaction` | **a control that does nothing when clicked** |
-| `visual` | `npm run visual:diff` | what the change looks like, next to the merge base |
+| `interaction` | `pnpm run check:interaction` | **a control that does nothing when clicked** |
+| `visual` | `pnpm run visual:diff` | what the change looks like, next to the merge base |
 
 ### `local` — your real editor data on this machine
 
 | Check | Command | Catches |
 |---|---|---|
-| `editor-data` | `npm run check:editor-data` | an editor that stopped producing readable sessions |
+| `editor-data` | `pnpm run check:editor-data` | an editor that stopped producing readable sessions |
 | `session-schemas` | `node .github/skills/validate-session-schemas/validate-session-schemas.js` | a log format that drifted |
 | `debug-log-schema` | `node .github/skills/discover-debug-log-schema/discover-debug-log-schema.js` | VS Code Chat debug-log drift silently turning exact billing into estimates |
 | `editor-names` | `node .github/skills/validate-editor-names/validate-editor-names.js` | CLI and extension disagreeing on an editor's name |
@@ -95,7 +95,7 @@ this is meant to prevent.
 ### `check:contract` — webview message contract
 
 ```bash
-npm run check:contract
+pnpm run check:contract
 ```
 
 Reads both sides of the `postMessage` wire and reports any message with no
@@ -128,10 +128,10 @@ short — it is the escape hatch, not the norm.
 ### `check:interaction` — interaction smoke
 
 ```bash
-npm run check:interaction
-npm run check:interaction -- --view chart,usage   # one or more views
-npm run check:interaction -- --isolate            # reload between clicks (slow, exhaustive)
-npm run check:interaction -- --concurrency 1      # one view at a time (default 4)
+pnpm run check:interaction
+pnpm run check:interaction --view chart,usage      # one or more views
+pnpm run check:interaction --isolate               # reload between clicks (slow, exhaustive)
+pnpm run check:interaction --concurrency 1         # one view at a time (default 4)
 ```
 
 Renders the **real** webview bundles headlessly (reusing the `visual-view-diff`
@@ -231,7 +231,7 @@ rule out machine load.
 | Job | Checks |
 |---|---|
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
-| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** (extension changes); **badge emulator screenshots vs the merge base** (`badge-app/` changes, see [badge-app/README.md](../badge-app/README.md#try-it-in-the-emulator)) |
+| `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** (extension changes); **badge emulator screenshots vs the merge base** (`badge-app/` changes, see [badge-app/README.md](../badge-app/README.md#try-it-in-the-emulator)); **desktop panel screenshots vs the merge base** (`desktop/` changes, see [Desktop app](#desktop-app)) |
 | `ui-checks-comment.yml` (`workflow_run`, same-repo PRs) | posts the screenshots as a PR comment (holds `GH_PAT`; runs from the default branch) |
 | `desktop-build` (`desktop-build.yml`) | desktop type-check, **desktop message contract**, **webview page shell**, production build, **headless render of every view**, build-output check; host view sync (informational) |
 | `validate-skills` / `security-classification` | **every skill that ships scripts has a `SECURITY.md` or an exempt/pending entry** (`node scripts/validate-skill-security.js`, over all skills) |
@@ -371,7 +371,9 @@ or from the repo root, `./build.ps1 -Project desktop -Target test`.
 - **`check:render`** (`scripts/validate-desktop-render.js`) — builds every panel's
   page with the desktop's own `buildPanelHtml` (`desktop/src/panelPage.ts`) over
   session files written to a temporary HOME (a populated history and an empty one),
-  loads each page in headless Chromium in the dark and light theme, and fails on a
+  loads each page in headless Chromium in the dark and light theme (with the
+  browser's color scheme set to match, because the app's theme tokens follow
+  `prefers-color-scheme` as Electron does), and fails on a
   script or console error, a failed request, an empty `#root` or a codicon font that
   does not load. The app serves a page from `app://panel` and its scripts from
   `app://static`; the check reproduces that two-origin split with two local servers
@@ -380,6 +382,19 @@ or from the repo root, `./build.ps1 -Project desktop -Target test`.
   visual-diff harness finds it (a global install, or the locked install under
   `.github/workflows/dependencies/playwright`). It is not part of `pnpm run check`,
   because of that build and browser; `desktop-build` runs it. It never opens Electron.
+  The temporary HOME is a git-ignored `desktop/.render-check-*` folder rather than
+  the OS temp directory, because the session readers refuse files under the temp
+  directory (`src/utils/safeFileRead.ts`); there the populated scenario read as empty.
+- **Desktop screenshots on PRs** (`scripts/desktop-visual-diff.js`) — for a PR
+  touching `desktop/`, CI's `ui-checks` job builds the desktop app at the merge base
+  (in a temporary `git worktree`) and at the head, runs the render check on both
+  with `--screenshots` (same fixture sessions, same pinned clock), compares them
+  with the visual-view-diff harness and adds the `desktop-*` panels to the same
+  report, artifact and PR screenshot comment as the webviews and the badge. It
+  fails when the head's panels do not render; visual changes are only reported.
+  Run it locally after `pnpm install` in `vscode-extension/`, `cli/` and `desktop/`:
+  `node scripts/desktop-visual-diff.js` (output in `visual-output/`). Changes to
+  the shared webviews or `src/` are screenshotted by the webview diff instead.
 - **`check:views`** — the `sync-host-views` skill, which reports extension views
   the desktop (like Visual Studio and JetBrains) does not ship, and desktop views
   that are bundled but not in `PANEL_MENU` or the other way round.
@@ -392,7 +407,49 @@ Not covered: messages the desktop sends *to* a view (such as `loadingStep` and
 `sessionFilesLoaded`), and clicking the views' controls (the render check only loads
 each page).
 
-## VS Code extension release provenance
+## Release provenance (artifact attestations)
+
+Every file this repository releases carries a Sigstore-backed GitHub build-provenance
+attestation, tying its SHA-256 digest to the repository, workflow, commit and runner:
+
+| Release | Workflow | Attested file | Where the attestation is made |
+|---|---|---|---|
+| VS Code extension (stable + nightly) | `release.yml`, `vscode-nightly-prerelease.yml` | VSIX (+ SBOM attestation) | separate `attest` job, `.github/actions/vsix-attest` |
+| Visual Studio extension | `release.yml`, `visualstudio-publish.yml` | VSIX | separate attest job, `.github/actions/attest-files` |
+| JetBrains plugin | `jetbrains-publish.yml` | plugin ZIP | separate `attest` job, `.github/actions/attest-files` |
+| Desktop app | `desktop-publish.yml` | Windows installer `.exe` | separate `attest` job, `.github/actions/attest-files` |
+| CLI npm package | `cli-publish.yml` | npm tarball | publish job (it already holds `id-token` for npm) |
+| Sharing server npm package | `sharing-server-publish.yml` | npm tarball | publish job (it already holds `id-token` for npm) |
+| Sharing server container image | `sharing-server-deploy.yml` | `ghcr.io/rajbos/copilot-sharing-server` digest | build job, also pushed to GHCR |
+
+Each attestation is verified in the same run, pinned to this repository, the signing
+workflow file, the run's ref and GitHub-hosted runners
+(`gh attestation verify --signer-workflow … --source-ref … --deny-self-hosted-runners`).
+`attest-files` then downloads the same-named asset from the GitHub release and verifies
+it too, so a release asset that is not the attested bytes fails the run.
+
+For the npm packages the workflow packs once and publishes that exact tarball with
+`--provenance`, so npm also records its own SLSA provenance. After publishing,
+`.github/workflows/scripts/verify-npm-publish.sh` checks that the registry's `integrity`
+equals the attested tarball's SHA-512 and that npm holds a SLSA v1 provenance for it,
+before the version-bump PR or GitHub release is created. The tarball is attached to the
+GitHub release. The sharing-server image is verified before the deploy job promotes its
+digest to Azure.
+
+Not covered yet: the Visual Studio and JetBrains marketplace uploads happen in the build
+job, before the attest job runs, so those publishes are not gated on verification the
+way the VS Code `publish` job is. The desktop app's `latest.yml` and `.blockmap` update
+metadata are not attested (`latest.yml` already carries the installer's SHA-512).
+
+To verify a download (needs the [GitHub CLI](https://cli.github.com/)):
+
+```sh
+gh attestation verify <file> --repo rajbos/ai-engineering-fluency
+gh attestation verify oci://ghcr.io/rajbos/copilot-sharing-server:latest --repo rajbos/ai-engineering-fluency
+npm audit signatures   # in a project that installed the npm package
+```
+
+### VS Code extension VSIX
 
 Every VS Code extension VSIX built by `release.yml` and the nightly pre-release
 workflow ships with SPDX JSON SBOMs and Sigstore-backed GitHub attestations
@@ -402,15 +459,6 @@ the VSIX workflow artifact, and the `publish` job re-verifies the same artifact
 before it publishes to the Marketplace or Open VSX. The job that builds the VSIX
 can neither sign nor publish it. SBOMs are attached to the
 GitHub release (nightlies keep them as the `vsix-sbom` workflow artifact).
-
-To verify a downloaded VSIX (needs the [GitHub CLI](https://cli.github.com/)):
-
-```sh
-gh attestation verify <file>.vsix --repo rajbos/ai-engineering-fluency
-```
-
-This proves the file was built by this repository's GitHub Actions workflows from
-the recorded commit. It does not cover the Visual Studio, JetBrains or CLI releases.
 
 ## Sharing server
 
@@ -426,10 +474,10 @@ use isolated temporary SQLite fixtures, never user databases, and stub authentic
 From `sharing-server`, run:
 
 ```sh
-npm run check-types
-npm run build
-npm test
-npm run check:interaction
+pnpm run check-types
+pnpm run build
+pnpm test
+pnpm run check:interaction
 ```
 
 The server's `check:interaction` is a reproducible headless browser check,
@@ -450,10 +498,11 @@ The root test entry point is:
 .\build.ps1 -Project sharing -Target test
 ```
 
-It runs the server's `npm test`, not the separate type/build/interaction checks.
-The deployment workflow gates on `npm test` and `npm run check:interaction`,
-using the repository's locked Playwright tooling. The package publishing workflow
-also runs `npm test` before the library build.
+It runs the server's `pnpm test`, not the separate type/build/interaction checks.
+The deployment workflow gates on `pnpm run check-types`, `pnpm test` and
+`pnpm run check:interaction`, using the repository's locked Playwright tooling.
+The package publishing workflow also runs `pnpm run check-types` and `pnpm test`
+before the library build.
 
 Exercise `/team` with a session cookie and `/api/team-insights` with a bearer token
 through actual HTTP routes, plus both CSV and JSON `/team/export` downloads with

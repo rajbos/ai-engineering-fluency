@@ -284,6 +284,37 @@ export function containsHydraFusionEvents(content: string): boolean {
 	return content.includes('fusion_resolved') || content.includes('fusion_phase_completed') || content.includes('fusion_completed');
 }
 
+/** The model id usage is attributed to when a session ran through Copilot Fusion. */
+export const COPILOT_FUSION_MODEL_ID = 'hydrafusion';
+
+/**
+ * Marks a `session.auto_mode_resolved` event written by Copilot Fusion. Since November 2026
+ * the Copilot app writes `selectedModel: "auto"` for a Fusion session instead of
+ * `hydrafusion`. The only sign of Fusion left is this routing reason, for example
+ * "Copilot Fusion selected GPT-6.1 Sol since the task has high complexity.".
+ */
+const FUSION_AUTO_REASON = /"selectionReason"\s*:\s*"Copilot Fusion\b/;
+
+/**
+ * True when a Copilot CLI / Copilot app session that selected `auto` was actually routed
+ * by Copilot Fusion: a routing decision credits Fusion, or the session has fusion events.
+ * Callers pass the result to {@link resolveCopilotRouterModel}.
+ */
+export function isCopilotFusionAutoSession(content: string | readonly string[]): boolean {
+	const lines = typeof content === 'string' ? [content] : content;
+	return lines.some(line =>
+		(line.includes('auto_mode_resolved') && FUSION_AUTO_REASON.test(line)) || containsHydraFusionEvents(line));
+}
+
+/**
+ * Maps the session-level model selection to the id usage is attributed to: `auto` becomes
+ * {@link COPILOT_FUSION_MODEL_ID} when {@link isCopilotFusionAutoSession} said Fusion ran
+ * the session. Any other model, and `auto` without that evidence, is returned unchanged.
+ */
+export function resolveCopilotRouterModel(model: string, fusionAuto: boolean): string {
+	return fusionAuto && model === 'auto' ? COPILOT_FUSION_MODEL_ID : model;
+}
+
 function buildPhase(entry: { data: RawRecord; timestamp: string | null }, finalSourcePhaseId: string | null): HydraFusionPhase {
 	const d = entry.data;
 	const phaseId = asString(d.phaseId) ?? '';
@@ -570,29 +601,53 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
  *   turn's `turnNumber`.
  */
 export function matchHydraFusionTurnsToChatTurns(
-	chatTurns: { turnNumber: number; timestamp: string | null }[],
+	chatTurns: ChatTurnStamp[],
 	hydraTurns: HydraFusionTurn[],
 ): Map<number, number> {
 	const matches = new Map<number, number>();
 	let chatIndex = 0;
 	for (let h = 0; h < hydraTurns.length; h++) {
-		const startedAt = hydraTurns[h].startedAt ? Date.parse(hydraTurns[h].startedAt!) : NaN;
+		const startedAt = parseTimestamp(hydraTurns[h].startedAt);
 		if (Number.isNaN(startedAt)) { continue; }
 
-		let matchedTurnNumber: number | null = null;
-		while (chatIndex < chatTurns.length) {
-			const ts = chatTurns[chatIndex].timestamp ? Date.parse(chatTurns[chatIndex].timestamp!) : NaN;
-			// An unusable timestamp can never be a match for *any* fusion turn, but it must not
-			// get stuck as the loop's position either — skip it permanently so later, well-formed
-			// chat turns stay reachable by this and every subsequent fusion turn.
-			if (Number.isNaN(ts)) { chatIndex++; continue; }
-			if (ts > startedAt) { break; }
-			matchedTurnNumber = chatTurns[chatIndex].turnNumber;
-			chatIndex++;
-		}
-		if (matchedTurnNumber !== null) { matches.set(h, matchedTurnNumber); }
+		const step = advanceChatTurnsTo(chatTurns, chatIndex, startedAt);
+		chatIndex = step.nextIndex;
+		if (step.matchedTurnNumber !== null) { matches.set(h, step.matchedTurnNumber); }
 	}
 	return matches;
+}
+
+/** The fields of a chat turn that {@link matchHydraFusionTurnsToChatTurns} correlates on. */
+type ChatTurnStamp = { turnNumber: number; timestamp: string | null };
+
+/** Parses an ISO timestamp to epoch ms, or `NaN` when it is missing or unparsable. */
+function parseTimestamp(value: string | null): number {
+	return value ? Date.parse(value) : NaN;
+}
+
+/**
+ * Advances the shared chat-turn cursor from `startIndex` past every chat turn at or
+ * before `startedAt`, returning the last one passed (the prompt the router was
+ * resolving) and where the cursor stopped, so the next fusion turn resumes there.
+ */
+function advanceChatTurnsTo(
+	chatTurns: ChatTurnStamp[],
+	startIndex: number,
+	startedAt: number,
+): { matchedTurnNumber: number | null; nextIndex: number } {
+	let matchedTurnNumber: number | null = null;
+	let chatIndex = startIndex;
+	while (chatIndex < chatTurns.length) {
+		const ts = parseTimestamp(chatTurns[chatIndex].timestamp);
+		// An unusable timestamp can never be a match for *any* fusion turn, but it must not
+		// get stuck as the loop's position either — skip it permanently so later, well-formed
+		// chat turns stay reachable by this and every subsequent fusion turn.
+		if (Number.isNaN(ts)) { chatIndex++; continue; }
+		if (ts > startedAt) { break; }
+		matchedTurnNumber = chatTurns[chatIndex].turnNumber;
+		chatIndex++;
+	}
+	return { matchedTurnNumber, nextIndex: chatIndex };
 }
 
 // ── Cross-session aggregate ──────────────────────────────────────────────────

@@ -6,6 +6,17 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Features
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
+
+### Bug Fixes
+- An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
+- OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
+
+## [0.20.0] - 2026-11-23
+
+### Features
+- Companion extension API: `openSessionLog(sessionFilePath)` opens the existing session viewer from an absolute JSON/JSONL session path, including Claude Code subagent logs and Copilot CLI `events.jsonl`. It awaits loading and propagates errors to the caller; `registerButton` remains unchanged. Viewer-only Claude sidechain instructions are labeled as automated delegation, without changing human-interaction metrics.
+- AI Readiness shows every stage and its checks for each repository, with clearer handling of optional, inapplicable and unverifiable controls (#2628).
+- Chart: select a **By Editor** card to filter the chart and summary to that editor (#2591).
 - Team Server: every uploaded rollup now also carries a per-row **cost estimate** (`estimatedCostUsd`, from the public price list), the extension **version** (`clientVersion`) and validated **activity counters** (`activity`: sessions, ask/edit/agent/plan/CLI mode counts, tool-call and MCP-call counts by tool/server name). All counts, no content. The Team Server shows models, editors, repositories, tools and MCP servers as team totals next to your own numbers on Team Insights, and per user on the admin dashboard. The **Configure Team Server Backend** panel lists the new fields; the scope is documented in `docs/sharing-server/TEAM-DATA-SCOPE.md`.
 - Fluency Score: the score and AI coding toolbox share blocks are now one **Share** section with a Score/Toolbox switch, placed above the page footer. Both can copy a summary and share to social media, the toolbox card can now be exported as a PNG, and the score's share strings are localized.
 
@@ -13,6 +24,10 @@ All notable changes to the VS Code extension will be documented in this file.
 - Usage Analysis: **Tool Curation** moved from Tools & Integrations to Workspace → Workspace Health, and **Skill Suggestions** moved to Coaching → Insights. Tools & Integrations now shows only tool telemetry
 
 ### Improvements
+- Mistral Vibe sessions in the unified session store are discovered and included, and Mistral Large 4 usage is priced (#2576).
+- The Copilot Fusion Router section compares metrics across periods in a single table (#2605).
+- Copilot app sessions that use **Copilot Fusion** are attributed to Copilot Fusion again instead of **Auto**. The Copilot app now records these sessions as `auto`; the tracker recognises them by the routing decision Fusion writes to the session log.
+- VS Code, VS Code Insiders and the desktop app no longer parse the same session files at the same time. A host waits briefly for another host that is already parsing, and VS Code reuses what the other edition parsed when both run the same version. A window whose parse hangs now loses its leader role within minutes instead of holding it forever.
 - Efficiency: one period picker instead of two. **Selected period** replaces the toolbar's **Drill into…**, and it now sits directly above the chart it selects from on every tab
 - Efficiency, Models tab: the time range and resolution moved into **Drift over time**, the only section they affect, and the head-to-head comparison has its own heading
 - Efficiency: a mixed or falling headline now points at **Month vs Month**, the calendar months it is calculated from, and the **Cost per session** card links to that metric in **Models**

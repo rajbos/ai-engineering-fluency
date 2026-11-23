@@ -13,9 +13,9 @@ import { findRepositoryRemoteForFolder, resolveExactWorkspacePath } from '../../
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { calculateEstimatedCost, NANO_AIU_TO_DOLLARS } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
-import type { CustomizationFileEntry, DailyTokenStats, DetailedStats, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis } from '../../src/usageAnalysis';
-import { activeSessionDays, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
+import { activeSessionDays, addSessionToDailyStats, scaleModelUsage, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
 import { createSessionAttributesCache, resolveSessionAttributes, type SessionAttributesCache } from '../../src/sessionRepository';
 import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
@@ -36,10 +36,12 @@ import {
 	tokenEstimators,
 	statSessionFile,
 	getSessionBackingPath,
+	getSessionLastActivity,
+	sessionCacheStamp,
 	processSessionFile as processSessionFileWith,
 	type SessionDataCache,
 } from './sessionProcessing';
-export { readDebugLogTokensForSession, getSessionBackingPath } from './sessionProcessing';
+export { readDebugLogTokensForSession, getSessionBackingPath, getSessionLastActivity } from './sessionProcessing';
 
 // Import JSON data files
 import toolNamesData from '../../src/toolNames.json';
@@ -321,20 +323,6 @@ export async function getSessionMeta(filePath: string): Promise<SessionMeta | nu
 }
 
 /**
- * Cheap per-session last-activity time from the owning adapter, or null when the
- * adapter has no such lookup (then the file's own mtime is the right signal).
- */
-export async function getSessionLastActivity(filePath: string): Promise<Date | null> {
-	const eco = getEcosystems().find(e => e.handles(filePath));
-	if (!eco?.getLastActivity) { return null; }
-	try {
-		return await eco.getLastActivity(filePath);
-	} catch {
-		return null;
-	}
-}
-
-/**
  * Extract per-UTC-day fractions from session content using interaction timestamps.
  * Fractions sum to 1.0. Falls back to { [fallbackDateKey]: 1.0 } when no timestamps found.
  *
@@ -513,7 +501,8 @@ export async function processSessionFileForViews(filePath: string, verbose = fal
 	try {
 		const after = await sessionVersion(filePath, await statSessionFile(filePath));
 		if (before && sameSessionVersion(before, after)) {
-			setCached(filePath, before.mtimeMs, before.size, enriched);
+			const stamp = sessionCacheStamp(before);
+			setCached(filePath, stamp.mtimeMs, stamp.size, enriched);
 		}
 	} catch {
 		// Not cacheable (file vanished): still return the enriched data for this run.
@@ -523,22 +512,24 @@ export async function processSessionFileForViews(filePath: string, verbose = fal
 
 /**
  * {@link processSessionFile} at a session's {@link SessionVersion}. A regular file's cache entry
- * is keyed by its own stat, so the normal cached parse is current. A DB-backed session's entry
- * is keyed by the shared database's stat, which a write still in the WAL leaves unchanged, so
- * its cached tokens, interactions, model usage and day split can be outdated. Its base parse
- * therefore records the session activity time it was parsed at (`baseActivityMs`) and is reused
- * only while that still matches; otherwise (cold, or derived for an older activity) the session
- * is parsed afresh once — not twice — and stamped. Used by every path that combines the base
+ * is keyed by its own stat, so the normal cached parse is current. A DB-backed session with a
+ * known activity time is keyed by that time ({@link sessionCacheStamp}), not by the shared
+ * database's stat, which a write still in the WAL leaves unchanged. Its base parse also records
+ * the activity time it was parsed at (`baseActivityMs`) and is reused only while that still
+ * matches, which guards entries written under the older database-stat key; otherwise (cold, or
+ * derived for an older activity) the session is parsed afresh once — not twice — and stamped.
+ * Used by every path that combines the base
  * parse with fresher, activity-aware data: the view walk and Usage Analysis.
  */
 export async function processSessionFileAtVersion(filePath: string, verbose: boolean, version: SessionVersion | undefined): Promise<SessionData | null> {
 	if (version?.activityMs === undefined) { return processSessionFile(filePath, verbose); }
-	const cached = getCached(filePath, version.mtimeMs, version.size);
+	const stamp = sessionCacheStamp(version);
+	const cached = getCached(filePath, stamp.mtimeMs, stamp.size);
 	if (cached && cached.baseActivityMs === version.activityMs) { return cached; }
 	const fresh = await processSessionFileWith(filePath, { verbose, cache: { get: () => null, set: setCached } });
 	if (!fresh) { return fresh; }
 	const stamped: SessionData = { ...fresh, baseActivityMs: version.activityMs };
-	setCached(filePath, version.mtimeMs, version.size, stamped);
+	setCached(filePath, stamp.mtimeMs, stamp.size, stamped);
 	return stamped;
 }
 
@@ -549,6 +540,43 @@ export async function processSessionFileAtVersion(filePath: string, verbose: boo
  */
 export async function processSessionFile(filePath: string, verbose = false): Promise<SessionData | null> {
 	return processSessionFileWith(filePath, { verbose, cache: cliSessionCache });
+}
+
+/**
+ * One session in the `SessionFileCache` shape the shared team-server rollup builder
+ * (src/teamServer/dailyRollupBuilder.ts) reads, built from the CLI's own parse so every
+ * ecosystem adapter is covered. Per-day rollups come from the session's `dailyFractions`, the
+ * same `extractDailyFractions()` attribution the extension's analyzer uses for its cache, and
+ * the full usage analysis supplies the team-safe activity counters.
+ *
+ * Throws when the session cannot be parsed, so the builder counts it as failed rather than
+ * reporting an unreadable file as a genuinely empty one.
+ */
+export async function getSessionFileCacheForRollups(filePath: string, mtime: number, size: number): Promise<SessionFileCache> {
+	const data = await processSessionFile(filePath);
+	if (!data) { throw new Error(`could not parse session ${filePath}`); }
+	const { analysis, failed } = await analyzeSessionUsageShared(filePath, { mtimeMs: mtime, size });
+	const interactions = Math.max(0, data.interactions);
+	const dailyRollups: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, fraction] of Object.entries(data.dailyFractions)) {
+		if (!(fraction > 0)) { continue; }
+		dailyRollups[dayKey] = {
+			tokens: Math.round(data.tokens * fraction),
+			actualTokens: Math.round(data.actualTokens * fraction),
+			thinkingTokens: Math.round(data.thinkingTokens * fraction),
+			interactions: Math.max(1, Math.round(Math.max(1, interactions) * fraction)),
+			modelUsage: scaleModelUsage(data.modelUsage, fraction),
+		};
+	}
+	return {
+		tokens: data.tokens,
+		interactions,
+		modelUsage: data.modelUsage,
+		mtime,
+		size,
+		dailyRollups,
+		...(failed ? {} : { usageAnalysis: analysis }),
+	};
 }
 
 /**
@@ -1029,4 +1057,4 @@ export { ENVIRONMENTAL } from './constants';
 export { modelPricing, tokenEstimators, toolNameMap };
 
 /** Cache lifecycle — re-export for use in commands */
-export { loadCache, saveCache, disableCache, getCacheStats } from './cliCache';
+export { loadCache, saveCache, saveCacheOnSignals, disableCache, getCacheStats } from './cliCache';

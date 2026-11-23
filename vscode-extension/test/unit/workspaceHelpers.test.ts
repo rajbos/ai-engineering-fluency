@@ -349,6 +349,8 @@ import {
         detectEditorSource,
         detectClaudeCodeEditorVariant,
         resetClaudeCodeEditorVariantCacheForTests,
+        detectVibeSessionEditorVariant,
+        resetVibeSessionEditorVariantCacheForTests,
         refineEditorLabelForInteractionModeSplit,
         SYNCED_INTERACTION_MODE_LABELS
 } from '../../../src/workspaceHelpers';
@@ -472,6 +474,51 @@ test('detectClaudeCodeEditorVariant: an unknown entrypoint still falls back to t
 
 test('refineEditorLabelForInteractionModeSplit: the Claude Code (VS Code) label also syncs as Claude (VS Code)', () => {
         assert.equal(refineEditorLabelForInteractionModeSplit('/home/user/.claude/projects/hash/session.jsonl', 'Claude Code (VS Code)'), 'Claude (VS Code)');
+});
+
+test('detectVibeSessionEditorVariant: runtime_path session_api in unified meta.json labels Mistral Vibe Desktop', () => {
+        const dir = fs.mkdtempSync(path.join(process.cwd(), 'vibe-variant-'));
+        const sessionDir = path.join(dir, '.vibe', 'logs', 'session', 'unified', '74a2a5aa-0ffa-e704-f72f-3e8a3f1bfa7b');
+        fs.mkdirSync(sessionDir, { recursive: true });
+        const file = path.join(sessionDir, 'meta.json');
+        fs.writeFileSync(file, JSON.stringify({ session_id: '74a2a5aa-0ffa-e704-f72f-3e8a3f1bfa7b', runtime_path: 'session_api', config: { active_model: 'mistral-large-4-0' } }));
+        try {
+                resetVibeSessionEditorVariantCacheForTests();
+                assert.equal(detectVibeSessionEditorVariant(file), 'Mistral Vibe Desktop');
+                assert.equal(getEditorTypeFromPath(file), 'Mistral Vibe Desktop');
+        } finally {
+                resetVibeSessionEditorVariantCacheForTests();
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectVibeSessionEditorVariant: CLI sessions (no runtime_path) stay Mistral Vibe in both layouts', () => {
+        const dir = fs.mkdtempSync(path.join(process.cwd(), 'vibe-variant-'));
+        const unifiedDir = path.join(dir, '.vibe', 'logs', 'session', 'unified', 'f9e98f95-1543-9a52-121d-25c970de4e7a');
+        const legacyDir = path.join(dir, '.vibe', 'logs', 'session', 'session_20260922_091515_5327080d');
+        fs.mkdirSync(unifiedDir, { recursive: true });
+        fs.mkdirSync(legacyDir, { recursive: true });
+        const unifiedMeta = path.join(unifiedDir, 'meta.json');
+        const legacyMeta = path.join(legacyDir, 'meta.json');
+        fs.writeFileSync(unifiedMeta, JSON.stringify({ session_id: 'f9e98f95-1543-9a52-121d-25c970de4e7a', config: { active_model: 'glm-5-3' } }));
+        fs.writeFileSync(legacyMeta, JSON.stringify({ session_id: '5327080d-e0e3-4502-1547-89e251664c15' }));
+        try {
+                resetVibeSessionEditorVariantCacheForTests();
+                assert.equal(detectVibeSessionEditorVariant(unifiedMeta), 'Mistral Vibe');
+                assert.equal(getEditorTypeFromPath(unifiedMeta), 'Mistral Vibe');
+                assert.equal(detectVibeSessionEditorVariant(legacyMeta), 'Mistral Vibe');
+                assert.equal(getEditorTypeFromPath(legacyMeta), 'Mistral Vibe');
+        } finally {
+                resetVibeSessionEditorVariantCacheForTests();
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectVibeSessionEditorVariant: defaults to Mistral Vibe for missing files and non-meta.json paths', () => {
+        resetVibeSessionEditorVariantCacheForTests();
+        assert.equal(detectVibeSessionEditorVariant('/nonexistent/.vibe/logs/session/unified/x/meta.json'), 'Mistral Vibe');
+        assert.equal(detectVibeSessionEditorVariant('/home/user/.vibe/logs/session/unified/x/messages.jsonl'), 'Mistral Vibe');
+        assert.equal(detectVibeSessionEditorVariant('/home/user/other/meta.json'), 'Mistral Vibe');
 });
 
 test('detectClaudeCodeEditorVariant: defaults to Claude Code when file is missing or has no entrypoint', () => {

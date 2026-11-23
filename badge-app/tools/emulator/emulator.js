@@ -35,15 +35,49 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const { loadChromium } = require(path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff', 'lib', 'browser.js'));
 
 const PAGE = fs.readFileSync(path.join(__dirname, 'page.html'));
+const CLOCK_WORKER = fs.readFileSync(path.join(__dirname, 'clock.worker.js'));
 const CONTENT_TYPES = {
 	'.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm',
 	'.json': 'application/json', '.py': 'text/plain; charset=utf-8',
 };
 const FRAME_TIMEOUT_MS = 30000;
 const SETTLE_FRAMES = 6;
-// The app animates on its clock (the Motion look slides screens for 260 ms), so a shot also waits
-// this long after the last button press; frames alone can arrive faster than the slide ends.
-const SETTLE_MS = 600;
+
+// The app animates on badge.ticks: screens slide, bars and the spider chart grow in, the radar
+// spins, the skyline sways. On the simulator's real clock a screenshot caught whatever frame the
+// machine happened to reach, so two runs of the same code differed. The emulator gives the app a
+// virtual clock instead (CLOCK_PRELUDE): it starts at CLOCK_START_MS, stands still while buttons
+// are pressed, and only moves when the harness lets it run on, by exactly CLOCK_STEP_MS per frame.
+// Every shot is taken CLOCK_SETTLE_MS of virtual time after the last input: late enough for every
+// intro animation to finish (the spider chart's first sweep and spoke pops end at 2250 ms) and
+// before the score bars reload (5000 ms). So a shot shows the fully drawn screen, and the same
+// pixels on every run.
+const CLOCK_START_MS = 1000;
+const CLOCK_STEP_MS = 33;
+const CLOCK_SETTLE_MS = 2500;
+const CLOCK_LINE = '[emulator] clock ';
+
+/**
+ * Replaces badge.ticks and badge.ticks_delta with the virtual clock. Each poll (once per frame)
+ * moves it one step towards the target clock.worker.js holds, and prints a line when it gets
+ * there, so the harness knows the next frame drawn is the one at that time.
+ */
+const CLOCK_PRELUDE = [
+	'import js',
+	`_emu_clock = [${CLOCK_START_MS}, 0]`,
+	'_emu_native_poll = badge.poll',
+	'def _emu_poll():',
+	'    _emu_native_poll()',
+	'    target = int(js.emuClockTarget)',
+	`    step = max(0, min(${CLOCK_STEP_MS}, target - _emu_clock[0]))`,
+	'    _emu_clock[0] += step',
+	'    _emu_clock[1] = step',
+	'    if step and _emu_clock[0] == target:',
+	`        print("${CLOCK_LINE}%d" % target)`,
+	'badge.poll = _emu_poll',
+	'type(badge).ticks = property(lambda self: _emu_clock[0])',
+	'type(badge).ticks_delta = property(lambda self: _emu_clock[1])',
+].join('\n');
 
 /** Serves the page and the runtime, downloading runtime files on first request. */
 function startServer(pin, root) {
@@ -53,6 +87,10 @@ function startServer(pin, root) {
 			if (req.method !== 'GET') { res.writeHead(405).end(); return; }
 			if (url.pathname === '/') {
 				res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(PAGE);
+				return;
+			}
+			if (url.pathname === '/clock.worker.js') {
+				res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' }).end(CLOCK_WORKER);
 				return;
 			}
 			if (url.pathname.startsWith('/simulator/')) {
@@ -102,6 +140,7 @@ function program(compat, appName) {
 		'sys.path[:0] = ["/system/lib", "/lib", "/system"]',
 		compat,
 		'import badgeware',
+		CLOCK_PRELUDE,
 		'badge.mode(LORES | VSYNC)',
 		'badgeware.set_backlight(1.0)',
 		`launch(${JSON.stringify(target)})`,
@@ -120,6 +159,7 @@ class Session {
 		this.label = label;
 		this.logIndex = 0;
 		this.log = [];
+		this.clock = CLOCK_START_MS;
 	}
 
 	async status() {
@@ -147,6 +187,24 @@ class Session {
 		}
 	}
 
+	/** Lets the virtual clock run on by `ms` and waits until a frame at the new time is on screen. */
+	async advanceClock(ms) {
+		this.clock += ms;
+		const line = `${CLOCK_LINE}${this.clock}`;
+		const seenFrom = this.log.length;
+		await this.page.evaluate((t) => window.emu.setClockTarget(t), this.clock);
+		const deadline = Date.now() + FRAME_TIMEOUT_MS + ms * 4;
+		while (!this.log.slice(seenFrom).includes(line)) {
+			if (Date.now() > deadline) {
+				throw new Error(`${this.label}: the clock did not reach ${this.clock} ms\n--- simulator output ---\n${this.log.slice(-40).join('\n')}`);
+			}
+			await this.page.waitForTimeout(20);
+			await this.status();
+		}
+		// The clock stands still again, so every later frame is the same; a few make sure one is drawn.
+		await this.waitFrames(SETTLE_FRAMES);
+	}
+
 	async setButtons(mask) {
 		await this.page.evaluate((m) => window.emu.setButtons(m), mask);
 		// Two polls per change: badge.pressed() is edge-triggered on the next poll.
@@ -155,7 +213,7 @@ class Session {
 
 	async step(step) {
 		if (step.wait) {
-			await this.waitFrames(step.wait);
+			await this.advanceClock(step.wait);
 			return;
 		}
 		const held = step.hold ? BUTTONS[step.hold] : 0;
@@ -203,8 +261,7 @@ async function renderApp({ browser, origin, compat, appDir, appName, outDir, sca
 			await session.waitFrames(SETTLE_FRAMES);
 			for (const step of run.steps) {
 				if (step.shot) {
-					await page.waitForTimeout(SETTLE_MS);
-					await session.waitFrames(SETTLE_FRAMES);
+					await session.advanceClock(CLOCK_SETTLE_MS);
 					const dataUrl = await page.evaluate((s) => window.emu.capture(s), scale);
 					const file = path.join(outDir, `${view}--${step.shot}.dark.png`);
 					fs.writeFileSync(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
@@ -266,4 +323,4 @@ if (require.main === module) {
 	});
 }
 
-module.exports = { appFiles, crashIn, parseArgs, program, renderApp, withEmulator };
+module.exports = { CLOCK_PRELUDE, CLOCK_SETTLE_MS, CLOCK_STEP_MS, appFiles, crashIn, parseArgs, program, renderApp, withEmulator };

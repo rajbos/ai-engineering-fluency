@@ -244,12 +244,18 @@ test('flashSection: overlapping flashes restore the original inline styles', asy
 	const { window } = installDom('<div id="s" style="box-shadow: 1px 1px red; transition: opacity 1s"></div>');
 	t.mock.timers.enable({ apis: ['setTimeout'] });
 	const target = window.document.getElementById('s') as HTMLElement;
+	// Compare against the DOM's own serialization of the original value: jsdom
+	// versions differ in how they order box-shadow components ('1px 1px red'
+	// vs 'red 1px 1px'), and the contract under test is "restored", not a format.
+	const originalBoxShadow = target.style.boxShadow;
+	const originalTransition = target.style.transition;
+	assert.notEqual(originalBoxShadow, '', 'the fixture starts with an inline box-shadow');
 	flashSection(target);
 	t.mock.timers.tick(1_000);
 	flashSection(target);
 	t.mock.timers.tick(2_000);
-	assert.equal(target.style.boxShadow, '1px 1px red');
-	assert.equal(target.style.transition, 'opacity 1s');
+	assert.equal(target.style.boxShadow, originalBoxShadow);
+	assert.equal(target.style.transition, originalTransition);
 });
 
 test('installSurfaceNavigation: reports ready, then acknowledges a reveal only once it has landed', async () => {

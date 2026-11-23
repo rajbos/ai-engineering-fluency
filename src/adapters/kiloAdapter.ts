@@ -3,10 +3,11 @@ import * as path from 'path';
 import type { ModelUsage, ChatTurn } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { KiloDataAccess } from '../kilo';
-import { createEmptyContextRefs } from '../tokenEstimation';
-import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { pathExists } from '../utils/fsAsync';
 import { isUnsafeObjectKey } from '../utils/protoGuard';
+import { applyModelSwitchingStats } from './modelSwitching';
+import { buildOpenCodeFamilyTurns } from './openCodeFamilyTurns';
 
 export class KiloAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'kilo';
@@ -112,75 +113,9 @@ export class KiloAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, I
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
-		const turns: ChatTurn[] = [];
 		const messages = await this.kilo.getKiloMessagesForSession(sessionFile);
-		let prevCumulativeTotal = 0;
-		let turnNumber = 0;
-		for (let i = 0; i < messages.length; i++) {
-			const msg = messages[i];
-			if (msg.role !== 'user') { continue; }
-			turnNumber++;
-			const turnAssistantMsgs = messages.filter((m, idx) => idx > i && m.role === 'assistant' && m.parentID === msg.id);
-			const userParts = await this.kilo.getKiloPartsForMessage(msg.id);
-			const userText = userParts.filter(p => p.type === 'text').map(p => p.text || '').join('\n');
-			const turnData = await this.processKiloAssistantMessages(turnAssistantMsgs, prevCumulativeTotal);
-			const turnInputTokens = Math.max(0, (turnData.turnCumulativeTotal - prevCumulativeTotal) - turnData.turnOutputAndThinking);
-			turns.push({
-				turnNumber,
-				timestamp: msg.time?.created ? new Date(msg.time.created).toISOString() : null,
-				mode: 'cli',
-				userMessage: userText,
-				assistantResponse: turnData.assistantText,
-				model: turnData.model,
-				toolCalls: turnData.toolCalls,
-				contextReferences: createEmptyContextRefs(),
-				mcpTools: [],
-				inputTokensEstimate: turnInputTokens,
-				outputTokensEstimate: turnData.turnOutputAndThinking - turnData.thinkingTokens,
-				thinkingTokensEstimate: turnData.thinkingTokens
-			});
-			prevCumulativeTotal = turnData.turnCumulativeTotal;
-		}
+		const turns = await buildOpenCodeFamilyTurns(messages, messageId => this.kilo.getKiloPartsForMessage(messageId));
 		return { turns };
-	}
-
-	private async processKiloAssistantMessages(turnAssistantMsgs: any[], prevCumulativeTotal: number): Promise<{
-		assistantText: string; toolCalls: { toolName: string; arguments?: string; result?: string }[];
-		model: string | null; thinkingTokens: number; turnCumulativeTotal: number; turnOutputAndThinking: number;
-	}> {
-		let assistantText = '';
-		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-		let model: string | null = null;
-		let thinkingTokens = 0;
-		let turnCumulativeTotal = prevCumulativeTotal;
-		for (const assistantMsg of turnAssistantMsgs) {
-			if (!model) { model = assistantMsg.modelID || assistantMsg.model?.modelID || null; }
-			thinkingTokens += assistantMsg.tokens?.reasoning || 0;
-			if (typeof assistantMsg.tokens?.total === 'number') {
-				turnCumulativeTotal = Math.max(turnCumulativeTotal, assistantMsg.tokens.total);
-			}
-			const assistantParts = await this.kilo.getKiloPartsForMessage(assistantMsg.id);
-			for (const part of assistantParts) {
-				assistantText += this.processKiloPart(part, toolCalls);
-			}
-		}
-		const turnOutputAndThinking = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
-		return { assistantText, toolCalls, model, thinkingTokens, turnCumulativeTotal, turnOutputAndThinking };
-	}
-
-	private processKiloPart(
-		part: any,
-		toolCalls: { toolName: string; arguments?: string; result?: string }[]
-	): string {
-		if (part.type === 'text' && part.text) { return part.text as string; }
-		if (part.type === 'tool' && part.tool) {
-			toolCalls.push({
-				toolName: part.tool,
-				arguments: part.state?.input ? JSON.stringify(part.state.input) : undefined,
-				result: part.state?.output || undefined
-			});
-		}
-		return '';
 	}
 
 	async getSyncData(sessionFile: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage; timestamp: number }> {
@@ -198,16 +133,7 @@ export class KiloAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, I
 			}
 		}
 		if (models.length > 0) {
-			const uniqueModels = [...new Set(models)];
-			analysis.modelSwitching.uniqueModels = uniqueModels;
-			analysis.modelSwitching.modelCount = uniqueModels.length;
-			analysis.modelSwitching.totalRequests = models.length;
-			let switchCount = 0;
-			for (let i = 1; i < models.length; i++) {
-				if (models[i] !== models[i - 1]) { switchCount++; }
-			}
-			analysis.modelSwitching.switchCount = switchCount;
-			applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
+			applyModelSwitchingStats(analysis, models, ctx.modelPricing);
 		}
 		return analysis;
 	}

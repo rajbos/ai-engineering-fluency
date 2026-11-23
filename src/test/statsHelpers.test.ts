@@ -25,7 +25,7 @@ type UtcDateRanges,
 } from '../statsHelpers';
 import type { DailyTokenStats } from '../types';
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../types';
-import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../statsHelpers';
+import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage, addTaskCategoryToDailyEntry } from '../statsHelpers';
 import { calculateEstimatedCost } from '../tokenEstimation';
 import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '../taskClassification';
 import { getTimeWindowStartDayKey } from '../timeWindows';
@@ -1909,4 +1909,101 @@ test('addSessionToDailyStats: an inherited-name task category does not turn task
 	assert.equal(typeof tokens, 'number');
 	assert.equal(tokens, 100);
 	assert.equal((day.taskCategorySessions as Record<string, unknown>)['toString'], 1);
+});
+
+// ── addTaskCategoryToDailyEntry, called directly ─────────────────────────────
+// One group per helper extracted from it (#2618): taskCategoryUsage tally, share resolution,
+// per-share accumulation, and chart-map initialisation.
+
+function emptyDay(): DailyTokenStats {
+	return { date: '2025-03-15', tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} };
+}
+
+test('addTaskCategoryToDailyEntry: taskCategoryUsage accumulates per category across calls', () => {
+	const day = emptyDay();
+	addTaskCategoryToDailyEntry(day, 100, {}, 'Coding');
+	addTaskCategoryToDailyEntry(day, 50, {}, 'Coding');
+	addTaskCategoryToDailyEntry(day, 10, {}, 'Testing');
+	assert.deepEqual(day.taskCategoryUsage, { Coding: { tokens: 150, sessions: 2 }, Testing: { tokens: 10, sessions: 1 } });
+});
+
+test('addTaskCategoryToDailyEntry: taskCategoryUsage is left undefined without a usable category', () => {
+	const day = emptyDay();
+	addTaskCategoryToDailyEntry(day, 100, {});
+	addTaskCategoryToDailyEntry(day, 100, {}, '__proto__' as TaskCategory);
+	assert.equal(day.taskCategoryUsage, undefined);
+	// Both calls still attribute to the "Conversation" fallback on the chart maps.
+	assert.deepEqual(day.taskCategoryTokens, { Conversation: 200 });
+	assert.deepEqual(day.taskCategorySessions, { Conversation: 2 });
+});
+
+test('addTaskCategoryToDailyEntry: taskCategoryUsage does not read an inherited member for a "toString" category', () => {
+	const day = emptyDay();
+	addTaskCategoryToDailyEntry(day, 40, {}, 'toString' as TaskCategory);
+	assert.deepEqual((day.taskCategoryUsage as Record<string, unknown>)['toString'], { tokens: 40, sessions: 1 });
+});
+
+test('addTaskCategoryToDailyEntry: positive shares win over the primary category', () => {
+	const day = emptyDay();
+	addTaskCategoryToDailyEntry(day, 200, {}, 'Coding', makeShares({ Debugging: 0.5, Testing: 0.5 }));
+	assert.deepEqual(day.taskCategoryTokens, { Debugging: 100, Testing: 100 });
+	// taskCategoryUsage still follows the primary category only.
+	assert.deepEqual(day.taskCategoryUsage, { Coding: { tokens: 200, sessions: 1 } });
+});
+
+test('addTaskCategoryToDailyEntry: zero, negative and non-numeric shares are skipped', () => {
+	const day = emptyDay();
+	const shares = { ...makeShares({ Coding: 0.5 }), Debugging: -0.5, Testing: Number.NaN, Refactoring: 'x' } as unknown as TaskCategoryBreakdown;
+	addTaskCategoryToDailyEntry(day, 100, {}, 'Coding', shares);
+	assert.deepEqual(day.taskCategoryTokens, { Coding: 50 });
+	assert.deepEqual(day.taskCategorySessions, { Coding: 0.5 });
+});
+
+test('addTaskCategoryToDailyEntry: shares with only negative values fall back to the primary category', () => {
+	const day = emptyDay();
+	const shares = { ...makeShares({}), Coding: -1 } as TaskCategoryBreakdown;
+	addTaskCategoryToDailyEntry(day, 100, {}, 'Testing', shares);
+	assert.deepEqual(day.taskCategoryTokens, { Testing: 100 });
+});
+
+test('addTaskCategoryToDailyEntry: per-share values add onto existing day totals and scale model usage', () => {
+	const day = emptyDay();
+	day.taskCategoryTokens = { Coding: 10 };
+	day.taskCategorySessions = { Coding: 1 };
+	day.taskCategoryModelUsage = { Coding: { 'gpt-4o': { inputTokens: 1, outputTokens: 1, sessions: 0 } } };
+	const modelUsage: ModelUsage = { 'gpt-4o': { inputTokens: 100, outputTokens: 40, sessions: 1 } };
+	addTaskCategoryToDailyEntry(day, 100, modelUsage, 'Coding', makeShares({ Coding: 0.25, Debugging: 0.75 }));
+	assert.deepEqual(day.taskCategoryTokens, { Coding: 35, Debugging: 75 });
+	assert.deepEqual(day.taskCategorySessions, { Coding: 1.25, Debugging: 0.75 });
+	assert.deepEqual(day.taskCategoryModelUsage, {
+		Coding: { 'gpt-4o': { inputTokens: 26, outputTokens: 11, sessions: 0 } },
+		Debugging: { 'gpt-4o': { inputTokens: 75, outputTokens: 30, sessions: 0 } },
+	});
+	// The caller's model usage is not mutated by the scaling.
+	assert.deepEqual(modelUsage, { 'gpt-4o': { inputTokens: 100, outputTokens: 40, sessions: 1 } });
+});
+
+test('addTaskCategoryToDailyEntry: chart maps are created even when every positive share is an unsafe key', () => {
+	const day = emptyDay();
+	const shares = JSON.parse('{"__proto__": 1}') as TaskCategoryBreakdown;
+	addTaskCategoryToDailyEntry(day, 100, {}, undefined, shares);
+	assert.deepEqual(day.taskCategoryTokens, {});
+	assert.deepEqual(day.taskCategorySessions, {});
+	assert.deepEqual(day.taskCategoryModelUsage, {});
+	assert.equal(Object.prototype.hasOwnProperty.call(day.taskCategoryTokens, '__proto__'), false);
+});
+
+test('addTaskCategoryToDailyEntry: existing chart maps are reused, not replaced', () => {
+	const day = emptyDay();
+	const tokens = { Testing: 5 };
+	const sessions = { Testing: 1 };
+	const models = {};
+	day.taskCategoryTokens = tokens;
+	day.taskCategorySessions = sessions;
+	day.taskCategoryModelUsage = models;
+	addTaskCategoryToDailyEntry(day, 20, {}, 'Coding');
+	assert.equal(day.taskCategoryTokens, tokens);
+	assert.equal(day.taskCategorySessions, sessions);
+	assert.equal(day.taskCategoryModelUsage, models);
+	assert.deepEqual(tokens, { Testing: 5, Coding: 20 });
 });
