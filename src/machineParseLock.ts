@@ -168,16 +168,26 @@ export async function beginMachineParse(owner: LockOwner, options: BeginMachineP
 		log(`Machine-wide parse lock still held after ${Math.round(result.waitedMs / 1000)}s; parsing without it`);
 	}
 	let progressPending = false;
+	let ended = false;
 	let timer: NodeJS.Timeout | undefined;
-	if (result.acquired) {
-		timer = setInterval(() => {
-			const progress = progressPending;
-			progressPending = false;
-			void renewFileLock(lockPath, owner, { progress }, options.now ? { now: options.now } : {}).catch(() => false);
+	// Beats run one at a time: the next is scheduled only once the previous write has finished.
+	// `renewFileLock` is read-modify-write, so overlapping beats (a slow write on Windows retries
+	// its rename) let a stale no-progress beat write back the old `progressAt` over a newer one,
+	// silently dropping reported progress. `end()` also awaits the beat in flight, so a beat that
+	// read the lock before the release cannot write it back afterwards.
+	let beatInFlight: Promise<void> = Promise.resolve();
+	const beat = async () => {
+		const progress = progressPending;
+		progressPending = false;
+		await renewFileLock(lockPath, owner, { progress }, options.now ? { now: options.now } : {}).catch(() => false);
+	};
+	const scheduleBeat = () => {
+		timer = setTimeout(() => {
+			beatInFlight = beat().finally(() => { if (!ended) { scheduleBeat(); } });
 		}, options.heartbeatMs ?? 30 * 1000);
 		if (typeof timer.unref === 'function') { timer.unref(); }
-	}
-	let ended = false;
+	};
+	if (result.acquired) { scheduleBeat(); }
 	return {
 		acquired: result.acquired,
 		unavailable: result.unavailable === true,
@@ -186,7 +196,8 @@ export async function beginMachineParse(owner: LockOwner, options: BeginMachineP
 		end: async () => {
 			if (ended) { return; }
 			ended = true;
-			if (timer) { clearInterval(timer); }
+			if (timer) { clearTimeout(timer); }
+			await beatInFlight;
 			if (result.acquired) { await releaseFileLock(lockPath, owner); }
 		},
 	};
