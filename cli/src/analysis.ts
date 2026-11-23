@@ -7,7 +7,7 @@
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
-import { normalizePathForComparison, detectClaudeCodeEditorVariant, detectRelocatedAgentHomeFromPath, getRepoDisplayName } from '../../src/workspaceHelpers';
+import { normalizePathForComparison, detectClaudeCodeEditorVariant, detectRelocatedAgentHomeFromPath, detectVibeSessionEditorVariant, getRepoDisplayName } from '../../src/workspaceHelpers';
 import { buildChartData } from '../../src/chartDataBuilder';
 import { buildEfficiencyViewData, formatAttributionDateEnUs, NO_PR_VALUE_INPUTS, type EfficiencySessionAnalysis } from '../../src/efficiencyViewBuilder';
 import type { EfficiencySessionInput, EfficiencyViewData } from '../../src/efficiencyAnalysis';
@@ -127,7 +127,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	// fallbacks below ('codex' contains 'code' and would misclassify as VS Code).
 	if (normalized.includes('/.codex/')) { return 'Codex CLI'; }
 	// $CODEX_HOME / $VIBE_HOME / $HERMES_HOME pointing at a folder not named like the default.
-	const relocatedAgent = detectRelocatedAgentHomeFromPath(normalized);
+	const relocatedAgent = detectRelocatedAgentHomeFromPath(normalized, process.env, filePath);
 	if (relocatedAgent) { return relocatedAgent; }
 	if (normalized.includes('/.pi/agent/sessions/')) { return 'Pi'; }
 	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
@@ -137,7 +137,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
-	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	if (normalized.includes('/.vibe/logs/session/')) { return detectVibeSessionEditorVariant(filePath); }
 	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/.
 	if (normalized.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
 	if (normalized.includes('/.gemini/tmp/') && normalized.includes('/chats/session-') && normalized.endsWith('.jsonl')) { return 'Gemini CLI'; }

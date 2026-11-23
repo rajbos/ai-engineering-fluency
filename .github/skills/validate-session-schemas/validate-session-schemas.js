@@ -243,8 +243,11 @@ function discoverAntigravity() {
 function discoverMistralVibe() {
   const vibeHome = process.env.VIBE_HOME ? path.resolve(process.env.VIBE_HOME.replace(/^~/, HOME)) : path.join(HOME, '.vibe');
   const files = [];
-  // <vibe-home>/logs/session/session_<date>_<time>_<id>/meta.json (messages.jsonl is deliberately not read)
-  walkFiles(path.join(vibeHome, 'logs', 'session'), (n) => n === 'meta.json', files, 2);
+  // <vibe-home>/logs/session/session_<date>_<time>_<id>/meta.json (legacy) and
+  // <vibe-home>/logs/session/unified/<uuid>/meta.json (unified store, written by newer CLI
+  // versions and by the Vibe Desktop app; messages.jsonl is deliberately not read).
+  // Depth 3 reaches unified/<uuid>/meta.json.
+  walkFiles(path.join(vibeHome, 'logs', 'session'), (n) => n === 'meta.json', files, 3);
   return files;
 }
 
