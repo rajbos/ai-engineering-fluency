@@ -1700,4 +1700,5 @@
   ,"get_syntax_docs": "Get Syntax Docs"
   ,"GetSymbolInfoAsync": "Get Symbol Info"
   ,"GetThreadsAsync": "Get Threads"
+  ,"process.start": "Process Start"
 }
