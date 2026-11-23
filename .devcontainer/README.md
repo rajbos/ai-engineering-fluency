@@ -1,10 +1,18 @@
 # Dev container
 
-`devcontainer.json` defines the development container for this repository
-(Node/TypeScript image with Git and PowerShell). Before the container starts,
-`init-mounts.ps1` runs on the host to make sure the VS Code user-data folders it
-bind-mounts read-only exist, so the extension can read real session data inside
-the container.
+Two configurations live here:
+
+- `devcontainer.json` is the **universal** one, used by GitHub Codespaces and any
+  Linux/macOS host. It has no host-specific mounts or host-side scripts (a Windows-only
+  `initializeCommand` or `%APPDATA%` mount fails Codespaces creation before any log
+  is written) and installs only the Git feature to keep container creation fast.
+- `local/devcontainer.json` is **optional, for Windows developers**. It adds the PowerShell
+  feature, read-only mounts of the VS Code user-data folders (so the extension can read
+  real session data) and node_modules volumes. `init-mounts.ps1` runs on the host first to
+  make sure those folders exist. Pick "AI Engineering Fluency Extension (local Windows)"
+  when reopening in a container.
+
+Both install dependencies with pnpm (`--frozen-lockfile`) in `vscode-extension/` and `cli/`.
 
 ## DevContainer Terminal Behavior
 
