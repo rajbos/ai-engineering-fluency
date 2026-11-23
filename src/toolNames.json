@@ -1698,4 +1698,6 @@
   ,"computer-use-exec_js": "JavaScript Execution"
   ,"enable_computer_use": "Enable Computer Use"
   ,"get_syntax_docs": "Get Syntax Docs"
+  ,"GetSymbolInfoAsync": "MCP_get_symbol_info_async"
+  ,"GetThreadsAsync": "MCP_get_threads_async"
 }
