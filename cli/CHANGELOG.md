@@ -9,6 +9,7 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once per run instead of once per session query, so `all --json` no longer runs for many minutes on a large OpenCode store (#2710)
 - The session cache (`cli-cache.json`) is now saved every 30 seconds during a run and when the CLI is stopped with Ctrl+C or `SIGTERM`, and is written atomically, so a run killed by a caller's timeout keeps its progress. It now holds up to 20,000 entries instead of 2,000, so large histories are no longer re-parsed on every run (#2710)
 - OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710)
+- Sessions stored in a database (OpenCode, Crush) are now cached under each session's own last-activity time instead of the database file's modification time, so a write to one session no longer forces every other session in that database to be re-parsed on the next run. An OpenCode session's last activity now also counts its message and part writes, which OpenCode does not always record on the session itself, so these sessions are no longer dated too early or served stale from the cache (#2710)
 
 ## [0.7.1] - 2026-10-27
 

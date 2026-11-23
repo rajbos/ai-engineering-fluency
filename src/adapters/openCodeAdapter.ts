@@ -74,6 +74,11 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 	}
 
 	async getLastActivity(sessionFile: string): Promise<Date | null> {
+		const sessionId = this.openCode.getOpenCodeSessionId(sessionFile);
+		if (this.openCode.isOpenCodeDbSession(sessionFile) && sessionId) {
+			// Includes message and part writes, which do not always move the session row.
+			return this.openCode.readOpenCodeDbSessionLastActivity(sessionId);
+		}
 		const session = await this.readOpenCodeSessionData(sessionFile);
 		const ms = session?.time?.updated ?? session?.time?.created;
 		return typeof ms === 'number' ? new Date(ms) : null;

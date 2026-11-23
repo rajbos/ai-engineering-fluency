@@ -79,6 +79,35 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 	}
 
 	/**
+	 * When a session in the SQLite database was last written: the newest `time_updated` of its
+	 * session row, its messages and its parts, in ms. The session row alone lags behind: OpenCode
+	 * does not touch it on every message or part write (in one real store 81 of 82 sessions had
+	 * a message updated after the row), so it cannot date or version the session's token data
+	 * (#2710). Null when the session is unknown. A missing `message` or `part` table (or column,
+	 * in an older schema) is skipped rather than failing the whole lookup.
+	 */
+	async readOpenCodeDbSessionLastActivity(sessionId: string): Promise<Date | null> {
+		const dbPath = this.getOpenCodeDbPath();
+		const sessionRows = await this.queryRows(dbPath, 'SELECT COALESCE(time_updated, time_created) AS t FROM session WHERE id = ?', [sessionId]);
+		const session = sessionRows?.[0]?.t;
+		if (typeof session !== 'number') { return null; }
+		// Only query tables that have the columns: on the read-only node:sqlite path a failing
+		// query moves the whole database to the sql.js fallback for a while, so an older schema
+		// must be detected up front rather than by catching an error.
+		const columns = await this.queryRows(dbPath,
+			"SELECT m.name AS tbl, COUNT(*) AS n FROM sqlite_master m JOIN pragma_table_info(m.name) c "
+			+ "WHERE m.type = 'table' AND m.name IN ('message', 'part') AND c.name IN ('session_id', 'time_updated') GROUP BY m.name");
+		let latest = session;
+		for (const table of ['message', 'part'] as const) {
+			if (!columns?.some(row => row.tbl === table && row.n === 2)) { continue; }
+			const rows = await this.queryRows(dbPath, `SELECT MAX(time_updated) AS t FROM ${table} WHERE session_id = ?`, [sessionId]);
+			const value = rows?.[0]?.t;
+			if (typeof value === 'number' && value > latest) { latest = value; }
+		}
+		return new Date(latest);
+	}
+
+	/**
 	 * Read all OpenCode messages from the SQLite database for a given session.
 	 */
 	async readOpenCodeDbMessages(sessionId: string): Promise<any[]> {
