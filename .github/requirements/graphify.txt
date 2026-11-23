@@ -4,9 +4,9 @@
 #
 #    pip-compile --allow-unsafe --generate-hashes --output-file=graphify.txt --strip-extras graphify.in
 #
-graphifyy==0.9.104 \
-    --hash=sha256:01963f515fcdd2e369c179ee701a3865623c5ee6b7ff8dafa2f1929d5be0d1c6 \
-    --hash=sha256:ecc5f436a44c4e776aa88e96acd0d5f26f9e3f680f1d1a010ca06547a78fbd55
+graphifyy==0.9.109 \
+    --hash=sha256:386b09f8e56f9c4fc23dd389811853edfbdff985e7d40519233f4af92c4b5b6c \
+    --hash=sha256:5563c1b2dc65ad6e5bc462c5ebbd54976875e2b01d7266a029661be85a43861f
     # via -r graphify.in
 networkx==3.7 \
     --hash=sha256:e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0 \
