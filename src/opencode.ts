@@ -106,6 +106,32 @@ export class OpenCodeDataAccess extends WalSqlJsDbCacheBase {
 	}
 
 	/**
+	 * When a session in the SQLite database was last written: the newest `time_updated` of its
+	 * session row, its messages and its parts, in ms. The session row alone lags behind: OpenCode
+	 * does not touch it on every message or part write (in one real store 81 of 82 sessions had
+	 * a message updated after the row), so it cannot date or version the session's token data
+	 * (#2710). Null when the session is unknown. A missing `message` or `part` table (or column,
+	 * in an older schema) is skipped rather than failing the whole lookup.
+	 */
+	async readOpenCodeDbSessionLastActivity(sessionId: string): Promise<Date | null> {
+		const db = await this.getOpenCodeDb();
+		if (!db) { return null; }
+		const scalar = (sql: string): number | null => {
+			try {
+				const value = db.exec(sql, [sessionId])[0]?.values[0]?.[0];
+				return typeof value === 'number' ? value : null;
+			} catch {
+				return null;
+			}
+		};
+		const session = scalar('SELECT COALESCE(time_updated, time_created) FROM session WHERE id = ?');
+		if (session === null) { return null; }
+		const message = scalar('SELECT MAX(time_updated) FROM message WHERE session_id = ?') ?? 0;
+		const part = scalar('SELECT MAX(time_updated) FROM part WHERE session_id = ?') ?? 0;
+		return new Date(Math.max(session, message, part));
+	}
+
+	/**
 	 * Read all OpenCode messages from the SQLite database for a given session.
 	 */
 	async readOpenCodeDbMessages(sessionId: string): Promise<any[]> {
