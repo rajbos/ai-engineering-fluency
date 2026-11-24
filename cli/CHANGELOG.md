@@ -4,10 +4,15 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-24
+
 ### Features
 - On Windows the CLI also reads session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores under `~/.vibe/sandbox-v2/*/`) from WSL distros that are already running. A stopped distro is never read or started. Turn off with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`; `stats --verbose` and `diagnostics` list each running distro
+- Mistral Vibe Desktop sessions are tracked and reported as their own editor (#2721)
 
 ### Bug Fixes
+- Mistral Vibe sessions in the unified session store are discovered and included, and Mistral Large 4 usage is priced (#2576)
+- Copilot app "auto" sessions routed by Copilot Fusion are attributed to Copilot Fusion (#2687)
 - Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once per run instead of once per session query, so `all --json` no longer runs for many minutes on a large OpenCode store (#2710)
 - The session cache (`cli-cache.json`) is now saved every 30 seconds during a run and when the CLI is stopped with Ctrl+C or `SIGTERM`, and is written atomically, so a run killed by a caller's timeout keeps its progress. It now holds up to 20,000 entries instead of 2,000, so large histories are no longer re-parsed on every run (#2710)
