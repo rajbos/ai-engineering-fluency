@@ -46,6 +46,7 @@ jobs:
       badge-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.badge-relevant == 'true' }}
       desktop-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.desktop-relevant == 'true' }}
       sharing-server-relevant: ${{ steps.filter.outputs.sharing-server-relevant == 'true' }}
+      npm-verify-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.npm-verify-relevant == 'true' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -154,6 +155,12 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/workflows/dependencies/playwright/**'
               - '.nvmrc'
+            # Gates npm-verify-tests only: the release-time npm publish check
+            # (used by cli-publish.yml and sharing-server-publish.yml) and its
+            # stubbed-npm scenario tests.
+            npm-verify-relevant:
+              - '.github/workflows/scripts/verify-npm-publish*'
+              - '.github/workflows/ci.yml'
 
   # Deterministic guard against "new source logic without test changes" — the
   # class of finding the Test Expert agent would otherwise have to
@@ -223,6 +230,38 @@ jobs:
     - name: Run code duplication analysis
       shell: bash
       run: node scripts/check-code-duplication.js --baseline scripts/code-duplication-baseline.json >> "$GITHUB_STEP_SUMMARY"
+
+  # Scenario tests for verify-npm-publish.sh, the release-time check that npm
+  # serves the attested tarball. They stub curl, npm and sleep, so they need no
+  # network and finish in seconds; a broken script would otherwise only show up
+  # in the middle of a real release.
+  npm-verify-tests:
+    name: npm publish verification tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: check-changes
+    if: needs.check-changes.outputs.npm-verify-relevant == 'true'
+    steps:
+    - name: Harden the runner (Block all outbound calls except allowed)
+      uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+      with:
+        egress-policy: block
+        allowed-endpoints: >
+          github.com:443
+          productionresultssa*.blob.core.windows.net:443
+          results-receiver.actions.githubusercontent.com:443
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: '.nvmrc'
+
+    - name: Run verify-npm-publish.sh scenario tests
+      shell: bash
+      run: bash .github/workflows/scripts/verify-npm-publish.test.sh
 
   # No matrix. 22.x was dropped (.nvmrc pins 24, and package/ui-checks here
   # already build on 24 only), and a one-entry matrix would be actively
@@ -881,7 +920,7 @@ jobs:
     name: CI result
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [check-changes, test-coverage-check, duplication-check, build, build-windows, package, ui-checks, sharing-server-tests]
+    needs: [check-changes, test-coverage-check, duplication-check, build, build-windows, package, ui-checks, sharing-server-tests, npm-verify-tests]
     if: always()
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -909,3 +948,4 @@ jobs:
             package=${{ needs.package.result }}
             ui-checks=${{ needs.ui-checks.result }}
             sharing-server-tests=${{ needs.sharing-server-tests.result }}
+            npm-verify-tests=${{ needs.npm-verify-tests.result }}
