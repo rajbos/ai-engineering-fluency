@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import { readDbBufferWithWal } from '../../src/utils/sqliteWal';
+import { queryCopilotAutomationRuns } from '../../src/copilotAutomationRuns';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -204,6 +205,21 @@ export class CopilotAppDataAccess {
 			}
 		} catch { /* optional enrichment — suppress */ }
 		return result;
+	}
+
+	/**
+	 * Session UUID → automation name for every GitHub Copilot automation run
+	 * (`workflow_runs` joined to `workflows`). Empty when data.db or the tables
+	 * are missing, or on any error.
+	 */
+	async getAutomationRuns(): Promise<Map<string, string>> {
+		const dbPath = this.getDbPath();
+		if (!fs.existsSync(dbPath)) { return new Map(); }
+		try {
+			return queryCopilotAutomationRuns(await this.getSharedDb(dbPath));
+		} catch {
+			return new Map();
+		}
 	}
 
 	/** Map one sessions-table row to a SessionContextWindow (null when the id is malformed). */

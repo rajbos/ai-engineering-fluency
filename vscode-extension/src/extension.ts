@@ -225,6 +225,7 @@ import {
 } from '../../src/diagnosticsViewBuilder';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
+import { automationRunName } from '../../src/copilotAutomationRuns';
 import { PiDataAccess } from '../../src/pi';
 import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
@@ -7359,7 +7360,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions = timedStepSync(lg, 'recent session buckets', () => this.buildRecentSessionBuckets(usageResults, now));
 			autoCompactionsLast7Days = timedStepSync(lg, 'auto-compaction stats', () => this.buildAutoCompactionStats(usageResults, now));
 			correctionReport = timedStepSync(lg, 'correction report', () => this.buildCorrectionReport(usageResults));
-			repeatedTasks = timedStepSync(lg, 'repeated-task report', () => this.buildRepeatedTaskReport(usageResults));
+			repeatedTasks = await timedStep(lg, 'repeated-task report (+ copilot automation runs)', () => this.buildRepeatedTaskReport(usageResults));
 			await timedStep(lg, 'workspace dedup + customization scans', () => this.deduplicateWorkspacePathsWithScans(workspaceSessionCounts, workspaceInteractionCounts));
 			timedStepSync(lg, 'customization matrix', () => this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts));
 			await timedStep(lg, 'multi-agent parent count (data.db)', () => this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey));
@@ -8488,13 +8489,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Build the repeated-task report from already-parsed session results:
 	 * cluster the first user prompt of every scanned session (across all
 	 * repositories) into tasks the user keeps prompting for manually —
-	 * candidates for a reusable skill or prompt file. Pure in-memory
-	 * clustering over cached prompts; returns undefined when no cluster
-	 * reaches the minimum size.
+	 * candidates for a reusable skill or prompt file. In-memory clustering
+	 * over cached prompts; runs of Claude Code scheduled tasks and GitHub
+	 * Copilot automations (data.db) are reported as scheduled tasks instead.
+	 * Returns undefined when there is neither a cluster nor a scheduled run.
 	 */
-	private buildRepeatedTaskReport(
-		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
-	): RepeatedTaskReport | undefined {
+	private async buildRepeatedTaskReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+	): Promise<RepeatedTaskReport | undefined> {
+		// GitHub Copilot automation runs from data.db, so scheduled runs are reported as scheduled tasks.
+		const automationRuns = await this.copilotAppData.getAutomationRuns();
 		return _buildRepeatedTaskReport(results
 			.filter((r): r is NonNullable<typeof r> => !!r)
 			.map(r => ({
@@ -8504,6 +8508,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastInteraction: r.sessionData.lastInteraction,
 				mtime: r.mtime,
 				repository: r.sessionData.repository,
+				editor: this.getEditorTypeFromPath(r.sessionFile),
+				copilotAutomation: automationRunName(r.sessionFile, automationRuns),
 			})));
 	}
 

@@ -42,9 +42,60 @@ task is the strongest signal that a workflow has stabilized enough to be capture
    line so it cannot restructure the instructions; it is a draft precisely because it embeds
    arbitrary user text that the user should review before it runs.
 
+## Recurring tasks: automate, not only a skill
+
+A task that keeps coming back on a rhythm is a candidate for a schedule, not only a skill: a
+skill saves re-explaining it, a scheduled run saves starting it at all.
+
+- **Editor per session**: hosts pass each session's editor (`getEditorTypeFromPath()` in the
+  extension, `getEditorSourceFromPath()` in the CLI) as `RepeatedTaskSessionSource.editor`;
+  `Unknown` is dropped. Each cluster carries `editors`, most sessions first.
+- **Recurrence** (`detectRecurrence()` in `src/repeatedTasks.ts`): the sessions' distinct UTC
+  days must number at least `MIN_RECURRING_DAYS = 3`, and at least 75% of the gaps between them
+  must fit the cadence of the median gap: `daily` (median ≤ 1.5 days, gaps of 1–3 days so
+  weekends fit), `weekly` (median 5–9, gaps 4–10), otherwise `regular` (gaps within half to
+  double the median). Several sessions on one day, or a burst plus a stray later session, are
+  not a schedule. The result is `RepeatedTaskCluster.recurrence` (`cadence`, `activeDays`,
+  `typicalGapDays`), absent when the task does not recur.
+- **Automation option per editor** (`automationPlatformForEditor()` /
+  `resolveAutomationPlatforms()`): Claude editors (`Claude Code`, `Claude Desktop`, ...) map to
+  **Claude Code scheduled tasks** (the Scheduled page of the Claude desktop app, or `/schedule`
+  for a cloud routine); Copilot hosts (VS Code variants, Copilot CLI/App, Visual Studio,
+  JetBrains, Eclipse, ...) map to **GitHub Copilot automations**; anything else gets a generic
+  scheduled job (cron, Task Scheduler, scheduled CI) running the agent's CLI non-interactively.
+  A cluster used in both Claude and Copilot shows both.
+- **Surfaces**: the card shows a 🔁 cadence badge and an "automate it" tip with one line per
+  platform, the sessions table has an Editor column, `buildSkillCreationPrompt()` adds a step
+  asking the agent to explain how to schedule the skill (without setting it up), the
+  `repeated-task-automation-candidate` insight fires for the largest recurring cluster, and
+  `skill-suggestions` in the CLI prints `Editors`, `Recurs` and `Automate` lines.
+
+## Scheduled runs: already automated
+
+Runs of a scheduled task are not hand-typed prompts, so they are never suggested. They are
+summarized in `RepeatedTaskReport.scheduledTasks` (name, platform, run count, active days, last
+run) and left out of `clusters` and `sessionsScanned`.
+
+- **Claude Code scheduled tasks**: the run's first prompt starts with
+  `<scheduled-task name="..." file="...">`; `claudeScheduledTaskName()` reads the name.
+- **GitHub Copilot automations**: the Copilot app stores automations in `~/.copilot/data.db`
+  (`workflows`) and each run in `workflow_runs`, whose `session_id` is the Copilot CLI session
+  UUID. `src/copilotAutomationRuns.ts` reads that map (`queryCopilotAutomationRuns()`; the
+  extension through `CopilotAppDataAccess.getAutomationRuns()`, the CLI through
+  `CopilotAutomationRunsAccess`) and hosts pass the automation name as
+  `RepeatedTaskSessionSource.copilotAutomation`.
+- **Surfaces**: the `scheduled-tasks-running` insight (a celebration) names the top three
+  tasks with their run counts; the Skill Suggestions section notes which scheduled tasks were
+  left out; the CLI prints an "Already on a schedule" block. `skill-suggestions --json` without
+  `--include-prompts` keeps the counts but drops the user-chosen task names.
+
 ## What is excluded
 
 - **Slash commands** (`/fix ...`) — already a reusable invocation, nothing to suggest.
+- **Scheduled runs** — already automated; reported as scheduled tasks (see above).
+- **Injected context** — Claude Code's `<system-reminder>` blocks (worktree notices, linked
+  session status) are removed from the prompt first (`stripInjectedContext()`): they repeat
+  verbatim across unrelated sessions and would otherwise cluster them together.
 - **Short or content-free prompts** ("ok thanks", "continue") — no task signal.
 - Prompts that reduce to only stopwords after normalization.
 
@@ -66,7 +117,8 @@ task is the strongest signal that a workflow has stabilized enough to be capture
 
 ## Tests
 
-- `src/test/repeatedTasks.test.ts` — normalization, similarity, clustering,
+- `src/test/copilotAutomationRuns.test.ts` — reading automation runs from a `data.db` fixture.
+- `src/test/repeatedTasks.test.ts` — normalization, injected-context stripping, scheduled runs, similarity, clustering,
   ordering, truncation, exclusions, example prompts, the skill location rule, the skill prompt, and
   the shared report builder (`buildRepeatedTaskReport`, `toRepeatedTaskInput`, `repoDisplayName`).
 - `vscode-extension/test/unit/webview-skillSuggestions.test.ts` — section rendering and escaping,
@@ -74,4 +126,4 @@ task is the strongest signal that a workflow has stabilized enough to be capture
 - `cli/src/test/skillSuggestions.test.ts` — the CLI builds the report from real session files only
   when asked, and `skill-suggestions --json` redacts prompts unless opted in.
 - `vscode-extension/test/unit/insightsEngine.test.ts` — the `repeated-task-skill-candidate`
-  insight thresholds.
+  insight thresholds and the `repeated-task-automation-candidate` insight.

@@ -977,6 +977,67 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
 });
 
+function recurringReport(editors: string[] | undefined, recurrence: { cadence: 'daily' | 'weekly' | 'regular'; activeDays: number; typicalGapDays: number } | undefined) {
+	const report = rtReport(4);
+	return { ...report, clusters: [{ ...report.clusters[0], editors, recurrence }] };
+}
+
+test('repeated-task-automation-candidate: fires only for a recurring task and names the matching schedulers', () => {
+	const none = makeCtx();
+	none.repeatedTasks = rtReport(4);
+	assert.equal(evaluateInsights(none, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate'), undefined);
+
+	const ctx = makeCtx();
+	ctx.repeatedTasks = recurringReport(['Claude Code', 'VS Code'], { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate');
+	assert.ok(insight, 'should fire for a recurring cluster');
+	assert.match(insight.body, /about weekly/);
+	assert.match(insight.body, /4 different days/);
+	assert.match(insight.body, /run the tests/);
+	assert.match(insight.body, /Claude Code scheduled tasks or GitHub Copilot automations/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+test('repeated-task-automation-candidate: unknown editors fall back to a scheduled CLI job, with every-N-days phrasing', () => {
+	const ctx = makeCtx();
+	ctx.repeatedTasks = recurringReport(undefined, { cadence: 'regular', activeDays: 3, typicalGapDays: 3 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate');
+	assert.ok(insight);
+	assert.match(insight.body, /about every 3 days/);
+	assert.match(insight.body, /scheduled job that runs your agent's CLI/);
+});
+
+test('scheduled-tasks-running: celebrates tasks already on a schedule and names them per platform', () => {
+	const none = makeCtx();
+	none.repeatedTasks = rtReport(3);
+	assert.equal(evaluateInsights(none, {}, 7, null).find(i => i.id === 'scheduled-tasks-running'), undefined);
+
+	const ctx = makeCtx();
+	ctx.repeatedTasks = {
+		...rtReport(3),
+		scheduledTasks: [
+			{ name: 'repo-health-scan-daily', platform: 'claude', runCount: 30, activeDays: 30, lastRun: null },
+			{ name: 'Dependabot review', platform: 'copilot', runCount: 10, activeDays: 10, lastRun: null },
+			{ name: 'weekly-refactor', platform: 'claude', runCount: 4, activeDays: 4, lastRun: null },
+			{ name: 'one-more', platform: 'copilot', runCount: 1, activeDays: 1, lastRun: null },
+		],
+	};
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'scheduled-tasks-running');
+	assert.ok(insight, 'should fire when scheduled tasks ran');
+	assert.equal(insight.severity, 'celebration');
+	assert.match(insight.body, /^4 scheduled tasks ran 45 times/);
+	assert.match(insight.body, /"repo-health-scan-daily" \(Claude Code, 30×\)/);
+	assert.match(insight.body, /"Dependabot review" \(GitHub Copilot automation, 10×\)/);
+	assert.match(insight.body, /and 1 more/);
+	assert.doesNotMatch(insight.body, /one-more/);
+
+	const single = makeCtx();
+	single.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: [{ name: 'nightly', platform: 'copilot', runCount: 2, activeDays: 2, lastRun: null }] };
+	const one = evaluateInsights(single, {}, 7, null).find(i => i.id === 'scheduled-tasks-running');
+	assert.match(one!.body, /^1 scheduled task ran 2 times/);
+	assert.equal(evaluateInsights(single, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+});
+
 test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {
 	const stale = { name: 'old-skill', source: 'skill' };
 	const curation = makeCtx();

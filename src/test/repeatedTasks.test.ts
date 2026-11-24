@@ -14,6 +14,14 @@ import {
     resolveSkillTarget,
     suggestSkillName,
     MAX_SKILL_NAME_LENGTH,
+    MIN_RECURRING_DAYS,
+    detectRecurrence,
+    automationPlatformForEditor,
+    resolveAutomationPlatforms,
+    describeCadence,
+    stripInjectedContext,
+    claudeScheduledTaskName,
+    scheduledRunOf,
     type RepeatedTaskInput,
 } from '../repeatedTasks';
 import type { RepeatedTaskCluster } from '../types';
@@ -420,4 +428,175 @@ test('suggestSkillName: stays within the Agent Skills name rules for over-long o
 
     const prompt = buildSkillCreationPrompt(cluster({ sharedKeywords: [long] }));
     assert.ok(prompt.includes(`.github/skills/${'a'.repeat(MAX_SKILL_NAME_LENGTH)}/SKILL.md`));
+});
+
+// ---------------------------------------------------------------------------
+// Recurrence and automation options
+// ---------------------------------------------------------------------------
+
+function onDays(...isoDays: string[]): { lastInteraction: string }[] {
+    return isoDays.map(d => ({ lastInteraction: `${d}T09:30:00.000Z` }));
+}
+
+test('detectRecurrence: needs MIN_RECURRING_DAYS distinct days; same-day sessions are one day', () => {
+    assert.equal(detectRecurrence(onDays('2026-11-02', '2026-11-03')), undefined);
+    assert.equal(detectRecurrence(onDays('2026-11-02', '2026-11-02', '2026-11-02', '2026-11-03')), undefined);
+    assert.equal(MIN_RECURRING_DAYS, 3);
+});
+
+test('detectRecurrence: weekdays with a weekend gap are daily', () => {
+    // Thu, Fri, Mon, Tue, Wed: gaps 1, 3, 1, 1.
+    assert.deepEqual(
+        detectRecurrence(onDays('2026-11-05', '2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11')),
+        { cadence: 'daily', activeDays: 5, typicalGapDays: 1 },
+    );
+});
+
+test('detectRecurrence: one session a week (give or take a day) is weekly', () => {
+    assert.deepEqual(
+        detectRecurrence(onDays('2026-10-05', '2026-10-12', '2026-10-20', '2026-10-26')),
+        { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 },
+    );
+});
+
+test('detectRecurrence: a steady non-daily, non-weekly interval is regular', () => {
+    assert.deepEqual(
+        detectRecurrence(onDays('2026-10-01', '2026-10-04', '2026-10-07', '2026-10-10')),
+        { cadence: 'regular', activeDays: 4, typicalGapDays: 3 },
+    );
+});
+
+test('detectRecurrence: a burst plus stray later sessions is not a schedule', () => {
+    // Gaps 1, 1, 20, 25: only 1 of 4 fits the median gap (10.5).
+    assert.equal(detectRecurrence(onDays('2026-09-01', '2026-09-02', '2026-09-03', '2026-09-23', '2026-10-18')), undefined);
+});
+
+test('detectRecurrence: ignores sessions without a parseable timestamp', () => {
+    assert.equal(detectRecurrence([{ lastInteraction: null }, { lastInteraction: 'not a date' }, ...onDays('2026-11-02', '2026-11-03')]), undefined);
+});
+
+test('automationPlatformForEditor: Claude editors, Copilot hosts, and everything else', () => {
+    for (const e of ['Claude Code', 'Claude Code CLI', 'Claude Desktop', 'Claude Desktop Cowork', 'Claude (VS Code)']) {
+        assert.equal(automationPlatformForEditor(e), 'claude', e);
+    }
+    for (const e of ['VS Code', 'VS Code Insiders', 'VS Code Server', 'VSCodium', 'Copilot CLI', 'Copilot App', 'Visual Studio', 'JetBrains', 'Eclipse']) {
+        assert.equal(automationPlatformForEditor(e), 'copilot', e);
+    }
+    for (const e of ['Cursor', 'Gemini CLI', 'OpenCode', 'Windsurf', 'Mistral Vibe']) {
+        assert.equal(automationPlatformForEditor(e), 'other', e);
+    }
+});
+
+test('resolveAutomationPlatforms: distinct, in editor order, defaulting to other', () => {
+    assert.deepEqual(resolveAutomationPlatforms({ editors: ['Claude Code', 'VS Code', 'Claude Desktop', 'Cursor'] }), ['claude', 'copilot', 'other']);
+    assert.deepEqual(resolveAutomationPlatforms({ editors: [] }), ['other']);
+    assert.deepEqual(resolveAutomationPlatforms({}), ['other']);
+});
+
+test('buildRepeatedTaskReport: ranks editors per cluster, drops Unknown, and flags recurring tasks', () => {
+    const days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05'];
+    const editors = ['Claude Code', 'VS Code', 'Claude Code', 'Unknown'];
+    const report = buildRepeatedTaskReport(days.map((d, i) => ({
+        file: `s${i}`,
+        firstUserPrompt: 'triage the new issues and label them by area',
+        lastInteraction: `${d}T08:00:00.000Z`,
+        mtime: 0,
+        editor: editors[i],
+    })));
+    const c = report!.clusters[0];
+    assert.deepEqual(c.editors, ['Claude Code', 'VS Code']);
+    assert.equal(c.sessions.find(s => s.file === 's3')!.editor, undefined);
+    assert.deepEqual(c.recurrence, { cadence: 'daily', activeDays: 4, typicalGapDays: 1 });
+});
+
+test('buildRepeatedTaskReport: tasks repeated on one day carry no recurrence', () => {
+    const report = buildRepeatedTaskReport([0, 1, 2].map(i => ({
+        file: `s${i}`,
+        firstUserPrompt: 'triage the new issues and label them by area',
+        lastInteraction: `2026-11-02T0${i}:00:00.000Z`,
+        mtime: 0,
+    })));
+    assert.equal(report!.clusters[0].recurrence, undefined);
+    assert.deepEqual(report!.clusters[0].editors, []);
+});
+
+test('buildSkillCreationPrompt: recurring tasks get a step to schedule the skill on each matching platform', () => {
+    const recurring = cluster({
+        editors: ['Claude Code', 'Copilot CLI'],
+        recurrence: { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 },
+    });
+    const prompt = buildSkillCreationPrompt(recurring);
+    const step = prompt.split('\n').find(l => l.startsWith('4. '));
+    assert.ok(step, 'automation step present');
+    assert.match(step!, /recurs about weekly/);
+    assert.match(step!, /Claude Code, as a scheduled task/);
+    assert.match(step!, /GitHub Copilot, as an automation/);
+    assert.match(step!, /Do not set up the schedule yourself/);
+    assert.ok(prompt.trimEnd().endsWith('Show me the file before making any other changes.'));
+
+    assert.ok(!buildSkillCreationPrompt(cluster()).split('\n').some(l => l.startsWith('4. ')), 'no step without recurrence');
+});
+
+test('describeCadence: daily, weekly and every-N-days phrasing', () => {
+    assert.equal(describeCadence({ cadence: 'daily', activeDays: 3, typicalGapDays: 1 }), 'about daily');
+    assert.equal(describeCadence({ cadence: 'weekly', activeDays: 3, typicalGapDays: 7 }), 'about weekly');
+    assert.equal(describeCadence({ cadence: 'regular', activeDays: 3, typicalGapDays: 3.5 }), 'about every 4 days');
+});
+
+// ---------------------------------------------------------------------------
+// Injected context and scheduled runs
+// ---------------------------------------------------------------------------
+
+const REMINDER = '<system-reminder>\nYou are operating in a git worktree.\nWorktree path: C:/x/y\n</system-reminder>\n';
+const CLAUDE_RUN = '<scheduled-task name="repo-health-scan-daily" file="C:/u/.claude/scheduled-tasks/repo-health-scan-daily/SKILL.md">\nThis is an automated run of a scheduled task.';
+
+test('stripInjectedContext: removes closed and cut-off system-reminder blocks', () => {
+    assert.equal(stripInjectedContext(`${REMINDER}run the tests and fix the failures`), 'run the tests and fix the failures');
+    assert.equal(stripInjectedContext('<system-reminder>\nWorktree path: C:/x/y and the text was cut'), '');
+    assert.equal(stripInjectedContext('plain prompt'), 'plain prompt');
+});
+
+test('normalizePromptTokens: injected context alone is not a task, and does not join unrelated prompts', () => {
+    assert.equal(normalizePromptTokens(REMINDER), null);
+    const a = normalizePromptTokens(`${REMINDER}rename the config loader`)!;
+    const b = normalizePromptTokens(`${REMINDER}add a chart legend toggle`)!;
+    assert.equal(tokenSimilarity(a, b), 0);
+});
+
+test('claudeScheduledTaskName: reads the task name from a scheduled run header, also after injected context', () => {
+    assert.equal(claudeScheduledTaskName(CLAUDE_RUN), 'repo-health-scan-daily');
+    assert.equal(claudeScheduledTaskName(REMINDER + CLAUDE_RUN), 'repo-health-scan-daily');
+    assert.equal(claudeScheduledTaskName('<scheduled-task name="">x'), 'Claude scheduled task');
+    assert.equal(claudeScheduledTaskName('please explain <scheduled-task name="x"> tags'), null);
+    assert.equal(normalizePromptTokens(CLAUDE_RUN), null, 'scheduled runs never cluster');
+});
+
+test('scheduledRunOf: Copilot automation from the host, Claude from the prompt, else null', () => {
+    assert.deepEqual(scheduledRunOf({ firstUserPrompt: 'review the PRs', copilotAutomation: 'Daily review' }), { name: 'Daily review', platform: 'copilot' });
+    assert.deepEqual(scheduledRunOf({ firstUserPrompt: CLAUDE_RUN }), { name: 'repo-health-scan-daily', platform: 'claude' });
+    assert.equal(scheduledRunOf({ firstUserPrompt: 'review the open PRs and merge green ones' }), null);
+});
+
+test('buildRepeatedTaskReport: scheduled runs are summarized, not clustered or counted as scanned', () => {
+    const daily = (day: string, i: number) => ({ file: `c${i}`, firstUserPrompt: CLAUDE_RUN, lastInteraction: `${day}T06:00:00.000Z`, mtime: 0 });
+    const report = buildRepeatedTaskReport([
+        daily('2026-11-02', 0), daily('2026-11-03', 1), daily('2026-11-03', 2),
+        { file: 'p0', firstUserPrompt: 'review the open dependabot prs and merge green ones', lastInteraction: '2026-11-04T09:00:00.000Z', mtime: 0, copilotAutomation: 'Dependabot review' },
+        { file: 'h0', firstUserPrompt: 'triage the new issues and label them by area', lastInteraction: '2026-11-01T09:00:00.000Z', mtime: 0 },
+        { file: 'h1', firstUserPrompt: 'triage new issues, label them by area', lastInteraction: '2026-11-02T09:00:00.000Z', mtime: 0 },
+    ])!;
+    assert.equal(report.sessionsScanned, 2);
+    assert.equal(report.clusters.length, 1);
+    assert.deepEqual(report.clusters[0].sessions.map(s => s.file).sort(), ['h0', 'h1']);
+    assert.deepEqual(report.scheduledTasks, [
+        { name: 'repo-health-scan-daily', platform: 'claude', runCount: 3, activeDays: 2, lastRun: '2026-11-03T06:00:00.000Z' },
+        { name: 'Dependabot review', platform: 'copilot', runCount: 1, activeDays: 1, lastRun: '2026-11-04T09:00:00.000Z' },
+    ]);
+});
+
+test('buildRepeatedTaskReport: only scheduled runs still yields a report with no clusters', () => {
+    const report = buildRepeatedTaskReport([{ file: 'c0', firstUserPrompt: CLAUDE_RUN, lastInteraction: null, mtime: Date.parse('2026-11-02T06:00:00.000Z') }])!;
+    assert.deepEqual(report.clusters, []);
+    assert.equal(report.scheduledTasks![0].lastRun, '2026-11-02T06:00:00.000Z');
+    assert.equal(buildRepeatedTaskReport([{ file: 'x', firstUserPrompt: 'one-off question about the build', mtime: 0 }]), undefined);
 });

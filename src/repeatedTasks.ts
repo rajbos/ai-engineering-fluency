@@ -18,7 +18,7 @@
  * This module is intentionally pure (no VS Code API, no filesystem access) so
  * it can be unit-tested with mocked data and reused by the CLI and the webview.
  */
-import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from './types';
+import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskPlatform, ScheduledTaskSummary } from './types';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -41,6 +41,15 @@ const REPRESENTATIVE_LENGTH = 200;
 
 /** Other prompts kept per cluster (beyond the representative) to ground a skill draft. */
 export const MAX_EXAMPLE_PROMPTS = 3;
+
+/** Distinct days a task must appear on before it counts as recurring (worth scheduling). */
+export const MIN_RECURRING_DAYS = 3;
+
+/**
+ * Share of the gaps between active days that must fit the detected cadence.
+ * Keeps a burst of sessions plus one stray later session from reading as a schedule.
+ */
+const RECURRENCE_FIT_RATIO = 0.75;
 
 /** Common English words that carry no task identity. */
 const STOPWORDS = new Set([
@@ -65,13 +74,40 @@ export interface RepeatedTaskInput {
 }
 
 /**
+ * Context the agent host injects into the first user message (Claude Code's
+ * `<system-reminder>` blocks: worktree notices, linked-session status, ...).
+ * It is not something the user typed and repeats verbatim across unrelated
+ * sessions, so it is removed before clustering and display. A block cut off by
+ * the stored prompt's length limit is removed to the end.
+ */
+const INJECTED_CONTEXT_PATTERN = /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g;
+
+/** The prompt without host-injected context blocks, trimmed. */
+export function stripInjectedContext(prompt: string): string {
+	return prompt.replace(INJECTED_CONTEXT_PATTERN, ' ').trim();
+}
+
+/** Claude Code scheduled runs start their prompt with `<scheduled-task name="..." ...>`. */
+const CLAUDE_SCHEDULED_TASK_PATTERN = /^<scheduled-task\b[^>]*?\bname="([^"]*)"/;
+
+/**
+ * The scheduled task's name when the prompt is a Claude Code scheduled run
+ * (an automated run, not something the user typed), otherwise null.
+ */
+export function claudeScheduledTaskName(prompt: string): string | null {
+	const match = CLAUDE_SCHEDULED_TASK_PATTERN.exec(stripInjectedContext(prompt));
+	return match ? (match[1].trim() || 'Claude scheduled task') : null;
+}
+
+/**
  * Normalize a raw prompt into a set of content tokens.
  * Returns null when the prompt should be excluded entirely (slash commands —
- * already a reusable invocation — and prompts too short to describe a task).
+ * already a reusable invocation —, scheduled runs — already automated — and
+ * prompts too short to describe a task). Injected context is ignored.
  */
 export function normalizePromptTokens(prompt: string): Set<string> | null {
-	const trimmed = prompt.trim();
-	if (trimmed.length < MIN_PROMPT_LENGTH || trimmed.startsWith('/')) { return null; }
+	const trimmed = stripInjectedContext(prompt);
+	if (trimmed.length < MIN_PROMPT_LENGTH || trimmed.startsWith('/') || claudeScheduledTaskName(trimmed) !== null) { return null; }
 	const tokens = trimmed
 		.slice(0, MAX_PROMPT_LENGTH)
 		.toLowerCase()
@@ -146,7 +182,7 @@ function assignToCluster(clusters: TaskClusterState[], input: RepeatedTaskInput,
 
 /** Trim a prompt and cut it at a word boundary to the display length. */
 function truncatePrompt(prompt: string): string {
-	const trimmed = prompt.trim();
+	const trimmed = stripInjectedContext(prompt);
 	return trimmed.length > REPRESENTATIVE_LENGTH
 		? trimmed.slice(0, REPRESENTATIVE_LENGTH).replace(/\s+\S*$/, '') + '…'
 		: trimmed;
@@ -207,9 +243,100 @@ function clusterMembers(members: readonly TaskMember[]): RepeatedTaskCluster[] {
 				sessions,
 				sharedKeywords: sharedKeywords(c.members.map(m => m.tokens)),
 				examplePrompts: selectExamplePrompts(sessions.map(s => promptsBySession.get(s)!), representativePrompt),
+				editors: rankEditors(sessions),
+				...withRecurrence(detectRecurrence(sessions)),
 			};
 		})
 		.sort((a, b) => b.sessionCount - a.sessionCount);
+}
+
+/** Distinct editors of the sessions, most sessions first (ties by name). */
+function rankEditors(sessions: readonly RepeatedTaskSessionRef[]): string[] {
+	const counts = new Map<string, number>();
+	for (const s of sessions) { if (s.editor) { counts.set(s.editor, (counts.get(s.editor) ?? 0) + 1); } }
+	return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([e]) => e);
+}
+
+function withRecurrence(recurrence: RepeatedTaskRecurrence | undefined): { recurrence?: RepeatedTaskRecurrence } {
+	return recurrence ? { recurrence } : {};
+}
+
+// ---------------------------------------------------------------------------
+// Recurrence: is the repeated task something to schedule, not only a skill?
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Sorted distinct UTC day numbers the sessions were active on. */
+function activeDayNumbers(sessions: readonly Pick<RepeatedTaskSessionRef, 'lastInteraction'>[]): number[] {
+	const days = new Set<number>();
+	for (const s of sessions) {
+		const t = s.lastInteraction ? Date.parse(s.lastInteraction) : NaN;
+		if (!Number.isNaN(t)) { days.add(Math.floor(t / DAY_MS)); }
+	}
+	return [...days].sort((a, b) => a - b);
+}
+
+function median(sorted: readonly number[]): number {
+	const mid = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Cadence for a median gap, and the gap range that counts as fitting it. */
+function cadenceFor(typicalGap: number): { cadence: RepeatedTaskRecurrence['cadence']; min: number; max: number } {
+	// Daily work skips weekends, so a Friday-to-Monday gap of 3 still fits "daily".
+	if (typicalGap <= 1.5) { return { cadence: 'daily', min: 1, max: 3 }; }
+	if (typicalGap >= 5 && typicalGap <= 9) { return { cadence: 'weekly', min: 4, max: 10 }; }
+	return { cadence: 'regular', min: Math.max(1, typicalGap / 2), max: typicalGap * 2 };
+}
+
+/**
+ * Whether a repeated task comes back on a schedule-like rhythm: at least
+ * MIN_RECURRING_DAYS distinct days, with most gaps between them close to the
+ * median gap. Several sessions on one day, or an irregular scatter, are not a
+ * schedule. Pure: works on the sessions' last-interaction timestamps.
+ */
+export function detectRecurrence(sessions: readonly Pick<RepeatedTaskSessionRef, 'lastInteraction'>[]): RepeatedTaskRecurrence | undefined {
+	const days = activeDayNumbers(sessions);
+	if (days.length < MIN_RECURRING_DAYS) { return undefined; }
+	const gaps = days.slice(1).map((d, i) => d - days[i]).sort((a, b) => a - b);
+	const typicalGapDays = median(gaps);
+	const { cadence, min, max } = cadenceFor(typicalGapDays);
+	const fitting = gaps.filter(g => g >= min && g <= max).length;
+	if (fitting / gaps.length < RECURRENCE_FIT_RATIO) { return undefined; }
+	return { cadence, activeDays: days.length, typicalGapDays };
+}
+
+// ---------------------------------------------------------------------------
+// Automation options per editor
+// ---------------------------------------------------------------------------
+
+/**
+ * Which scheduling feature fits a recurring task, by where its sessions ran:
+ * - `claude`: Claude Code scheduled tasks (the desktop app's Scheduled page,
+ *   or `/schedule` for a cloud routine).
+ * - `copilot`: GitHub Copilot automations.
+ * - `other`: no built-in scheduler known; run the agent's CLI from a scheduled job.
+ */
+export type AutomationPlatform = 'claude' | 'copilot' | 'other';
+
+/** Copilot-hosting editors whose name does not contain "copilot". */
+const COPILOT_HOST_EDITORS = /^(vs ?code|vscodium|visual studio|jetbrains|eclipse|xcode|ssms)\b/i;
+
+export function automationPlatformForEditor(editor: string): AutomationPlatform {
+	const name = editor.trim();
+	if (/^claude\b/i.test(name)) { return 'claude'; }
+	if (/copilot/i.test(name) || COPILOT_HOST_EDITORS.test(name)) { return 'copilot'; }
+	return 'other';
+}
+
+/**
+ * Distinct automation platforms for a cluster, in the order of its editors
+ * (most sessions first). No known editor means the generic `other` option.
+ */
+export function resolveAutomationPlatforms(cluster: Pick<RepeatedTaskCluster, 'editors'>): AutomationPlatform[] {
+	const platforms = [...new Set((cluster.editors ?? []).map(automationPlatformForEditor))];
+	return platforms.length > 0 ? platforms : ['other'];
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +370,43 @@ export interface RepeatedTaskSessionSource {
 	mtime: number;
 	/** Repository remote URL or name; shortened with `repoDisplayName()`. */
 	repository?: string | null;
+	/** Editor/agent display name (e.g. from `getEditorTypeFromPath()`); 'Unknown' is dropped. */
+	editor?: string | null;
+	/**
+	 * Name of the GitHub Copilot automation this session is a run of (from the
+	 * Copilot app's `workflow_runs`, see `queryCopilotAutomationRuns()`), when it is one.
+	 * Claude Code scheduled runs need no host help: their prompt names the task.
+	 */
+	copilotAutomation?: string | null;
+}
+
+/** The scheduled task a session is an automated run of, or null for a hand-typed session. */
+export function scheduledRunOf(source: Pick<RepeatedTaskSessionSource, 'firstUserPrompt' | 'copilotAutomation'>): { name: string; platform: ScheduledTaskPlatform } | null {
+	if (source.copilotAutomation) { return { name: source.copilotAutomation, platform: 'copilot' }; }
+	const claudeName = source.firstUserPrompt ? claudeScheduledTaskName(source.firstUserPrompt) : null;
+	return claudeName ? { name: claudeName, platform: 'claude' } : null;
+}
+
+/** Groups scheduled runs by platform and task name, most runs first. */
+function summarizeScheduledRuns(runs: readonly { name: string; platform: ScheduledTaskPlatform; source: RepeatedTaskSessionSource }[]): ScheduledTaskSummary[] {
+	const byTask = new Map<string, { summary: ScheduledTaskSummary; days: Set<number> }>();
+	for (const { name, platform, source } of runs) {
+		const key = `${platform}\u0000${name}`;
+		let entry = byTask.get(key);
+		if (!entry) {
+			entry = { summary: { name, platform, runCount: 0, activeDays: 0, lastRun: null }, days: new Set() };
+			byTask.set(key, entry);
+		}
+		const at = source.lastInteraction && !Number.isNaN(Date.parse(source.lastInteraction))
+			? new Date(source.lastInteraction).toISOString()
+			: new Date(source.mtime).toISOString();
+		entry.summary.runCount++;
+		entry.days.add(Math.floor(Date.parse(at) / DAY_MS));
+		if (!entry.summary.lastRun || at > entry.summary.lastRun) { entry.summary.lastRun = at; }
+	}
+	return [...byTask.values()]
+		.map(({ summary, days }) => ({ ...summary, activeDays: days.size }))
+		.sort((a, b) => b.runCount - a.runCount || a.name.localeCompare(b.name));
 }
 
 /**
@@ -268,6 +432,7 @@ function toTaskMember(source: RepeatedTaskSessionSource): TaskMember | null {
 				title: source.title ?? null,
 				lastInteraction: source.lastInteraction ?? new Date(source.mtime).toISOString(),
 				repository: source.repository ? repoDisplayName(source.repository) : undefined,
+				...(source.editor && source.editor !== 'Unknown' ? { editor: source.editor } : {}),
 			},
 		},
 	};
@@ -275,18 +440,32 @@ function toTaskMember(source: RepeatedTaskSessionSource): TaskMember | null {
 
 /**
  * Build the repeated-task report from parsed sessions: cluster the first user
- * prompt of every session that has one. Returns undefined when no cluster
- * reaches MIN_CLUSTER_SIZE.
+ * prompt of every hand-typed session that has one. Scheduled runs (Claude Code
+ * scheduled tasks, GitHub Copilot automations) are already automated, so they
+ * are left out of the clusters and summarized in `scheduledTasks` instead.
+ * Returns undefined when no cluster reaches MIN_CLUSTER_SIZE and nothing runs
+ * on a schedule.
  */
 export function buildRepeatedTaskReport(sources: readonly RepeatedTaskSessionSource[]): RepeatedTaskReport | undefined {
 	const members: TaskMember[] = [];
+	const scheduledRuns: { name: string; platform: ScheduledTaskPlatform; source: RepeatedTaskSessionSource }[] = [];
 	for (const source of sources) {
+		const scheduled = scheduledRunOf(source);
+		if (scheduled) {
+			scheduledRuns.push({ ...scheduled, source });
+			continue;
+		}
 		const member = toTaskMember(source);
 		if (member) { members.push(member); }
 	}
 	const clusters = clusterMembers(members);
-	if (clusters.length === 0) { return undefined; }
-	return { minClusterSize: MIN_CLUSTER_SIZE, sessionsScanned: members.length, clusters };
+	if (clusters.length === 0 && scheduledRuns.length === 0) { return undefined; }
+	return {
+		minClusterSize: MIN_CLUSTER_SIZE,
+		sessionsScanned: members.length,
+		clusters,
+		...(scheduledRuns.length > 0 ? { scheduledTasks: summarizeScheduledRuns(scheduledRuns) } : {}),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +518,20 @@ export function suggestSkillName(cluster: Pick<RepeatedTaskCluster, 'sharedKeywo
 	return name || 'repeated-task';
 }
 
+/** English cadence phrase for the skill prompt ("about daily", "about every 3 days"). */
+export function describeCadence(recurrence: RepeatedTaskRecurrence): string {
+	if (recurrence.cadence === 'daily') { return 'about daily'; }
+	if (recurrence.cadence === 'weekly') { return 'about weekly'; }
+	return `about every ${Math.round(recurrence.typicalGapDays)} days`;
+}
+
+/** How to schedule the task on each platform, as written into the skill prompt. */
+const AUTOMATION_PROMPT_HINTS: Record<AutomationPlatform, string> = {
+	claude: 'in Claude Code, as a scheduled task (the Scheduled page in the Claude desktop app, or `/schedule` for a cloud routine) that invokes the skill',
+	copilot: 'in GitHub Copilot, as an automation that runs the skill on a schedule',
+	other: "by running the agent's CLI non-interactively from a scheduled job (cron, Windows Task Scheduler, or a scheduled CI workflow)",
+};
+
 /**
  * Build the Copilot Chat prompt that turns a repeated-task cluster into a
  * reusable skill. Pure, so every host can share it. The prompt embeds the
@@ -358,6 +551,9 @@ export function buildSkillCreationPrompt(cluster: RepeatedTaskCluster): string {
 		? `create it as a workspace skill in this repository (${quoteForChat(target.repository)}) at \`${skillPath}\``
 		: `create it as a user-level skill at \`${skillPath}\`, because these sessions are not tied to a single repository`;
 	const examples = (cluster.examplePrompts ?? []).slice(0, MAX_EXAMPLE_PROMPTS);
+	const automationStep = cluster.recurrence
+		? [`4. This task recurs ${describeCadence(cluster.recurrence)}, so after the skill exists, explain how to run it on a schedule instead of by hand: ${resolveAutomationPlatforms(cluster).map(p => AUTOMATION_PROMPT_HINTS[p]).join('; ')}. Do not set up the schedule yourself.`]
+		: [];
 	return [
 		`I keep starting AI chat sessions with the same kind of request (${scope}). Please turn it into a reusable agent skill.`,
 		'',
@@ -370,6 +566,7 @@ export function buildSkillCreationPrompt(cluster: RepeatedTaskCluster): string {
 		'1. First check the existing skills: `.github/skills/`, `.claude/skills/` and `.agents/skills/` in the workspace, and `~/.copilot/skills/`, `~/.claude/skills/` and `~/.agents/skills/` for the user. If one already covers this task, extend it instead of creating a duplicate.',
 		`2. Otherwise, ${location} (pick a better name if one fits).`,
 		'3. Give the SKILL.md YAML frontmatter with `name` and a trigger-oriented `description` that says when the skill should be used, followed by concrete, ordered steps for doing the task the way these examples ask for it.',
+		...automationStep,
 		'Show me the file before making any other changes.',
 	].join('\n');
 }

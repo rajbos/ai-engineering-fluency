@@ -42,6 +42,9 @@ function writeSessions(t: { after: (fn: () => void) => void }, prompts: string[]
 	});
 }
 
+/** Never reads the real ~/.copilot/data.db. */
+const NO_AUTOMATION_RUNS = async () => new Map<string, string>();
+
 const REPEATED_PROMPTS = [
 	'run the tests and fix the failures',
 	'please run the tests and fix any failures',
@@ -56,7 +59,7 @@ test('calculateUsageAnalysisStats omits repeatedTasks unless asked', async (t) =
 
 test('calculateUsageAnalysisStats builds the repeated-task report from session first prompts', async (t) => {
 	const files = writeSessions(t, REPEATED_PROMPTS);
-	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true });
+	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true, loadCopilotAutomationRuns: NO_AUTOMATION_RUNS });
 	const report = stats.repeatedTasks;
 	assert.ok(report, 'expected a repeated-task report');
 	assert.equal(report.sessionsScanned, 3);
@@ -68,7 +71,7 @@ test('calculateUsageAnalysisStats builds the repeated-task report from session f
 
 test('calculateUsageAnalysisStats leaves repeatedTasks undefined when no prompt recurs', async (t) => {
 	const files = writeSessions(t, ['run the tests and fix the failures', 'update the changelog and bump the version']);
-	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true });
+	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true, loadCopilotAutomationRuns: NO_AUTOMATION_RUNS });
 	assert.equal(stats.repeatedTasks, undefined);
 	assert.equal(JSON.parse(JSON.stringify(stats)).repeatedTasks, undefined);
 });
@@ -182,6 +185,33 @@ test('skill-suggestions text report lists each repeated task', () => {
 	assert.match(text, /Repositories:\s+o\/r/);
 	assert.match(text, /Last seen:\s+2026-08-02/);
 	assert.match(formatSkillSuggestionsReport(undefined), /No repeated tasks found/);
+	assert.doesNotMatch(text, /Recurs:|Automate:|can also be scheduled/);
+});
+
+const RECURRING_REPORT: RepeatedTaskReport = {
+	...REPORT,
+	clusters: [{
+		...REPORT.clusters[0],
+		sessions: REPORT.clusters[0].sessions.map((s, i) => ({ ...s, editor: i === 0 ? 'Claude Code' : 'Copilot CLI' })),
+		editors: ['Claude Code', 'Copilot CLI'],
+		recurrence: { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 },
+	}],
+};
+
+test('skill-suggestions text report shows editors, cadence and an automation option per platform for recurring tasks', () => {
+	const text = formatSkillSuggestionsReport(RECURRING_REPORT);
+	assert.match(text, /Editors:\s+Claude Code, Copilot CLI/);
+	assert.match(text, /Recurs:\s+about weekly \(4 days\)/);
+	assert.match(text, /Automate:\s+Claude Code scheduled task/);
+	assert.match(text, /Automate:\s+GitHub Copilot automation/);
+	assert.match(text, /can also be scheduled/);
+});
+
+test('skill-suggestions redacted JSON keeps editors and recurrence (no prompt text in them)', () => {
+	const cluster = createSkillSuggestionsPayload(RECURRING_REPORT, false).repeatedTasks!.clusters[0];
+	assert.deepEqual(cluster.editors, ['Claude Code', 'Copilot CLI']);
+	assert.deepEqual(cluster.recurrence, { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 });
+	assert.equal(cluster.sessions[0].editor, 'Claude Code');
 });
 
 test('skill-suggestions text report strips newlines and terminal control sequences from session data', () => {
@@ -201,4 +231,32 @@ test('skill-suggestions text report strips newlines and terminal control sequenc
 	assert.ok(!text.includes('\n2. "forged line"'), 'a prompt newline forged a report line');
 	assert.equal(text.split('\n').filter(line => line.startsWith('   Repositories:')).length, 1);
 	assert.ok(text.includes('1. "fix tests 2. "forged line" ]0;pwned [2J 31m"'));
+});
+
+const SCHEDULED_REPORT: RepeatedTaskReport = {
+	...REPORT,
+	scheduledTasks: [
+		{ name: 'repo-health-scan-daily', platform: 'claude', runCount: 12, activeDays: 11, lastRun: '2026-11-24T06:00:00.000Z' },
+		{ name: 'Dependabot review', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: null },
+	],
+};
+
+test('skill-suggestions text report lists tasks already on a schedule', () => {
+	const text = formatSkillSuggestionsReport(SCHEDULED_REPORT);
+	assert.match(text, /Already on a schedule/);
+	assert.match(text, /"repo-health-scan-daily" \(Claude Code scheduled task\): 12 run\(s\) on 11 day\(s\), last 2026-11-24/);
+	assert.match(text, /"Dependabot review" \(GitHub Copilot automation\): 3 run\(s\) on 3 day\(s\)/);
+
+	const onlyScheduled = formatSkillSuggestionsReport({ ...SCHEDULED_REPORT, clusters: [] });
+	assert.match(onlyScheduled, /No repeated tasks found/);
+	assert.match(onlyScheduled, /Already on a schedule/);
+});
+
+test('skill-suggestions redacted JSON keeps scheduled-task counts but not their names', () => {
+	const payload = createSkillSuggestionsPayload(SCHEDULED_REPORT, false);
+	assert.deepEqual(payload.repeatedTasks!.scheduledTasks, [
+		{ platform: 'claude', runCount: 12, activeDays: 11, lastRun: '2026-11-24T06:00:00.000Z' },
+		{ platform: 'copilot', runCount: 3, activeDays: 3, lastRun: null },
+	]);
+	assert.ok(!JSON.stringify(payload).includes('repo-health-scan-daily'));
 });

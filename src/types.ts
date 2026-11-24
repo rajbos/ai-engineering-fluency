@@ -904,6 +904,22 @@ export interface RepeatedTaskSessionRef {
   title?: string | null;
   lastInteraction?: string | null;
   repository?: string;
+  /** Editor/agent the session ran in (e.g. `Claude Code`, `VS Code`, `Copilot CLI`), when known. */
+  editor?: string;
+}
+
+/**
+ * How regularly a repeated task comes back: `daily` (most days, weekends
+ * allowed), `weekly`, or `regular` (a steady interval of `typicalGapDays`).
+ * Present only when the task recurs on enough distinct days to be worth
+ * scheduling rather than only capturing as a skill.
+ */
+export interface RepeatedTaskRecurrence {
+  cadence: 'daily' | 'weekly' | 'regular';
+  /** Distinct UTC calendar days with at least one session of this task. */
+  activeDays: number;
+  /** Median number of days between consecutive active days. */
+  typicalGapDays: number;
 }
 
 /**
@@ -925,6 +941,10 @@ export interface RepeatedTaskCluster {
    * representative prompt. Optional: payloads cached by older builds lack it.
    */
   examplePrompts?: string[];
+  /** Editors the cluster's sessions ran in, most sessions first. Optional: older payloads lack it. */
+  editors?: string[];
+  /** Set when the task recurs on a schedule-like rhythm (see RepeatedTaskRecurrence). */
+  recurrence?: RepeatedTaskRecurrence;
 }
 
 /** Repeated-task candidates across all scanned sessions. */
@@ -932,7 +952,30 @@ export interface RepeatedTaskReport {
   minClusterSize: number;
   /** Sessions whose first user prompt survived normalization and was clustered (see normalizePromptTokens). */
   sessionsScanned: number;
+  /** May be empty when only scheduled runs were found. */
   clusters: RepeatedTaskCluster[];
+  /**
+   * Tasks already running on a schedule (Claude Code scheduled tasks, GitHub
+   * Copilot automations), most runs first. Their runs are left out of
+   * `clusters` and `sessionsScanned`. Absent when there are none.
+   */
+  scheduledTasks?: ScheduledTaskSummary[];
+}
+
+/** Where a scheduled task runs: Claude Code scheduled tasks or GitHub Copilot automations. */
+export type ScheduledTaskPlatform = 'claude' | 'copilot';
+
+/** One scheduled task and its runs in the analysis window. */
+export interface ScheduledTaskSummary {
+  /** The task's name as configured by the user (Claude task name, Copilot automation name). */
+  name: string;
+  platform: ScheduledTaskPlatform;
+  /** Sessions that were runs of this task. */
+  runCount: number;
+  /** Distinct UTC days with a run. */
+  activeDays: number;
+  /** ISO timestamp of the most recent run. */
+  lastRun: string | null;
 }
 
 export interface EditScopeUsage {

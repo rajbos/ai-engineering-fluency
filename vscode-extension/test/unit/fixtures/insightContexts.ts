@@ -402,6 +402,33 @@ export function insightFixtureContexts(translate: Translate): InsightContext[] {
 		contexts.push(ctx);
 	}
 
+	// A recurring repeated task: each cadence, with known (Claude + Copilot) and unknown editors.
+	for (const [cadence, editors] of [['daily', ['Claude Code', 'VS Code']], ['weekly', ['Cursor']], ['regular', undefined]] as const) {
+		const ctx = base(translate);
+		ctx.last30Days.sessions = 20;
+		ctx.repeatedTasks = {
+			clusters: [{
+				sessionCount: 4,
+				representativePrompt: 'triage the new issues',
+				editors,
+				recurrence: { cadence, activeDays: 4, typicalGapDays: cadence === 'daily' ? 1 : cadence === 'weekly' ? 7 : 3 },
+			}],
+		} as unknown as InsightContext['repeatedTasks'];
+		contexts.push(ctx);
+	}
+
+	// Tasks already on a schedule: one, and more than the body names.
+	for (const count of [1, 5]) {
+		const ctx = base(translate);
+		ctx.repeatedTasks = {
+			minClusterSize: 2,
+			sessionsScanned: 0,
+			clusters: [],
+			scheduledTasks: Array.from({ length: count }, (_, i) => ({ name: `task-${i}`, platform: i % 2 === 0 ? 'claude' : 'copilot', runCount: 3, activeDays: 3, lastRun: null })),
+		} as unknown as InsightContext['repeatedTasks'];
+		contexts.push(ctx);
+	}
+
 	// File references only — no codebase/selection breadth.
 	{
 		const ctx = base(translate);

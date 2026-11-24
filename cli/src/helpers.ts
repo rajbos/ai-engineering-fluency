@@ -29,6 +29,7 @@ import { buildWorkspaceCustomization, type WorkspaceCustomization } from '../../
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getTimeWindowStartDate } from '../../src/timeWindows';
 import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
+import { automationRunName, CopilotAutomationRunsAccess, getCopilotAppDataDbPath } from '../../src/copilotAutomationRuns';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import {
 	getEcosystems,
@@ -58,6 +59,7 @@ import {
 	buildChartPayload,
 	fmt,
 	formatTokens,
+	getEditorSourceFromPath,
 } from './analysis';
 export type { SessionData } from './analysis';
 export { effectiveTokens, buildChartPayload, buildEfficiencyPayload, fmt, formatTokens } from './analysis';
@@ -678,6 +680,11 @@ export interface UsageAnalysisOptions {
 	 * (Skill Suggestions) report. Off by default: the report carries prompt text.
 	 */
 	includeRepeatedTasks?: boolean;
+	/**
+	 * Session UUID → GitHub Copilot automation name, so automation runs are reported as
+	 * scheduled tasks. Defaults to reading ~/.copilot/data.db; tests pass a stub.
+	 */
+	loadCopilotAutomationRuns?: () => Promise<Map<string, string>>;
 }
 
 /**
@@ -699,6 +706,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	const todaySessions: TodaySessionSummary[] = [];
 	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 	const repeatedTaskSources: RepeatedTaskSessionSource[] = [];
+	// GitHub Copilot automation runs, so scheduled runs are reported as scheduled tasks, not suggestions.
+	const automationRuns = options.includeRepeatedTasks ? await (options.loadCopilotAutomationRuns ?? loadCopilotAutomationRuns)() : new Map<string, string>();
 
 	for (const file of sessionFiles) {
 		try {
@@ -720,7 +729,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			const version = await sessionVersion(file, stats, () => activity.lastActivity());
 			const { analysis } = await analyzeSessionUsageShared(file, version);
 			if (options.includeRepeatedTasks) {
-				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
+				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart, automationRuns);
 			}
 			// Period stats bucket by the same activity time.
 			let sessionSummary: TodaySessionSummary | undefined;
@@ -847,7 +856,9 @@ export function createSessionActivityLookup(file: string, sources: SessionActivi
  * DB-backed sessions share their database's mtime, so the adapter's per-session
  * last interaction (or last activity) is what places a session in the window.
  */
-async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+async function toRepeatedTaskSource(
+	activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number, automationRuns: ReadonlyMap<string, string>,
+): Promise<RepeatedTaskSessionSource> {
 	const meta = await activity.meta();
 	const lastInteraction = meta?.lastInteraction ?? (await activity.lastActivity())?.toISOString() ?? null;
 	return {
@@ -857,16 +868,26 @@ async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPr
 		lastInteraction,
 		mtime: mtimeMs,
 		repository: meta?.repository ?? null,
+		editor: getEditorSourceFromPath(activity.file),
+		copilotAutomation: automationRunName(activity.file, automationRuns),
 	};
+}
+
+/** Copilot automation runs from ~/.copilot/data.db; empty when the Copilot app is not installed. */
+async function loadCopilotAutomationRuns(): Promise<Map<string, string>> {
+	const dbPath = getCopilotAppDataDbPath();
+	if (!fs.existsSync(dbPath)) { return new Map(); }
+	const access = new CopilotAutomationRunsAccess(dbPath);
+	try { return await access.getAutomationRuns(); } catch { return new Map(); } finally { access.dispose(); }
 }
 
 /** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
 async function addRepeatedTaskSource(
 	sources: RepeatedTaskSessionSource[], activity: SessionActivityLookup,
-	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
+	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date, automationRuns: ReadonlyMap<string, string>,
 ): Promise<void> {
 	if (!firstUserPrompt) { return; }
-	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs);
+	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs, automationRuns);
 	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
 }
 

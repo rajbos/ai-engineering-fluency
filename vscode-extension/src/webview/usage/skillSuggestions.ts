@@ -13,8 +13,8 @@
 import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatAbsoluteDate } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
-import { buildSkillCreationPrompt, resolveSkillTarget } from '../../../../src/repeatedTasks';
-import type { RepeatedTaskCluster, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../../src/types';
+import { buildSkillCreationPrompt, resolveAutomationPlatforms, resolveSkillTarget, type AutomationPlatform } from '../../../../src/repeatedTasks';
+import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskSummary } from '../../../../src/types';
 import {
 	getDataTablePage,
 	getDataTableState,
@@ -52,6 +52,7 @@ export function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | nul
 			title: typeof s.title === 'string' ? s.title : null,
 			lastInteraction: typeof s.lastInteraction === 'string' ? s.lastInteraction : null,
 			repository: typeof s.repository === 'string' ? s.repository : undefined,
+			...(typeof s.editor === 'string' && s.editor ? { editor: s.editor } : {}),
 		}));
 	if (sessions.length === 0) { return null; }
 	return {
@@ -64,7 +65,24 @@ export function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | nul
 		sharedKeywords: sanitizeStringArray(raw.sharedKeywords),
 		// Optional: payloads cached by an older build have no examples.
 		examplePrompts: sanitizeStringArray(raw.examplePrompts),
+		// Optional: payloads cached by an older build have neither.
+		editors: sanitizeStringArray(raw.editors),
+		...sanitizeRecurrence(raw.recurrence),
 	};
+}
+
+const RECURRENCE_CADENCES: readonly RepeatedTaskRecurrence['cadence'][] = ['daily', 'weekly', 'regular'];
+
+function isPositiveNumber(value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function sanitizeRecurrence(value: unknown): { recurrence?: RepeatedTaskRecurrence } {
+	if (!value || typeof value !== 'object') { return {}; }
+	const raw = value as Partial<Record<keyof RepeatedTaskRecurrence, unknown>>;
+	const cadence = RECURRENCE_CADENCES.find(c => c === raw.cadence);
+	if (!cadence || !isPositiveNumber(raw.activeDays) || !isPositiveNumber(raw.typicalGapDays)) { return {}; }
+	return { recurrence: { cadence, activeDays: Math.floor(raw.activeDays), typicalGapDays: raw.typicalGapDays } };
 }
 
 export function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null {
@@ -75,7 +93,25 @@ export function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null 
 		minClusterSize: typeof raw.minClusterSize === 'number' ? raw.minClusterSize : 2,
 		sessionsScanned: typeof raw.sessionsScanned === 'number' ? raw.sessionsScanned : 0,
 		clusters,
+		...sanitizeScheduledTasks(raw.scheduledTasks),
 	};
+}
+
+function sanitizeScheduledTasks(raw: unknown): { scheduledTasks?: ScheduledTaskSummary[] } {
+	if (!Array.isArray(raw)) { return {}; }
+	const tasks = raw.flatMap((value: unknown): ScheduledTaskSummary[] => {
+		if (!value || typeof value !== 'object') { return []; }
+		const t = value as Partial<Record<keyof ScheduledTaskSummary, unknown>>;
+		if (typeof t.name !== 'string' || (t.platform !== 'claude' && t.platform !== 'copilot') || !isPositiveNumber(t.runCount)) { return []; }
+		return [{
+			name: t.name,
+			platform: t.platform,
+			runCount: Math.floor(t.runCount),
+			activeDays: isPositiveNumber(t.activeDays) ? Math.floor(t.activeDays) : 0,
+			lastRun: typeof t.lastRun === 'string' ? t.lastRun : null,
+		}];
+	});
+	return tasks.length > 0 ? { scheduledTasks: tasks } : {};
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
@@ -121,6 +157,7 @@ function sessionColumns(): DataTableColumn<RepeatedTaskSessionRef>[] {
 		{ id: 'session', label: localize('usage.skillSuggestions.column.session'), className: 'data-table-wrap-anywhere', sortValue: sessionTitle, render: sessionTitle },
 		{ id: 'date', label: localize('usage.skillSuggestions.column.date'), sortValue: sessionTimestamp, firstSortDirection: 'desc', render: sessionDateLabel },
 		{ id: 'repository', label: localize('usage.skillSuggestions.column.repository'), sortValue: s => s.repository ?? null, render: s => s.repository ?? '' },
+		{ id: 'editor', label: localize('usage.skillSuggestions.column.editor'), sortValue: s => s.editor ?? null, render: s => s.editor ?? '' },
 		{
 			id: 'actions',
 			label: localize('usage.skillSuggestions.column.actions'),
@@ -150,6 +187,41 @@ function buildTargetHint(cluster: RepeatedTaskCluster): string {
 		: localize('usage.skillSuggestions.target.user');
 }
 
+/** Badge text for a recurring task ("🔁 Recurs about weekly (4 days)"). */
+export function buildRecurrenceLabel(recurrence: RepeatedTaskRecurrence): string {
+	if (recurrence.cadence === 'regular') {
+		return localizeFormat('usage.skillSuggestions.recurring.regular', Math.round(recurrence.typicalGapDays), recurrence.activeDays);
+	}
+	return localizeFormat(`usage.skillSuggestions.recurring.${recurrence.cadence}`, recurrence.activeDays);
+}
+
+const AUTOMATION_TIP_KEYS: Record<AutomationPlatform, string> = {
+	claude: 'usage.skillSuggestions.automate.claude',
+	copilot: 'usage.skillSuggestions.automate.copilot',
+	other: 'usage.skillSuggestions.automate.other',
+};
+
+/**
+ * "Automate it" tip for a recurring task: one line per scheduling feature that
+ * fits the editors the task was run in (Claude Code scheduled tasks, GitHub
+ * Copilot automations, or a generic scheduled job). Empty when not recurring.
+ */
+export function buildAutomationTipHtml(cluster: RepeatedTaskCluster): string {
+	if (!cluster.recurrence) { return ''; }
+	const items = resolveAutomationPlatforms(cluster)
+		.map(p => `<li data-automation-platform="${p}">${escapeHtml(localize(AUTOMATION_TIP_KEYS[p]))}</li>`)
+		.join('');
+	return `<div class="skill-suggestion-automation" style="margin-top:8px; padding:8px 10px; border-radius:4px; background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.4); font-size:11px; color:var(--text-primary);">
+		<div>${escapeHtml(localize('usage.skillSuggestions.automate.intro'))}</div>
+		<ul style="margin:4px 0 0; padding-left:18px;">${items}</ul>
+	</div>`;
+}
+
+function buildRecurrenceBadgeHtml(cluster: RepeatedTaskCluster): string {
+	if (!cluster.recurrence) { return ''; }
+	return `<span class="skill-suggestion-recurring" style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(96,165,250,0.15); border:1px solid rgba(96,165,250,0.5); color:var(--text-primary); white-space:nowrap;">${escapeHtml(buildRecurrenceLabel(cluster.recurrence))}</span>`;
+}
+
 function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number): string {
 	const keywords = cluster.sharedKeywords.length > 0
 		? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map(k => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k)}</span>`).join('')}</div>`
@@ -158,6 +230,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 		<div class="skill-suggestion-card" data-cluster-index="${clusterIndex}" style="padding:4px 2px;">
 			<div style="display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap;">
 				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${escapeHtml(localizeFormat('usage.skillSuggestions.repeated', cluster.sessionCount))}</span>
+				${buildRecurrenceBadgeHtml(cluster)}
 				<div style="flex:1; min-width:200px; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;"><q>${escapeHtml(cluster.representativePrompt)}</q></div>
 				<div style="display:flex; gap:6px; flex-shrink:0;">
 					<button type="button" class="skill-suggestion-create" data-cluster-index="${clusterIndex}" title="${escapeHtml(localize('usage.skillSuggestions.createSkillTooltip'))}"
@@ -168,6 +241,7 @@ function buildClusterCardHtml(cluster: RepeatedTaskCluster, clusterIndex: number
 			</div>
 			${keywords}
 			<div style="margin-top:6px; font-size:11px; color:var(--text-secondary);">${escapeHtml(buildTargetHint(cluster))}</div>
+			${buildAutomationTipHtml(cluster)}
 			<div class="skill-suggestion-notice" data-cluster-index="${clusterIndex}" role="status" aria-live="polite" aria-atomic="true"></div>
 			<details style="margin-top:8px;">
 				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">${escapeHtml(localizeFormat('usage.skillSuggestions.sessions', cluster.sessions.length))}</summary>
@@ -193,11 +267,23 @@ function renderSuggestionList(report: RepeatedTaskReport): string {
 	});
 }
 
+/**
+ * Note naming the tasks that already run on a schedule: their runs are not
+ * suggestions, and saying so explains why a familiar daily task is missing.
+ */
+export function buildScheduledExcludedHtml(report: RepeatedTaskReport): string {
+	const tasks = report.scheduledTasks ?? [];
+	if (tasks.length === 0) { return ''; }
+	const list = tasks.map(t => localizeFormat('usage.skillSuggestions.scheduledTask', t.name, t.runCount)).join(', ');
+	return `<div class="skill-suggestions-scheduled" style="margin:4px 0 8px; font-size:11px; color:var(--text-secondary);">${escapeHtml(localizeFormat('usage.skillSuggestions.scheduledExcluded', list))}</div>`;
+}
+
 /** Inner HTML of the section: title, subtitle and the paged card list. */
 export function buildSkillSuggestionsBodyHtml(report: RepeatedTaskReport): string {
 	return `
 		<div class="section-title"><span>🧩</span><span>${escapeHtml(localizeFormat('usage.skillSuggestions.title', report.clusters.length))}</span></div>
 		<div class="section-subtitle">${escapeHtml(localizeFormat('usage.skillSuggestions.subtitle', report.sessionsScanned))}</div>
+		${buildScheduledExcludedHtml(report)}
 		${renderSuggestionList(report)}`;
 }
 

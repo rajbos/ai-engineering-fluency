@@ -205,6 +205,31 @@ test('l10n: skill suggestion UI strings resolve in English and zh-cn', () => {
 		["usage.skillSuggestions.openSessionTooltip", "Open this session in the session viewer", "在会话查看器中打开此会话"],
 		["usage.skillSuggestions.sessionsTableLabel", "Sessions for this suggestion", "此建议的会话"],
 		["usage.skillSuggestions.pagerLabel", "Skill suggestion pages", "技能建议分页"],
+		["usage.skillSuggestions.scheduledExcluded", "⏰ Already on a schedule, so left out of these suggestions: {0}", "⏰ 已按计划运行，因此未列入这些建议：{0}"],
+		["usage.skillSuggestions.scheduledTask", "{0} ({1} runs)", "{0}（{1} 次运行）"],
+		["insight.scheduledTasksRunning.title", "⏰ You already run tasks on a schedule", "⏰ 你已经在按计划运行任务了"],
+		["insight.scheduledTasksRunning.body.one", "{0} scheduled task ran {1} times in this period: {2}. Its runs are left out of Skill Suggestions, since they are already automated.", "在此期间，{0} 个计划任务共运行了 {1} 次：{2}。这些运行已经自动化，因此不会出现在技能建议中。"],
+		["insight.scheduledTasksRunning.body.other", "{0} scheduled tasks ran {1} times in this period: {2}. Their runs are left out of Skill Suggestions, since they are already automated.", "在此期间，{0} 个计划任务共运行了 {1} 次：{2}。这些运行已经自动化，因此不会出现在技能建议中。"],
+		["insight.scheduledTasksRunning.task.claude", "\"{0}\" (Claude Code, {1}×)", "“{0}”（Claude Code，{1} 次）"],
+		["insight.scheduledTasksRunning.task.copilot", "\"{0}\" (GitHub Copilot automation, {1}×)", "“{0}”（GitHub Copilot 自动化，{1} 次）"],
+		["insight.scheduledTasksRunning.more", "and {0} more", "另有 {0} 个"],
+		["usage.skillSuggestions.column.editor", "Editor", "编辑器"],
+		["usage.skillSuggestions.recurring.daily", "🔁 Recurs about daily ({0} days)", "🔁 大约每天重复（{0} 天）"],
+		["usage.skillSuggestions.recurring.weekly", "🔁 Recurs about weekly ({0} days)", "🔁 大约每周重复（{0} 天）"],
+		["usage.skillSuggestions.recurring.regular", "🔁 Recurs about every {0} days ({1} days)", "🔁 大约每 {0} 天重复（{1} 天）"],
+		["usage.skillSuggestions.automate.intro", "This task comes back on a rhythm. Beyond making it a skill, automate it so it runs without you starting it:", "这个任务会定期出现。除了把它做成技能，还可以将其自动化，让它无需你手动启动就能运行："],
+		["usage.skillSuggestions.automate.claude", "Claude Code: create a scheduled task (Scheduled in the Claude desktop app, or /schedule for a cloud routine) that runs the skill.", "Claude Code：创建一个运行该技能的计划任务（在 Claude 桌面应用的“Scheduled”中，或使用 /schedule 创建云端例程）。"],
+		["usage.skillSuggestions.automate.copilot", "GitHub Copilot: set up an automation that runs the skill on a schedule.", "GitHub Copilot：设置一个按计划运行该技能的自动化（automation）。"],
+		["usage.skillSuggestions.automate.other", "Other agents: run the agent's CLI non-interactively from a scheduled job (cron, Task Scheduler or a scheduled CI workflow).", "其他智能体：通过计划作业（cron、任务计划程序或定时 CI 工作流）以非交互方式运行该智能体的 CLI。"],
+		["insight.repeatedTaskAutomationCandidate.title", "🔁 A repeated task comes back on a schedule — automate it", "🔁 一个重复任务会按固定节奏出现——把它自动化吧"],
+		["insight.repeatedTaskAutomationCandidate.body", "You start the same task {0} (\"{1}\", on {2} different days). A skill saves re-explaining it, but a scheduled run saves starting it at all: use {3}. See Insights → Skill Suggestions.", "你{0}都会开始同一个任务（“{1}”，共 {2} 天）。技能能省去反复解释，而定时运行连手动启动都省了：可以使用{3}。详情请查看洞察 → 技能建议。"],
+		["insight.repeatedTaskAutomationCandidate.cadence.daily", "about daily", "大约每天"],
+		["insight.repeatedTaskAutomationCandidate.cadence.weekly", "about weekly", "大约每周"],
+		["insight.repeatedTaskAutomationCandidate.cadence.regular", "about every {0} days", "大约每 {0} 天"],
+		["insight.repeatedTaskAutomationCandidate.platform.claude", "Claude Code scheduled tasks", "Claude Code 计划任务"],
+		["insight.repeatedTaskAutomationCandidate.platform.copilot", "GitHub Copilot automations", "GitHub Copilot 自动化"],
+		["insight.repeatedTaskAutomationCandidate.platform.other", "a scheduled job that runs your agent's CLI", "运行智能体 CLI 的计划作业"],
+		["insight.repeatedTaskAutomationCandidate.platformJoin", " or ", "或"],
 	];
 	for (const [key, english] of translations) {
 		assert.equal(t(key), english, key);
@@ -1593,7 +1618,7 @@ test('insights l10n: the catalog actually has keys to cover', () => {
 	// Guards the tests below against silently passing on an empty set if the
 	// catalog is ever refactored to a different key prefix.
 	assert.ok(insightKeys().length > 150, `expected the insight catalog's keys, got ${insightKeys().length}`);
-	assert.equal(INSIGHT_CATALOG.length, 53, 'catalog size changed — update the expected count deliberately');
+	assert.equal(INSIGHT_CATALOG.length, 55, 'catalog size changed — update the expected count deliberately');
 });
 
 test('insights l10n: every catalog title and action label resolves in English', () => {

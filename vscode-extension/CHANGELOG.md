@@ -5,6 +5,8 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Skill Suggestions: runs of Claude Code scheduled tasks and GitHub Copilot automations (read from the Copilot app's `~/.copilot/data.db`) are recognized as already automated. They are no longer suggested as repeated tasks; a new insight celebrates the scheduled tasks you run, and the section names the ones it left out. Claude Code's injected `<system-reminder>` text is ignored when comparing prompts, so unrelated sessions in worktrees no longer group together.
+- Skill Suggestions: a repeated task that comes back on a rhythm (about daily, weekly or every few days, on at least 3 different days) now shows a 🔁 cadence badge and a tip to **automate** it instead of only making a skill: Claude Code scheduled tasks for tasks run in Claude, GitHub Copilot automations for tasks run in Copilot, or a scheduled job running the agent's CLI otherwise. The sessions table gains an **Editor** column, the drafted skill prompt asks how to schedule the skill, and a new insight points at the recurring task.
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
 
 ### Bug Fixes

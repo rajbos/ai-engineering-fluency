@@ -37,6 +37,7 @@ import modelPricingData from './modelPricing.json';
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from './utils/toolUtils';
 import { getLongContextInfo, type LongContextInfo } from './tokenEstimation';
 import { CONTEXT_NEAR_LIMIT_RATIO } from './types';
+import { resolveAutomationPlatforms } from './repeatedTasks';
 import type { ModelPricing } from './types';
 // The translator type lives in types.ts (re-exported by the extension's l10nCore) so this
 // module stays free of the localization bundles: hosts inject a translator.
@@ -1505,7 +1506,55 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
 		weight: 60,
 	},
+	{
+		id: 'repeated-task-automation-candidate',
+		category: 'customization',
+		severity: 'opportunity',
+		titleKey: 'insight.repeatedTaskAutomationCandidate.title',
+		buildBody: (ctx) => {
+			const cluster = firstRecurringCluster(ctx)!;
+			const recurrence = cluster.recurrence!;
+			const cadence = recurrence.cadence === 'regular'
+				? ctx.translate('insight.repeatedTaskAutomationCandidate.cadence.regular', Math.round(recurrence.typicalGapDays))
+				: ctx.translate(`insight.repeatedTaskAutomationCandidate.cadence.${recurrence.cadence}`);
+			const platforms = resolveAutomationPlatforms(cluster)
+				.map(p => ctx.translate(`insight.repeatedTaskAutomationCandidate.platform.${p}`))
+				.join(ctx.translate('insight.repeatedTaskAutomationCandidate.platformJoin'));
+			return ctx.translate('insight.repeatedTaskAutomationCandidate.body', cadence, cluster.representativePrompt, recurrence.activeDays, platforms);
+		},
+		actionLabelKey: 'insight.action.viewSkillSuggestions',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
+		appliesTo: (ctx) => firstRecurringCluster(ctx) !== undefined,
+		weight: 65,
+	},
+	{
+		id: 'scheduled-tasks-running',
+		category: 'agentic',
+		severity: 'celebration',
+		titleKey: 'insight.scheduledTasksRunning.title',
+		buildBody: (ctx) => {
+			const tasks = ctx.repeatedTasks?.scheduledTasks ?? [];
+			const runs = tasks.reduce((sum, t) => sum + t.runCount, 0);
+			const named = joinNames(ctx, tasks.slice(0, SCHEDULED_TASKS_NAMED)
+				.map(t => ctx.translate(`insight.scheduledTasksRunning.task.${t.platform}`, t.name, t.runCount)));
+			const more = tasks.length - SCHEDULED_TASKS_NAMED;
+			const list = more > 0 ? `${named} ${ctx.translate('insight.scheduledTasksRunning.more', more)}` : named;
+			return ctx.translate(plural('insight.scheduledTasksRunning.body', tasks.length), tasks.length, runs, list);
+		},
+		actionLabelKey: 'insight.action.viewSkillSuggestions',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
+		appliesTo: (ctx) => (ctx.repeatedTasks?.scheduledTasks?.length ?? 0) > 0,
+		weight: 40,
+	},
 ];
+
+/** Scheduled tasks named in the insight body before the rest are summarized as "+N more". */
+const SCHEDULED_TASKS_NAMED = 3;
+
+/** The largest repeated task that recurs on a schedule-like rhythm (see detectRecurrence). */
+function firstRecurringCluster(ctx: InsightContext) {
+	return ctx.repeatedTasks?.clusters.find(c => c.recurrence);
+}
 
 // ---------------------------------------------------------------------------
 // Core evaluation functions (all pure)

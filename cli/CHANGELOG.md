@@ -5,6 +5,8 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 ## [Unreleased]
 
 ### Features
+- `skill-suggestions` recognizes runs of Claude Code scheduled tasks and GitHub Copilot automations (from `~/.copilot/data.db`), leaves them out of the suggestions and lists them under "Already on a schedule"; `--json` adds `scheduledTasks` (names only with `--include-prompts`). Claude Code's injected `<system-reminder>` text is ignored when comparing prompts
+- `skill-suggestions` shows the editors each repeated task ran in and, for a task that recurs on a rhythm (about daily, weekly or every few days, on at least 3 different days), its cadence and how to automate it: Claude Code scheduled tasks, GitHub Copilot automations, or a scheduled job running the agent's CLI. `--json` carries `editors`, per-session `editor` and `recurrence` (none of them prompt text, so they are kept in the redacted output)
 - On Windows the CLI also reads session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores under `~/.vibe/sandbox-v2/*/`) from WSL distros that are already running. A stopped distro is never read or started. Turn off with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`; `stats --verbose` and `diagnostics` list each running distro
 
 ### Bug Fixes
