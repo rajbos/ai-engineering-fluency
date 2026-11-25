@@ -17,6 +17,7 @@
     "check:contract": "node ../scripts/validate-desktop-contract.js",
     "check:shell": "node ../scripts/validate-webview-shell.js",
     "check:render": "node ../scripts/validate-desktop-render.js",
+    "check:preload": "node ../scripts/validate-desktop-preloads.js",
     "check:views": "node ../.github/skills/sync-host-views/sync-host-views.js",
     "check": "pnpm run check-types && pnpm run check:contract && pnpm run check:shell"
   },

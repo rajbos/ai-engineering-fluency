@@ -51,6 +51,9 @@ export interface TeamServerStatus {
  */
 const GITHUB_OAUTH_CLIENT_ID = '';
 
+/** A GitHub request that has not answered by then is abandoned, so sign-in cannot hang on it. */
+const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
+
 /** Same scope the extension requests: enough for the server to read the user's identity. */
 const GITHUB_SCOPE = 'read:user';
 
@@ -179,6 +182,7 @@ async function postForm(url: string, body: Record<string, string>): Promise<Reco
         method: 'POST',
         headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(body).toString(),
+        signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) { throw new Error(`GitHub returned HTTP ${response.status}`); }
     return await response.json() as Record<string, unknown>;
@@ -188,6 +192,7 @@ async function fetchGitHubLogin(token: string): Promise<string | undefined> {
     try {
         const response = await fetch('https://api.github.com/user', {
             headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json', 'User-Agent': 'ai-engineering-fluency-desktop' },
+            signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
         });
         if (!response.ok) { return undefined; }
         const user = await response.json() as { login?: unknown };

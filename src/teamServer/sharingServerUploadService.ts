@@ -29,6 +29,13 @@ export interface SharingServerEntry {
 	activity?: SharingServerActivity;
 }
 
+/**
+ * How long one request (headers and body) may take before it is abandoned. Without it a
+ * server that accepts the connection and never answers leaves the caller on "uploading…"
+ * until the platform's own fetch timeout, about five minutes.
+ */
+export const UPLOAD_REQUEST_TIMEOUT_MS = 60_000;
+
 /** Maximum number of entries per HTTP request (matches server-side limit). */
 const BATCH_SIZE = 500;
 
@@ -64,6 +71,8 @@ export function packEntriesByDay<T extends { day: string; datasetId?: string }>(
 }
 
 export class SharingServerUploadService {
+	constructor(private readonly requestTimeoutMs: number = UPLOAD_REQUEST_TIMEOUT_MS) {}
+
 	/**
 	 * How many entries of a batch the server confirmed it stored.
 	 *
@@ -145,6 +154,7 @@ export class SharingServerUploadService {
 						'Authorization': `Bearer ${githubToken}`,
 					},
 					body: JSON.stringify(batch),
+					signal: AbortSignal.timeout(this.requestTimeoutMs),
 				});
 
 				if (!response.ok) {
@@ -217,6 +227,7 @@ export class SharingServerUploadService {
 					'Authorization': `Bearer ${githubToken}`,
 				},
 				body: JSON.stringify(score),
+				signal: AbortSignal.timeout(this.requestTimeoutMs),
 			});
 			if (!response.ok) {
 				const errorText = await response.text().catch(() => '');

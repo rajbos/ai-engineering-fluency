@@ -56,6 +56,7 @@ const { spawnSync } = require('child_process');
 
 const { loadChromium } = require('../.github/skills/visual-view-diff/lib/browser.js');
 const { readDesktopViews } = require('./validate-desktop-contract.js');
+const { checkSandboxedPreloads } = require('./validate-desktop-preloads.js');
 
 const SCENARIOS = ['populated', 'empty'];
 const THEMES = ['dark', 'light'];
@@ -245,6 +246,19 @@ async function main() {
   if (views.length === 0 || !fs.existsSync(path.join(WEBVIEW_DIST, `${views[0]}.js`))) {
     console.error(`❌ ${WEBVIEW_DIST} has no built webviews (or --panel names no desktop view). Run "pnpm run build" in desktop/ first.`);
     process.exit(1);
+  }
+
+  // The sandboxed preloads (validate-desktop-preloads.js) are checked here so CI gates on them
+  // with the build it already made. Only for this checkout: a --repo-root baseline is rendered
+  // for screenshots and may predate a fix.
+  if (!option(argv, 'repo-root')) {
+    const preloads = checkSandboxedPreloads(checkout.desktopDir);
+    if (preloads.findings.length) {
+      for (const f of preloads.findings) { console.error(`❌ ${f}`); }
+      process.exit(1);
+    }
+    console.log(`✅ Sandboxed preloads load and expose their bridge: ${preloads.checked.join('; ') || 'none'}
+`);
   }
 
   if (screenshotDir) { fs.mkdirSync(screenshotDir, { recursive: true }); }
