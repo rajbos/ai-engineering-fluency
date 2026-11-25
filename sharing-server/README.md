@@ -415,7 +415,7 @@ await startServer(app);
 | `getTeamInsights(viewerId, days)`, `parseTeamDays(raw)` | Reuse the safe Team Insights projection and supported-period parsing. Derive `viewerId` only from server-authenticated identity, never request/query input. |
 | `TeamInsights`, `TeamMember`, `UsageCohort` | Public TypeScript types for the identity-free projection. |
 | `renderNavExtra(c, currentPath)`, `NavLink` | Render the same downstream links inside your own page header, so navigation stays consistent across built-in and custom pages. |
-| `startServer(app, opts)` | Backup/restore, DB init with retry, periodic backup, graceful shutdown. |
+| `startServer(app, opts)` | Backup/restore, DB init with retry, periodic backup, graceful shutdown. If a backup exists but cannot be restored (after retries), the server starts on an empty database and refuses every backup until a restart restores it, so the good backup is never overwritten. |
 
 ### Guidance
 
