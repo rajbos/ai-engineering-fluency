@@ -16,6 +16,8 @@ workflow-token usage may be billable. A manual dispatch without that
 confirmation reports a failing “not run” job rather than a green workflow that
 could be mistaken for an evaluation pass. Manual model runs are limited to the
 repository's default branch; dispatches from other refs are marked not run.
+The evaluation job also fails if the Action reports `not-run` or does not
+provide evidence of at least one executed, passing trial.
 Use the local lint command below if you only want model-free validation.
 
 The workflow uses the GitHub-generated token, not a stored PAT, and grants
@@ -30,8 +32,9 @@ conversation content.
 Before enabling scheduled model runs, repository administrators must confirm
 Copilot workflow-token billing/entitlement for this repository. An Actions
 policy allowing the workflow Action does not establish that entitlement.
-The implementation does not install the interactive Evals plugin, make model
-calls, or inspect live session/usage data. Never add real logs, hydrated
+The pilot does not install the interactive Evals plugin or inspect live
+session/usage data; scheduled and confirmed manual evaluations do make model
+calls. Never add real logs, hydrated
 `session-logs/` or `usage-data/`, repository secrets, or private prompts to
 these fixtures. Keep transcript upload disabled.
 

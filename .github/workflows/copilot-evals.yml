@@ -68,6 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Run the synthetic session-log-data suite
+        id: pilot
         uses: github/evals-action@6e4c077e92194c7e75663d8d782426841047e887 # v0.2.0
         with:
           command: run
@@ -85,3 +86,13 @@ jobs:
           copilot-token: ${{ github.token }}
         env:
           VALLY_TELEMETRY_OPTOUT: '1'
+
+      - name: Require an executed, passing evaluation
+        env:
+          OUTCOME: ${{ steps.pilot.outputs.outcome }}
+          EXECUTED: ${{ steps.pilot.outputs.executed }}
+        run: |
+          if [[ "$OUTCOME" != "passed" || ! "$EXECUTED" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::The evaluation did not produce an executed, passing result (outcome: ${OUTCOME:-unknown}, executed: ${EXECUTED:-unknown})."
+            exit 1
+          fi
