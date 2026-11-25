@@ -458,6 +458,7 @@ import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { registerBadgeSetup, type BadgeSnapshot } from './badge/registerBadgeSetup';
+import { registerUsageHistoryCommands } from './usageHistoryCommands';
 import { formatWindsurfDiagnosticsContent } from './windsurfDiagnosticsReport';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 import { TtftScanResultCache } from './ttftAnalysisCache';
@@ -1261,7 +1262,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public windsurf!: WindsurfDataAccess;
 	private hermes!: HermesDataAccess;
 	public ecosystems!: IEcosystemAdapter[];
-	private cacheManager!: CacheManager;
+	cacheManager!: CacheManager;
 	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
@@ -2746,7 +2747,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
 		this.cacheManager = new CacheManager(context, {
-			log: (m: string) => this.log(m),
+			log: (m: string) => this.log(m), editorTypeOf: (p: string) => this.getEditorTypeFromPath(p),
 			warn: (m: string) => this.warn(m),
 			error: (m: string) => this.error(m),
 			// Mirrors clearCache()'s own local-clear invalidation, minus the two steps that are
@@ -5419,7 +5420,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
 		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
 			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {
-				this.cacheManager.deleteCachedSessionData(rawPath);
+				this.cacheManager.evictUndiscoveredSessionData(rawPath);
 			}
 		}
 		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
@@ -6803,6 +6804,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 					aggregateInputs.push({ editorType: this.getEditorTypeFromPath(r.sessionFile), sessionData: r.sessionData, mtime: r.mtime, lastInteraction: r.sessionData.lastInteraction || r.details.lastInteraction });
 				} catch (fileError) { this.warn(`Error processing session file ${r.sessionFile}: ${fileError}`); }
 			}
+			// Sessions whose files are gone keep counting (issue #2728); skipped for sample data.
+			if (!this.isSampleDataModeActive()) { aggregateInputs.push(...this.cacheManager.usageHistory.toAggregateInputs(this.cacheManager.cache.keys(), p => this.getEditorTypeFromPath(p), fileLoadCutoffMs)); }
 
 			const aggregated = aggregatePeriodStats(aggregateInputs, { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs });
 			todayStats = aggregated.todayStats; monthStats = aggregated.monthStats;
@@ -16194,6 +16197,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   registerViewCommands(context, tokenTracker);
   registerDiagnosticAndAuthCommands(context, tokenTracker);
   registerBadgeSetup(context, tokenTracker);
+  registerUsageHistoryCommands(context, tokenTracker);
 
   context.subscriptions.push(tokenTracker);
 

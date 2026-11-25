@@ -147,6 +147,9 @@ Claude Code (Anthropic's CLI/IDE extension) writes sessions to `~/.claude/projec
 - **Key advantage**: Assistant events contain actual Anthropic API token counts in `message.usage` — no estimation needed
 - Includes prompt cache fields: `cache_creation_input_tokens`, `cache_read_input_tokens`
 - Sub-agents are stored in `{session-uuid}/subagents/{agent-id}.jsonl`
+- `CLAUDE_CONFIG_DIR` replaces `~/.claude` when set; discovery and editor detection follow it
+- Claude Code sometimes sets an older copy aside beside the live transcript as `{session-uuid}.orphaned-{timestamp}-{suffix}.jsonl` (or `{session-uuid}.jsonl.superseded-{timestamp}`). These copies are skipped, so a session is not counted twice
+- Claude Code deletes transcripts older than its `cleanupPeriodDays` setting (default 30 days; Claude Desktop sessions are kept unless `desktopSessionCleanupPeriodDays` is set). The VS Code extension keeps the usage of a deleted or moved transcript in its usage history (see the **Clear Usage History** command), so totals don't drop when the file goes
 
 See `claude-code-session-schema.json` for full details.
 
