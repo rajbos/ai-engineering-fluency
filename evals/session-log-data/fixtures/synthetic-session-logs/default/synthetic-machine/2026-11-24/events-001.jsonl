@@ -1,0 +1,2 @@
+{"type":"user.message","data":{"content":"Synthetic example request; not a real prompt."},"model":"gpt-4o"}
+{"type":"assistant.message","data":{"content":"Synthetic example response."}}

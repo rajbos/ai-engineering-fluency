@@ -27,6 +27,7 @@ Run `ls -a` for the live top level.
 ├── badge-app/                   ← MicroPython app for the GitHub Universe 2026 badge
 ├── sharing-server/              ← Self-hosted team sharing API + dashboard (TypeScript, SQLite)
 ├── release-video/               ← Local narrated release-video generator (FFmpeg, local TTS)
+├── evals/                        ← Synthetic Vally evaluation specs and fixtures
 ├── scripts/                     ← Build/release/CI helper scripts
 ├── omp-segment/                 ← Oh My Posh prompt segment showing token usage
 ├── assets/ , docs/              ← Brand assets / shared documentation (docs/README.md is the index)

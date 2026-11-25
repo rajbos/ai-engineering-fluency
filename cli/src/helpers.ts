@@ -13,7 +13,7 @@ import { findRepositoryRemoteForFolder, resolveExactWorkspacePath } from '../../
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { calculateEstimatedCost, NANO_AIU_TO_DOLLARS } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
-import type { AgenticTrendPoint, CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { AgenticTrendPoint, CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, ScheduledTaskDefinition, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis } from '../../src/usageAnalysis';
 import { activeSessionDays, addSessionToDailyStats, scaleModelUsage, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
@@ -28,7 +28,9 @@ import { groupWorkspaces, groupFolders, type WorkspaceGroup, type WorkspaceGroup
 import { buildWorkspaceCustomization, type WorkspaceCustomization } from '../../src/customizationMatrix';
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getTimeWindowStartDate } from '../../src/timeWindows';
-import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
+import { buildRepeatedTaskReport, scheduledRunOf, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
+import { automationRunName, CopilotAutomationRunsAccess, getCopilotAppDataDbPath } from '../../src/copilotAutomationRuns';
+import { readClaudeScheduledTasks } from '../../src/scheduledTaskSources';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import {
 	getEcosystems,
@@ -60,6 +62,7 @@ import {
 	buildChartPayload,
 	fmt,
 	formatTokens,
+	getEditorSourceFromPath,
 } from './analysis';
 export type { SessionData } from './analysis';
 export { effectiveTokens, buildChartPayload, buildEfficiencyPayload, fmt, formatTokens } from './analysis';
@@ -680,6 +683,12 @@ export interface UsageAnalysisOptions {
 	 * (Skill Suggestions) report. Off by default: the report carries prompt text.
 	 */
 	includeRepeatedTasks?: boolean;
+	/**
+	 * Scheduled-task data: session UUID → GitHub Copilot automation name (so automation
+	 * runs are reported as scheduled tasks), and both apps' scheduled-task inventory.
+	 * Defaults to reading ~/.copilot/data.db and the Claude desktop app's data; tests pass a stub.
+	 */
+	loadScheduledTaskSources?: () => Promise<ScheduledTaskSources>;
 }
 
 /**
@@ -706,6 +715,10 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	// Day keys of sessions classified as Delegation in the window (for the daily Agentic trend).
 	const delegationDayKeys: string[] = [];
 	let agenticDailyTrend: AgenticTrendPoint[] | undefined;
+	// GitHub Copilot automation runs, so scheduled runs are reported as scheduled tasks, not suggestions.
+	const { automationRuns, definitions: scheduledTaskDefinitions } = options.includeRepeatedTasks
+		? await (options.loadScheduledTaskSources ?? loadScheduledTaskSources)()
+		: { automationRuns: new Map<string, string>(), definitions: [] };
 
 	for (const file of sessionFiles) {
 		try {
@@ -726,14 +739,23 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			// analyze each recent session twice.
 			const version = await sessionVersion(file, stats, () => activity.lastActivity());
 			const { analysis } = await analyzeSessionUsageShared(file, version);
-			if (options.includeRepeatedTasks) {
-				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
-			}
+			const repeatedTaskSource = options.includeRepeatedTasks
+				? await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart, automationRuns)
+				: undefined;
 			// Period stats bucket by the same activity time.
 			let sessionSummary: TodaySessionSummary | undefined;
 			// At the session's own version: a DB-backed session admitted by its fresh adapter
 			// activity must not be summarised from a base parse the WAL has left stale.
 			const data = activeAt >= last30DaysStart ? await processSessionFileAtVersion(file, false, version) : undefined;
+			if (repeatedTaskSource) {
+				// So a failed scheduled run can show what its session cost. Scheduled runs are parsed
+				// even when older than the 30-day stats window: there are few of them.
+				const runData = data ?? (scheduledRunOf(repeatedTaskSource) ? await processSessionFileAtVersion(file, false, version) : undefined);
+				if (runData) {
+					repeatedTaskSource.tokens = runData.tokens;
+					repeatedTaskSource.costUsd = calculateEstimatedCost(runData.modelUsage, modelPricing);
+				}
+			}
 			if (data && data.interactions > 0) {
 				let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
 				for (const usage of Object.values(data.modelUsage)) {
@@ -825,7 +847,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
 		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
 		...(agenticDailyTrend ? { agenticDailyTrend } : {}),
-		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources) } : {}),
+		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources, { scheduledTaskDefinitions }) } : {}),
 	};
 }
 
@@ -882,7 +904,9 @@ export function createSessionActivityLookup(file: string, sources: SessionActivi
  * DB-backed sessions share their database's mtime, so the adapter's per-session
  * last interaction (or last activity) is what places a session in the window.
  */
-async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+async function toRepeatedTaskSource(
+	activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number, automationRuns: ReadonlyMap<string, string>,
+): Promise<RepeatedTaskSessionSource> {
 	const meta = await activity.meta();
 	const lastInteraction = meta?.lastInteraction ?? (await activity.lastActivity())?.toISOString() ?? null;
 	return {
@@ -892,17 +916,42 @@ async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPr
 		lastInteraction,
 		mtime: mtimeMs,
 		repository: meta?.repository ?? null,
+		editor: getEditorSourceFromPath(activity.file),
+		copilotAutomation: automationRunName(activity.file, automationRuns),
 	};
 }
 
-/** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
+/** Scheduled-task data the repeated-task report needs; see UsageAnalysisOptions.loadScheduledTaskSources. */
+export interface ScheduledTaskSources {
+	automationRuns: Map<string, string>;
+	definitions: ScheduledTaskDefinition[];
+}
+
+/** Copilot automations and runs from ~/.copilot/data.db plus Claude desktop scheduled tasks; empty parts when an app is not installed. */
+async function loadScheduledTaskSources(): Promise<ScheduledTaskSources> {
+	const claude = await readClaudeScheduledTasks().catch(() => []);
+	const dbPath = getCopilotAppDataDbPath();
+	if (!fs.existsSync(dbPath)) { return { automationRuns: new Map(), definitions: claude }; }
+	const access = new CopilotAutomationRunsAccess(dbPath);
+	try {
+		return { automationRuns: await access.getAutomationRuns(), definitions: [...claude, ...await access.getAutomations()] };
+	} catch {
+		return { automationRuns: new Map(), definitions: claude };
+	} finally {
+		access.dispose();
+	}
+}
+
+/** Add a session with a first prompt to the repeated-task sources (and return it) when its own activity is in the window. */
 async function addRepeatedTaskSource(
 	sources: RepeatedTaskSessionSource[], activity: SessionActivityLookup,
-	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
-): Promise<void> {
-	if (!firstUserPrompt) { return; }
-	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs);
-	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
+	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date, automationRuns: ReadonlyMap<string, string>,
+): Promise<RepeatedTaskSessionSource | undefined> {
+	if (!firstUserPrompt) { return undefined; }
+	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs, automationRuns);
+	if (repeatedTaskActivityMs(source) < cutoff.getTime()) { return undefined; }
+	sources.push(source);
+	return source;
 }
 
 /**

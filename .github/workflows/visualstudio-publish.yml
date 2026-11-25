@@ -7,8 +7,9 @@ name: Visual Studio Extension - Publish
 # MUST match the pushed tag.
 #
 # Required secret:
-#   VSCE_PAT (or VS_MARKETPLACE_PAT) — Azure DevOps PAT with Marketplace (Publish) scope.
-#   The same PAT is used for both the VS Code and Visual Studio Marketplaces.
+#   None for the Marketplace: publishing uses Marketplace Trusted Publishing (GitHub
+#   OIDC) via .github/workflows/scripts/publish-vs-marketplace.ps1. The RobBos
+#   publisher has a policy for this workflow file; renaming the file breaks it.
 
 on:
   push:
@@ -37,6 +38,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write  # needed to create GitHub release on tag push
+      id-token: write  # OIDC token for Visual Studio Marketplace Trusted Publishing
     outputs:
       version: ${{ steps.version.outputs.local_version }}
       is_tag: ${{ steps.version.outputs.is_tag }}
@@ -294,28 +296,13 @@ jobs:
 
       - name: Publish to Visual Studio Marketplace
         if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true && inputs.dry_run != true
+        # Marketplace Trusted Publishing (OIDC): no PAT. The RobBos publisher has a
+        # policy trusting this repository + this workflow file (no environment).
         shell: pwsh
-        env:
-          VS_MARKETPLACE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          if (-not $env:VS_MARKETPLACE_PAT) {
-            Write-Error "❌ VS_MARKETPLACE_PAT secret (VSCE_PAT) is not configured."
-            exit 1
-          }
-          $vsixPublisher = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" `
-            -Recurse -Filter "VsixPublisher.exe" -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $vsixPublisher) {
-            Write-Error "❌ VsixPublisher.exe not found on this runner."
-            exit 1
-          }
-          Write-Host "Found: $($vsixPublisher.FullName)"
-          $vsix = "${{ steps.vsix.outputs.vsix_path }}"
-          $manifest = "visualstudio-extension/publish-manifest.json"
-          Write-Host "Publishing $vsix to Visual Studio Marketplace..."
-          & $vsixPublisher.FullName publish -payload $vsix -publishManifest $manifest -personalAccessToken $env:VS_MARKETPLACE_PAT
-          if ($LASTEXITCODE -ne 0) { throw "Marketplace publish failed" }
-          Write-Host "✅ Published to Visual Studio Marketplace"
+          ./.github/workflows/scripts/publish-vs-marketplace.ps1 `
+            -Vsix "${{ steps.vsix.outputs.vsix_path }}" `
+            -PublishManifest "visualstudio-extension/publish-manifest.json"
 
       - name: Tag Visual Studio release (vs/v<manifest version>)
         # Marketplace publishes from release.yml / dispatch carry no vs/v* tag otherwise,

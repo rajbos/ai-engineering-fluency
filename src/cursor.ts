@@ -74,7 +74,18 @@ interface CursorComposerData {
 	status?: string;
 	trackedGitRepos?: Array<{ repoPath?: string }>;
 	originalFileStates?: { [uri: string]: unknown };
-	fullConversationHeadersOnly?: Array<{ type?: number; bubbleId?: string }>;
+	fullConversationHeadersOnly?: CursorConversationHeader[];
+	/**
+	 * Present on composers written by Cursor 3.3x+ (`_v` 18), which leave
+	 * `fullConversationHeadersOnly` empty and store the headers in chunked
+	 * `composerConvHeaders:<composerId>:<000000>` rows instead (see #2735).
+	 */
+	headerLog?: { chunkCount?: number; count?: number };
+}
+
+interface CursorConversationHeader {
+	type?: number; // 1 = user, 2 = assistant
+	bubbleId?: string;
 }
 
 export interface CursorBubble {
@@ -483,12 +494,47 @@ export class CursorDataAccess {
 		);
 		if (!outcome) { return null; } // both backends failed — a transient failure, not "not found"
 		if (outcome.result.values.length === 0) { return { data: null, fingerprint: outcome.fingerprint }; }
+		let data: CursorComposerData | null;
 		try {
 			const raw = outcome.result.values[0][0] as string;
-			return { data: JSON.parse(raw) as CursorComposerData, fingerprint: outcome.fingerprint };
+			data = JSON.parse(raw) as CursorComposerData;
 		} catch {
 			return null; // malformed JSON — treat as a read failure, not "not found"; retry next call
 		}
+		if (!data) { return { data: null, fingerprint: outcome.fingerprint }; }
+		if (!data.fullConversationHeadersOnly || data.fullConversationHeadersOnly.length === 0) {
+			const chunked = await this.queryChunkedHeaders(dbPath, composerId);
+			if (!chunked) { return null; } // read failure — don't cache a header-less composer
+			if (chunked.length > 0) { data.fullConversationHeadersOnly = chunked; }
+		}
+		return { data, fingerprint: outcome.fingerprint };
+	}
+
+	/**
+	 * Newer Cursor builds (#2735) keep the conversation headers out of the composer record, in
+	 * `composerConvHeaders:<composerId>:<000000>` rows that each hold a JSON array of
+	 * `{ bubbleId, type }`. Reads them in chunk order with an indexed key-range query (the db can
+	 * be tens of GB, so no LIKE scan) and concatenates them. Returns `[]` when there are none
+	 * (older or empty chats) and `null` only when the read itself failed.
+	 */
+	private async queryChunkedHeaders(dbPath: string, composerId: string): Promise<CursorConversationHeader[] | null> {
+		const prefix = `composerConvHeaders:${composerId}:`;
+		// ';' is the character after ':', so [prefix, upper) covers exactly the keys under prefix.
+		const upper = `composerConvHeaders:${composerId};`;
+		const outcome = await this.queryAll(
+			dbPath,
+			"SELECT value FROM cursorDiskKV WHERE key >= ? AND key < ? ORDER BY key",
+			[prefix, upper]
+		);
+		if (!outcome) { return null; }
+		const headers: CursorConversationHeader[] = [];
+		for (const row of outcome.result.values) {
+			try {
+				const chunk = JSON.parse(row[0] as string);
+				if (Array.isArray(chunk)) { headers.push(...chunk); }
+			} catch { /* skip a malformed chunk rather than dropping the whole session */ }
+		}
+		return headers;
 	}
 
 	/**
@@ -566,7 +612,8 @@ export class CursorDataAccess {
 	}
 
 	/**
-	 * Count user interactions (type === 1 entries in fullConversationHeadersOnly).
+	 * Count user interactions (type === 1 entries in fullConversationHeadersOnly, which
+	 * readComposerData fills from the chunked header rows for newer Cursor builds).
 	 */
 	async countInteractions(virtualPath: string): Promise<number> {
 		const data = await this.readComposerData(virtualPath);

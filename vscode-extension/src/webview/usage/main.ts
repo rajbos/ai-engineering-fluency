@@ -73,7 +73,7 @@ import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml, wireServerMemoriesButtons } from './serverMemories';
 import { buildBuiltinToolsHtml, buildUnusedMcpHtml, buildUnusedSkillsHtml } from './toolCurationTables';
 import { renderAgentPluginsFilter, renderAgentPluginsTable, renderMemoryFilesTable, renderMissedPotentialTable, renderRepoHygieneListTable, type RepoHygieneListRow } from './usageListTables';
-import { buildSkillSuggestionsSectionHtml, sanitizeRepeatedTaskReport, wireSkillSuggestions, type RepeatedTaskReport, type SkillSuggestionsMessage } from './skillSuggestions';
+import { buildScheduledAutomationsSectionHtml, buildSkillSuggestionsSectionHtml, sanitizeRepeatedTaskReport, wireSkillSuggestions, type RepeatedTaskReport, type SkillSuggestionsMessage } from './skillSuggestions';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -3269,7 +3269,7 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[], repeatedTasks: 
 					${allSection}
 				</div>
 			</div>
-			${safeSectionHtml('Skill Suggestions', () => buildSkillSuggestionsSectionHtml(repeatedTasks))}
+			${safeSectionHtml('Skill Suggestions', () => buildSkillSuggestionsSectionHtml(repeatedTasks))}${safeSectionHtml('Scheduled automations', () => buildScheduledAutomationsSectionHtml(repeatedTasks))}
 		</div>`;
 }
 

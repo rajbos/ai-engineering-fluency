@@ -1,0 +1,18 @@
+[
+  {
+    "day": "2026-11-24",
+    "model": "gpt-4o",
+    "workspaceName": "Synthetic Workspace",
+    "inputTokens": 40,
+    "outputTokens": 20,
+    "interactions": 2
+  },
+  {
+    "day": "2026-11-24",
+    "model": "claude-3-5-sonnet",
+    "workspaceName": "Synthetic Workspace",
+    "inputTokens": 30,
+    "outputTokens": 10,
+    "interactions": 1
+  }
+]

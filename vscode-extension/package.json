@@ -126,6 +126,11 @@
         "category": "AI Engineering Fluency"
       },
       {
+        "command": "aiEngineeringFluency.clearUsageHistory",
+        "title": "%command.clearUsageHistory.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
         "command": "aiEngineeringFluency.resetInsightsState",
         "title": "%command.resetInsightsState.title%",
         "category": "AI Engineering Fluency"

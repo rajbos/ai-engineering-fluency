@@ -115,7 +115,7 @@ test('skillSuggestions: sessions table has one open button per session with the 
 	assert.equal(buttons[0].getAttribute('data-file'), 'C:\\logs\\"evil"<b>.jsonl');
 	assert.equal(buttons[1].getAttribute('data-file'), 'C:\\logs\\cluster-0-session-1.jsonl');
 	const headers = Array.from(doc.querySelectorAll('#data-table-root-skill-sessions-0 thead th')).map(th => th.textContent!.trim());
-	assert.deepEqual(headers, ['Session', 'Date↓', 'Repository', 'Actions']);
+	assert.deepEqual(headers, ['Session', 'Date↓', 'Repository', 'Editor', 'Actions']);
 	const dateHeader = Array.from(doc.querySelectorAll('#data-table-root-skill-sessions-0 thead th')).find(th => th.textContent!.includes('Date'))!;
 	assert.equal(dateHeader.getAttribute('aria-sort'), 'descending', 'the applied sort is exposed on the header');
 	assert.match(doc.querySelector('#data-table-root-skill-sessions-0 tbody tr')!.textContent!, /<img src=x onerror=alert\(1\)>/);
@@ -357,4 +357,80 @@ test('wireSkillSuggestions: a second Copy click while "Copied!" shows still rest
 		Object.defineProperty(globalThis, 'navigator', { value: previous.navigator, configurable: true, writable: true });
 		Object.assign(globals, { document: previous.document, Element: previous.Element, HTMLElement: previous.HTMLElement });
 	}
+});
+
+test('sanitizeRepeatedTaskReport: keeps editors and a well-formed recurrence, drops malformed ones', () => {
+	const base = { representativePrompt: 'x', sessionCount: 1, sessions: [{ file: 'a', editor: 'Claude Code' }, { file: 'b', editor: 7 }] };
+	const ok = sanitizeRepeatedTaskReport({ clusters: [{ ...base, editors: ['Claude Code', 1], recurrence: { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 } }] })!.clusters[0];
+	assert.deepEqual(ok.editors, ['Claude Code']);
+	assert.equal(ok.sessions[0].editor, 'Claude Code');
+	assert.equal(ok.sessions[1].editor, undefined);
+	assert.deepEqual(ok.recurrence, { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 });
+	for (const recurrence of [{ cadence: 'hourly', activeDays: 4, typicalGapDays: 1 }, { cadence: 'daily', activeDays: -1, typicalGapDays: 1 }, { cadence: 'daily', activeDays: 3, typicalGapDays: NaN }, 'daily']) {
+		const c = sanitizeRepeatedTaskReport({ clusters: [{ ...base, recurrence }] })!.clusters[0];
+		assert.equal(c.recurrence, undefined, JSON.stringify(recurrence));
+	}
+	const legacy = sanitizeRepeatedTaskReport({ clusters: [base] })!.clusters[0];
+	assert.deepEqual(legacy.editors, []);
+	assert.equal('recurrence' in legacy, false);
+});
+
+test('skillSuggestions: a recurring task shows its cadence and one automation tip per matching platform', () => {
+	resetPages();
+	const recurring: RepeatedTaskCluster = {
+		...makeCluster(0, 3),
+		editors: ['Claude Code', 'VS Code'],
+		recurrence: { cadence: 'weekly', activeDays: 3, typicalGapDays: 7 },
+	};
+	const doc = render({ minClusterSize: 2, sessionsScanned: 3, clusters: [recurring, makeCluster(1)] });
+	const cards = doc.querySelectorAll('.skill-suggestion-card');
+	assert.match(cards[0].querySelector('.skill-suggestion-recurring')!.textContent!, /weekly \(3 days\)/);
+	const tips = Array.from(cards[0].querySelectorAll('.skill-suggestion-automation li')).map(li => li.getAttribute('data-automation-platform'));
+	assert.deepEqual(tips, ['claude', 'copilot']);
+	assert.match(cards[0].querySelector('.skill-suggestion-automation')!.textContent!, /scheduled task/);
+	assert.match(cards[0].querySelector('.skill-suggestion-automation')!.textContent!, /automation/);
+	// A non-recurring task is a skill suggestion only.
+	assert.equal(cards[1].querySelector('.skill-suggestion-recurring'), null);
+	assert.equal(cards[1].querySelector('.skill-suggestion-automation'), null);
+});
+
+test('skillSuggestions: a recurring task with no known editor gets the generic scheduled-job tip', () => {
+	resetPages();
+	const recurring: RepeatedTaskCluster = { ...makeCluster(0, 3), recurrence: { cadence: 'regular', activeDays: 4, typicalGapDays: 3 } };
+	const doc = render({ minClusterSize: 2, sessionsScanned: 3, clusters: [recurring] });
+	assert.match(doc.querySelector('.skill-suggestion-recurring')!.textContent!, /every 3 days \(4 days\)/);
+	const tips = Array.from(doc.querySelectorAll('.skill-suggestion-automation li')).map(li => li.getAttribute('data-automation-platform'));
+	assert.deepEqual(tips, ['other']);
+});
+
+test('skillSuggestions: the sessions table shows each session editor', () => {
+	resetPages();
+	const c = makeCluster(0, 2);
+	c.sessions[0].editor = 'Claude Code';
+	const doc = render({ minClusterSize: 2, sessionsScanned: 2, clusters: [c] });
+	const table = doc.getElementById(`data-table-root-${sessionsTableId(0)}`)!;
+	assert.ok(Array.from(table.querySelectorAll('th')).some(th => th.textContent!.includes('Editor')));
+	assert.ok(table.textContent!.includes('Claude Code'));
+});
+
+test('skillSuggestions: tasks already on a schedule are named as left out, escaped, and sanitized', () => {
+	resetPages();
+	const report = sanitizeRepeatedTaskReport({
+		...makeReport(1),
+		scheduledTasks: [
+			{ name: 'repo-health-scan-daily', platform: 'claude', runCount: 12, activeDays: 12, lastRun: '2026-11-24T06:00:00Z' },
+			{ name: '<b>nightly</b>', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: null },
+			{ name: 'bad platform', platform: 'cron', runCount: 3 },
+			{ name: 'no runs', platform: 'claude', runCount: 0 },
+		],
+	})!;
+	assert.deepEqual(report.scheduledTasks!.map(t => t.name), ['repo-health-scan-daily', '<b>nightly</b>', 'no runs']);
+	const html = buildSkillSuggestionsSectionHtml(report);
+	assert.ok(!html.includes('<b>nightly'), 'task names are escaped');
+	const note = render(report).querySelector('.skill-suggestions-scheduled')!;
+	assert.match(note.textContent!, /Already on a schedule/);
+	assert.match(note.textContent!, /repo-health-scan-daily \(12 runs\), <b>nightly<\/b> \(3 runs\)$/, 'a task with no run in the window is left to the automations table');
+
+	assert.equal(render(makeReport(1)).querySelector('.skill-suggestions-scheduled'), null);
+	assert.equal('scheduledTasks' in sanitizeRepeatedTaskReport(makeReport(1))!, false);
 });

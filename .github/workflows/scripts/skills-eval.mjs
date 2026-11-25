@@ -1,424 +1,430 @@
-// Runs agent-skills-eval (https://github.com/darkrishabh/agent-skills-eval)
-// over the repository's Agent Skills in .github/skills, using the GitHub
-// Copilot CLI (npx @github/copilot) as both the target and the judge model.
-//
-// agent-skills-eval only speaks the OpenAI chat API out of the box, so this
-// script wires up a custom Provider whose complete() shells out to the
-// Copilot CLI in non-interactive programmatic mode instead. Skills without an
-// evals/evals.json are skipped automatically by the SDK.
-//
-// Invoked by .github/workflows/skills-eval.yml. Requires:
-//   - EVAL_PKG_DIR   directory where agent-skills-eval was npm-installed
-//   - GH_TOKEN / COPILOT_GITHUB_TOKEN  auth for the Copilot CLI
-// Optional:
-//   - COPILOT_CLI_VERSION exact @github/copilot version (default pinned below)
-//   - COPILOT_MODEL       model passed to `copilot --model` (CLI default when unset)
-//   - SKILLS_ROOT         skills folder (default .github/skills)
-//   - EVAL_WORKSPACE      artifact output dir (default ./agent-skills-workspace)
-
+// Pinned agent-skills-eval adapter. Target and judge calls are text-only:
+// only the SDK's with_skill prompt supplies skill instructions.
+// EVAL_PKG_DIR is required; EVAL_WORKSPACE defaults to ./agent-skills-workspace.
+// COPILOT_CLI_VERSION, COPILOT_MODEL and SKILLS_ROOT may override the defaults.
+// eval-actionable.json is the sanitized issue-reporter handoff. passRate is
+// null if with-skill grading is unavailable; numeric zero means measured zero.
+// Operational failures exit nonzero; ordinary assertion failures are actionable.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
-  appendFileSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
+  appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const pkgDir = process.env.EVAL_PKG_DIR;
-if (!pkgDir) {
-  console.error("EVAL_PKG_DIR is not set — install agent-skills-eval first.");
-  process.exit(1);
-}
+const json = (file, value) => writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-const { evaluateSkills, consoleReporter } = await import(
-  pathToFileURL(path.join(pkgDir, "node_modules", "agent-skills-eval", "dist", "index.js")).href
-);
-
-// Exact Copilot CLI version to run. The workflow sets COPILOT_CLI_VERSION; the
-// fallback keeps a local run pinned too, so `npx` never resolves "latest".
-const copilotCliVersion = process.env.COPILOT_CLI_VERSION || "1.0.94";
-const modelName = process.env.COPILOT_MODEL || "copilot-cli-default";
-// Kept as separate names so the model count reported below is derived from the
-// values actually handed to evaluateSkills, rather than assumed to be 1.
-const targetModel = modelName;
-const judgeModel = modelName;
-const skillsRoot = process.env.SKILLS_ROOT || ".github/skills";
-const workspace = process.env.EVAL_WORKSPACE || "./agent-skills-workspace";
-
-// ── Resolving the *actual* model name ────────────────────────────────────────
-// When COPILOT_MODEL is unset, `modelName` above is just the placeholder
-// string "copilot-cli-default" — it does not say which real model (e.g. a
-// specific GPT/Claude variant) the CLI picked. The CLI itself doesn't have a
-// flag that prints "the model I'd use" without actually running a prompt, but
-// every call — explicit --model or not — logs a `"model": "<name>"` field in
-// its wire-level debug log. So each CLI invocation below runs with
-// `--log-level debug --log-dir <scratch dir>`, and the log is scraped for
-// that field right after the call, giving us the real resolved model name
-// even when the CLI was left to pick its own default. Log files are deleted
-// immediately after scraping to avoid piling up disk usage across the run.
-const cliLogDir = mkdtempSync(path.join(os.tmpdir(), "copilot-cli-logs-"));
-const resolvedModels = new Set();
-
-function scrapeResolvedModel(beforeFiles) {
+function judgeResponseValid(output) {
   try {
-    // A single CLI call can emit more than one log file, so scan every new one
-    // and delete them all — leaving strays behind would grow unboundedly across
-    // the run, and reading only the first could miss the file with the model.
-    const newFiles = readdirSync(cliLogDir).filter((f) => !beforeFiles.has(f));
-    let resolved;
-    for (const file of newFiles) {
-      const logPath = path.join(cliLogDir, file);
-      try {
-        resolved ??= readFileSync(logPath, "utf-8").match(/"model":\s*"([^"]+)"/)?.[1];
-      } catch {
-        // Unreadable log file — keep going, the next one may still have it.
-      }
-      rmSync(logPath, { force: true });
-    }
-    return resolved;
+    const raw = JSON.parse(output.slice(output.indexOf("{"), output.lastIndexOf("}") + 1));
+    return Array.isArray(raw.assertion_results) && raw.assertion_results.length > 0 &&
+      raw.assertion_results.every((r) => typeof r.passed === "boolean" &&
+        typeof r.evidence === "string" && r.evidence.trim().length > 0);
   } catch {
-    return undefined; // Best-effort only — never let log scraping break the eval run.
+    return false;
   }
 }
 
-/**
- * Provider that completes prompts by running the Copilot CLI once per call.
- * Locked down for untrusted-ish prompt content: no tool approvals are granted
- * (shell/write/url are explicitly denied), built-in MCP servers are disabled,
- * and tokens are marked secret so they are redacted from the transcript.
- */
-function copilotCliProvider() {
+function failureReason(result, output) {
+  if (result.error?.code === "ETIMEDOUT") return "timeout";
+  if (result.error) return "spawn-error";
+  if (result.signal) return "signal";
+  if (result.status !== 0) {
+    return /Invalid command format/i.test(`${result.stderr || ""}\n${output}`)
+      ? "invalid-command-format" : "nonzero-exit";
+  }
+  return output ? undefined : "empty-output";
+}
+
+export function createEvaluationState() {
+  return { runs: [], active: undefined, models: new Set() };
+}
+
+// Keep SDK events, prompts, CLI output and judge evidence out of console and
+// actionable summaries. The full evidence belongs only in workspace artifacts.
+export function recordEvent(state, event) {
+  if (event.type === "eval-start") {
+    state.active = {
+      skill: event.skill, index: event.evalIndex, slug: event.evalSlug,
+      mode: event.mode, failures: [], completed: false,
+    };
+    state.runs.push(state.active);
+  }
+  if (event.type === "eval-end") {
+    const run = state.active;
+    if (!run || run.skill !== event.skill || run.index !== event.evalIndex || run.mode !== event.mode) {
+      throw new Error("Evaluator event order changed; refusing to attribute results.");
+    }
+    const assertions = event.grading?.assertion_results;
+    if (!Array.isArray(assertions) || assertions.length === 0) {
+      run.failures.push("missing-assertions");
+    } else if (!run.failures.includes("target-cli") && (run.judgeValid === false || assertions.some((r) =>
+      /^(judge returned unparseable response:|judge omitted this assertion result|judge did not provide concrete evidence)/.test(r.evidence)))) {
+      run.failures.push("invalid-judge");
+    }
+    run.completed = true;
+    run.grading = event.grading;
+    run.durationMs = event.timing.duration_ms;
+    state.active = undefined;
+  }
+}
+
+export function copilotCliProvider({
+  role, state, scratch, execute = spawnSync, env = process.env,
+}) {
   return {
     name: "copilot-cli",
-    model: modelName,
+    model: env.COPILOT_MODEL || "copilot-cli-default",
     async complete(prompt) {
-      const started = Date.now();
-      // Snapshot the log dir so scrapeResolvedModel can tell which files this
-      // call produced. Guarded because a throw here would abort the whole run
-      // (see the ProviderResult error note below) for a purely cosmetic stat.
-      let beforeFiles = new Set();
-      try {
-        beforeFiles = new Set(readdirSync(cliLogDir));
-      } catch {
-        // Log dir unreadable — scraping degrades to the placeholder model name.
+      const active = state.active;
+      if (!active) throw new Error("Provider invoked outside an evaluation.");
+      // Do not pay a judge to grade an infrastructure error as model output.
+      if (role === "judge" && active.failures.includes("target-cli")) {
+        return { output: "", error: "Target execution failed; grading skipped." };
       }
+      const callDir = mkdtempSync(path.join(scratch, "call-"));
+      const home = path.join(callDir, "home");
+      const logs = path.join(callDir, "logs");
+      mkdirSync(home);
+      mkdirSync(logs);
+      // The pinned CLI rejects a -p value beginning with '-' (the SDK's
+      // baseline begins "---USER REQUEST---"). A neutral prefix fixes both
+      // modes without depending on unsupported --prompt=<value> syntax.
       const args = [
-        "--yes",
-        `@github/copilot@${copilotCliVersion}`,
-        "-p",
-        prompt,
-        "--silent",
-        "--no-color",
-        "--no-ask-user",
-        "--disable-builtin-mcps",
-        "--deny-tool",
-        "shell",
-        "--deny-tool",
-        "write",
-        "--deny-tool",
-        "url",
+        "--yes", `@github/copilot@${env.COPILOT_CLI_VERSION || "1.0.94"}`,
+        "--no-auto-update",
+        "-p", `Evaluation request follows.\n\n${prompt}`,
+        "--silent", "--no-color", "--no-ask-user", "--no-custom-instructions",
+        "--disable-builtin-mcps", "--available-tools",
+        "--deny-tool", "shell", "--deny-tool", "write", "--deny-tool", "url",
         "--secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN",
-        "--log-level",
-        "debug",
-        "--log-dir",
-        cliLogDir,
+        "--log-level", "debug", "--log-dir", logs,
       ];
-      if (process.env.COPILOT_MODEL) {
-        args.push("--model", process.env.COPILOT_MODEL);
+      if (env.COPILOT_MODEL) args.push("--model", env.COPILOT_MODEL);
+      const started = Date.now();
+      try {
+        const result = execute("npx", args, {
+          encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60 * 1000,
+          cwd: path.join(scratch, "repository"),
+          env: {
+            ...env, COPILOT_HOME: home, HOME: home, USERPROFILE: home,
+            XDG_CONFIG_HOME: home, COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "",
+            COPILOT_ALLOW_ALL: "false", COPILOT_ASSISTED_APPROVAL: "false",
+            COPILOT_AUTO_UPDATE: "false",
+            npm_config_cache: path.join(scratch, "npm-cache"),
+          },
+        });
+        const output = (result.stdout || "").trim();
+        const reason = failureReason(result, output);
+        const failed = reason !== undefined;
+        let model = env.COPILOT_MODEL || "copilot-cli-default";
+        try {
+          for (const file of readdirSync(logs)) {
+            try {
+              model = readFileSync(path.join(logs, file), "utf8").match(/"model":\s*"([^"]+)"/)?.[1] || model;
+            } catch { /* Another log may contain the resolved model. */ }
+          }
+        } catch { /* Model resolution is cosmetic, never a validity signal. */ }
+        state.models.add(model);
+        if (failed) {
+          active.failures.push(`${role}-cli`);
+          (active.diagnostics ??= []).push({
+            role, reason, exitCode: Number.isInteger(result.status) ? result.status : null,
+          });
+        }
+        if (role === "judge" && !failed) active.judgeValid = judgeResponseValid(output);
+        // Usage is unavailable, not measured zero. Do not invent token/cost
+        // fields; our artifacts and report explicitly mark them unavailable.
+        return {
+          provider: "copilot-cli", model, output: failed ? "" : output,
+          latencyMs: Date.now() - started,
+          ...(failed ? { error: `${role} CLI execution failed; comparison unavailable.` } : {}),
+        };
+      } finally {
+        rmSync(callDir, { recursive: true, force: true });
       }
-      const run = spawnSync("npx", args, {
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: 10 * 60 * 1000,
-      });
-      const latencyMs = Date.now() - started;
-      const output = (run.stdout || "").trim();
-      const failed = run.error || run.status !== 0 || output.length === 0;
-      if (failed) {
-        const detail = run.error
-          ? run.error.message
-          : `exit code ${run.status}: ${(run.stderr || "").trim().slice(0, 2000)}`;
-        console.error(`copilot CLI call failed after ${latencyMs}ms — ${detail}`);
-      }
-      const resolvedModel = scrapeResolvedModel(beforeFiles) || modelName;
-      resolvedModels.add(resolvedModel);
-      // On failure, return a ProviderResult with `error` set rather than
-      // throwing: the framework's run-eval replaces the output with
-      // "ERROR: <error>" so the judge fails the case closed, whereas a throw
-      // would abort the entire evaluation run.
-      return {
-        provider: "copilot-cli",
-        model: resolvedModel,
-        output,
-        latencyMs,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: 0,
-        ...(failed ? { error: `copilot CLI call failed (exit ${run.status ?? "spawn error"})` } : {}),
-      };
     },
   };
 }
 
-const provider = copilotCliProvider();
-
-const result = await evaluateSkills({
-  root: skillsRoot,
-  workspace,
-  baseline: true,
-  target: { model: targetModel, provider },
-  judge: { model: judgeModel, provider },
-  concurrency: 1,
-  workspaceLayout: "iteration",
-  report: true,
-  reportTitle: "Agent Skills Eval — weekly Copilot CLI run",
-  onEvent: consoleReporter(),
-});
-
-// The target and judge are both driven by this script's single Copilot CLI
-// provider today, so this set has one entry in practice. It's built from the
-// models actually resolved by each CLI call (scraped from its debug log, see
-// scrapeResolvedModel above) rather than the requested `modelName`, so a run
-// left on the CLI's own default reports the real model (e.g. "claude-sonnet-5")
-// instead of the opaque "copilot-cli-default" placeholder. Falls back to
-// modelName if scraping failed for every call (e.g. no calls were made).
-const modelsUsed = resolvedModels.size > 0 ? Array.from(resolvedModels) : [modelName];
-
-rmSync(cliLogDir, { recursive: true, force: true });
-
-// ── Per-skill "suggested next step" (report only) ───────────────────────────
-// agent-skills-eval's own HTML report (report.js, vendored via npm — not ours
-// to edit) shows pass/fail data but no actionable guidance. We post-process
-// the generated index.html below to inject a data-driven suggestion box per
-// skill, computed from the same grading.json/benchmark.json files the report
-// itself reads.
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function valid(run) {
+  return Boolean(run?.completed && run.failures.length === 0);
 }
 
-// Scans `<skillDir>/eval-<slug>/<mode>/grading.json` for failed assertions.
-// NB: a line comment on purpose — a JSDoc block here cannot contain the glob
-// `eval-*` followed by a slash, because that sequence closes the comment early.
-function collectFailingAssertions(skillDir) {
-  const failures = [];
-  // Read first and handle the failure, rather than checking existence and then
-  // reading: the check-then-use pattern is a TOCTOU race (CodeQL
-  // js/file-system-race) and needs the same error handling anyway.
-  let entries;
-  try {
-    entries = readdirSync(skillDir, { withFileTypes: true });
-  } catch {
-    return failures;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("eval-")) {
-      continue;
-    }
-    const evalDir = path.join(skillDir, entry.name);
-    for (const mode of ["with_skill", "without_skill"]) {
-      const gradingPath = path.join(evalDir, mode, "grading.json");
-      let grading;
-      try {
-        grading = JSON.parse(readFileSync(gradingPath, "utf-8"));
-      } catch {
-        continue; // Missing (mode never ran) or malformed — nothing to report.
-      }
-      for (const r of grading.assertion_results ?? []) {
-        if (!r.passed) {
-          failures.push({ evalSlug: entry.name, mode, text: r.text, evidence: r.evidence });
-        }
-      }
-    }
-  }
-  return failures;
+function passRate(runs) {
+  const total = runs.reduce((n, r) => n + r.grading.summary.total, 0);
+  return total ? runs.reduce((n, r) => n + r.grading.summary.passed, 0) / total : null;
 }
 
-/**
- * Builds a concrete, data-driven "what to do next" suggestion for one skill,
- * prioritizing the most actionable signal available:
- *   1. A concrete failing assertion (with judge evidence) in with_skill mode.
- *   2. Both modes at 100% with zero delta — the eval isn't discriminating.
- *   3. with_skill scoring worse than without_skill — the skill may be actively
- *      confusing the model.
- *   4. Otherwise, no action needed this run.
- */
-function buildSuggestion(skillDir, benchmark) {
-  const withSkillFailures = collectFailingAssertions(skillDir).filter((f) => f.mode === "with_skill");
-  if (withSkillFailures.length > 0) {
-    const f = withSkillFailures[0];
-    return {
-      cls: "bad",
-      text:
-        `Judge FAILED an assertion in with_skill / ${f.evalSlug}: "${f.text}" ` +
-        `— evidence: "${f.evidence}". Add explicit guidance to SKILL.md covering this gap, then re-run.`,
+// Only fixed explanations and validated skill identifiers enter this public
+// handoff. Never include a prompt, output, error string, path or judge evidence.
+export function assessResults(result, state) {
+  const actionable = [];
+  let operationalFailure = false;
+  const skills = result.skills.map((skill) => {
+    const name = /^[a-z0-9][a-z0-9-]{0,99}$/.test(skill.skill) ? skill.skill :
+      `skill-${createHash("sha256").update(skill.skill).digest("hex").slice(0, 12)}`;
+    const runs = state.runs.filter((r) => r.skill === skill.skill);
+    const withRuns = runs.filter((r) => r.mode === "with_skill");
+    const withoutRuns = runs.filter((r) => r.mode === "without_skill");
+    const add = (key, summary) => actionable.push({ key: `${name}:${key}`, summary });
+    const diagnostic = (items) => {
+      const reasons = [...new Set(items.flatMap((r) => (r.diagnostics ?? []).map((d) => d.reason)))];
+      return reasons.length ? ` CLI failure categories: ${reasons.join(", ")}.` : "";
     };
-  }
-  // Every field below is optional-chained: benchmark.json's shape isn't
-  // contractually guaranteed by the SDK, and a missing/renamed field here must
-  // fall through to the safe "ok" default rather than throw and fail the
-  // workflow after the (potentially ~10 minute) eval has already run.
-  const rs = benchmark?.run_summary;
-  const withMean = rs?.with_skill?.pass_rate?.mean;
-  const withoutMean = rs?.without_skill?.pass_rate?.mean;
-  const deltaPassRate = rs?.delta?.pass_rate;
-  if (withMean !== undefined && withoutMean !== undefined && deltaPassRate !== undefined) {
-    if (withMean === 1 && withoutMean === 1 && deltaPassRate === 0) {
-      return {
-        cls: "warn",
-        text:
-          "Both with_skill and without_skill scored 100% (Δ 0.0pp) — this eval isn't discriminating; " +
-          "the model already answers correctly without the skill. Write harder assertions that require " +
-          "skill-specific facts (exact paths, line numbers, function names) not inferable from general repo knowledge.",
-      };
+    const completeMode = (items) => skill.evals > 0 && items.length === skill.evals &&
+      new Set(items.map((r) => r.index)).size === skill.evals &&
+      new Set(items.map((r) => r.slug)).size === skill.evals &&
+      items.every((r) => Number.isInteger(r.index) && r.index >= 0 && r.index < skill.evals && valid(r));
+    const withValid = completeMode(withRuns);
+    const baselineValid = completeMode(withoutRuns) && withRuns.every((r) =>
+      withoutRuns.some((baseline) => baseline.index === r.index && baseline.slug === r.slug));
+    const comparable = withValid && baselineValid;
+    if (!withValid) {
+      operationalFailure = true;
+      add("with-skill-invalid", "With-skill execution or grading is incomplete or invalid; pass rate is unavailable." + diagnostic(withRuns));
     }
-    if (deltaPassRate < 0) {
-      return {
-        cls: "bad",
-        text:
-          `with_skill scored lower than without_skill (Δ ${(deltaPassRate * 100).toFixed(1)}pp) — ` +
-          "the skill's instructions may be actively confusing the model here. Review the failing assertions " +
-          "above and correct the relevant SKILL.md section.",
-      };
+    if (!baselineValid) {
+      operationalFailure = true;
+      add("baseline-invalid", "Baseline execution or grading is incomplete or invalid; no skill improvement can be inferred." + diagnostic(withoutRuns));
     }
+    const withRate = withValid ? passRate(withRuns) : null;
+    const withoutRate = baselineValid ? passRate(withoutRuns) : null;
+    if (withRate !== null && withRate < 1) {
+      add("assertions-failed", "With-skill assertions failed; review the workspace evaluation artifacts and improve the skill or rubric.");
+    }
+    if (comparable && withRate < withoutRate) {
+      add("regression", "With-skill performance regressed against the successfully executed baseline.");
+    }
+    if (comparable && withRate === 1 && withoutRate === 1) {
+      add("non-discriminating", "Both modes passed every assertion; strengthen the evaluation to measure skill-specific benefit.");
+    }
+    return {
+      ...skill, name, runs, withValid, baselineValid, comparable,
+      withRate, withoutRate, delta: comparable ? withRate - withoutRate : null,
+    };
+  });
+  if (!skills.length) {
+    operationalFailure = true;
+    actionable.push({ key: "no-evaluations", summary: "No skills with evaluations were executed; no comparison is available." });
   }
   return {
-    cls: "ok",
-    text: "No failing assertions this run, and the skill matches or outperforms the baseline — no action needed.",
+    skills, operationalFailure,
+    summary: {
+      version: 1, actionable,
+      skills: skills.map((s) => ({ name: s.name, evals: s.evals, passRate: s.withRate })),
+    },
   };
 }
 
-// Read the report rather than checking existence and then reading it: the
-// check-then-use pattern is a TOCTOU race (CodeQL js/file-system-race), and a
-// missing report is already an expected case (the run may have failed before
-// the renderer got to it).
-let html;
-try {
-  html = result.reportPath ? readFileSync(result.reportPath, "utf-8") : undefined;
-} catch {
-  html = undefined;
-}
-
-if (html !== undefined) {
-  // Model count + name stat, so it's obvious at a glance how many distinct
-  // models this run actually evaluated with (today always 1: same model for
-  // target and judge) and which one, without hunting for the separate
-  // target/judge line in the header meta.
-  html = html.replace(
-    '<div class="totals">',
-    `<div class="totals">\n      <div class="stat"><span class="label">models evaluated</span><span class="value">${modelsUsed.length}</span><span class="muted" style="display:block;margin-top:2px;">${escapeHtml(modelsUsed.join(", "))}</span></div>`
-  );
-
-  // Suggestion box styling — appended alongside the report's own <style>
-  // block rather than editing it, since report.js is vendored via npm.
-  html = html.replace(
-    "</head>",
-    `  <style>
-  .suggestion { margin: 10px 0 0; padding: 10px 12px; border-radius: 6px; font-size: 13px; border-left: 4px solid var(--border); }
-  .suggestion.ok { border-left-color: var(--ok); background: var(--ok-bg); }
-  .suggestion.warn { border-left-color: var(--warn); background: var(--warn-bg); }
-  .suggestion.bad { border-left-color: var(--bad); background: var(--bad-bg); }
-  </style>
-</head>`
-  );
-
-  for (const s of result.skills) {
-    const skillDir = path.dirname(s.benchmarkPath);
-    let benchmark;
-    try {
-      benchmark = JSON.parse(readFileSync(s.benchmarkPath, "utf-8"));
-    } catch {
-      benchmark = undefined;
+function writeCanonicalArtifacts(assessment) {
+  for (const skill of assessment.skills) {
+    const dir = path.dirname(skill.benchmarkPath);
+    for (const run of skill.runs) {
+      const runDir = path.join(dir, run.slug, run.mode);
+      mkdirSync(runDir, { recursive: true });
+      json(path.join(runDir, "execution.json"), {
+        status: valid(run) ? "completed" : "invalid", failures: run.failures,
+        diagnostics: run.diagnostics ?? [],
+        token_measurement: "unavailable", cost_measurement: "unavailable",
+      });
+      json(path.join(runDir, "timing.json"), {
+        duration_ms: run.durationMs ?? null, total_tokens: null, token_measurement: "unavailable",
+      });
     }
-    const suggestion = buildSuggestion(skillDir, benchmark);
-    const anchorIdx = html.indexOf(`id="skill-${s.slug}"`);
-    if (anchorIdx === -1) {
-      continue;
-    }
-    const evalsIdx = html.indexOf('<div class="evals">', anchorIdx);
-    if (evalsIdx === -1) {
-      continue;
-    }
-    const box = `<div class="suggestion ${suggestion.cls}"><strong>Suggested next step:</strong> ${escapeHtml(suggestion.text)}</div>\n      `;
-    html = html.slice(0, evalsIdx) + box + html.slice(evalsIdx);
+    // Replace SDK zero-token statistics and deltas computed from failed
+    // executions. Invalid measurements remain null, never a successful zero.
+    const benchmark = JSON.parse(readFileSync(skill.benchmarkPath, "utf8"));
+    const stats = (mode, rate) => ({
+      ...benchmark.run_summary[mode],
+      pass_rate: { mean: rate, stddev: rate === null ? null : benchmark.run_summary[mode]?.pass_rate?.stddev },
+      tokens: { mean: null, stddev: null },
+    });
+    json(skill.benchmarkPath, {
+      run_summary: {
+        with_skill: stats("with_skill", skill.withRate),
+        without_skill: stats("without_skill", skill.withoutRate),
+        delta: skill.comparable ? { ...benchmark.run_summary.delta, pass_rate: skill.delta, tokens: null } : null,
+      },
+      comparison_status: skill.comparable ? "valid" : "invalid",
+      token_measurement: "unavailable", cost_measurement: "unavailable",
+    });
   }
-
-  writeFileSync(result.reportPath, html, "utf-8");
 }
 
-// ── GitHub Actions step summary ──────────────────────────────────────────────
-// Report runner-relative paths: the absolute /home/runner/... paths are
-// meaningless once the job is gone, so point at the artifact contents instead.
-const rel = (p) => (p ? path.relative(process.cwd(), p).split(path.sep).join("/") : undefined);
-// `agent-skills-eval-workspace` is uploaded from the EVAL_WORKSPACE directory,
-// so its contents are stored relative to that. Note this is NOT
-// `result.workspaceRoot`, which under the "iteration" layout points one level
-// deeper at the current iteration-N directory.
-const uploadRoot = path.resolve(workspace);
-const workspaceRel = rel(uploadRoot);
-// Path of the report inside that artifact, e.g. `iteration-1/report/index.html`.
-const reportInWorkspaceArtifact = result.reportPath
-  ? path.relative(uploadRoot, result.reportPath).split(path.sep).join("/")
-  : undefined;
+const rateLabel = (rate) => rate === null ? "Unavailable" : `${(rate * 100).toFixed(1)}%`;
 
-// Hand the report directory to the workflow so it can be uploaded as a flat,
-// report-only artifact. upload-artifact roots an artifact at the non-glob
-// prefix of its `path`, so passing the concrete report directory (rather than a
-// glob spanning the workspace) is what puts index.html at the artifact root.
-if (process.env.GITHUB_OUTPUT && result.reportPath) {
-  appendFileSync(process.env.GITHUB_OUTPUT, `report-dir=${path.dirname(result.reportPath)}\n`);
+export function renderReport(assessment, models, html) {
+  // Preserve the pinned SDK's rich report, including prompts, outputs,
+  // assertion evidence, navigation, styling and expandable details. Only
+  // runner-owned measurements and operational status are corrected here.
+  const skills = new Map(assessment.skills.map((s) => [escapeHtml(s.slug), s]));
+  const hasUnavailableSkillScores = !assessment.skills.length || assessment.skills.some((s) => !s.withValid);
+  html = html.replace("</head>", `<style>
+    .suggestion{margin:10px 0;padding:10px 12px;border-radius:6px;border-left:4px solid var(--warn);background:var(--warn-bg)}
+    .suggestion.bad{border-left-color:var(--bad);background:var(--bad-bg)}
+    .suggestion.ok{border-left-color:var(--ok);background:var(--ok-bg)}
+    </style></head>`);
+  html = html.replace('<div class="totals">', `<div class="totals">
+    <div class="stat"><span class="label">models evaluated</span><span class="value">${models.length}</span>
+    <span class="muted">${escapeHtml(models.join(", ") || "Unavailable")}</span></div>`);
+  html = html.replace("</header>", `<p>Evaluation status: ${assessment.operationalFailure ? "INVALID — operational failures" : "Completed"}.
+    Token usage and cost: unavailable (not measured). No token or cost comparisons are reported.</p></header>`);
+  if (hasUnavailableSkillScores) {
+    html = html.replace(/(<span class="label">(?:passed|failed|pass rate)<\/span><span class="value">)[^<]*(<\/span>)/g,
+      "$1Unavailable$2");
+  }
+  html = html.replace(/<tr class="skill-row [^"]*">[\s\S]*?<\/tr>/g, (row) => {
+    const skill = skills.get(row.match(/href="#skill-([^"]+)"/)?.[1]);
+    if (!skill) throw new Error("SDK report summary layout changed.");
+    let column = 0;
+    row = row.replace(/<td class="num">[^<]*<\/td>/g, (cell) => {
+      const current = column++;
+      return current === 4 || (!skill.withValid && (current === 1 || current === 2))
+        ? '<td class="num">Unavailable</td>' : cell;
+    });
+    return skill.withValid ? row : row.replace(/class="skill-row [^"]*"/, 'class="skill-row bad"')
+      .replace(/<div class="bar [\s\S]*?<\/div><\/div>/, "Unavailable");
+  });
+  let patched = 0;
+  html = html.replace(/<article class="skill" id="skill-([^"]+)">[\s\S]*?<\/article>/g, (article, slug) => {
+    const skill = skills.get(slug);
+    if (!skill) throw new Error("SDK report skill layout changed.");
+    patched++;
+    const suggestions = assessment.summary.actionable.filter((a) => a.key.startsWith(`${skill.name}:`));
+    const delta = skill.comparable ? `Δ vs baseline: pass-rate ${(skill.delta * 100).toFixed(1)}pp` :
+      "INVALID comparison — no improvement or regression can be inferred.";
+    const deltaClass = !skill.comparable || skill.delta < 0 ? "bad" : skill.delta > 0 ? "ok" : "muted";
+    article = article.replace(/<header>[\s\S]*?<\/header>/, (header) => {
+      header = header.replace(/<div class="delta [^"]*">[\s\S]*?<\/div>/, "");
+      header = header.replace(/\d+ tokens avg/, "token usage unavailable");
+      if (!skill.withValid) {
+        header = header.replace(/<span class="badge [^"]*">[^<]*<\/span>/, '<span class="badge bad">Unavailable</span>')
+          .replace(/\d+\/\d+ assertions/, "Assertion totals unavailable");
+      }
+      return header.replace("</header>", `<div class="delta ${deltaClass}">${delta}</div></header>`);
+    });
+    const suggestionClass = !skill.comparable || skill.withRate < 1 ? "bad" : suggestions.length ? "warn" : "ok";
+    article = article.replace('<div class="evals">', `<p class="suggestion ${suggestionClass}"><strong>Suggested next step:</strong>
+      ${suggestions.length ? suggestions.map((a) => escapeHtml(a.summary)).join(" ") :
+        "No actionable defects detected in the successfully executed comparisons."}</p><div class="evals">`);
+    const assertionFailure = skill.runs.filter((r) => r.mode === "with_skill" && valid(r))
+      .flatMap((r) => r.grading.assertion_results).find((r) => !r.passed);
+    if (assertionFailure) {
+      article = article.replace('<div class="evals">', `<p class="suggestion bad">
+        Judge FAILED a with_skill assertion: &quot;${escapeHtml(assertionFailure.text)}&quot; —
+        evidence: &quot;${escapeHtml(assertionFailure.evidence)}&quot;.
+        Add explicit guidance to SKILL.md covering this gap, then re-run.</p><div class="evals">`);
+    }
+    // Restrict replacements to report headers, never prompt/output/evidence.
+    article = article.replace(/<details class="eval [^"]*">[\s\S]*?<\/summary>/g, (header) => {
+      const evalSlug = header.match(/<span class="eval-name">([^<]+)<\/span>/)?.[1];
+      const runs = skill.runs.filter((r) => escapeHtml(r.slug) === evalSlug);
+      if (runs.length !== 2 || runs.some((r) => !valid(r))) {
+        return header.replace(/class="eval [^"]*"/, 'class="eval bad"')
+          .replace(/<span class="eval-status">[^<]*<\/span>/, '<span class="eval-status">!</span>')
+          .replace(/\d+\/\d+ assertions/, "Invalid execution / grading");
+      }
+      return header;
+    });
+    const runQueues = {
+      with_skill: skill.runs.filter((r) => r.mode === "with_skill").sort((a, b) => a.slug.localeCompare(b.slug)),
+      without_skill: skill.runs.filter((r) => r.mode === "without_skill").sort((a, b) => a.slug.localeCompare(b.slug)),
+    };
+    article = article.replace(/<header class="run-head">[\s\S]*?<\/header>/g, (header) => {
+      const mode = header.match(/class="mode mode-([^"]+)"/)?.[1];
+      const run = runQueues[mode]?.shift();
+      header = header.replace(/(?:null|\d+) tokens/, "token usage unavailable");
+      if (!valid(run)) {
+        const reasons = run?.diagnostics?.map((d) => `${d.role}: ${d.reason}`).join(", ");
+        header = header.replace(/<span class="status [^"]*">[^<]*<\/span>/,
+          `<span class="status bad">INVALID (${escapeHtml(reasons || run?.failures.join(", ") || "missing execution")})</span>`)
+          .replace(/\d+\/\d+/, "assertion score unavailable");
+      }
+      return header;
+    });
+    return article;
+  });
+  if (patched !== assessment.skills.length) throw new Error("SDK report sections changed.");
+  return html;
 }
 
-// Backtick-escape each model name so a workflow_dispatch COPILOT_MODEL input
-// (or an unexpected value scraped from the CLI log) can't break out of the
-// Markdown code span it's rendered in below.
-const modelNamesForSummary = modelsUsed.map((m) => m.replace(/`/g, "'")).join("`, `");
-// The "same model used for target and judge" note is only true while a single
-// model backs both roles — keep it conditional so it can't go stale if this
-// ever becomes a real multi-model matrix (modelsUsed.length > 1).
-const modelSummaryNote = modelsUsed.length === 1 ? " — same model used for target and judge" : "";
-
-const lines = [
-  "## Agent Skills Eval (weekly, Copilot CLI)",
-  "",
-  `- Skills with evals: **${result.skills.length}**`,
-  `- Model(s) evaluated: **${modelsUsed.length}** (\`${modelNamesForSummary}\`)${modelSummaryNote}`,
-  `- Runs passed: **${result.passed}** · failed: **${result.failed}**`,
-  `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
-  ...(reportInWorkspaceArtifact
-    ? [
-        "- Artifact `agent-skills-eval-report` → the HTML report on its own; download it and open `index.html` at the artifact root",
-        `- The same report is also inside \`agent-skills-eval-workspace\` at \`${reportInWorkspaceArtifact}\``,
-      ]
-    : ["- No HTML report was generated for this run."]),
-  "",
-  "| Skill | Evals | Pass rate |",
-  "|---|---|---|",
-  ...result.skills.map(
-    (s) => `| ${s.skill} | ${s.evals} | ${(s.passRate * 100).toFixed(0)}% |`
-  ),
-  "",
-];
-console.log(lines.join("\n"));
-if (process.env.GITHUB_STEP_SUMMARY) {
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+export async function runEvaluation({ env = process.env, execute = spawnSync, sdk } = {}) {
+  const workspace = path.resolve(env.EVAL_WORKSPACE || "./agent-skills-workspace");
+  mkdirSync(workspace, { recursive: true });
+  const summaryPath = path.join(workspace, "eval-actionable.json");
+  // A fatal run must not leave the previous run's successful handoff behind.
+  rmSync(summaryPath, { force: true });
+  if (!sdk) {
+    if (!env.EVAL_PKG_DIR) throw new Error("EVAL_PKG_DIR is required.");
+    sdk = await import(pathToFileURL(path.resolve(env.EVAL_PKG_DIR, "node_modules", "agent-skills-eval", "dist", "index.js")).href);
+  }
+  const scratch = mkdtempSync(path.join(workspace, ".cli-"));
+  const state = createEvaluationState();
+  let reportPath;
+  try {
+    const repository = path.join(scratch, "repository");
+    mkdirSync(repository);
+    // A real empty repository boundary stops ancestor skill/plugin discovery.
+    const init = execute("git", ["init", "--quiet", repository], { encoding: "utf8" });
+    if (init.error || init.status !== 0) throw new Error("Cannot isolate evaluation repository.");
+    const provider = (role) => copilotCliProvider({ role, state, scratch, execute, env });
+    const result = await sdk.evaluateSkills({
+      root: env.SKILLS_ROOT || ".github/skills", workspace, baseline: true,
+      target: { model: env.COPILOT_MODEL || "copilot-cli-default", provider: provider("target") },
+      judge: { model: env.COPILOT_MODEL || "copilot-cli-default", provider: provider("judge") },
+      concurrency: 1, workspaceLayout: "iteration", report: true,
+      reportTitle: "Agent Skills Eval — weekly Copilot CLI run",
+      onEvent: (event) => recordEvent(state, event),
+    });
+    reportPath = result.reportPath;
+    const assessment = assessResults(result, state);
+    const report = renderReport(assessment, [...state.models], readFileSync(result.reportPath, "utf8"));
+    writeCanonicalArtifacts(assessment);
+    writeFileSync(result.reportPath, report);
+    json(summaryPath, assessment.summary);
+    const reportDir = path.dirname(result.reportPath);
+    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `report-dir=${reportDir}\n`);
+    const lines = [
+      "## Agent Skills Eval",
+      "",
+      `- Skills with evals: **${assessment.skills.length}**`,
+      `- Model(s) evaluated: **${state.models.size}** (${[...state.models].map((m) => `\`${m.replace(/`/g, "'")}\``).join(", ") || "unavailable"})`,
+      `- Evaluation status: **${assessment.operationalFailure ? "INVALID — operational failures" : "Completed"}**`,
+      "- Token usage and cost: **unavailable (not measured)**.",
+      "- Only successfully executed and graded paired runs are compared.",
+      "- Download `agent-skills-eval-report` for the HTML report; full evidence is in `agent-skills-eval-workspace`.",
+      "",
+      "| Skill | Evals | With skill | Baseline | Delta |",
+      "|---|---|---|---|---|",
+      ...assessment.skills.map((s) => `| ${s.name} | ${s.evals} | ${rateLabel(s.withRate)} | ${rateLabel(s.withoutRate)} | ${s.comparable ? `${(s.delta * 100).toFixed(1)}pp` : "Unavailable (invalid comparison)"} |`),
+      "",
+      ...assessment.summary.actionable.map((a) => `- **${a.key}**: ${a.summary}`),
+      "",
+    ].join("\n");
+    console.log(lines);
+    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, lines);
+    return { assessment, exitCode: assessment.operationalFailure ? 1 : 0 };
+  } catch (error) {
+    // Never upload an uncorrected SDK report if validation/post-processing
+    // fails: it can still contain the misleading improvement and zero usage.
+    if (reportPath) rmSync(reportPath, { force: true });
+    throw error;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
-if (result.skills.length === 0) {
-  console.log("::warning::No skills with evals/evals.json were found — nothing was evaluated.");
-}
-for (const s of result.skills) {
-  if (s.passRate < 1) {
-    console.log(
-      `::warning::Skill "${s.skill}" pass rate is ${(s.passRate * 100).toFixed(0)}% — open the report artifact for judge evidence.`
-    );
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  try {
+    const result = await runEvaluation();
+    process.exitCode = result.exitCode;
+  } catch {
+    // Never echo SDK/CLI exceptions: they may embed prompts or credentials.
+    console.error("Skills evaluation failed operationally; no trustworthy comparison was produced.");
+    process.exitCode = 1;
   }
 }

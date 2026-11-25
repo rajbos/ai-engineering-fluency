@@ -455,7 +455,7 @@ The CLI uses the same discovery and parsing code as the [VS Code extension](../v
 | **JetBrains IDEs** + Copilot | `~/.copilot/jb/` | Estimated |
 | **Visual Studio / SSMS** + Copilot | `%LOCALAPPDATA%\Temp\VSGitHubCopilotLogs`, `%LOCALAPPDATA%\Microsoft\VisualStudio\<ver>\VSGitHubCopilot`, and `.vs/<solution>/copilot-chat/` folders under common source roots (`~/code`, `~/repos`, `~/src`, …) | Estimated · **Windows only** |
 | **Eclipse** + Copilot | `~/eclipse-workspace/.metadata/.plugins/com.microsoft.copilot.eclipse.core/` and recent Eclipse workspaces | Estimated |
-| **Claude Code** | `~/.claude/projects/` (including subagents) | Actual |
+| **Claude Code** | `~/.claude/projects/` (including subagents; `CLAUDE_CONFIG_DIR`) | Actual |
 | **Claude Desktop Cowork** | Windows: `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\`; macOS: `~/Library/Application Support/Claude/` | Actual · **Windows and macOS only** |
 | **Gemini CLI** | `~/.gemini/tmp/<project>/chats/` | Actual |
 | **Antigravity** | `~/.gemini/antigravity/brain/` | Estimated |

@@ -4,9 +4,17 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Bug Fixes
+- Windows: Claude Desktop Cowork sessions are found again on current Claude desktop installs, which moved their data from the app package's `LocalCache\Roaming\Claude` folder to `%LOCALAPPDATA%\Claude-Data\claude_<package>`. Every existing location is read, newest first, and a session present in two locations is counted once
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
+- `skill-suggestions`: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run and toward the **failing** status. A run that is still going (active in the last hour) is not counted as failed.
+
 ## [0.7.2] - 2026-11-24
 
 ### Features
+- `skill-suggestions` lists every scheduled automation on this machine (Claude desktop scheduled tasks, Copilot app automations) with its status (healthy, stale after 30 days without a run, failing, disabled, ...), repository, schedule, last run and recent success, and each failed run's session with its tokens and cost; `--json` carries the same fields
+- `skill-suggestions` recognizes runs of Claude Code scheduled tasks and GitHub Copilot automations (from `~/.copilot/data.db`), leaves them out of the suggestions and lists them under "Already on a schedule"; `--json` adds `scheduledTasks` (names only with `--include-prompts`). Claude Code's injected `<system-reminder>` text is ignored when comparing prompts
+- `skill-suggestions` shows the editors each repeated task ran in and, for a task that recurs on a rhythm (about daily, weekly or every few days, on at least 3 different days), its cadence and how to automate it: Claude Code scheduled tasks, GitHub Copilot automations, or a scheduled job running the agent's CLI. `--json` carries `editors`, per-session `editor` and `recurrence` (none of them prompt text, so they are kept in the redacted output)
 - On Windows the CLI also reads session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores under `~/.vibe/sandbox-v2/*/`) from WSL distros that are already running. A stopped distro is never read or started. Turn off with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`; `stats --verbose` and `diagnostics` list each running distro
 - Mistral Vibe Desktop sessions are tracked and reported as their own editor (#2721)
 

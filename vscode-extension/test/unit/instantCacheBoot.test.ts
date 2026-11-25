@@ -457,10 +457,12 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 		'publishRefreshResult() must set _hasCompletedRealRefresh before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
 });
 
-test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {
+test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware evictUndiscoveredSessionData()', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
-	assert.ok(body.includes('this.cacheManager.deleteCachedSessionData(rawPath)'),
-		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
+	// evictUndiscoveredSessionData() keeps the usage of a file that is gone (issue #2728) and then
+	// evicts through the tombstoning deleteCachedSessionData(); usageHistoryStore.test.ts covers it.
+	assert.ok(body.includes('this.cacheManager.evictUndiscoveredSessionData(rawPath)'),
+		'must evict via cacheManager.evictUndiscoveredSessionData() (which tombstones the path through deleteCachedSessionData()), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
 	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
 		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
 

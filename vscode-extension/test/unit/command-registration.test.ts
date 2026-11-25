@@ -19,7 +19,7 @@ function findPackageRoot(): string {
 const INTENTIONALLY_UNREGISTERED: string[] = [];
 
 // Modules outside extension.ts that call registerCommand for contributed commands.
-const EXTRA_REGISTRATION_MODULES = [path.join('src', 'badge', 'registerBadgeSetup.ts')];
+const EXTRA_REGISTRATION_MODULES = [path.join('src', 'badge', 'registerBadgeSetup.ts'), path.join('src', 'usageHistoryCommands.ts')];
 
 describe('contributed commands are registered', () => {
 	const root = findPackageRoot();
