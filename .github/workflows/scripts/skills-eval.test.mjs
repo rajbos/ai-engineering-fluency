@@ -341,6 +341,7 @@ test("public summary identifiers conform to the reporter contract without leakin
         (typeof skill.passRate === "number" && Number.isFinite(skill.passRate) &&
           skill.passRate >= 0 && skill.passRate <= 1));
     }
-    assert.doesNotMatch(JSON.stringify(summary), /PRIVATE_|<script>|Synthetic evidence/);
+    assert.doesNotMatch(JSON.stringify(summary), /PRIVATE_|Synthetic evidence/);
+    assert.ok(!JSON.stringify(summary).toLowerCase().includes("<script>"));
   }
 });

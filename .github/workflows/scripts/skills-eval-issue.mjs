@@ -51,7 +51,7 @@
  * ::error:: annotation so a broken reporter fails the job visibly).
  */
 
-import { appendFileSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, openSync, readSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
@@ -84,8 +84,7 @@ export function sanitizeText(value, max = MAX_TEXT) {
   let text = String(value)
     .replace(/\r\n?|\n|\t/g, " ")
     .replace(HIDDEN_CHARS, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!--|-->/g, "")
+    .replace(/[<>]/g, "")
     .replace(/`/g, "'")
     .replace(/\|/g, "/")
     .replace(/\s+/g, " ")
@@ -134,19 +133,35 @@ export function validateSummary(data) {
   return { ok: true, summary: { actionable, skills } };
 }
 
-/** Read and validate the summary file. Reasons are fixed strings, never file content. */
-export function loadSummary(file, { readFile = readFileSync, stat = statSync } = {}) {
-  if (!file) return { ok: false, reason: "missing" };
-  let size;
+function readBoundedSummary(file) {
+  const fd = openSync(file, "r");
   try {
-    size = stat(file).size;
-  } catch {
-    return { ok: false, reason: "missing" };
+    const buffer = Buffer.alloc(MAX_SUMMARY_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const bytesRead = readSync(fd, buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    return buffer.subarray(0, length);
+  } finally {
+    closeSync(fd);
   }
-  if (size > MAX_SUMMARY_BYTES) return { ok: false, reason: "too large" };
+}
+
+/** Read and validate the summary file. Reasons are fixed strings, never file content. */
+export function loadSummary(file, { readFile = readBoundedSummary } = {}) {
+  if (!file) return { ok: false, reason: "missing" };
+  let contents;
+  try {
+    contents = Buffer.from(readFile(file));
+  } catch (error) {
+    return { ok: false, reason: error?.code === "ENOENT" ? "missing" : "could not read" };
+  }
+  if (contents.length > MAX_SUMMARY_BYTES) return { ok: false, reason: "too large" };
   let data;
   try {
-    data = JSON.parse(readFile(file, "utf8"));
+    data = JSON.parse(contents.toString("utf8"));
   } catch {
     return { ok: false, reason: "not valid JSON" };
   }
@@ -387,7 +402,7 @@ export function validArtifactUrl(url, { server, repo, runId }) {
   return url.startsWith(prefix) && /^\d+$/.test(url.slice(prefix.length)) ? url : null;
 }
 
-export async function run(env = process.env, { client, log = console.log, readFile, stat } = {}) {
+export async function run(env = process.env, { client, log = console.log, readFile } = {}) {
   const server = env.GITHUB_SERVER_URL || "https://github.com";
   const repo = env.GITHUB_REPOSITORY ?? "";
   const runId = env.GITHUB_RUN_ID ?? "";
@@ -396,7 +411,7 @@ export async function run(env = process.env, { client, log = console.log, readFi
   const runInfo = { id: runId, attempt, url: `${server}/${repo}/actions/runs/${runId}/attempts/${attempt}` };
   const ctx = { server, repo, runId };
 
-  const summaryResult = loadSummary(env.SUMMARY_FILE, { readFile, stat });
+  const summaryResult = loadSummary(env.SUMMARY_FILE, { readFile });
   if (!summaryResult.ok) log(`Actionable summary ${summaryResult.reason}.`);
   const decision = decideReport({ summaryResult, jobResult: env.EVAL_JOB_RESULT });
   if (decision.skip) {

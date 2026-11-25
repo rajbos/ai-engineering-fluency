@@ -2,6 +2,9 @@
 // in-memory fake or a stubbed fetch; nothing here touches the real API.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   BLOCK_END,
   BLOCK_START,
@@ -66,12 +69,8 @@ function fakeStore(issues = []) {
 function summaryFiles(map) {
   return {
     readFile: (file) => {
-      if (!(file in map)) throw new Error("ENOENT");
+      if (!(file in map)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       return map[file];
-    },
-    stat: (file) => {
-      if (!(file in map)) throw new Error("ENOENT");
-      return { size: Buffer.byteLength(map[file]) };
     },
   };
 }
@@ -254,8 +253,22 @@ test("malformed managed-section markers abort without editing", async () => {
 
 test("sanitizeText strips hidden content and neutralizes markup", () => {
   const out = sanitizeText("a\u202Eb\u200Bc<!-- hide -->`@team`|x\nnext\u{E0041}");
-  assert.equal(out, "abc'@team'/x next");
+  assert.equal(out, "abc!-- hide --'@team'/x next");
   assert.equal([...sanitizeText("x".repeat(500))].length, 300);
+  for (const input of ["<!-- <!-- --> -->", "<!-- hidden --!>", "<!-- skills-eval-report:end -->"]) {
+    assert.doesNotMatch(sanitizeText(input), /[<>]/);
+  }
+});
+
+test("summary reading is bounded and distinguishes missing from oversized files", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "skills-eval-summary-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "summary.json");
+  assert.deepEqual(loadSummary(file), { ok: false, reason: "missing" });
+  writeFileSync(file, summary(FINDING));
+  assert.equal(loadSummary(file).ok, true);
+  writeFileSync(file, "x".repeat(256 * 1024 + 1));
+  assert.deepEqual(loadSummary(file), { ok: false, reason: "too large" });
 });
 
 test("artifact links must belong to this run", () => {
