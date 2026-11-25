@@ -63,13 +63,17 @@ function pathKey(filePath: string): string {
 }
 
 /**
- * The session id in a file name, when the name carries one. Lets a retained entry be matched to
- * the same session living at a new path (Claude Code's `/cd` relocates a transcript into another
- * project folder), so it is not counted twice. Generic names (e.g. `main.jsonl`) return undefined
- * and only match by full path.
+ * The session id a path carries. Lets a retained entry be matched to the same session living at
+ * a new path (Claude Code's `/cd` relocates a transcript into another project folder), so it is
+ * not counted twice. The file name is checked first (`<uuid>.jsonl`, `rollout-…-<uuid>.jsonl`);
+ * a generic file name falls back to its own folder (Copilot CLI's `<uuid>/events.jsonl`). Only
+ * the immediate folder: a Claude Code subagent transcript (`<uuid>/subagents/agent-….jsonl`) is
+ * its own session and must not take its parent session's id. A path with no id anywhere in
+ * those two places only matches by full path.
  */
 function sessionIdOf(filePath: string): string | undefined {
-	const match = SESSION_ID_FILE_NAME_RE.exec(path.basename(filePath));
+	const match = SESSION_ID_FILE_NAME_RE.exec(path.basename(filePath))
+		?? SESSION_ID_FILE_NAME_RE.exec(path.basename(path.dirname(filePath)));
 	return match ? match[0].toLowerCase() : undefined;
 }
 

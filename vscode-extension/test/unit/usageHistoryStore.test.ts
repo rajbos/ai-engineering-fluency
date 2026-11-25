@@ -160,3 +160,38 @@ test('CacheManager.evictUndiscoveredSessionData() keeps usage only when the file
 	assert.equal(m.usageHistory.size, 1,
 		'only the missing file is kept: an existing file no adapter claims any more is dropped on purpose, and a virtual DB path cannot be checked');
 });
+
+test('toAggregateInputs() reads the session id from the folder of a generic file name, but never from further up', () => {
+	const store = makeStore(makeTmpFixtureDir('ctt-usage-history-'));
+	// Copilot CLI: ~/.copilot/session-state/<uuid>/events.jsonl, the id is the folder name.
+	const copilotCli = path.join('/home', '.copilot', 'session-state', SESSION_A, 'events.jsonl');
+	// Claude Code subagent transcript: its own session, filed under the parent session's folder.
+	const subagent = path.join('/claude', 'projects', 'p', SESSION_B, 'subagents', 'agent-abc123.jsonl');
+	store.retain(copilotCli, entry(NOW));
+	store.retain(subagent, entry(NOW));
+
+	const movedCopilotCli = path.join('/restored', SESSION_A, 'events.jsonl');
+	const liveParentSession = path.join('/claude', 'projects', 'p', `${SESSION_B}.jsonl`);
+	const inputs = store.toAggregateInputs([movedCopilotCli, liveParentSession], editorOf, 0);
+	assert.equal(inputs.length, 1, 'the moved Copilot CLI session matches by its folder id; the subagent must not be hidden by its live parent session');
+	assert.equal(inputs[0].sessionData.mtime, NOW);
+});
+
+test('a file that is briefly missing is not double counted while it is back, and counts once if it goes again', () => {
+	const dir = makeTmpFixtureDir('ctt-usage-history-');
+	const m = makeManager(dir);
+	const flaky = path.join(dir, 'share', 'main.jsonl'); // generic name: only the path can match
+	m.setCachedSessionData(flaky, entry(NOW, 100), 10);
+	m.retireMissingSessionData(flaky); // e.g. an unmounted network drive reported ENOENT
+
+	// The drive comes back: discovery re-caches the same path.
+	m.setCachedSessionData(flaky, entry(NOW + 1000, 150), 10);
+	assert.equal(m.usageHistory.toAggregateInputs(m.cache.keys(), editorOf, 0).length, 0,
+		'while the file is live, its kept copy is skipped, so the session counts once (from the live entry)');
+
+	// It disappears again: the newer version replaces the kept one, still a single entry.
+	m.retireMissingSessionData(flaky);
+	const inputs = m.usageHistory.toAggregateInputs(m.cache.keys(), editorOf, 0);
+	assert.equal(inputs.length, 1);
+	assert.equal(inputs[0].sessionData.tokens, 150);
+});
