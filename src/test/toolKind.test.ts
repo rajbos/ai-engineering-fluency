@@ -21,7 +21,7 @@ test('classifyToolKind: skill wrappers and slash-command markers', () => {
 });
 
 test('classifyToolKind: delegation / subagent tools', () => {
-    for (const name of ['task', 'Agent', 'read_agent', 'spawn_task', 'runSubagent']) {
+    for (const name of ['task', 'Agent', 'read_agent', 'spawn_task', 'runSubagent', 'start_session', 'send_to_session']) {
         assert.equal(classifyToolKind(name), 'subagent', name);
     }
 });
