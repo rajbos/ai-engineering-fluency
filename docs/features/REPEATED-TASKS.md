@@ -90,8 +90,13 @@ together with the apps' own inventory of scheduled tasks.
 - **Claude desktop** (`src/scheduledTaskSources.ts`): `scheduled-tasks.json` under
   `<config>/claude-code-sessions/<account>/<machine>/` gives each task's cron expression (or
   one-off `fireAt`), enabled flag, working folder, creation time and `lastRunAt`. The sibling
-  `local_<id>.json` session metadata marks each run with `scheduledTaskId`, and with `error`
-  when it failed. `<config>` is `%LOCALAPPDATA%\Claude-Data\claude_*` on current Windows
+  `local_<id>.json` session metadata marks each run with `scheduledTaskId`. A run failed when it
+  has `error`, or when it never finished a turn (`completedTurns` missing or 0): it stalled, for
+  example on an unanswered permission prompt, or was cut short (`lastTurnCutShort`). A run with no
+  finished turn whose `lastActivityAt` is less than `STALLED_RUN_AFTER_MS` (1 hour) old and that
+  was not cut short may still be running, so it is not counted as failed yet. When no session in the
+  folder records `completedTurns` (an app version that does not write it), only `error` marks a
+  failure. `<config>` is `%LOCALAPPDATA%\Claude-Data\claude_*` on current Windows
   installs (the packaged `LocalCache\Roaming\Claude` on older ones) and
   `~/Library/Application Support/Claude` on macOS.
 - **Copilot app** (`queryCopilotAutomations()`): `workflows` gives the name, interval or cron
@@ -142,9 +147,7 @@ they are older than the 30-day stats window.
 - **CLI**: `skill-suggestions` prints the inventory with status, repository, schedule, last run and
   recent success, and under each task its failed runs with tokens, cost and session file. `--json` without `--include-prompts` keeps everything except the task names.
 
-**Limitations**: a Claude run that stalls (for example on an unanswered permission prompt) is
-not marked failed in the session metadata, so it still counts as a success. The inventory is the
-data of this machine only.
+**Limitations**: the inventory is the data of this machine only.
 
 ## What is excluded
 

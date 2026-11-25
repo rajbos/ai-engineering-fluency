@@ -8,8 +8,10 @@
  *     { scheduledTasks: [{ id, cronExpression?, fireAt?, enabled, filePath, cwd,
  *                          createdAt, lastRunAt, ... }] }
  *   <config>/claude-code-sessions/<account>/<machine>/local_<id>.json
- *     one per session; a scheduled run carries `scheduledTaskId`, and `error`
- *     when the run failed.
+ *     one per session; a scheduled run carries `scheduledTaskId`, `error`
+ *     when the run failed, and `completedTurns` once a turn has finished.
+ *     A run without `completedTurns` never finished (it stalled on a permission
+ *     prompt or was cut short, then marked `lastTurnCutShort`).
  *
  * <config> is, on Windows, `%LOCALAPPDATA%\Claude-Data\claude_<package>` for
  * current installs and the packaged `...\LocalCache\Roaming\Claude` (or
@@ -82,16 +84,45 @@ function isoFrom(value: unknown): string | null {
 	return null;
 }
 
-/** Runs per task id, from the session metadata files in one folder (newest first). */
+/**
+ * A run with no finished turn and no activity for this long is treated as
+ * stalled. The app cuts unattended runs short after about 50 minutes.
+ */
+export const STALLED_RUN_AFTER_MS = 60 * 60 * 1000;
+
+interface RawRunMetadata {
+	scheduledTaskId?: unknown; createdAt?: unknown; lastActivityAt?: unknown; error?: unknown;
+	cliSessionId?: unknown; completedTurns?: unknown; lastTurnCutShort?: unknown;
+}
+
+/**
+ * Whether a run succeeded: no `error`, and at least one turn finished. A run
+ * that never finished counts as failed once it was cut short or has been idle
+ * for `STALLED_RUN_AFTER_MS`; until then it may still be running, so it is not
+ * counted as failed.
+ *
+ * `tracksTurns` is false when no session in the run's folder records
+ * `completedTurns` (an app version that does not write it): then only `error`
+ * marks a failure, so finished runs are not mistaken for stalled ones.
+ */
+function runSucceeded(meta: RawRunMetadata, at: string, now: number, tracksTurns: boolean): boolean {
+	if (meta.error) { return false; }
+	if (!tracksTurns) { return true; }
+	if (typeof meta.completedTurns === 'number' && meta.completedTurns > 0) { return true; }
+	if (meta.lastTurnCutShort === true) { return false; }
+	const lastActivity = Date.parse(isoFrom(meta.lastActivityAt) ?? at);
+	return now - lastActivity < STALLED_RUN_AFTER_MS;
+}
+
 /** The task id and run one session-metadata file describes, or null when it is not a scheduled run. */
-export function parseRunMetadata(text: string): { taskId: string; run: ScheduledTaskRun } | null {
+export function parseRunMetadata(text: string, now: number = Date.now(), tracksTurns = true): { taskId: string; run: ScheduledTaskRun } | null {
 	// Cheap pre-check: most sessions are not scheduled runs.
 	if (!text.includes('"scheduledTaskId"')) { return null; }
-	let meta: { scheduledTaskId?: unknown; createdAt?: unknown; error?: unknown; cliSessionId?: unknown };
+	let meta: RawRunMetadata;
 	try { meta = JSON.parse(text); } catch { return null; }
 	const at = isoFrom(meta.createdAt);
 	if (typeof meta.scheduledTaskId !== 'string' || !at) { return null; }
-	const run: ScheduledTaskRun = { at, ok: !meta.error };
+	const run: ScheduledTaskRun = { at, ok: runSucceeded(meta, at, now, tracksTurns) };
 	// cliSessionId names the transcript (~/.claude/projects/<project>/<cliSessionId>.jsonl).
 	if (typeof meta.cliSessionId === 'string' && meta.cliSessionId) { run.sessionId = meta.cliSessionId; }
 	return { taskId: meta.scheduledTaskId, run };
@@ -101,13 +132,20 @@ async function readTextOrNull(file: string): Promise<string | null> {
 	try { return await fs.promises.readFile(file, 'utf8'); } catch { return null; }
 }
 
-async function readRuns(folder: string): Promise<Map<string, ScheduledTaskRun[]>> {
+/** Runs per task id, from the session metadata files in one folder (newest first). */
+async function readRuns(folder: string, now: number): Promise<Map<string, ScheduledTaskRun[]>> {
 	const runs = new Map<string, ScheduledTaskRun[]>();
 	let names: string[] = [];
 	try { names = await fs.promises.readdir(folder); } catch { return runs; }
+	const texts: string[] = [];
 	for (const name of names.filter(n => n.startsWith('local_') && n.endsWith('.json'))) {
 		const text = await readTextOrNull(path.join(folder, name));
-		const parsed = text === null ? null : parseRunMetadata(text);
+		if (text !== null) { texts.push(text); }
+	}
+	// Any session here recording finished turns means this app version writes `completedTurns`.
+	const tracksTurns = texts.some(text => text.includes('"completedTurns"'));
+	for (const text of texts) {
+		const parsed = parseRunMetadata(text, now, tracksTurns);
 		if (!parsed) { continue; }
 		runs.set(parsed.taskId, [...(runs.get(parsed.taskId) ?? []), parsed.run]);
 	}
@@ -125,7 +163,6 @@ function repositoryOf(folder: string | null): string | null {
 	}
 }
 
-/** Map one scheduled-tasks.json entry plus its runs to a definition (null when malformed). */
 /** A cron schedule, or a one-off run at `fireAt`, or neither. */
 function claudeSchedule(raw: RawClaudeTask): { schedule: string | null; oneOff: boolean; nextRunAt: string | null } {
 	const cron = typeof raw.cronExpression === 'string' ? raw.cronExpression.trim() : '';
@@ -134,6 +171,7 @@ function claudeSchedule(raw: RawClaudeTask): { schedule: string | null; oneOff: 
 	return { schedule: 'once', oneOff: true, nextRunAt: isoFrom(raw.fireAt) };
 }
 
+/** Map one scheduled-tasks.json entry plus its runs to a definition (null when malformed). */
 export function toClaudeTaskDefinition(raw: RawClaudeTask, runs: readonly ScheduledTaskRun[], resolveRepository = repositoryOf): ScheduledTaskDefinition | null {
 	if (typeof raw.id !== 'string' || !raw.id) { return null; }
 	const folder = typeof raw.cwd === 'string' && raw.cwd ? raw.cwd : null;
@@ -156,7 +194,7 @@ export function toClaudeTaskDefinition(raw: RawClaudeTask, runs: readonly Schedu
  * Every Claude desktop scheduled task on this machine, with its recorded runs.
  * Empty when the app is not installed or keeps no scheduled tasks.
  */
-export async function readClaudeScheduledTasks(configDirs: readonly string[] = claudeDesktopConfigDirs()): Promise<ScheduledTaskDefinition[]> {
+export async function readClaudeScheduledTasks(configDirs: readonly string[] = claudeDesktopConfigDirs(), now: number = Date.now()): Promise<ScheduledTaskDefinition[]> {
 	const definitions = new Map<string, ScheduledTaskDefinition>();
 	for (const folder of await scheduledTaskFolders(configDirs)) {
 		let tasks: RawClaudeTask[];
@@ -166,7 +204,7 @@ export async function readClaudeScheduledTasks(configDirs: readonly string[] = c
 		} catch {
 			continue;
 		}
-		const runs = await readRuns(folder);
+		const runs = await readRuns(folder, now);
 		for (const raw of tasks) {
 			const def = toClaudeTaskDefinition(raw, typeof raw.id === 'string' ? runs.get(raw.id) ?? [] : []);
 			// The same task id under two config dirs (an old install left behind): keep the most recently run.
