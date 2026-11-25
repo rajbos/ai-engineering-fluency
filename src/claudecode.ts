@@ -2,6 +2,7 @@
  * Claude Code data access layer.
  * Handles reading session data from Claude Code (Anthropic CLI/IDE extension) JSONL session files.
  * Sessions are stored at: ~/.claude/projects/{project-hash}/{session-uuid}.jsonl
+ * ($CLAUDE_CONFIG_DIR replaces ~/.claude when set, as Claude Code itself does).
  * Token data is ACTUAL Anthropic API counts — no estimation needed.
  */
 import * as fs from 'fs';
@@ -9,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
 import { withErrorRecovery } from './utils/errors';
-import { normalizePathForComparison } from './workspaceHelpers';
+import { isClaudeCodeSetAsideTranscript, normalizePathForComparison, resolveClaudeConfigDir } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { isHumanUserTurn } from './utils/claudeUserTurns';
@@ -78,10 +79,12 @@ function collectEventTimestamps(events: SessionEvent[]): number[] {
 export class ClaudeCodeDataAccess {
 
 	/**
-	 * Get the Claude Code data directory path (~/.claude).
+	 * Get the Claude Code data directory path: $CLAUDE_CONFIG_DIR when set, otherwise ~/.claude.
+	 * Claude Code stores settings, session history and plugins under CLAUDE_CONFIG_DIR when the
+	 * variable is set, so a hard-coded ~/.claude would find no sessions at all for those users.
 	 */
 	getClaudeCodeDataDir(): string {
-		return path.join(os.homedir(), '.claude');
+		return resolveClaudeConfigDir(process.env) ?? path.join(os.homedir(), '.claude');
 	}
 
 	/**
@@ -100,6 +103,7 @@ export class ClaudeCodeDataAccess {
 		const normalized = normalizePathForComparison(filePath);
 		const projectsDir = normalizePathForComparison(this.getClaudeCodeProjectsDir());
 		if (!normalized.endsWith('.jsonl')) { return false; }
+		if (isClaudeCodeSetAsideTranscript(path.basename(filePath))) { return false; }
 		// A Claude Code home inside a running WSL distro, read from Windows (see wslDiscovery.ts).
 		if (/^\/\/wsl(?:\.localhost|\$)\/[^/]+\/home\/[^/]+\/\.claude\/projects\//.test(normalized)) { return true; }
 		return normalized.startsWith(projectsDir);
@@ -146,6 +150,8 @@ export class ClaudeCodeDataAccess {
 						return this.collectJsonlFilesFromProject(fullPath, depth + 1, maxDepth);
 					}
 					if (!e.name.endsWith('.jsonl')) { return []; }
+					// An older copy Claude Code set aside next to the live transcript, not a session.
+					if (isClaudeCodeSetAsideTranscript(e.name)) { return []; }
 					try {
 						const st = await fs.promises.stat(fullPath);
 						return st.size > 0 ? [fullPath] : [];

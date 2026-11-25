@@ -6,6 +6,7 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ### Bug Fixes
 - Windows: Claude Desktop Cowork sessions are found again on current Claude desktop installs, which moved their data from the app package's `LocalCache\Roaming\Claude` folder to `%LOCALAPPDATA%\Claude-Data\claude_<package>`. Every existing location is read, newest first, and a session present in two locations is counted once
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
 
 ## [0.7.2] - 2026-11-24
 
