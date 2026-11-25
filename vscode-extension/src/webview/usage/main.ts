@@ -5129,28 +5129,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
 	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
 	const thinkingEffortHtml = safeSectionHtml('Thinking Effort', () => buildThinkingEffortSectionHtml(stats));
-	const multiModelHtml = safeSectionHtml('Multi-Model Usage', () => `
-		<!-- Multi-Model Usage Section -->
-		<div class="section" id="section-multi-model">
-			<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
-			<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
-			<div class="three-column">
-				${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
-				${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
-				${renderMultiModelPeriod(`📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}`, stats.lastMonth.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
-			</div>
-		</div>${buildRouterSectionHtml(stats.hydraFusion)}`);
-	const sessionsSummaryHtml = `
-		<!-- Summary Section -->
-		<div class="section" id="section-sessions-summary">
-			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
-			<div class="stats-grid">
-				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
-				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
-				<div class="stat-card"><div class="stat-label">📅 This Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
-				<div class="stat-card"><div class="stat-label">📅 Last Month Sessions</div><div class="stat-value">${formatNumber(stats.lastMonth.sessions)}</div></div>
-			</div>
-		</div>`;
+	const multiModelHtml = safeSectionHtml('Multi-Model Usage', () => _buildMultiModelSectionHtml(stats, allKeys));
+	const sessionsSummaryHtml = _buildSessionsSummaryHtml(stats);
 
 	const rendered = assignUsageRootHtml(root, () => buildUsageRootHtml(
 		stats,
@@ -5163,6 +5143,41 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	));
 	if (!rendered) { return; }
 
+	_wireRenderedLayout(stats);
+}
+
+/** Multi-Model Usage section (today / last 30 days / previous month) followed by the router section. */
+function _buildMultiModelSectionHtml(stats: UsageAnalysisStats, allKeys: ReturnType<typeof buildUsageAllKeysSets>): string {
+	return `
+		<!-- Multi-Model Usage Section -->
+		<div class="section" id="section-multi-model">
+			<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
+			<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
+			<div class="three-column">
+				${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
+				${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
+				${renderMultiModelPeriod(`📅 ${escapeHtml(localize('usage.toolPeriod.colPreviousMonth'))}`, stats.lastMonth.modelSwitching, allKeys.allLowCostModels, allKeys.allMediumCostModels, allKeys.allHighCostModels, allKeys.allUnknownModels)}
+			</div>
+		</div>${buildRouterSectionHtml(stats.hydraFusion)}`;
+}
+
+/** Sessions Summary stat cards for today, last 30 days, this month and last month. */
+function _buildSessionsSummaryHtml(stats: UsageAnalysisStats): string {
+	return `
+		<!-- Summary Section -->
+		<div class="section" id="section-sessions-summary">
+			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
+			<div class="stats-grid">
+				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 This Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 Last Month Sessions</div><div class="stat-value">${formatNumber(stats.lastMonth.sessions)}</div></div>
+			</div>
+		</div>`;
+}
+
+/** Wires every control in the freshly rendered layout, in the order the DOM-dependent steps require. */
+function _wireRenderedLayout(stats: UsageAnalysisStats): void {
 	wireNavigationButtons();
 	wireAboutInfoToggle();
 	wireMcpPeriodToggle();
