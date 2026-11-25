@@ -215,3 +215,100 @@ body {
 	font-size: 11px;
 	color: var(--text-secondary);
 }
+
+.hotspots {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 12px 0;
+}
+
+.hotspots-title {
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.hotspots-subtitle,
+.hotspots-empty {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.hotspot-open {
+	background: transparent;
+	border: none;
+	padding: 0;
+	color: var(--vscode-textLink-foreground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+	text-align: left;
+	word-break: break-all;
+	cursor: pointer;
+}
+
+.hotspot-open:hover {
+	text-decoration: underline;
+}
+
+.hotspot-open:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.hotspot-badge {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	white-space: nowrap;
+	border: 1px solid var(--hotspot-color);
+	background: color-mix(in srgb, var(--hotspot-color) 18%, transparent);
+}
+
+.hotspot-reread { --hotspot-color: var(--vscode-charts-blue); }
+.hotspot-generated { --hotspot-color: var(--vscode-charts-purple); }
+
+.hotspots-tip {
+	font-size: 12px;
+	padding: 6px 10px;
+	border-left: 3px solid var(--vscode-charts-blue);
+	background: var(--bg-secondary);
+}
+
+.hotspots-tool {
+	color: var(--vscode-textLink-foreground);
+}
+
+.hotspot-trend,
+.hotspot-tokens {
+	white-space: nowrap;
+}
+
+/* Fewer re-reads is the fix working; the sign carries the meaning too, not only the colour. */
+.hotspot-trend.trend-down { color: var(--vscode-charts-green); }
+.hotspot-trend.trend-up { color: var(--vscode-charts-red); }
+
+.hotspot-copy {
+	padding: 2px 10px;
+	border-radius: 3px;
+	border: 1px solid var(--border-subtle);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.hotspot-copy:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.hotspot-copy:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.hotspot-hint {
+	color: var(--text-secondary);
+	min-width: 260px;
+}

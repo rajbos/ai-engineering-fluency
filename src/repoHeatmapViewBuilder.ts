@@ -16,6 +16,7 @@ import { getTimeWindowStartDayKey } from './timeWindows';
 import { toLocalDayKey } from './utils/dayKeys';
 import { repoDisplayName } from './repeatedTasks';
 import { isUnsafeObjectKey } from './utils/protoGuard';
+import type { CodeNavTool, DetectedCodeNavTool } from './codeNavTools';
 
 /** Per-kind counters in {@link FILE_ACTIVITY_KINDS} order: read, edited, created, deleted. */
 export type KindCounts = [number, number, number, number];
@@ -36,9 +37,14 @@ export interface RepoHeatmapFile {
 	path: string;
 	/** Counters per local day (YYYY-MM-DD). */
 	days: Record<string, KindCounts>;
+	/** Per local day, for the reads whose size the log records. Absent when none do. */
+	readSizes?: Record<string, ReadSize>;
 	/** True when every delete of this file was inferred from a shell command. */
 	inferredDeletes?: boolean;
 }
+
+/** Characters returned to the model, and how many reads that covers. */
+export type ReadSize = [chars: number, reads: number];
 
 export interface RepoHeatmapRepo {
 	key: string;
@@ -54,6 +60,12 @@ export interface RepoHeatmapViewData {
 	outsideRepoTouches: number;
 	lastUpdated: string;
 	hasData: boolean;
+	/**
+	 * Code-graph and symbol-lookup tools: the ones found set up on this machine or in an open
+	 * workspace folder, and the catalog to suggest from. Set by hosts that can look; the
+	 * hotspot tip falls back to generic advice without it.
+	 */
+	codeNavTools?: { detected: DetectedCodeNavTool[]; suggested: CodeNavTool[] };
 }
 
 export const MAX_FILES_PER_REPO = 3000;
@@ -144,13 +156,18 @@ function touchDayKey(touch: FileTouch, fallback: string): string {
 	return touch.ts !== undefined ? toLocalDayKey(new Date(touch.ts)) : fallback;
 }
 
-interface FileAcc { days: Record<string, KindCounts>; inferred: number; deletes: number }
+interface FileAcc { days: Record<string, KindCounts>; readSizes: Record<string, ReadSize>; inferred: number; deletes: number }
 
 function addTouch(files: Map<string, FileAcc>, relPath: string, dayKey: string, touch: FileTouch): void {
 	let acc = files.get(relPath);
-	if (!acc) { acc = { days: {}, inferred: 0, deletes: 0 }; files.set(relPath, acc); }
+	if (!acc) { acc = { days: {}, readSizes: {}, inferred: 0, deletes: 0 }; files.set(relPath, acc); }
 	const counts = (acc.days[dayKey] ??= EMPTY_COUNTS());
 	counts[KIND_INDEX[touch.kind]]++;
+	if (touch.kind === 'read' && touch.chars) {
+		const size = (acc.readSizes[dayKey] ??= [0, 0]);
+		size[0] += touch.chars;
+		size[1]++;
+	}
 	if (touch.kind === 'deleted') { acc.deletes++; if (touch.inferred) { acc.inferred++; } }
 }
 
@@ -168,6 +185,7 @@ function toRepo(key: string, label: string, files: Map<string, FileAcc>): RepoHe
 		files: kept.map(([path, acc]) => ({
 			path,
 			days: acc.days,
+			...(Object.keys(acc.readSizes).length > 0 ? { readSizes: acc.readSizes } : {}),
 			...(acc.deletes > 0 && acc.inferred === acc.deletes ? { inferredDeletes: true } : {}),
 		})),
 		truncatedFiles: ranked.length - kept.length,
@@ -180,6 +198,11 @@ function mergeFileAcc(into: FileAcc, from: FileAcc): void {
 	for (const [day, c] of Object.entries(from.days)) {
 		const target = (into.days[day] ??= EMPTY_COUNTS());
 		for (let i = 0; i < 4; i++) { target[i] += c[i]; }
+	}
+	for (const [day, [chars, reads]] of Object.entries(from.readSizes)) {
+		const target = (into.readSizes[day] ??= [0, 0]);
+		target[0] += chars;
+		target[1] += reads;
 	}
 	into.inferred += from.inferred;
 	into.deletes += from.deletes;
@@ -243,6 +266,9 @@ export interface RepoHeatmapCell {
 	/** Sum of the counts for the kinds selected by the filter. */
 	total: number;
 	inferredDeletes: boolean;
+	/** Characters returned by the reads whose size is known, and how many reads that is. */
+	readChars: number;
+	sizedReads: number;
 }
 
 export interface RepoHeatmapFolder {
@@ -280,8 +306,14 @@ function fileCellIn(file: RepoHeatmapFile, startKey: string, todayKey: string, k
 	}
 	const total = sumKinds(counts, kinds);
 	if (total === 0) { return undefined; }
+	let readChars = 0, sizedReads = 0;
+	for (const [day, [chars, reads]] of Object.entries(file.readSizes ?? {})) {
+		if (day < startKey || day > todayKey) { continue; }
+		readChars += chars;
+		sizedReads += reads;
+	}
 	const name = file.path.split('/').pop() ?? file.path;
-	return { name, path: file.path, counts, total, inferredDeletes: file.inferredDeletes === true };
+	return { name, path: file.path, counts, total, inferredDeletes: file.inferredDeletes === true, readChars, sizedReads };
 }
 
 function folderOf(path: string): string {
@@ -321,4 +353,117 @@ export function summarizeRepoHeatmap(
 	for (const f of folders) { f.files.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)); }
 	folders.sort((a, b) => b.total - a.total || a.folder.localeCompare(b.folder));
 	return { folders, counts, fileCount, maxCellTotal };
+}
+
+// ── Hotspots: files whose activity pattern the user can do something about ──
+
+/**
+ * Why a file is a hotspot. Only patterns with a fix in the user's hands are flagged:
+ * - `generated`: a dependency, build output or lockfile agents keep opening; they should skip it.
+ * - `reread`: read many times for every edit, so agents navigate it by reading it. A lookup
+ *   tool (a code graph, a symbol index) or a smaller file removes the need.
+ * Files that are edited a lot, or created and deleted again, are normal work and not flagged.
+ */
+export type RepoHeatmapHotspotKind = 'generated' | 'reread';
+
+export interface RepoHeatmapHotspot {
+	path: string;
+	name: string;
+	kind: RepoHeatmapHotspotKind;
+	/** All four kinds in the period, regardless of the view's kind filter. */
+	counts: KindCounts;
+	total: number;
+	/**
+	 * Reads of this file in the period just before this one (same length), so a fix can be
+	 * seen working. Undefined when the period has no predecessor (all time).
+	 */
+	previousReads?: number;
+	/**
+	 * Estimated tokens the period's reads of this file put into agents' context. Undefined
+	 * when no read of it has a recorded size.
+	 */
+	readTokens?: number;
+	/** How many of the reads have a recorded size; the rest are assumed to be average. */
+	sizedReads: number;
+}
+
+/** Rough characters per token for source text; good enough to rank files by read cost. */
+export const HOTSPOT_CHARS_PER_TOKEN = 4;
+
+/**
+ * Tokens spent reading a file: the sized reads' text, scaled up to all reads on the assumption
+ * that the unsized ones were as large on average.
+ */
+export function estimateReadTokens(reads: number, readChars: number, sizedReads: number): number | undefined {
+	if (sizedReads <= 0 || readChars <= 0) { return undefined; }
+	return Math.round((readChars / sizedReads) * Math.max(reads, sizedReads) / HOTSPOT_CHARS_PER_TOKEN);
+}
+
+/** Fewest reads before a file counts as re-read; below it the ratio is noise. */
+export const HOTSPOT_MIN_READS = 10;
+/** Reads per edit at or above which a file counts as re-read. */
+export const HOTSPOT_REREAD_RATIO = 4;
+/** Fewest reads before a generated file is worth flagging. */
+export const HOTSPOT_MIN_GENERATED_READS = 3;
+export const MAX_HOTSPOTS = 8;
+
+const GENERATED_PATH = /(^|\/)(node_modules|dist|out|build|coverage|\.next|\.nuxt|vendor|obj|__pycache__|\.venv|target)\//i;
+const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock|composer\.lock|Gemfile\.lock|go\.sum)$/i;
+
+/** True for dependency folders, build output and lockfiles: files agents rarely need to read. */
+export function isGeneratedPath(path: string): boolean {
+	return GENERATED_PATH.test(path) || LOCKFILE.test(path) || /\.min\.(js|css)$/i.test(path);
+}
+
+/** The hotspot kind of one file's period counts, or undefined when there is nothing to do about it. */
+export function classifyHotspot(path: string, counts: KindCounts): RepoHeatmapHotspotKind | undefined {
+	const [read, edited] = counts;
+	if (isGeneratedPath(path)) { return read >= HOTSPOT_MIN_GENERATED_READS ? 'generated' : undefined; }
+	if (read >= HOTSPOT_MIN_READS && read >= HOTSPOT_REREAD_RATIO * Math.max(1, edited)) { return 'reread'; }
+	return undefined;
+}
+
+/**
+ * The last day of the period just before `period`, at local noon, so the same period can be
+ * summarized one step back. Undefined for all time, which has nothing before it.
+ */
+export function previousPeriodEnd(period: ChartTimeWindow, now: Date): Date | undefined {
+	const [year, month, day] = periodStartDayKey(period, now).split('-').map(Number);
+	return year > 0 ? new Date(year, month - 1, day - 1, 12) : undefined;
+}
+
+function toHotspot(cell: RepoHeatmapCell): RepoHeatmapHotspot | undefined {
+	const kind = classifyHotspot(cell.path, cell.counts);
+	if (!kind) { return undefined; }
+	const readTokens = estimateReadTokens(cell.counts[0], cell.readChars, cell.sizedReads);
+	return {
+		path: cell.path, name: cell.name, kind, counts: cell.counts, total: cell.total, sizedReads: cell.sizedReads,
+		...(readTokens !== undefined ? { readTokens } : {}),
+	};
+}
+
+/**
+ * The repository's hotspots in a period, most-read first. Always counts every kind, so the
+ * list does not change meaning when the view's kind filter hides reads or edits.
+ */
+export function findRepoHeatmapHotspots(repo: RepoHeatmapRepo, period: ChartTimeWindow, now: Date, limit = MAX_HOTSPOTS): RepoHeatmapHotspot[] {
+	const summary = summarizeRepoHeatmap(repo, period, now);
+	const hotspots: RepoHeatmapHotspot[] = [];
+	for (const folder of summary.folders) {
+		for (const cell of folder.files) {
+			const hotspot = toHotspot(cell);
+			if (hotspot) { hotspots.push(hotspot); }
+		}
+	}
+	hotspots.sort((a, b) => b.counts[0] - a.counts[0] || a.path.localeCompare(b.path));
+	const kept = hotspots.slice(0, limit);
+	const previousEnd = previousPeriodEnd(period, now);
+	if (previousEnd && kept.length > 0) {
+		const previousReads = new Map<string, number>();
+		for (const folder of summarizeRepoHeatmap(repo, period, previousEnd).folders) {
+			for (const cell of folder.files) { previousReads.set(cell.path, cell.counts[0]); }
+		}
+		for (const hotspot of kept) { hotspot.previousReads = previousReads.get(hotspot.path) ?? 0; }
+	}
+	return kept;
 }

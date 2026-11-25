@@ -8,6 +8,10 @@
  *  - Copilot CLI JSONL: `tool.execution_start` / `tool.execution_complete` (`view`, `edit`, `create`, ...)
  *  - VS Code Copilot Chat (JSON and delta JSONL): `toolInvocationSerialized` response items
  *
+ * A read also carries how much text the tool handed back to the model ({@link FileTouch.chars})
+ * where the log records it: always for Claude Code, mostly for Copilot CLI, and only in newer
+ * VS Code Copilot Chat logs (older ones give a read and its result unrelated ids).
+ *
  * Deletes are the weak spot: no agent logs a structured "delete file" tool, so they are
  * found by parsing shell commands (`rm`, `git rm`, `del`, `Remove-Item`). That is best-effort
  * and flagged as such by {@link FileTouch.inferred}.
@@ -28,6 +32,11 @@ export interface FileTouch {
 	ts?: number;
 	/** True when the kind was inferred from a shell command rather than a structured tool call. */
 	inferred?: boolean;
+	/**
+	 * Reads only: characters of file text the tool returned to the model. Absent when the log
+	 * does not record it (or the result was not text, such as an image).
+	 */
+	chars?: number;
 }
 
 const CLAUDE_READ_TOOLS = new Set(['Read', 'NotebookRead']);
@@ -193,10 +202,19 @@ class ClaudeCollector {
 			if (block.is_error === true) {
 				// A failed call changed nothing, so it must not colour the heatmap.
 				for (const t of call.touches) { this.failed.add(t); }
-			} else if (call.tool === 'Write' && !/created successfully/i.test(toolResultText(block.content))) {
-				// `Write` over an existing file is an edit, not a create.
-				call.touches[0].kind = 'edited';
+			} else {
+				this.applyResult(call, toolResultText(block.content));
 			}
+		}
+	}
+
+	/** What a successful call's result adds: a read's size, or that a `Write` overwrote a file. */
+	private applyResult(call: { tool: string; touches: FileTouch[] }, text: string): void {
+		if (CLAUDE_READ_TOOLS.has(call.tool)) {
+			if (text.length > 0) { call.touches[0].chars = text.length; }
+		} else if (call.tool === 'Write' && !/created successfully/i.test(text)) {
+			// `Write` over an existing file is an edit, not a create.
+			call.touches[0].kind = 'edited';
 		}
 	}
 
@@ -214,7 +232,19 @@ class CliCollector {
 		if (!data) { return; }
 		const id = typeof data.toolCallId === 'string' ? data.toolCallId : `anon-${this.order++}`;
 		if (event.type === 'tool.execution_start') { this.touches.set(id, this.touchesOfStart(data, epochMs(event.timestamp))); }
-		else if (event.type === 'tool.execution_complete' && data.success === false) { this.touches.delete(id); }
+		else if (event.type === 'tool.execution_complete') {
+			if (data.success === false) { this.touches.delete(id); } else { this.recordReadSize(id, data); }
+		}
+	}
+
+	/** The CLI reports the length of what it sent the model as telemetry on the completed call. */
+	private recordReadSize(id: string, data: Record<string, unknown>): void {
+		const touches = this.touches.get(id);
+		if (touches?.length !== 1 || touches[0].kind !== 'read') { return; }
+		const telemetry = isRecord(data.toolTelemetry) ? data.toolTelemetry : undefined;
+		const metrics = telemetry && isRecord(telemetry.metrics) ? telemetry.metrics : undefined;
+		const chars = metrics?.resultForLlmLength ?? metrics?.resultLength;
+		if (typeof chars === 'number' && chars > 0) { touches[0].chars = chars; }
 	}
 
 	private touchesOfStart(data: Record<string, unknown>, ts: number | undefined): FileTouch[] {
@@ -267,8 +297,25 @@ function vscodeTouches(item: Record<string, unknown>, ts: number | undefined): F
 	return [...paths].map(path => ({ path, kind, ts }));
 }
 
+/** Characters of text in a serialized tool result (a tree of parts with `text` or `value` strings). */
+function resultTextLength(value: unknown, depth = 0): number {
+	if (depth > 40 || typeof value !== 'object' || value === null) { return 0; }
+	let n = 0;
+	if (Array.isArray(value)) {
+		for (const v of value) { n += resultTextLength(v, depth + 1); }
+		return n;
+	}
+	const obj = value as Record<string, unknown>;
+	if (typeof obj.text === 'string') { n += obj.text.length; }
+	if (typeof obj.value === 'string') { n += obj.value.length; }
+	for (const v of Object.values(obj)) { if (typeof v === 'object') { n += resultTextLength(v, depth + 1); } }
+	return n;
+}
+
 class VsCodeCollector {
 	private readonly byCallId = new Map<string, FileTouch[]>();
+	/** Result text length by the model's tool-call id (`toolCallResults` keys, suffix stripped). */
+	private readonly resultChars = new Map<string, number>();
 	private anon = 0;
 
 	/** Walks any parsed JSON value (a legacy session object or one delta line) for tool invocations. */
@@ -282,11 +329,25 @@ class VsCodeCollector {
 			this.byCallId.set(id, vscodeTouches(obj, ts));
 			return;
 		}
+		if (isRecord(obj.toolCallResults)) {
+			for (const [id, result] of Object.entries(obj.toolCallResults)) {
+				// Keys are `<toolCallId>__vscode-<n>`; the invocation carries the bare id.
+				this.resultChars.set(id.replace(/__vscode-\d+$/, ''), resultTextLength(result));
+			}
+			return;
+		}
 		const nextTs = typeof obj.requestId === 'string' ? (epochMs(obj.timestamp) ?? ts) : ts;
 		for (const v of Object.values(obj)) { this.visit(v, nextTs, depth + 1); }
 	}
 
-	result(): FileTouch[] { return [...this.byCallId.values()].flat(); }
+	result(): FileTouch[] {
+		for (const [id, touches] of this.byCallId) {
+			const chars = this.resultChars.get(id);
+			// One result is one read; a call listing several files cannot be split between them.
+			if (chars && touches.length === 1 && touches[0].kind === 'read') { touches[0].chars = chars; }
+		}
+		return [...this.byCallId.values()].flat();
+	}
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -300,10 +361,11 @@ function parseWhole(content: string): unknown {
 	try { return JSON.parse(content); } catch { return undefined; }
 }
 
-const LINE_HINTS = ['tool_result', 'tool.execution_complete'];
+/** A line worth parsing: a tool call, or the result that tells whether it worked and how much it returned. */
+const LINE_MATTERS = /tool(?:_use"|_result|\.execution_(?:start|complete)|InvocationSerialized|CallResults)/;
 
 function mayMatterLine(line: string): boolean {
-	return line.length > 0 && (MAY_TOUCH_FILES.test(line) || LINE_HINTS.some(h => line.includes(h)));
+	return line.length > 0 && LINE_MATTERS.test(line);
 }
 
 function parseRecordLine(line: string): Record<string, unknown> | undefined {

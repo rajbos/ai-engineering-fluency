@@ -7,6 +7,7 @@
  * extension's global storage. Everything it shows is derived locally and is never uploaded.
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -16,6 +17,7 @@ import {
 	type RepoHeatmapCollectDeps,
 	type RepoHeatmapScanCache,
 } from '../../src/repoHeatmapCollector';
+import { CODE_NAV_TOOLS, detectCodeNavTools } from '../../src/codeNavTools';
 import { buildRepoHeatmapViewData, type RepoHeatmapViewData } from '../../src/repoHeatmapViewBuilder';
 import { t as l10nT, resolvedLocale } from './l10n';
 import { buildWebviewLocalization } from './webviewLocalization';
@@ -60,8 +62,10 @@ export class RepoHeatmapPanel {
 		);
 		this.panel = panel;
 		panel.webview.html = this.getHtml(panel.webview);
-		panel.webview.onDidReceiveMessage((message: { command?: string }) => {
+		panel.webview.onDidReceiveMessage((message: { command?: string; text?: unknown }) => {
 			if (message?.command === 'ready' || message?.command === 'refresh') { void this.scan(); }
+			// A hotspot's ready-made prompt, for the user to paste into their agent.
+			else if (message?.command === 'copyText' && typeof message.text === 'string') { void vscode.env.clipboard.writeText(message.text); }
 		});
 		panel.onDidDispose(() => { if (this.panel === panel) { this.panel = undefined; } });
 	}
@@ -90,11 +94,23 @@ export class RepoHeatmapPanel {
 				onError: (file, error) => this.host.warn(`Repository heatmap: could not read ${path.basename(file)}: ${String(error)}`),
 			});
 			const data: RepoHeatmapViewData = buildRepoHeatmapViewData(sessions, new Date());
+			data.codeNavTools = { detected: await this.detectCodeNavTools(), suggested: CODE_NAV_TOOLS };
 			this.post({ command: 'data', data });
 			await this.saveCache(cache);
 		} catch (error) {
 			this.host.warn(`Repository heatmap scan failed: ${String(error)}`);
 			this.post({ command: 'error' });
+		}
+	}
+
+	/** Lookup tools set up for the user or in an open workspace folder; none when that cannot be read. */
+	private async detectCodeNavTools(): Promise<Awaited<ReturnType<typeof detectCodeNavTools>>> {
+		try {
+			const folders = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+			return await detectCodeNavTools(os.homedir(), folders);
+		} catch (error) {
+			this.host.warn(`Repository heatmap: could not check for code lookup tools: ${String(error)}`);
+			return [];
 		}
 	}
 
