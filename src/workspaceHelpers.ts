@@ -1199,8 +1199,31 @@ function vibeAgentHome(value: string | undefined): string | undefined {
 }
 
 /**
- * Detect CLI agents whose data root was relocated with $CODEX_HOME, $VIBE_HOME or
- * $HERMES_HOME to a folder not named like the default (.codex, .vibe, hermes), which the
+ * $CLAUDE_CONFIG_DIR as Claude Code uses it: when set, it replaces ~/.claude for settings,
+ * session history and plugins. Returns the absolute directory, or undefined when the variable
+ * is unset or blank (the caller then falls back to ~/.claude). Shared by the Claude Code data
+ * access layer (discovery) and the path-to-editor detectors, so both agree on the location.
+ */
+export function resolveClaudeConfigDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
+	const raw = rawAgentHome(env['CLAUDE_CONFIG_DIR']);
+	return raw === undefined ? undefined : path.resolve(raw.trim());
+}
+
+/**
+ * True for a transcript copy Claude Code set aside beside the live one
+ * (`<session>.orphaned-<timestamp>-<suffix>.jsonl`). These keep the `.jsonl` extension but are
+ * an older copy of a session that is still counted from its live file, so reading them would
+ * count that session twice. (`<session>.jsonl.superseded-<timestamp>` copies never end in
+ * `.jsonl` and are skipped by the extension check already.)
+ */
+export function isClaudeCodeSetAsideTranscript(fileName: string): boolean {
+	return /\.orphaned-.*\.jsonl$/i.test(fileName);
+}
+
+/**
+ * Detect CLI agents whose data root was relocated with $CODEX_HOME, $VIBE_HOME,
+ * $HERMES_HOME or $CLAUDE_CONFIG_DIR to a folder not named like the default (.codex, .vibe,
+ * hermes, .claude), which the
  * default-name substring checks cannot recognise. Only the adapters' own session
  * sub-paths under the configured root match, so a broad root (e.g. the home dir) does
  * not swallow unrelated files. Each home is interpreted exactly as its adapter does and
@@ -1220,6 +1243,10 @@ export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.
 	}
 	const hermesHome = rawAgentHome(env['HERMES_HOME']);
 	if (hermesHome && lowerPath.startsWith(`${normalizePathForComparison(path.join(hermesHome, 'state.db'))}#`)) { return 'Hermes'; }
+	const claudeHome = resolveClaudeConfigDir(env);
+	if (claudeHome && lowerPath.startsWith(joinedChildPrefixForComparison(path.join(claudeHome, 'projects')))) {
+		return filePath ? detectClaudeCodeEditorVariant(filePath) : 'Claude Code';
+	}
 	return undefined;
 }
 

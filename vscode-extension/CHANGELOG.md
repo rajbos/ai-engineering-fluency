@@ -12,6 +12,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Bug Fixes
 - Opening a session from a view (Usage Analysis, Skill Suggestions, Scheduled automations' Failed runs, Diagnostics, and Diagnostics' formatted JSONL view) now opens only an absolute, existing session file the extension discovered itself. Any other path a view sends, such as a relative path, a `..` path, a directory or an unknown file, is refused and logged.
+- Usage of a session file that is moved away or deleted is no longer lost from the daily, monthly and 30-day totals. Claude Code deletes transcripts older than 30 days by default, which made older Claude Code usage drop out of every total. The extension now keeps the numbers of such sessions in a usage history that only the new **Clear Usage History** command removes; **Clear Session Cache** leaves it alone. Usage Analysis detail still covers only files that exist (#2728).
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and are attributed to Claude Code instead of an unknown editor (#2728).
+- Older transcript copies Claude Code sets aside as `<session>.orphaned-<timestamp>-<suffix>.jsonl` are no longer read as extra sessions, which counted that session twice (#2728).
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
 - OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
 
