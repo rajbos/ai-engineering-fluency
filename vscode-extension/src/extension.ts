@@ -482,6 +482,7 @@ import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from 
 import { findViewIndexEntry, type ViewIndexNavigation } from './whatsNew/viewIndex';
 import { SurfaceRevealQueue } from './whatsNew/surfaceRevealQueue';
 import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
+import { checkWebviewSessionFilePath, parseWebviewTurnNumber } from './sessionFilePathGuard';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -10645,14 +10646,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.log(`🧭 [Tool Curation Trace] ${stage} ${details}`);
 	}
 
+	/** Every webview-supplied session-file path goes through this before the extension opens it; a refusal is logged only. */
+	private checkWebviewSessionFile(file: unknown, source: string): Promise<string | undefined> { return checkWebviewSessionFilePath(file, source, { isCachedSessionFile: (p) => this.getCachedSessionData(p) !== undefined, listSessionFiles: () => this.sessionDiscovery.getCopilotSessionFiles(), log: (m) => this.log(m) }); }
+
 	private async _handleOpenSessionFile(message: any): Promise<void> {
-		if (!message.file) { return; }
-		const turnNumber = typeof message.turnNumber === 'number' && Number.isSafeInteger(message.turnNumber) && message.turnNumber > 0
-			? message.turnNumber
-			: undefined;
+		const file = await this.checkWebviewSessionFile(message.file, 'openSessionFile:analysis'); if (!file) { return; }
+		const turnNumber = parseWebviewTurnNumber(message.turnNumber);
 		await this.dispatch('openSessionFile:analysis', async () => {
-			try { await this.showLogViewer(message.file, turnNumber); }
-			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
+			try { await this.showLogViewer(file, turnNumber); }
+			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + file); }
 		});
 	}
 
@@ -13577,9 +13579,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       case "reportNewEditorPath":
         if (message.path) { await this.dispatch('reportNewEditorPath:diagnostics', () => this.diagHandleReportNewEditorPath(message.path)); } break;
       case "openSessionFile":
-        if (message.file) { await this.dispatch('openSessionFile:diagnostics', async () => { try { await this.showLogViewer(message.file); } catch { vscode.window.showErrorMessage("Could not open log viewer: " + message.file); } }); } break;
+        { const file = await this.checkWebviewSessionFile(message.file, 'openSessionFile:diagnostics'); if (file) { await this.dispatch('openSessionFile:diagnostics', async () => { try { await this.showLogViewer(file); } catch { vscode.window.showErrorMessage("Could not open log viewer: " + file); } }); } } break;
       case "openFormattedJsonlFile":
-        if (message.file) { await this.dispatch('openFormattedJsonlFile:diagnostics', () => this.diagHandleOpenFormattedJsonlFile(message.file)); } break;
+        { const file = await this.checkWebviewSessionFile(message.file, 'openFormattedJsonlFile:diagnostics'); if (file) { await this.dispatch('openFormattedJsonlFile:diagnostics', () => this.diagHandleOpenFormattedJsonlFile(file)); } } break;
       case "revealPath":
         if (message.path) { await this.dispatch('revealPath:diagnostics', () => this.diagHandleRevealPath(message.path)); } break;
       default:

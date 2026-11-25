@@ -11,6 +11,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
 
 ### Bug Fixes
+- Opening a session from a view (Usage Analysis, Skill Suggestions, Scheduled automations' Failed runs, Diagnostics, and Diagnostics' formatted JSONL view) now opens only an absolute, existing session file the extension discovered itself. Any other path a view sends, such as a relative path, a `..` path, a directory or an unknown file, is refused and logged.
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
 - OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
 
