@@ -7,7 +7,9 @@
  *   - the set of running distros comes from `wsl.exe --list --running --quiet` (UTF-16LE output);
  *   - every UNC access goes through {@link WslScanner.unc}, which throws for a distro that was not in
  *     that list, so no code path can build a UNC path of a stopped distro;
- *   - `docker-desktop` / `docker-desktop-data` are never scanned.
+ *   - `docker-desktop` / `docker-desktop-data` are never scanned;
+ *   - a host holding WSL paths from an earlier scan (its session cache) checks them with
+ *     {@link createStoppedWslPathFilter} before any stat/access, and keeps a stopped distro's cached data.
  * The `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` registry key has no running flag, so it is
  * deliberately not used as the source of truth for state.
  *
@@ -147,6 +149,41 @@ export function describeWslSessionPath(filePath: string): WslSessionSource | und
 /** Whether a path is inside a WSL distro's filesystem as seen from Windows. */
 export function isWslUncPath(filePath: string): boolean {
 	return /^\/\/wsl(?:\.localhost|\$)\//i.test(filePath.replace(/\\/g, '/'));
+}
+
+/** The distro a `\\wsl.localhost\<distro>\...` / `\\wsl$\<distro>\...` path points into, or undefined. */
+export function wslDistroOfPath(filePath: string): string | undefined {
+	const m = /^\/\/wsl(?:\.localhost|\$)\/([^/]+)/i.exec(filePath.replace(/\\/g, '/'));
+	return m ? m[1] : undefined;
+}
+
+/**
+ * Whether `filePath` lies inside a WSL distro that is NOT in `runningDistros` (compared case-insensitively,
+ * as Windows resolves the UNC share name). Touching such a path (stat, access, exists, read) starts the
+ * distro, so callers holding a path from an earlier scan (a cache) must skip it, and keep its cached data
+ * rather than treat it as gone. Non-WSL paths are never "stopped".
+ */
+export function isPathInStoppedWslDistro(filePath: string, runningDistros: Iterable<string>): boolean {
+	const distro = wslDistroOfPath(filePath);
+	if (distro === undefined) { return false; }
+	const lower = distro.toLowerCase();
+	for (const running of runningDistros) {
+		if (running.toLowerCase() === lower && !EXCLUDED_DISTROS.has(lower)) { return false; }
+	}
+	return true;
+}
+
+/**
+ * Build a predicate for {@link isPathInStoppedWslDistro} against the distros running right now. `wsl.exe` is
+ * only asked when `paths` contains a WSL path at all; with none, the predicate is always false. Off Windows,
+ * or when wsl.exe fails, no distro counts as running, so every WSL path is treated as stopped (never touched).
+ */
+export async function createStoppedWslPathFilter(paths: Iterable<string>, deps: WslScanDeps = {}): Promise<(filePath: string) => boolean> {
+	let anyWsl = false;
+	for (const p of paths) { if (isWslUncPath(p)) { anyWsl = true; break; } }
+	if (!anyWsl) { return () => false; }
+	const running = await listRunningDistros(deps);
+	return (filePath: string) => isPathInStoppedWslDistro(filePath, running);
 }
 
 const MAX_WALK_DEPTH = 6;

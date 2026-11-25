@@ -1764,16 +1764,16 @@ export function isToastAllowed(cadenceDays: number, lastNudgeAt: string | null, 
 /**
  * Re-opens the failing-automation insight (drops its stored state, so it is `new` again) when a
  * scheduled task starts failing that `notifiedKeys` does not name yet. The host stores the
- * returned `failingKeys` as the next `notifiedKeys`.
+ * returned `nextNotifiedKeys` as the next `notifiedKeys` (see trackFailingTasks).
  */
 export function reopenFailingAutomationInsight(
 	tasks: readonly ScheduledTaskSummary[],
 	stateBag: InsightStateBag,
 	notifiedKeys: readonly string[],
-): { reopened: boolean; failingKeys: string[] } {
-	const { newlyFailing, failingKeys } = trackFailingTasks(tasks, notifiedKeys);
+): { reopened: boolean; nextNotifiedKeys: string[] } {
+	const { newlyFailing, nextNotifiedKeys } = trackFailingTasks(tasks, notifiedKeys);
 	if (newlyFailing.length > 0) { delete stateBag[SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID]; }
-	return { reopened: newlyFailing.length > 0, failingKeys };
+	return { reopened: newlyFailing.length > 0, nextNotifiedKeys };
 }
 
 /**

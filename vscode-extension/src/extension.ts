@@ -3569,15 +3569,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const preloaded: SessionFilePreload[] = [];
 			for (const [sessionFile, sessionData] of this.getDeduplicatedCacheEntries()) {
 				if (!this.isUsableForInstantPaint(sessionData, instantPaintCutoffMs)) { continue; }
-				const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
-				preloaded.push({
-					sessionFile,
-					mtime: sessionData.mtime,
-					fileSize: sessionData.size ?? 0,
-					sessionData,
-					wasCached: true,
-					details: this.buildMinimalPreloadDetails(sessionFile, stat, sessionData),
-				});
+				preloaded.push(this.preloadFromCacheEntry(sessionFile, sessionData));
 			}
 			if (preloaded.length === 0) { return; }
 
@@ -5365,23 +5357,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * it and its cache hit resolves just as fast, only later in the queue instead of dominating the
 	 * front of it.
 	 *
-	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
+	 * A cached path inside a WSL distro that is not running now (`isStoppedWsl`) is never queued:
+	 * the worker's stat would start that distro. Its cached data goes straight into `preloaded`
+	 * instead, so its usage stays in the totals while the distro is stopped.
+	 *
+	 * Returns the number of paths queued (for the caller's totalDiscovered count).
 	 */
-	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, editorSet?: Set<string>): number {
+	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, isStoppedWsl: (filePath: string) => boolean, preloaded: SessionFilePreload[], editorSet?: Set<string>): number {
 		if (this.isSampleDataModeActive()) { return 0; }
-		const cachedPaths = this.getDeduplicatedCacheEntries()
-			.filter(([, data]) => data.mtime >= cutoffMs)
-			.map(([filePath]) => filePath);
-		if (cachedPaths.length === 0) { return 0; }
-		for (const p of cachedPaths) { seen.add(_normalizePathForDedup(p)); }
-		if (editorSet) {
-			for (const file of cachedPaths) {
-				const editor = this.detectEditorSource(file);
-				if (editor && editor !== 'Unknown') { editorSet.add(editor); }
-			}
+		const entries = this.getDeduplicatedCacheEntries().filter(([, data]) => data.mtime >= cutoffMs);
+		let queued = 0;
+		for (const [filePath, data] of entries) {
+			seen.add(_normalizePathForDedup(filePath));
+			const editor = editorSet ? this.detectEditorSource(filePath) : undefined;
+			if (editor && editor !== 'Unknown') { editorSet?.add(editor); }
+			if (!isStoppedWsl(filePath)) { queue.push(filePath); queued++; }
+			else if (!data.detailsOnly) { preloaded.push(this.preloadFromCacheEntry(filePath, data)); }
 		}
-		queue.push(...cachedPaths);
-		return cachedPaths.length;
+		return queued;
+	}
+
+	/** A preload entry built from cached data alone, without a stat (the instant paint, a stopped WSL distro). */
+	private preloadFromCacheEntry(sessionFile: string, sessionData: SessionFileCache): SessionFilePreload {
+		const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
+		const details = sessionData.interactions > 0 ? this.buildMinimalPreloadDetails(sessionFile, stat, sessionData) : undefined;
+		return { sessionFile, mtime: sessionData.mtime, fileSize: sessionData.size ?? 0, sessionData, wasCached: true, details };
 	}
 
 	/**
@@ -5413,16 +5413,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * files as `sessionFiles` in that mode, so `confirmedKeys` would contain nothing but fixture
 	 * paths — sweeping the whole cache against that would tombstone every real session the user
 	 * actually has, not just reconcile fixture-related entries.
+	 *
+	 * A path inside a WSL distro that is not running now (`isStoppedWsl`) counts as confirmed:
+	 * discovery cannot see it while the distro is stopped, and evicting it would both touch the
+	 * path (starting the distro) and drop its usage from the totals.
 	 */
-	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
+	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[], isStoppedWsl: (filePath: string) => boolean): SessionFilePreload[] {
 		if (this.isSampleDataModeActive() || this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
+		const isConfirmed = (filePath: string): boolean => confirmedKeys.has(_normalizePathForDedup(filePath)) || isStoppedWsl(filePath);
 		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
-			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {
-				this.cacheManager.evictUndiscoveredSessionData(rawPath);
-			}
+			if (!isConfirmed(rawPath)) { this.cacheManager.evictUndiscoveredSessionData(rawPath); }
 		}
-		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
+		return preloaded.filter(p => isConfirmed(p.sessionFile));
 	}
 
 	/**
@@ -5458,7 +5461,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Seed the queue from the on-disk cache's known file list before discovery
 		// starts (see seedPreloadQueueFromCache doc comment for why).
 		const seen = new Set<string>();
-		const seededCount = this.seedPreloadQueueFromCache(queue, seen, cutoffMs, editorSet);
+		// Which cached paths sit in a WSL distro that is not running now: never stat'ed this refresh.
+		const isStoppedWsl = await this.cacheManager.createStoppedWslPathFilter();
+		const seededCount = this.seedPreloadQueueFromCache(queue, seen, cutoffMs, isStoppedWsl, preloaded, editorSet);
 		totalDiscovered += seededCount;
 
 		// Discovery fills the queue via onBatch callback
@@ -5572,7 +5577,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...Array.from({ length: CONCURRENCY }, () => worker()),
 		]);
 
-		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles);
+		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles, isStoppedWsl);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup. Scheduled
 		// unconditionally (not only on a successful, non-empty scan) so a cached entry for a file
@@ -6672,7 +6677,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.refreshInsightBadgeFromState(now, evaluated);
 
-		await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag), this.context.globalState.update('insights.notifiedFailingAutomations', failing.failingKeys)]);
+		await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag), this.context.globalState.update('insights.notifiedFailingAutomations', failing.nextNotifiedKeys)]);
 		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open

@@ -6,6 +6,7 @@ import * as path from 'path';
 import {
 	decodeWslOutput, parseRunningDistros, parsePasswdHomes, listRunningDistros, discoverWslSessionFiles,
 	WslScanner, describeWslSessionPath, isWslScanAllowedByEnvironment, setWslScanDisabled, type WslScanFs,
+	wslDistroOfPath, isPathInStoppedWslDistro, createStoppedWslPathFilter,
 } from '../wslDiscovery';
 import { MistralVibeDataAccess, discoverVibeSessionsInRoot, findVibeSandboxRoots } from '../mistralvibe';
 
@@ -157,4 +158,41 @@ test('Vibe multi-root: home + AoE sandbox stores, both layouts, VIBE_HOME honour
 		if (saved === undefined) { delete process.env.VIBE_HOME; } else { process.env.VIBE_HOME = saved; }
 		fs.rmSync(home, { recursive: true, force: true });
 	}
+});
+
+test('wslDistroOfPath: distro of \\wsl.localhost and \\wsl$ paths, undefined otherwise', () => {
+	assert.equal(wslDistroOfPath('\\\\wsl.localhost\\Ubuntu\\home\\rob\\.claude\\projects\\a.jsonl'), 'Ubuntu');
+	assert.equal(wslDistroOfPath('\\\\wsl$\\Debian-12\\home\\rob\\x.jsonl'), 'Debian-12');
+	assert.equal(wslDistroOfPath('//WSL.LOCALHOST/Ubuntu/etc/passwd'), 'Ubuntu');
+	assert.equal(wslDistroOfPath('C:\\Users\\rob\\.claude\\projects\\a.jsonl'), undefined);
+	assert.equal(wslDistroOfPath('/home/rob/.claude/projects/a.jsonl'), undefined);
+});
+
+test('isPathInStoppedWslDistro: only WSL paths of distros outside the running list, case-insensitively', () => {
+	const running = ['Ubuntu'];
+	assert.equal(isPathInStoppedWslDistro('\\\\wsl.localhost\\Ubuntu\\home\\rob\\a.jsonl', running), false);
+	assert.equal(isPathInStoppedWslDistro('\\\\wsl$\\ubuntu\\home\\rob\\a.jsonl', running), false);
+	assert.equal(isPathInStoppedWslDistro('\\\\wsl.localhost\\Debian\\home\\rob\\a.jsonl', running), true);
+	assert.equal(isPathInStoppedWslDistro('\\\\wsl.localhost\\docker-desktop\\x', ['docker-desktop']), true, 'an excluded distro is never treated as reachable');
+	assert.equal(isPathInStoppedWslDistro('C:\\Users\\rob\\a.jsonl', []), false, 'a local path is never "stopped"');
+});
+
+test('createStoppedWslPathFilter: asks wsl.exe only when a WSL path is present, and treats every WSL path as stopped when none run', async () => {
+	let calls = 0;
+	const runWslList = async (): Promise<Buffer> => { calls++; return utf16('Ubuntu\r\n'); };
+	const local = await createStoppedWslPathFilter(['C:\\Users\\rob\\a.jsonl', '/home/rob/b.jsonl'], { platform: 'win32', runWslList });
+	assert.equal(calls, 0, 'no WSL path in the cache: wsl.exe is not run');
+	assert.equal(local('\\\\wsl.localhost\\Debian\\x'), false);
+
+	const paths = ['C:\\a.jsonl', '\\\\wsl.localhost\\Ubuntu\\home\\rob\\a.jsonl', '\\\\wsl.localhost\\Debian\\home\\rob\\b.jsonl'];
+	const isStopped = await createStoppedWslPathFilter(paths, { platform: 'win32', runWslList });
+	assert.equal(calls, 1);
+	assert.deepEqual(paths.filter(isStopped), ['\\\\wsl.localhost\\Debian\\home\\rob\\b.jsonl']);
+
+	// wsl.exe missing / failing, or not on Windows: no distro is known to run, so no WSL path may be touched.
+	const failed = await createStoppedWslPathFilter(paths, { platform: 'win32', runWslList: async () => undefined });
+	assert.deepEqual(paths.filter(failed), paths.slice(1));
+	const offWindows = await createStoppedWslPathFilter(paths, { platform: 'linux', runWslList });
+	assert.deepEqual(paths.filter(offWindows), paths.slice(1));
+	assert.equal(calls, 1, 'off Windows, wsl.exe is not run');
 });

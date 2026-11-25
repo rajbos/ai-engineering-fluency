@@ -1084,7 +1084,7 @@ test('a scheduled automation that starts failing re-opens its insight once and t
 
 	// First detection: re-opened even though it was dismissed, and toasted although a toast was just shown.
 	const first = reopenFailingAutomationInsight([task('nightly', 'failing'), task('ok', 'healthy')], bag, []);
-	assert.deepEqual(first, { reopened: true, failingKeys: ['claude:nightly'] });
+	assert.deepEqual(first, { reopened: true, nextNotifiedKeys: ['claude:nightly'] });
 	assert.equal(bag['scheduled-automation-failing'], undefined);
 	const ctx = makeCtx();
 	ctx.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: [task('nightly', 'failing')] };
@@ -1096,10 +1096,17 @@ test('a scheduled automation that starts failing re-opens its insight once and t
 
 	// Already told: nothing re-opened, and the cadence applies again.
 	bag['scheduled-automation-failing'] = { status: 'dismissed', firstSurfacedAt: now, lastSurfacedAt: now };
-	const again = reopenFailingAutomationInsight([task('nightly', 'failing')], bag, first.failingKeys);
+	const again = reopenFailingAutomationInsight([task('nightly', 'failing')], bag, first.nextNotifiedKeys);
 	assert.equal(again.reopened, false);
 	assert.equal(bag['scheduled-automation-failing'].status, 'dismissed');
 	assert.equal(pickToastInsight(evaluateInsights(ctx, bag, 7, justNudged), 7, justNudged, now, again.reopened), undefined);
+
+	// A refresh with no inventory (read error, empty data.db) must not reset what was notified,
+	// or the refresh after it re-opens and toasts the same failure again.
+	const empty = reopenFailingAutomationInsight([], bag, again.nextNotifiedKeys);
+	assert.deepEqual(empty, { reopened: false, nextNotifiedKeys: ['claude:nightly'] });
+	assert.equal(reopenFailingAutomationInsight([task('nightly', 'failing')], bag, empty.nextNotifiedKeys).reopened, false);
+	assert.equal(bag['scheduled-automation-failing'].status, 'dismissed');
 
 	// Other insights keep their plain toast and tooltip.
 	const plain = { id: 'x', title: 'Try skills', body: 'body' };
