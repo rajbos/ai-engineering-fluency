@@ -60,10 +60,12 @@ export function renderUngroupedWorkspaceNote(names: string[] | undefined): strin
 export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): DataTableColumn<WorkspaceCustomizationRow>[] {
 	const typeColumns: DataTableColumn<WorkspaceCustomizationRow>[] = (matrix.customizationTypes ?? []).map(type => ({
 		id: `type:${type.id}`,
-		label: type.icon,
+		label: type.label,
+		// Icon above its name, so the columns read without the legend; the name may wrap.
+		headerHtml: `<span class="customization-type-header"><span aria-hidden="true">${escapeHtml(type.icon)}</span><span>${escapeHtml(type.label)}</span></span>`,
 		headerTitle: type.label,
 		align: 'center',
-		width: '44px',
+		width: '92px',
 		sortValue: row => customizationStatusRank(row.typeStatuses?.[type.id]),
 		render: row => {
 			const status = row.typeStatuses?.[type.id] || '❓';
@@ -139,15 +141,11 @@ export function renderCustomizationTable(matrix: WorkspaceCustomizationMatrix): 
 	});
 }
 
-function buildLegendHtml(matrix: WorkspaceCustomizationMatrix): string {
+/** Status key only: the column headers already name each customization type. */
+function buildLegendHtml(): string {
 	return `
 			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-					${(matrix.customizationTypes ?? []).map(type => `
-						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-					`).join('')}
-				</div>
-				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+				<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
 					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.legend.fresh'))}</span>
 					<span style="color: var(--text-muted);">•</span>
 					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.status.stale'))} ${escapeHtml(localize('usage.customization.legend.stale'))}</span>
@@ -195,6 +193,6 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 			<div class="customization-matrix-container">
 				${renderCustomizationTable(currentMatrix)}
 			</div>
-			${buildLegendHtml(currentMatrix)}
+			${buildLegendHtml()}
 		</div>`;
 }

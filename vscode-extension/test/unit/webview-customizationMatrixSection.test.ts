@@ -176,6 +176,13 @@ test('customizationMatrix: renders interactions column, icon headers with type l
 	assert.match(html, />1234</);
 	assert.match(html, /aria-label="Instructions"/);
 	assert.match(html, /title="Sort by Agents"/);
+	// Each type header shows its icon and its name as visible text, not only in the tooltip.
+	assert.match(html, /<span class="customization-type-header"><span aria-hidden="true">📄<\/span><span>Instructions<\/span><\/span>/);
+	assert.match(html, /<span class="customization-type-header"><span aria-hidden="true">🤖<\/span><span>Agents<\/span><\/span>/);
+	// The legend keeps the status key but no longer repeats the type names the headers show.
+	const legend = html.slice(html.lastIndexOf('border-top: 1px solid var(--border-subtle)'));
+	assert.ok(!legend.includes('Instructions') && !legend.includes('📄'), 'no type list in the legend');
+	assert.ok(legend.includes('status-badge--fresh') && legend.includes('status-badge--missing'), 'status key still present');
 	assert.match(html, /Only workspaces without customization files/);
 	assert.match(html, /1 workspace\(s\) have no customization files/);
 });
