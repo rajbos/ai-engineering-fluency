@@ -11,6 +11,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
 
 ### Bug Fixes
+- Opening a session from a view (Usage Analysis, Skill Suggestions, Scheduled automations' Failed runs, Diagnostics, and Diagnostics' formatted JSONL view) now opens only an absolute, existing session file the extension discovered itself. Any other path a view sends, such as a relative path, a `..` path, a directory or an unknown file, is refused and logged.
 - Usage of a session file that is moved away or deleted is no longer lost from the daily, monthly and 30-day totals. Claude Code deletes transcripts older than 30 days by default, which made older Claude Code usage drop out of every total. The extension now keeps the numbers of such sessions in a usage history that only the new **Clear Usage History** command removes; **Clear Session Cache** leaves it alone. Usage Analysis detail still covers only files that exist (#2728).
 - Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and are attributed to Claude Code instead of an unknown editor (#2728).
 - Older transcript copies Claude Code sets aside as `<session>.orphaned-<timestamp>-<suffix>.jsonl` are no longer read as extra sessions, which counted that session twice (#2728).
