@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { UriLike } from '../opencode';
 import { CursorDataAccess } from '../cursor';
+import { CursorAdapter } from '../adapters/cursorAdapter';
 import type { ReadOnlySqliteReader } from '../utils/readOnlySqlite';
 
 const FAKE_URI: UriLike = { fsPath: '', path: '', scheme: 'file' };
@@ -262,7 +263,9 @@ test('a failed read-only open demotes the db only temporarily — the REAL query
 	const realNow = Date.now;
 	try {
 		const composerId = 'composer-cooldown';
-		const payload = JSON.stringify({ composerId, name: 'Cooldown session', contextTokensUsed: 5 });
+		// Inline headers keep this a single-query read (a header-less composer also looks up the
+		// chunked composerConvHeaders rows, #2735), so openAttempts counts one open per read.
+		const payload = JSON.stringify({ composerId, name: 'Cooldown session', contextTokensUsed: 5, fullConversationHeadersOnly: [{ type: 1, bubbleId: 'b1' }] });
 		fixture.writer.exec(`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${payload.replace(/'/g, "''")}')`);
 
 		const access = new CursorDataAccess(FAKE_URI);
@@ -541,6 +544,110 @@ test('a WAL-blind plain read (merge failed, nothing cached) is not persisted as 
 	} finally {
 		Date.now = realNow;
 		rawFs.copyFileSync = originalCopyFileSync;
+		fixture.cleanup();
+	}
+});
+
+/**
+ * Cursor 3.3x (#2735) writes composers with an empty `fullConversationHeadersOnly` and keeps the
+ * headers in chunked `composerConvHeaders:<composerId>:<000000>` rows. Seeds that shape, plus a
+ * neighbouring composer whose id shares the prefix, so the key-range bounds are exercised too.
+ */
+function seedChunkedComposer(writer: { exec(sql: string): void }, composerId: string): void {
+	const put = (key: string, value: unknown) => writer.exec(
+		`INSERT INTO cursorDiskKV VALUES ('${key}', '${JSON.stringify(value).replace(/'/g, "''")}')`
+	);
+	put(`composerData:${composerId}`, {
+		_v: 18, composerId, name: 'New format', contextTokensUsed: 900, modelConfig: { modelName: 'grok-4.7' },
+		fullConversationHeadersOnly: [], conversationMap: {},
+		headerLog: { chunkSize: 2, chunkCount: 2, count: 4 },
+	});
+	// Inserted out of order on purpose: chunks must be read in key order, not insertion order.
+	put(`composerConvHeaders:${composerId}:000001`, [{ bubbleId: 'u2', type: 1 }, { bubbleId: 'u2/s:0', type: 2 }]);
+	put(`composerConvHeaders:${composerId}:000000`, [{ bubbleId: 'u1', type: 1 }, { bubbleId: 'u1/s:0', type: 2 }]);
+	put(`composerConvHeaders:${composerId}x:000000`, [{ bubbleId: 'other', type: 1 }]);
+	put(`bubbleId:${composerId}:u1`, { bubbleId: 'u1', type: 1, text: 'first question' });
+	put(`bubbleId:${composerId}:u1/s:0`, { bubbleId: 'u1/s:0', type: 2, text: 'first answer' });
+	put(`bubbleId:${composerId}:u2`, { bubbleId: 'u2', type: 1, text: 'second question' });
+	put(`bubbleId:${composerId}:u2/s:0`, { bubbleId: 'u2/s:0', type: 2, text: 'second answer' });
+}
+
+test('new-format composers (#2735): interactions and turns come from chunked composerConvHeaders rows', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'chunked-composer';
+		seedChunkedComposer(fixture.writer, composerId);
+		const access = new CursorDataAccess(FAKE_URI);
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+
+		const data = await access.readComposerData(virtualPath);
+		assert.deepEqual(
+			data?.fullConversationHeadersOnly?.map(h => h.bubbleId),
+			['u1', 'u1/s:0', 'u2', 'u2/s:0'],
+			'chunks are concatenated in key order and a neighbouring composer\'s chunk is not included'
+		);
+
+		const sync = await access.getSessionData(virtualPath);
+		assert.equal(sync.interactions, 2, 'a new-format chat must not be skipped as 0 interactions');
+		assert.equal(sync.tokens, 900);
+
+		const { turns } = await new CursorAdapter(access).buildTurns(virtualPath);
+		assert.deepEqual(
+			turns.map(t => [t.userMessage, t.assistantResponse]),
+			[['first question', 'first answer'], ['second question', 'second answer']]
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('new-format composers (#2735): chunked headers are read through the sql.js fallback too, and cached with the composer', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'chunked-fallback';
+		seedChunkedComposer(fixture.writer, composerId);
+		fixture.writer.close(); // checkpoint so the plain sql.js buffer read sees the rows
+
+		const access = new CursorDataAccess(FAKE_URI);
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
+		let queryCount = 0;
+		const originalQueryAll = (access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll.bind(access);
+		(access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll = (...args: unknown[]) => {
+			queryCount++;
+			return originalQueryAll(...args);
+		};
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const sync = await access.getSessionData(virtualPath);
+		assert.equal(sync.interactions, 2);
+		assert.equal(queryCount, 2, 'one composer query plus one chunk query for 4 concurrent reads');
+
+		await access.countInteractions(virtualPath);
+		assert.equal(queryCount, 2, 'the resolved headers are served from the composer cache afterwards');
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('legacy composers keep using their inline fullConversationHeadersOnly without a chunk query', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'legacy-composer';
+		fixture.writer.exec(
+			`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${JSON.stringify({
+				composerId, fullConversationHeadersOnly: [{ type: 1, bubbleId: 'a' }, { type: 2, bubbleId: 'b' }, { type: 1, bubbleId: 'c' }],
+			}).replace(/'/g, "''")}')`
+		);
+		const access = new CursorDataAccess(FAKE_URI);
+		let queryCount = 0;
+		const originalQueryAll = (access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll.bind(access);
+		(access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll = (...args: unknown[]) => {
+			queryCount++;
+			return originalQueryAll(...args);
+		};
+		assert.equal(await access.countInteractions(`${fixture.dbPath}#${composerId}`), 2);
+		assert.equal(queryCount, 1, 'inline headers are used as-is, no extra chunk lookup');
+	} finally {
 		fixture.cleanup();
 	}
 });
