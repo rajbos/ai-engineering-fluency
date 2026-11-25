@@ -26,7 +26,8 @@ permissions:
 #   build   — runs the dependency install and the build; read-only token, no secrets.
 #   attest  — signs the VSIX the build job uploaded; the only job that can attest.
 #   publish — verifies that same VSIX, then publishes it; the only job with the
-#             marketplace tokens and the permission to push the nightly tag.
+#             marketplace credentials (OIDC for the VS Code Marketplace, a token
+#             for Open VSX) and the permission to push the nightly tag.
 jobs:
   build:
     name: Build Nightly VSIX
@@ -245,6 +246,7 @@ jobs:
     permissions:
       contents: write       # push the nightly tag
       attestations: read    # gh attestation verify before publishing
+      id-token: write       # OIDC token for VS Code Marketplace Trusted Publishing
 
     steps:
     - name: Harden the runner (Audit all outbound calls)
@@ -287,19 +289,16 @@ jobs:
         gh attestation verify "dist/${{ needs.build.outputs.vsix_file }}" --repo "${{ github.repository }}" \
           --predicate-type https://slsa.dev/provenance/v1
 
+    # Marketplace Trusted Publishing (OIDC): no PAT. The RobBos publisher has a policy
+    # trusting rajbos/ai-engineering-fluency + this workflow file (no environment).
+    # Renaming this file breaks publishing until the policy is updated to match.
     - name: Publish to VS Code Marketplace
       id: publish_marketplace
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
       run: |
-        if [ -z "$VSCE_PAT" ]; then
-          echo "❌ VSCE_PAT secret is not configured."
-          exit 1
-        fi
-        echo "Publishing ${{ needs.build.outputs.vsix_file }} as pre-release to VS Code Marketplace..."
+        echo "Publishing ${{ needs.build.outputs.vsix_file }} as pre-release to VS Code Marketplace (OIDC)..."
         vscode-extension/node_modules/.bin/vsce publish \
           --packagePath "dist/${{ needs.build.outputs.vsix_file }}" \
-          --pat "$VSCE_PAT" \
+          --oidc \
           --pre-release
 
     - name: Publish to Open VSX Registry
