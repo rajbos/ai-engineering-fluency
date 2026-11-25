@@ -13,7 +13,7 @@ import { findRepositoryRemoteForFolder, resolveExactWorkspacePath } from '../../
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { calculateEstimatedCost, NANO_AIU_TO_DOLLARS } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
-import type { CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { AgenticTrendPoint, CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis } from '../../src/usageAnalysis';
 import { activeSessionDays, addSessionToDailyStats, scaleModelUsage, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
@@ -32,6 +32,7 @@ import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../s
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import {
 	getEcosystems,
+	getDataAccessInstances,
 	modelPricing,
 	tokenEstimators,
 	statSessionFile,
@@ -41,6 +42,7 @@ import {
 	processSessionFile as processSessionFileWith,
 	type SessionDataCache,
 } from './sessionProcessing';
+import { bucketMultiAgentParentsByDay, collectMultiAgentCandidates, countMultiAgentParents, createMultiAgentSources, type AgenticDayBucket } from '../../src/multiAgentSources';
 export { readDebugLogTokensForSession, getSessionBackingPath, getSessionLastActivity } from './sessionProcessing';
 
 // Import JSON data files
@@ -699,6 +701,11 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	const todaySessions: TodaySessionSummary[] = [];
 	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 	const repeatedTaskSources: RepeatedTaskSessionSource[] = [];
+	// Sessions active in the last-30-days window, as multi-agent candidate rows (file + day key).
+	const multiAgentRows: { sessionFile: string; dayKey: string }[] = [];
+	// Day keys of sessions classified as Delegation in the window (for the daily Agentic trend).
+	const delegationDayKeys: string[] = [];
+	let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 
 	for (const file of sessionFiles) {
 		try {
@@ -763,6 +770,11 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			if (activeAt >= last30DaysStart) {
 				mergeUsageAnalysis(last30DaysPeriod, analysis);
 				last30DaysPeriod.sessions++;
+				if (resolveSessionTaskAttribution(analysis).taskCategory === 'Delegation') {
+					last30DaysPeriod.delegationSessions = (last30DaysPeriod.delegationSessions ?? 0) + 1;
+					delegationDayKeys.push(toLocalDayKey(activeAt));
+				}
+				multiAgentRows.push({ sessionFile: file, dayKey: toLocalDayKey(activeAt) });
 			}
 			if (activeAt >= monthStart) {
 				mergeUsageAnalysis(monthPeriod, analysis);
@@ -782,6 +794,28 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 		}
 	}
 
+	// Multi-agent parent sessions for the last-30-days period plus the daily Agentic trend,
+	// from the same shared MultiAgentSource list the extension uses (Hermes state.db, Vibe
+	// meta.json). Optional enrichment — errors are suppressed.
+	try {
+		const sources = createMultiAgentSources(getDataAccessInstances());
+		const candidates = await collectMultiAgentCandidates(sources, multiAgentRows);
+		const parentCount = await countMultiAgentParents(candidates);
+		if (parentCount > 0) { last30DaysPeriod.multiAgentParentSessions = parentCount; }
+		const byDay = new Map<string, AgenticDayBucket>();
+		await bucketMultiAgentParentsByDay(candidates, byDay);
+		for (const dayKey of delegationDayKeys) {
+			const bucket = byDay.get(dayKey) ?? { multiAgentParentSessions: 0, delegationSessions: 0 };
+			bucket.delegationSessions++;
+			byDay.set(dayKey, bucket);
+		}
+		if (byDay.size > 0) {
+			agenticDailyTrend = [...byDay.entries()]
+				.map(([date, v]) => ({ date, ...v }))
+				.sort((a, b) => a.date.localeCompare(b.date));
+		}
+	} catch { /* optional enrichment — suppress */ }
+
 	return {
 		today: todayPeriod,
 		last30Days: last30DaysPeriod,
@@ -790,6 +824,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
 		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
+		...(agenticDailyTrend ? { agenticDailyTrend } : {}),
 		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources) } : {}),
 	};
 }

@@ -56,7 +56,6 @@ import type {
   SessionLogData,
   AgentSessionsResult,
   TokenEstimator,
-  SessionRelationRef,
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
@@ -225,7 +224,6 @@ import {
 } from '../../src/diagnosticsViewBuilder';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
-import { PiDataAccess } from '../../src/pi';
 import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
@@ -251,6 +249,8 @@ import { ExclusiveRunner } from './analysis/exclusiveRunner';
 import { runOffHostThread as _runOffHostThread } from './analysis/runOffHostThread';
 import { computeSessionFileDetails as _computeSessionFileDetails } from './analysis/sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace as _scanCustomizationFilesForWorkspace } from './analysis/workspaceCustomizationScan';
+import { createCopilotCliMultiAgentSource, enrichCopilotSessionHierarchy, enrichPiSessionHierarchy, enrichVibeSessionHierarchy } from './analysis/sessionHierarchy';
+import { bucketMultiAgentParentsByDay, collectMultiAgentCandidates, countMultiAgentParents, createMultiAgentSources, type MultiAgentCandidate, type MultiAgentSource } from '../../src/multiAgentSources';
 
 // --- Session parsing & token estimation ---
 import {
@@ -320,7 +320,6 @@ import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
-  STAGE_THRESHOLDS,
   STATS_REFRESH_INTERVAL_MS,
 } from '../../src/maturityScoring';
 
@@ -336,7 +335,6 @@ import {
   resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
   extractMcpServerName as _extractMcpServerName,
-  normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
   dedupeByNormalizedKeyKeepGreatest as _dedupeByNormalizedKeyKeepGreatest,
   normalizeToRepoRoot as _normalizeToRepoRoot,
@@ -8057,102 +8055,51 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
-	/** Splits usage results (within the last-30-days window) into Copilot CLI uuids and Hermes session ids, along with each id's day key (for daily trend bucketing). */
-	private _collectMultiAgentCandidateIds(
-		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
-		last30DaysUtcStartKey: string,
-	): { cliUuids: string[]; hermesIds: string[]; dayByCliUuid: Map<string, string>; dayByHermesId: Map<string, string> } {
-		const cliUuids: string[] = [];
-		const hermesIds: string[] = [];
-		const dayByCliUuid = new Map<string, string>();
-		const dayByHermesId = new Map<string, string>();
-		for (const r of usageResults) {
-			if (!r) { continue; }
-			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
-			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
-			const uuid = this.extractCopilotCliUuid(r.sessionFile);
-			if (uuid) { cliUuids.push(uuid); dayByCliUuid.set(uuid, lastActivityKey); continue; }
-			if (this.hermes.isHermesSessionFile(r.sessionFile)) {
-				const id = this.hermes.getSessionId(r.sessionFile);
-				if (id) { hermesIds.push(id); dayByHermesId.set(id, lastActivityKey); }
-			}
-		}
-		return { cliUuids, hermesIds, dayByCliUuid, dayByHermesId };
+	/** The multi-agent sources this host knows: the host-only Copilot data.db source plus the shared src/ sources (Hermes state.db, Vibe meta.json). */
+	private _multiAgentSources(): MultiAgentSource[] {
+		return [
+			createCopilotCliMultiAgentSource(this.copilotAppData, f => this.extractCopilotCliUuid(f)),
+			...createMultiAgentSources({ hermes: this.hermes, mistralVibe: this.mistralVibe }),
+		];
 	}
 
-	/** Counts Copilot CLI sessions (from data.db hierarchy) with 2+ direct child workspaces. */
-	private async _countCliMultiAgentParents(cliUuids: string[]): Promise<number> {
-		if (cliUuids.length === 0) { return 0; }
-		try {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
-			let count = 0;
-			for (const uuid of cliUuids) {
-				const node = hierarchy.get(uuid);
-				if (node && node.totalChildCount >= STAGE_THRESHOLDS.agentic.multiAgentMinChildren) { count++; }
-			}
-			return count;
-		} catch {
-			return 0; /* optional enrichment — suppress */
+	/** Collects multi-agent candidates (source + session id + day key) from usage results inside the last-30-days window. */
+	private async _collectMultiAgentCandidates(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): Promise<MultiAgentCandidate[]> {
+		const rows: { sessionFile: string; dayKey: string }[] = [];
+		for (const r of usageResults) {
+			if (!r) { continue; }
+			const dayKey = this.computeLastActivityKey(r.sessionData, r.mtime);
+			if (dayKey < last30DaysUtcStartKey) { continue; }
+			rows.push({ sessionFile: r.sessionFile, dayKey });
 		}
+		return collectMultiAgentCandidates(this._multiAgentSources(), rows);
 	}
 
 	/**
-	 * Query data.db (Copilot CLI) and Hermes's state.db for multi-agent parent counts and
-	 * set the combined total on the period. A session counts as a "multi-agent parent" when
-	 * it has 2+ direct children (child workspaces for Copilot CLI; `source='subagent'` rows
-	 * pointing back via `parent_session_id` for Hermes). Errors are swallowed — optional enrichment only.
+	 * Query the multi-agent sources (Copilot CLI data.db, Hermes state.db, Vibe meta.json)
+	 * for multi-agent parent counts and set the combined total on the period. A session counts
+	 * as a "multi-agent parent" when it has 2+ direct children. Errors are swallowed — optional
+	 * enrichment only.
 	 */
 	private async enrichMultiAgentParentCount(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		last30DaysStats: UsageAnalysisPeriod,
 		last30DaysUtcStartKey: string,
 	): Promise<void> {
-		const { cliUuids, hermesIds } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
-		let count = await this._countCliMultiAgentParents(cliUuids);
-		if (hermesIds.length > 0) {
-			try {
-				count += await this.hermes.getMultiAgentParentCount(hermesIds);
-			} catch { /* optional enrichment — suppress */ }
-		}
-		if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
-	}
-
-	/** Buckets multi-agent-parent counts (CLI + Hermes) per day into `byDay`. Shared by `_computeAgenticDailyTrend`. */
-	private async _bucketMultiAgentParentsByDay(
-		cliUuids: string[],
-		hermesIds: string[],
-		dayByCliUuid: Map<string, string>,
-		dayByHermesId: Map<string, string>,
-		byDay: Map<string, { multiAgentParentSessions: number; delegationSessions: number }>,
-	): Promise<void> {
-		const getEntry = (day: string) => {
-			let entry = byDay.get(day);
-			if (!entry) { entry = { multiAgentParentSessions: 0, delegationSessions: 0 }; byDay.set(day, entry); }
-			return entry;
-		};
-		const threshold = STAGE_THRESHOLDS.agentic.multiAgentMinChildren;
-		if (cliUuids.length > 0) {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
-			for (const uuid of cliUuids) {
-				const node = hierarchy.get(uuid);
-				const day = dayByCliUuid.get(uuid);
-				if (node && node.totalChildCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
-			}
-		}
-		if (hermesIds.length > 0) {
-			const childCounts = await this.hermes.getChildCounts(hermesIds);
-			for (const id of hermesIds) {
-				const childCount = childCounts.get(id) ?? 0;
-				const day = dayByHermesId.get(id);
-				if (childCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
-			}
-		}
+		try {
+			const candidates = await this._collectMultiAgentCandidates(usageResults, last30DaysUtcStartKey);
+			const count = await countMultiAgentParents(candidates);
+			if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
+		} catch { /* optional enrichment — suppress */ }
 	}
 
 	/**
 	 * Builds the daily "Multi-Agent Usage" trend (last ~30 days) shown as a sparkline on the
 	 * Fluency dashboard's Agentic category card. Each day combines two independent signals:
-	 * multi-agent-parent sessions (data.db/Hermes hierarchy, 2+ children) and delegation
+	 * multi-agent-parent sessions (multi-agent source hierarchy, 2+ children) and delegation
 	 * sessions (adapter-agnostic tool-name classification). Errors are swallowed — optional
 	 * enrichment only, absent from the payload when it fails or there is no signal.
 	 */
@@ -8161,9 +8108,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		last30DaysUtcStartKey: string,
 	): Promise<AgenticTrendPoint[] | undefined> {
 		try {
-			const { cliUuids, hermesIds, dayByCliUuid, dayByHermesId } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+			const candidates = await this._collectMultiAgentCandidates(usageResults, last30DaysUtcStartKey);
 			const byDay = new Map<string, { multiAgentParentSessions: number; delegationSessions: number }>();
-			await this._bucketMultiAgentParentsByDay(cliUuids, hermesIds, dayByCliUuid, dayByHermesId, byDay);
+			await bucketMultiAgentParentsByDay(candidates, byDay);
 			for (const r of usageResults) {
 				if (!r || r.sessionData.taskCategory !== 'Delegation') { continue; }
 				const day = this.computeLastActivityKey(r.sessionData, r.mtime);
@@ -9447,8 +9394,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async getSessionLogData(sessionFile: string, strict = false): Promise<SessionLogData> {
 		// Use pre-enriched details from the diagnostics cache when available — it carries
-		// hierarchy data (parentInfo, childInfo) populated by enrichSessionHierarchy /
-		// enrichPiSessionHierarchy during the background load.
+		// hierarchy data (parentInfo, childInfo) populated by analysis/sessionHierarchy.ts
+		// during the background load.
 		const cached = this.diagnosticsCachedFiles.find(f => f.file === sessionFile);
 		const details = cached ?? await this.getSessionFileDetails(sessionFile);
 		let subAgentsStarted: number | undefined;
@@ -15027,8 +14974,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       }
       await yieldToEventLoop();
     }
-    await this.enrichSessionHierarchy(detailedSessionFiles);
-    await this.enrichPiSessionHierarchy(detailedSessionFiles);
+    await enrichCopilotSessionHierarchy(this.copilotAppData, f => this.extractCopilotCliUuid(f), detailedSessionFiles);
+    await enrichPiSessionHierarchy(detailedSessionFiles);
+    await enrichVibeSessionHierarchy(this.mistralVibe, detailedSessionFiles);
     await this.sendBgLoadResults(panel, detailedSessionFiles, initialCacheHits, initialCacheMisses);
   }
 
@@ -15052,112 +15000,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       return UUID_RE.test(uuid) ? uuid : null;
     }
     return null;
-  }
-
-  /**
-   * Enrich Copilot CLI sessions in `files` with parent/child hierarchy data
-   * read from ~/.copilot/data.db.  All other session types are left untouched.
-   * Errors are suppressed — hierarchy is an optional enrichment.
-   */
-  private async enrichSessionHierarchy(files: SessionFileDetails[]): Promise<void> {
-    // Build uuid → SessionFileDetails map for Copilot CLI sessions only.
-    const uuidToDetails = new Map<string, SessionFileDetails>();
-    for (const details of files) {
-      const uuid = this.extractCopilotCliUuid(details.file);
-      if (uuid) { uuidToDetails.set(uuid, details); }
-    }
-    if (uuidToDetails.size === 0) { return; }
-
-    try {
-      const hierarchy = await this.copilotAppData.getSessionHierarchy([...uuidToDetails.keys()]);
-      for (const [uuid, node] of hierarchy) {
-        const details = uuidToDetails.get(uuid);
-        if (!details) { continue; }
-        if (node.parentUuid) {
-          const ref: SessionRelationRef = {
-            uuid: node.parentUuid,
-            name: node.parentName ?? node.parentUuid,
-            sessionFile: uuidToDetails.get(node.parentUuid)?.file,
-          };
-          details.parentInfo = ref;
-        }
-        if (node.childUuids.length > 0) {
-          details.childInfo = node.childUuids.map(cUuid => ({
-            uuid: cUuid,
-            name: node.childNames.get(cUuid) ?? cUuid,
-            sessionFile: uuidToDetails.get(cUuid)?.file,
-          } satisfies SessionRelationRef));
-          details.totalChildCount = node.totalChildCount;
-        }
-      }
-    } catch { /* hierarchy is optional — never surface errors */ }
-  }
-
-  /**
-   * Enrich Pi sessions in `files` with parent/child hierarchy data derived from
-   * the `parentSession` field in each session's JSONL header.
-   * All other session types are left untouched.
-   * Errors are suppressed — hierarchy is an optional enrichment.
-   */
-  private async enrichPiSessionHierarchy(files: SessionFileDetails[]): Promise<void> {
-    const pi = new PiDataAccess();
-    const piFiles = files.filter(f => pi.isPiSessionFile(f.file));
-    if (piFiles.length === 0) { return; }
-
-    // Normalise a path for platform-independent comparison.
-    const norm = (p: string) => _normalizePath(p);
-
-    // Build normalised-path → SessionFileDetails map.
-    const pathToDetails = new Map<string, SessionFileDetails>();
-    for (const details of piFiles) {
-      pathToDetails.set(norm(details.file), details);
-    }
-
-    // Discover parent links.
-    // Primary: path-based detection (pi nests child sessions under {parentId}/{hash}/run-N/session.jsonl).
-    // Fallback: header-based parentSession field (future pi versions may use this).
-    const parentByChild = new Map<string, string>();     // normChildPath → normParentPath
-    const childrenByParent = new Map<string, string[]>(); // normParentPath → normChildPaths[]
-    await Promise.all(piFiles.map(async (details) => {
-      try {
-        const rawParent =
-          pi.getParentSessionPathFromFilePath(details.file) ??
-          await pi.getParentSessionPath(details.file);
-        if (!rawParent) { return; }
-        const normChild = norm(details.file);
-        const normParent = norm(rawParent);
-        parentByChild.set(normChild, normParent);
-        if (!childrenByParent.has(normParent)) { childrenByParent.set(normParent, []); }
-        childrenByParent.get(normParent)!.push(normChild);
-      } catch { /* skip unreadable sessions */ }
-    }));
-
-    // Apply parentInfo to child sessions.
-    for (const [normChild, normParent] of parentByChild) {
-      const childDetails = pathToDetails.get(normChild);
-      if (!childDetails) { continue; }
-      const parentDetails = pathToDetails.get(normParent);
-      childDetails.parentInfo = {
-        uuid: normParent,
-        name: parentDetails?.title ?? path.basename(path.dirname(normParent)),
-        sessionFile: parentDetails?.file,
-      } satisfies SessionRelationRef;
-    }
-
-    // Apply childInfo to parent sessions.
-    for (const [normParent, normChildren] of childrenByParent) {
-      const parentDetails = pathToDetails.get(normParent);
-      if (!parentDetails) { continue; }
-      parentDetails.childInfo = normChildren.map(nc => {
-        const childDetails = pathToDetails.get(nc);
-        return {
-          uuid: nc,
-          name: childDetails?.title ?? path.basename(path.dirname(nc)),
-          sessionFile: childDetails?.file,
-        } satisfies SessionRelationRef;
-      });
-      parentDetails.totalChildCount = normChildren.length;
-    }
   }
 
   /**

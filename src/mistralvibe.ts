@@ -715,6 +715,94 @@ return (await this.getRuntimePath(metaJsonPath)) === 'session_api';
 }
 
 /**
+ * Identity + hierarchy fields of one session from its meta.json, in both layouts:
+ * `session_id`, `parent_session_id` (set on a subsession pointing at the session that
+ * spawned it; null for root sessions) and `child_sessions` (the parent's own list —
+ * only the unified store writes it; the legacy layout relies on the children's
+ * `parent_session_id` instead). Untrusted strings are treated as absent (protoGuard).
+ */
+async getSessionIdentity(metaJsonPath: string): Promise<{ sessionId?: string; parentSessionId?: string; childSessionIds: string[] }> {
+const meta = await this.readSessionMeta(metaJsonPath);
+const out: { sessionId?: string; parentSessionId?: string; childSessionIds: string[] } = { childSessionIds: [] };
+if (!meta) { return out; }
+const sessionId = meta.session_id;
+if (typeof sessionId === 'string' && sessionId && !isUnsafeObjectKey(sessionId)) { out.sessionId = sessionId; }
+const parent = meta.parent_session_id;
+if (typeof parent === 'string' && parent && !isUnsafeObjectKey(parent)) { out.parentSessionId = parent; }
+if (Array.isArray(meta.child_sessions)) {
+out.childSessionIds = meta.child_sessions.filter((c: unknown): c is string => typeof c === 'string' && !!c && !isUnsafeObjectKey(c));
+}
+return out;
+}
+
+/**
+ * Resolve the meta.json path of a session by its session_id, across the Vibe home and any
+ * AoE sandbox stores: the unified store names the directory `<uuid>` directly, the legacy
+ * layout names it `session_<YYYYMMDD>_<HHMMSS>_<session_id[:8]>`. Returns undefined when no
+ * session with that id exists. The id is allow-listed to path-safe characters first, since
+ * it comes from parsed (untrusted) meta.json.
+ */
+async findSessionMetaById(sessionId: string): Promise<string | undefined> {
+if (!sessionId || isUnsafeObjectKey(sessionId) || !/^[0-9a-z-]+$/i.test(sessionId)) { return undefined; }
+const home = this.getVibeHomeDir();
+const roots = [home, ...await findVibeSandboxRoots(home)];
+const id8 = sessionId.slice(0, 8).toLowerCase();
+for (const root of roots) {
+const unifiedMeta = await this.findUnifiedMetaById(root, sessionId);
+if (unifiedMeta) { return unifiedMeta; }
+const legacyMeta = await this.findLegacyMetaById(root, id8);
+if (legacyMeta) { return legacyMeta; }
+}
+return undefined;
+}
+
+/** The unified store's meta.json for `sessionId` under one root, when it exists. */
+private async findUnifiedMetaById(root: string, sessionId: string): Promise<string | undefined> {
+const unifiedMeta = path.join(root, 'logs', 'session', 'unified', sessionId, 'meta.json');
+try { await fs.promises.access(unifiedMeta); return unifiedMeta; } catch { return undefined; }
+}
+
+/** The legacy `session_*_<id8>` directory's meta.json under one root, when it exists. */
+private async findLegacyMetaById(root: string, id8: string): Promise<string | undefined> {
+let entries: { name: string; isDirectory(): boolean }[];
+try {
+entries = await fs.promises.readdir(path.join(root, 'logs', 'session'), { withFileTypes: true });
+} catch { return undefined; }
+for (const entry of entries) {
+if (!entry.isDirectory() || !entry.name.toLowerCase().endsWith(`_${id8}`)) { continue; }
+const metaPath = path.join(root, 'logs', 'session', entry.name, 'meta.json');
+try { await fs.promises.access(metaPath); return metaPath; } catch { /* keep looking */ }
+}
+return undefined;
+}
+
+/**
+ * Child-session counts keyed by parent session id, restricted to `candidateSessionIds`.
+ * Mirrors HermesDataAccess.getChildCounts: scans every discovered session's meta.json
+ * `parent_session_id` (recorded on the child in both layouts) and counts children per
+ * parent. A parent listed in the candidates but whose children were deleted is absent
+ * from the map. Errors are suppressed — optional enrichment only.
+ */
+async getChildCounts(candidateSessionIds: string[]): Promise<Map<string, number>> {
+const counts = new Map<string, number>();
+if (candidateSessionIds.length === 0) { return counts; }
+const candidateSet = new Set(candidateSessionIds);
+let sessionFiles: string[];
+try {
+sessionFiles = await this.discoverSessions();
+} catch { return counts; }
+await Promise.all(sessionFiles.map(async (metaPath) => {
+try {
+const identity = await this.getSessionIdentity(metaPath);
+if (identity.parentSessionId && candidateSet.has(identity.parentSessionId)) {
+counts.set(identity.parentSessionId, (counts.get(identity.parentSessionId) ?? 0) + 1);
+}
+} catch { /* skip unreadable sessions */ }
+}));
+return counts;
+}
+
+/**
  * Get session metadata: title, timestamps, model, workspace directory.
  * Timestamps are ISO 8601 strings in meta.json (no epoch conversion needed).
  * `workspacePath` is `environment.working_directory`, present in both layouts.

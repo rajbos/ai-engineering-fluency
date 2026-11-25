@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
+import { buildAdapterRegistry, createDataAccessInstances, type DataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
 import { parseSessionFileContent } from '../../src/sessionParser';
@@ -60,16 +60,28 @@ export interface ProcessSessionFileOptions {
 	cache?: SessionDataCache;
 }
 
+/** Synchronous lazy-initialized data-access instances — created once on first use. */
+let _dataAccess: DataAccessInstances | null = null;
+
+/**
+ * Returns the shared data-access instances (one per vendor), creating them on first call.
+ * No extension host here: the constructors only need a file-URI-shaped path for WASM loading.
+ */
+export function getDataAccessInstances(): DataAccessInstances {
+	if (_dataAccess) { return _dataAccess; }
+	const fakeUri = { fsPath: __dirname, path: __dirname, scheme: 'file' };
+	_dataAccess = createDataAccessInstances(fakeUri);
+	return _dataAccess;
+}
+
 /** Synchronous lazy-initialized ecosystem registry — created once on first use. */
 let _ecosystems: IEcosystemAdapter[] | null = null;
 
 /** Returns the shared ecosystem adapter registry, creating it on first call. */
 export function getEcosystems(): IEcosystemAdapter[] {
 	if (_ecosystems) { return _ecosystems; }
-	// No extension host here: the data-access constructors only need a file-URI-shaped path.
-	const fakeUri = { fsPath: __dirname, path: __dirname, scheme: 'file' };
 	_ecosystems = buildAdapterRegistry({
-		...createDataAccessInstances(fakeUri),
+		...getDataAccessInstances(),
 		estimateTokens: (t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators),
 		isMcpTool,
 		extractMcpServerName,
