@@ -654,6 +654,10 @@ test('getEditorTypeFromPath: detects Claude Desktop Cowork from renamed claude-c
         assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/claude-code-sessions/app/machine/local_abc/.claude/projects/hash/session.jsonl'), 'Claude Desktop Cowork');
 });
 
+test('getEditorTypeFromPath: detects Claude Desktop Cowork in the moved Claude-Data location', () => {
+        assert.equal(getEditorTypeFromPath('C:\\Users\\dev\\AppData\\Local\\Claude-Data\\claude_pzs8sxrjxfjjc\\claude-code-sessions\\app\\machine\\local_abc\\.claude\\projects\\hash\\session.jsonl'), 'Claude Desktop Cowork');
+});
+
 test('getEditorTypeFromPath: returns Unknown for unrecognized paths', () => {
         assert.equal(getEditorTypeFromPath('/tmp/random/file.json'), 'Unknown');
 });

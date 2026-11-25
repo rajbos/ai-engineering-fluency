@@ -2,9 +2,13 @@
  * Claude Desktop Cowork data access layer.
  * Handles reading session data from Claude Desktop's Cowork (local agent mode) feature.
  *
- * Cowork sessions are stored under the Claude Desktop config dir:
- *   Windows: %LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\
+ * Cowork sessions are stored under the Claude Desktop config dir (see claudeDesktopConfigDirs()):
+ *   Windows: %LOCALAPPDATA%\Claude-Data\claude_<package>\   (current installs)
+ *            %LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\
+ *              (older MSIX installs; only a `.user-data-left.*` marker remains once the app moved its data)
+ *            %APPDATA%\Claude\                               (non-MSIX installs)
  *   macOS:   ~/Library/Application Support/Claude/
+ * Every existing location is read, newest first; a session present in two locations counts once.
  * in a session subdirectory that was RENAMED by the desktop app:
  *   current: claude-code-sessions\         (since ~Aug 2026)
  *   legacy:  local-agent-mode-sessions\    (still read for older installs)
@@ -81,46 +85,80 @@ const CLAUDE_DESKTOP_PACKAGE = 'Claude_pzs8sxrjxfjjc';
  * The app renamed 'local-agent-mode-sessions' to 'claude-code-sessions';
  * both are read so older installs keep working.
  */
-const CLAUDE_DESKTOP_SESSION_DIR_NAMES = ['claude-code-sessions', 'local-agent-mode-sessions'] as const;
+export const CLAUDE_DESKTOP_SESSION_DIR_NAMES = ['claude-code-sessions', 'local-agent-mode-sessions'] as const;
+
+/**
+ * Candidate Claude Desktop config directories on this machine (existing or not), newest
+ * location first. The single source of truth for where the desktop app keeps its data.
+ *
+ * On Windows the app moved its user data out of the MSIX package's redirected
+ * `LocalCache\Roaming\Claude` folder into `%LOCALAPPDATA%\Claude-Data\claude_<package>`
+ * (a README.txt there explains it); the packaged folder and the non-MSIX
+ * `%APPDATA%\Claude` are still returned for older installs.
+ */
+export function claudeDesktopConfigDirs(): string[] {
+	if (process.platform === 'win32') {
+		const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+		const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+		return [
+			...claudeDataDirs(path.join(localAppData, 'Claude-Data')),
+			path.join(localAppData, 'Packages', CLAUDE_DESKTOP_PACKAGE, 'LocalCache', 'Roaming', 'Claude'),
+			path.join(appData, 'Claude'),
+		];
+	}
+	if (process.platform === 'darwin') {
+		return [path.join(os.homedir(), 'Library', 'Application Support', 'Claude')];
+	}
+	return [];
+}
+
+/** The `claude_<package>` folders inside a `Claude-Data` root, sorted for a stable order. */
+function claudeDataDirs(dataRoot: string): string[] {
+	try {
+		return fs.readdirSync(dataRoot, { withFileTypes: true })
+			.filter(e => e.isDirectory() && e.name.toLowerCase().startsWith('claude'))
+			.map(e => path.join(dataRoot, e.name))
+			.sort();
+	} catch {
+		return []; // not installed this way
+	}
+}
+
+function dirExists(dir: string): boolean {
+	try {
+		return fs.statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/** Case-insensitive, separator-neutral key for a path relative to its session base dir. */
+function relativeSessionKey(baseDir: string, filePath: string): string {
+	return path.relative(baseDir, filePath).replace(/\\/g, '/').toLowerCase();
+}
 
 export class ClaudeDesktopDataAccess {
 
 	/**
-	 * Get the Claude Desktop config directory that holds the session subdirectories.
-	 * Returns an empty string on unsupported platforms (Linux).
+	 * @param getConfigDirs where to look for the desktop app's config dirs; tests pass a
+	 *   temporary fixture so real user data is never read.
 	 */
-	private getDesktopConfigDir(): string {
-		const platform = os.platform();
-		if (platform === 'win32') {
-			const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-			return path.join(
-				localAppData,
-				'Packages',
-				CLAUDE_DESKTOP_PACKAGE,
-				'LocalCache',
-				'Roaming',
-				'Claude'
-			);
-		}
-		if (platform === 'darwin') {
-			return path.join(
-				os.homedir(),
-				'Library',
-				'Application Support',
-				'Claude'
-			);
-		}
-		return '';
-	}
+	constructor(private readonly getConfigDirs: () => string[] = claudeDesktopConfigDirs) {}
 
 	/**
-	 * Get all candidate Claude Desktop session base directories (newest naming first,
-	 * legacy 'local-agent-mode-sessions' last). Empty on unsupported platforms.
+	 * Get all Claude Desktop session base directories, newest location first and, within a
+	 * location, newest naming first (legacy 'local-agent-mode-sessions' last).
+	 *
+	 * Only directories that exist are returned, so a moved install (whose old packaged folder
+	 * is left with just a marker file) does not add dead entries. When none exist, the
+	 * candidates of the preferred location are returned so diagnostics still show where we
+	 * looked. Empty on unsupported platforms (Linux).
 	 */
 	getDesktopSessionDirs(): string[] {
-		const configDir = this.getDesktopConfigDir();
-		if (!configDir) { return []; }
-		return CLAUDE_DESKTOP_SESSION_DIR_NAMES.map(name => path.join(configDir, name));
+		const candidates = this.getConfigDirs()
+			.map(configDir => CLAUDE_DESKTOP_SESSION_DIR_NAMES.map(name => path.join(configDir, name)));
+		const existing = candidates.flat().filter(dirExists);
+		return existing.length > 0 ? existing : (candidates[0] ?? []);
 	}
 
 	/**
@@ -152,16 +190,26 @@ export class ClaudeDesktopDataAccess {
 	 */
 	async getDesktopSessionFiles(): Promise<string[]> {
 		const results: string[] = [];
+		// A session copied into a newer location may still sit in an older one; its path relative
+		// to the session base dir is the same in both, so the first (newest) location wins.
+		const seen = new Set<string>();
 		for (const baseDir of this.getDesktopSessionDirs()) {
 			try {
 				await fs.promises.access(baseDir);
 			} catch {
 				continue;
 			}
+			const found: string[] = [];
 			try {
-				await this.walkForJsonlFiles(baseDir, results, 0, 8);
+				await this.walkForJsonlFiles(baseDir, found, 0, 8);
 			} catch {
 				// Ignore top-level errors
+			}
+			for (const file of found) {
+				const key = relativeSessionKey(baseDir, file);
+				if (seen.has(key)) { continue; }
+				seen.add(key);
+				results.push(file);
 			}
 		}
 		return results;
@@ -224,7 +272,9 @@ export class ClaudeDesktopDataAccess {
 			// No ~/.claude/projects at all — every record then counts as missing, which is accurate.
 		}
 
-		for (const machineDir of await this.getDesktopMetadataDirs()) {
+		// Same record in two locations (moved install) counts once; the newest location wins.
+		const seen = new Set<string>();
+		for (const { baseDir, machineDir } of await this.getDesktopMetadataDirs()) {
 			let entries: string[];
 			try {
 				entries = await fs.promises.readdir(machineDir);
@@ -233,6 +283,9 @@ export class ClaudeDesktopDataAccess {
 			}
 			for (const entry of entries) {
 				if (!entry.startsWith('local_') || !entry.endsWith('.json')) { continue; }
+				const key = relativeSessionKey(baseDir, path.join(machineDir, entry));
+				if (seen.has(key)) { continue; }
+				seen.add(key);
 				knownSessions++;
 				if (await this.hasLocalTranscript(machineDir, entry, claudeProjectsDir, projectSlugs)) { withTranscript++; }
 			}
@@ -242,11 +295,13 @@ export class ClaudeDesktopDataAccess {
 	}
 
 	/** Resolve the `<base>/<app-uuid>/<machine-uuid>` directories that hold `local_<id>.json` records. */
-	private async getDesktopMetadataDirs(): Promise<string[]> {
-		const dirs: string[] = [];
+	private async getDesktopMetadataDirs(): Promise<{ baseDir: string; machineDir: string }[]> {
+		const dirs: { baseDir: string; machineDir: string }[] = [];
 		for (const baseDir of this.getDesktopSessionDirs()) {
 			for (const appDir of await this.readSubdirectories(baseDir)) {
-				dirs.push(...await this.readSubdirectories(appDir));
+				for (const machineDir of await this.readSubdirectories(appDir)) {
+					dirs.push({ baseDir, machineDir });
+				}
 			}
 		}
 		return dirs;

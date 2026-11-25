@@ -18,35 +18,17 @@
  * Read-only, best effort: anything missing or unparseable is skipped.
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { CLAUDE_DESKTOP_SESSION_DIR_NAMES, claudeDesktopConfigDirs } from './claudedesktop';
 import { readGitOriginUrl } from './darkFactorySignals';
 import { repoDisplayName } from './repeatedTasks';
 import { RECENT_RUN_LIMIT } from './scheduledTasks';
 import type { ScheduledTaskDefinition, ScheduledTaskRun } from './types';
 
-const CLAUDE_DESKTOP_PACKAGE = 'Claude_pzs8sxrjxfjjc';
-const SESSION_DIR_NAMES = ['claude-code-sessions', 'local-agent-mode-sessions'];
+const SESSION_DIR_NAMES = CLAUDE_DESKTOP_SESSION_DIR_NAMES;
 
-/** Candidate Claude desktop config directories on this machine (existing or not). */
-export function claudeDesktopConfigDirs(): string[] {
-	if (process.platform === 'win32') {
-		const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-		const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-		const dataRoot = path.join(localAppData, 'Claude-Data');
-		let current: string[] = [];
-		try {
-			current = fs.readdirSync(dataRoot, { withFileTypes: true })
-				.filter(e => e.isDirectory() && e.name.toLowerCase().startsWith('claude'))
-				.map(e => path.join(dataRoot, e.name));
-		} catch { /* not installed this way */ }
-		return [...current, path.join(localAppData, 'Packages', CLAUDE_DESKTOP_PACKAGE, 'LocalCache', 'Roaming', 'Claude'), path.join(appData, 'Claude')];
-	}
-	if (process.platform === 'darwin') {
-		return [path.join(os.homedir(), 'Library', 'Application Support', 'Claude')];
-	}
-	return [];
-}
+/** Re-exported: the Cowork session reader and this module share one list of config dirs. */
+export { claudeDesktopConfigDirs };
 
 async function subdirs(dir: string): Promise<string[]> {
 	try {
