@@ -10,6 +10,8 @@ import {
 	recentSuccessRate,
 	scheduledTaskFindings,
 	scheduledTasksForRepo,
+	scheduledTaskKey,
+	trackFailingTasks,
 	FAILING_MIN_RUNS,
 	RECENT_RUN_LIMIT,
 	STALE_AFTER_DAYS,
@@ -161,4 +163,17 @@ test('mergeScheduledTasks: links recent runs to analysed sessions; failing findi
 	const [finding] = scheduledTaskFindings(merged, NOW);
 	assert.equal(finding.id, 'failing-scheduled-automation');
 	assert.match(finding.detail, /failed 2 of its last 3 runs \(the 2 failed run\(s\) with a known session used 1,500,000 tokens, about \$4\.25\)/);
+});
+
+test('trackFailingTasks: reports only failing tasks not yet notified, and forgets ones that recovered', () => {
+	const task = (name: string, health: 'failing' | 'healthy' | 'stale') => ({ name, platform: 'copilot' as const, runCount: 0, activeDays: 0, lastRun: null, health });
+	const first = trackFailingTasks([task('a', 'failing'), task('b', 'healthy'), task('c', 'stale')], []);
+	assert.deepEqual(first.newlyFailing.map(t => t.name), ['a']);
+	assert.deepEqual(first.failingKeys, ['copilot:a']);
+	assert.deepEqual(trackFailingTasks([task('a', 'failing')], first.failingKeys).newlyFailing, []);
+	// "a" recovered, so it is dropped from the stored keys and announced again when it fails later.
+	const recovered = trackFailingTasks([task('a', 'healthy')], first.failingKeys);
+	assert.deepEqual(recovered.failingKeys, []);
+	assert.deepEqual(trackFailingTasks([task('a', 'failing')], recovered.failingKeys).newlyFailing.map(t => t.name), ['a']);
+	assert.equal(scheduledTaskKey({ platform: 'claude', name: 'x' }), 'claude:x');
 });

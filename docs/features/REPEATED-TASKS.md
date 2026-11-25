@@ -125,8 +125,16 @@ they are older than the 30-day stats window.
   title (`vscode-extension/src/webview/usage/scheduledAutomations.ts`). Below it, **Failed runs**
   lists each failed recent run with its date, tokens and cost, and an Open button for its session,
   with the total in the heading.
-- **Insights**: `scheduled-automation-at-risk` (a tip naming stale and failing tasks) and
-  `scheduled-tasks-running` (a celebration for tasks that ran in the window).
+- **Insights**: `scheduled-automation-failing` (a tip naming failing tasks with what their failed
+  runs cost), `scheduled-automation-at-risk` (a tip naming stale tasks) and `scheduled-tasks-running`
+  (a celebration for tasks that ran in the window).
+- **First-failure notice**: the extension stores which tasks it already reported as failing
+  (`insights.notifiedFailingAutomations`). When a task starts failing that is not in that list,
+  `reopenFailingAutomationInsight()` re-opens the failing insight (even if it was dismissed) and
+  `pickToastInsight()` shows it as a toast past the usual insight cadence, with the task, its failure
+  count and the failed runs' tokens and cost; the status-bar tooltip carries the same text. A task
+  that recovers is dropped from the list, so failing again is reported again. Turning off
+  `aiEngineeringFluency.insights.toastsEnabled` keeps the toast away; the badge and card remain.
 - **AI Readiness**: per repository, the `stale-scheduled-automation` and
   `failing-scheduled-automation` findings (see
   [DARK-FACTORY-READINESS.md](DARK-FACTORY-READINESS.md#anti-patterns)).

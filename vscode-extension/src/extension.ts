@@ -185,7 +185,7 @@ import {
   evaluateUsageInsights as _evaluateUsageInsights,
   mergeInsightStates as _mergeInsightStates,
   countNewInsights as _countNewInsights,
-  isToastAllowed as _isToastAllowed,
+  pickToastInsight as _pickToastInsight, insightToastMessage as _insightToastMessage, insightTooltipTitle as _insightTooltipTitle, reopenFailingAutomationInsight as _reopenFailingAutomationInsight,
 } from '../../src/insightsEngine';
 
 // --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
@@ -3882,7 +3882,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const topNew = newInsights[0];
 		this.refreshStatusBarInsightBadge(
 			newInsights.length,
-			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+			topNew ? { title: _insightTooltipTitle(topNew), id: topNew.id } : undefined,
 		);
 	}
 
@@ -6664,13 +6664,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
 		const now = new Date().toISOString();
 
+		// A scheduled task that started failing since the last refresh re-opens its insight, even if dismissed.
+		const failing = _reopenFailingAutomationInsight(stats.repeatedTasks?.scheduledTasks ?? [], this._insightStateBag, this.context.globalState.get<string[]>('insights.notifiedFailingAutomations', []));
 		// The same evaluation the Usage Analysis payload runs, so a toast never sees fewer inputs than the panel.
 		const evaluated = _evaluateUsageInsights(stats, this.insightEvaluationState());
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
 		this.refreshInsightBadgeFromState(now, evaluated);
 
-		await this.context.globalState.update('insights.state', this._insightStateBag);
+		await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag), this.context.globalState.update('insights.notifiedFailingAutomations', failing.failingKeys)]);
 		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open
@@ -6684,9 +6686,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Surface a toast for the highest-weight 'new' allowToast insight (rate-limited)
 		const toastsEnabled = vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('insights.toastsEnabled', true);
 		if (!toastsEnabled) { return; }
-		if (!_isToastAllowed(cadenceDays, this._lastInsightNudgeAt, now)) { return; }
-
-		const toastCandidate = evaluated.find(i => i.allowToast && i.status === 'new');
+		// Rate-limited by the cadence, except a scheduled automation that just started failing.
+		const toastCandidate = _pickToastInsight(evaluated, cadenceDays, this._lastInsightNudgeAt, now, failing.reopened);
 		if (!toastCandidate) { return; }
 
 		this._lastInsightNudgeAt = now;
@@ -6698,7 +6699,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const view = l10n.t('button.openInsightsTab');
 		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			`💡 ${toastCandidate.title}`,
+			_insightToastMessage(toastCandidate),
 			view,
 			dismiss,
 		);

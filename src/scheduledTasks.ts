@@ -40,6 +40,29 @@ export function isAtRisk(task: Pick<ScheduledTaskSummary, 'health'>): boolean {
 	return task.health !== undefined && AT_RISK_HEALTH.includes(task.health);
 }
 
+/** Stable identity of a task across refreshes: platform plus name. */
+export function scheduledTaskKey(task: Pick<ScheduledTaskSummary, 'platform' | 'name'>): string {
+	return `${task.platform}:${task.name}`;
+}
+
+/**
+ * Which failing tasks are failing for the first time, given the keys the host
+ * already told the user about. `failingKeys` is what the host should store
+ * next: only the tasks failing now, so a task that recovers and later fails
+ * again is reported again.
+ */
+export function trackFailingTasks(
+	tasks: readonly ScheduledTaskSummary[],
+	notifiedKeys: readonly string[],
+): { newlyFailing: ScheduledTaskSummary[]; failingKeys: string[] } {
+	const failing = tasks.filter(t => t.health === 'failing');
+	const notified = new Set(notifiedKeys);
+	return {
+		newlyFailing: failing.filter(t => !notified.has(scheduledTaskKey(t))),
+		failingKeys: failing.map(scheduledTaskKey),
+	};
+}
+
 /** Successful share of the recent runs, or null when there are none. */
 export function recentSuccessRate(runs: readonly ScheduledTaskRun[] | undefined): number | null {
 	if (!runs || runs.length === 0) { return null; }

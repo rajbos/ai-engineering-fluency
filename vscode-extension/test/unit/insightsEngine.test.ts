@@ -2,8 +2,8 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { INSIGHT_CATALOG, evaluateInsights } from '../../../src/insightsEngine';
-import type { InsightContext } from '../../../src/insightsEngine';
+import { INSIGHT_CATALOG, evaluateInsights, insightToastMessage, insightTooltipTitle, pickToastInsight, reopenFailingAutomationInsight } from '../../../src/insightsEngine';
+import type { InsightContext, InsightStateBag } from '../../../src/insightsEngine';
 import { createTranslator } from '../../src/l10nCore';
 import type { ToolCurationAnalysis, UsageAnalysisPeriod, MemoryFilesAnalysis } from '../../../src/types';
 
@@ -1038,7 +1038,7 @@ test('scheduled-tasks-running: celebrates tasks already on a schedule and names 
 	assert.equal(evaluateInsights(single, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
 });
 
-test('scheduled-automation-at-risk: names stale and failing automations, not healthy or disabled ones', () => {
+test('scheduled-automation-at-risk names stale automations; scheduled-automation-failing names failing ones with their cost', () => {
 	const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 	const ctx = makeCtx();
 	ctx.repeatedTasks = {
@@ -1046,7 +1046,8 @@ test('scheduled-automation-at-risk: names stale and failing automations, not hea
 		scheduledTasks: [
 			{ name: 'stopped', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(45), health: 'stale' },
 			{ name: 'never', platform: 'copilot', runCount: 0, activeDays: 0, lastRun: null, health: 'stale' },
-			{ name: 'broken', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false }, { at: daysAgo(2), ok: false }, { at: daysAgo(3), ok: true }] },
+			{ name: 'broken', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false, sessionFile: '/s/a.jsonl', tokens: 1_200_000, costUsd: 3 }, { at: daysAgo(2), ok: false, sessionFile: '/s/b.jsonl', tokens: 300_000, costUsd: 1.25 }, { at: daysAgo(3), ok: true }] },
+			{ name: 'flaky', platform: 'claude', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false }, { at: daysAgo(2), ok: false }, { at: daysAgo(3), ok: false }] },
 			{ name: 'fine', platform: 'claude', runCount: 5, activeDays: 5, lastRun: daysAgo(1), health: 'healthy' },
 			{ name: 'off', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(90), health: 'disabled' },
 		],
@@ -1054,17 +1055,56 @@ test('scheduled-automation-at-risk: names stale and failing automations, not hea
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === 'scheduled-automation-at-risk');
 	assert.ok(insight);
-	assert.match(insight.body, /^3 scheduled automations are at risk/);
+	assert.match(insight.body, /^2 scheduled automations stopped running/);
 	assert.match(insight.body, /"stopped" has not run for 45 days/);
 	assert.match(insight.body, /"never" has never run/);
-	assert.match(insight.body, /"broken" failed 2 of its last 3 runs/);
-	assert.doesNotMatch(insight.body, /"fine"|"off"/);
+	assert.doesNotMatch(insight.body, /"broken"|"flaky"|"fine"|"off"/);
+
+	const failing = results.find(i => i.id === 'scheduled-automation-failing');
+	assert.ok(failing);
+	assert.equal(failing.allowToast, true, 'a failing job is worth a toast');
+	assert.ok(results.indexOf(failing) < results.indexOf(insight), 'ranked above the stale list');
+	assert.match(failing.body, /^2 scheduled automations keep failing/);
+	assert.match(failing.body, /"broken" failed 2 of its last 3 runs, using 1\.5M tokens \(about \$4\.25\)/);
+	assert.match(failing.body, /"flaky" failed 3 of its last 3 runs(?!,)/, 'no cost when no failed run has a known session');
 	// Only tasks that ran in the window are celebrated.
-	assert.match(results.find(i => i.id === 'scheduled-tasks-running')!.body, /^2 scheduled tasks ran 8 times/);
+	assert.match(results.find(i => i.id === 'scheduled-tasks-running')!.body, /^3 scheduled tasks ran 11 times/);
 
 	const healthy = makeCtx();
 	healthy.repeatedTasks = { ...ctx.repeatedTasks, scheduledTasks: ctx.repeatedTasks.scheduledTasks!.filter(t => t.health === 'healthy') };
 	assert.equal(evaluateInsights(healthy, {}, 7, null).find(i => i.id === 'scheduled-automation-at-risk'), undefined);
+	assert.equal(evaluateInsights(healthy, {}, 7, null).find(i => i.id === 'scheduled-automation-failing'), undefined);
+});
+
+test('a scheduled automation that starts failing re-opens its insight once and toasts past the cadence', () => {
+	const task = (name: string, health: 'failing' | 'healthy') => ({ name, platform: 'claude' as const, runCount: 3, activeDays: 3, lastRun: null, health, recentRuns: [{ at: '2026-11-20T00:00:00Z', ok: health !== 'failing' }] });
+	const now = '2026-11-25T12:00:00.000Z';
+	const justNudged = '2026-11-25T11:00:00.000Z';
+	const bag: InsightStateBag = { 'scheduled-automation-failing': { status: 'dismissed', firstSurfacedAt: now, lastSurfacedAt: now } };
+
+	// First detection: re-opened even though it was dismissed, and toasted although a toast was just shown.
+	const first = reopenFailingAutomationInsight([task('nightly', 'failing'), task('ok', 'healthy')], bag, []);
+	assert.deepEqual(first, { reopened: true, failingKeys: ['claude:nightly'] });
+	assert.equal(bag['scheduled-automation-failing'], undefined);
+	const ctx = makeCtx();
+	ctx.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: [task('nightly', 'failing')] };
+	const evaluated = evaluateInsights(ctx, bag, 7, justNudged);
+	const toast = pickToastInsight(evaluated, 7, justNudged, now, first.reopened);
+	assert.equal(toast?.id, 'scheduled-automation-failing');
+	assert.match(insightToastMessage(toast!), /^⚠️ A scheduled automation keeps failing — "nightly" failed 1 of its last 1 runs/);
+	assert.match(insightTooltipTitle(toast!), /keeps failing\n\n"nightly" failed/);
+
+	// Already told: nothing re-opened, and the cadence applies again.
+	bag['scheduled-automation-failing'] = { status: 'dismissed', firstSurfacedAt: now, lastSurfacedAt: now };
+	const again = reopenFailingAutomationInsight([task('nightly', 'failing')], bag, first.failingKeys);
+	assert.equal(again.reopened, false);
+	assert.equal(bag['scheduled-automation-failing'].status, 'dismissed');
+	assert.equal(pickToastInsight(evaluateInsights(ctx, bag, 7, justNudged), 7, justNudged, now, again.reopened), undefined);
+
+	// Other insights keep their plain toast and tooltip.
+	const plain = { id: 'x', title: 'Try skills', body: 'body' };
+	assert.equal(insightToastMessage(plain), '💡 Try skills');
+	assert.equal(insightTooltipTitle(plain), 'Try skills');
 });
 
 test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {

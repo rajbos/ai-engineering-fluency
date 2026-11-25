@@ -233,11 +233,15 @@ test('l10n: skill suggestion UI strings resolve in English and zh-cn', () => {
 		["usage.scheduledAutomations.health.manual", "▶ Manual", "▶ 手动"],
 		["usage.scheduledAutomations.health.never-run", "🕒 Not run yet", "🕒 尚未运行"],
 		["insight.scheduledAutomationAtRisk.title", "⚠️ A scheduled automation needs attention", "⚠️ 有计划自动化需要处理"],
-		["insight.scheduledAutomationAtRisk.body.one", "{0} scheduled automation is at risk: {1}. Unattended work that stops or keeps failing goes unnoticed — fix or retire it. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化存在风险：{1}。无人值守的工作停止或持续失败时很难被发现——请修复或停用它。（“已停滞”指已启用但 {2} 天内没有运行。）"],
-		["insight.scheduledAutomationAtRisk.body.other", "{0} scheduled automations are at risk: {1}. Unattended work that stops or keeps failing goes unnoticed — fix or retire them. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化存在风险：{1}。无人值守的工作停止或持续失败时很难被发现——请修复或停用它们。（“已停滞”指已启用但 {2} 天内没有运行。）"],
+		["insight.scheduledAutomationAtRisk.body.one", "{0} scheduled automation stopped running: {1}. Unattended work that stops goes unnoticed — fix or retire it. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化已停止运行：{1}。无人值守的工作停止时很难被发现——请修复或停用它。（“已停滞”指已启用但 {2} 天内没有运行。）"],
+		["insight.scheduledAutomationAtRisk.body.other", "{0} scheduled automations stopped running: {1}. Unattended work that stops goes unnoticed — fix or retire them. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化已停止运行：{1}。无人值守的工作停止时很难被发现——请修复或停用它们。（“已停滞”指已启用但 {2} 天内没有运行。）"],
 		["insight.scheduledAutomationAtRisk.stale", "\"{0}\" has not run for {1} days", "“{0}”已有 {1} 天没有运行"],
 		["insight.scheduledAutomationAtRisk.neverRan", "\"{0}\" has never run", "“{0}”从未运行"],
-		["insight.scheduledAutomationAtRisk.failing", "\"{0}\" failed {1} of its last {2} runs", "“{0}”最近 {2} 次运行中失败了 {1} 次"],
+		["insight.scheduledAutomationFailing.title", "⚠️ A scheduled automation keeps failing", "⚠️ 有计划自动化持续失败"],
+		["insight.scheduledAutomationFailing.body.one", "{1}. Each failed run still spends tokens without finishing the job — open its failed runs to see what went wrong, then fix or pause it.", "{1}。每次失败的运行仍会消耗令牌却没有完成任务——请打开失败的运行查看原因，然后修复或暂停它。"],
+		["insight.scheduledAutomationFailing.body.other", "{0} scheduled automations keep failing: {1}. Each failed run still spends tokens without finishing the job — open the failed runs to see what went wrong, then fix or pause them.", "{0} 个计划自动化持续失败：{1}。每次失败的运行仍会消耗令牌却没有完成任务——请打开失败的运行查看原因，然后修复或暂停它们。"],
+		["insight.scheduledAutomationFailing.task", "\"{0}\" failed {1} of its last {2} runs", "“{0}”最近 {2} 次运行中失败了 {1} 次"],
+		["insight.scheduledAutomationFailing.taskCost", "\"{0}\" failed {1} of its last {2} runs, using {3} tokens (about ${4})", "“{0}”最近 {2} 次运行中失败了 {1} 次，消耗 {3} 个令牌（约 ${4}）"],
 		["usage.skillSuggestions.scheduledExcluded", "⏰ Already on a schedule, so left out of these suggestions: {0}", "⏰ 已按计划运行，因此未列入这些建议：{0}"],
 		["usage.skillSuggestions.scheduledTask", "{0} ({1} runs)", "{0}（{1} 次运行）"],
 		["insight.scheduledTasksRunning.title", "⏰ You already run tasks on a schedule", "⏰ 你已经在按计划运行任务了"],
@@ -1651,7 +1655,7 @@ test('insights l10n: the catalog actually has keys to cover', () => {
 	// Guards the tests below against silently passing on an empty set if the
 	// catalog is ever refactored to a different key prefix.
 	assert.ok(insightKeys().length > 150, `expected the insight catalog's keys, got ${insightKeys().length}`);
-	assert.equal(INSIGHT_CATALOG.length, 56, 'catalog size changed — update the expected count deliberately');
+	assert.equal(INSIGHT_CATALOG.length, 57, 'catalog size changed — update the expected count deliberately');
 });
 
 test('insights l10n: every catalog title and action label resolves in English', () => {

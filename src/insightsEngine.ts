@@ -38,7 +38,7 @@ import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName }
 import { getLongContextInfo, type LongContextInfo } from './tokenEstimation';
 import { CONTEXT_NEAR_LIMIT_RATIO } from './types';
 import { resolveAutomationPlatforms } from './repeatedTasks';
-import { daysSince, isAtRisk, STALE_AFTER_DAYS } from './scheduledTasks';
+import { daysSince, failedRunCost, STALE_AFTER_DAYS, trackFailingTasks } from './scheduledTasks';
 import type { ModelPricing, ScheduledTaskSummary } from './types';
 // The translator type lives in types.ts (re-exported by the extension's l10nCore) so this
 // module stays free of the localization bundles: hosts inject a translator.
@@ -433,6 +433,9 @@ function compactedSessionPhrase(ctx: InsightContext): string {
 // Sub-session agents will add entries here for trend data, context quality,
 // focus times, streaks, and MCP/tool adoption insights.
 // ---------------------------------------------------------------------------
+
+/** Id of the insight for failing scheduled automations; the extension re-opens it per newly failing task. */
+export const SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID = 'scheduled-automation-failing';
 
 export const INSIGHT_CATALOG: InsightDefinition[] = [
 	// ── Customization ──────────────────────────────────────────────────────
@@ -1553,7 +1556,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		severity: 'tip',
 		titleKey: 'insight.scheduledAutomationAtRisk.title',
 		buildBody: (ctx) => {
-			const atRisk = (ctx.repeatedTasks?.scheduledTasks ?? []).filter(isAtRisk);
+			const atRisk = staleTasks(ctx);
 			const described = joinNames(ctx, atRisk.slice(0, SCHEDULED_TASKS_NAMED).map(t => describeAtRiskTask(ctx, t)));
 			const more = atRisk.length - SCHEDULED_TASKS_NAMED;
 			const list = more > 0 ? `${described} ${ctx.translate('insight.scheduledTasksRunning.more', more)}` : described;
@@ -1561,22 +1564,58 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		actionLabelKey: 'insight.action.viewSkillSuggestions',
 		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
-		appliesTo: (ctx) => (ctx.repeatedTasks?.scheduledTasks ?? []).some(isAtRisk),
+		appliesTo: (ctx) => staleTasks(ctx).length > 0,
 		weight: 70,
 	},
+	{
+		// Toastable, and the extension re-opens it whenever a task starts failing that the user
+		// was not told about yet (trackFailingTasks), so a newly failing job is announced once.
+		id: SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID,
+		category: 'agentic',
+		severity: 'tip',
+		titleKey: 'insight.scheduledAutomationFailing.title',
+		buildBody: (ctx) => {
+			const failing = failingTasks(ctx);
+			const described = joinNames(ctx, failing.slice(0, SCHEDULED_TASKS_NAMED).map(t => describeFailingTask(ctx, t)));
+			const more = failing.length - SCHEDULED_TASKS_NAMED;
+			const list = more > 0 ? `${described} ${ctx.translate('insight.scheduledTasksRunning.more', more)}` : described;
+			return ctx.translate(plural('insight.scheduledAutomationFailing.body', failing.length), failing.length, list);
+		},
+		actionLabelKey: 'insight.action.viewSkillSuggestions',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
+		appliesTo: (ctx) => failingTasks(ctx).length > 0,
+		weight: 92,
+		allowToast: true,
+	},
 ];
+
+/** Enabled scheduled tasks that stopped running (see assessScheduledTaskHealth). */
+function staleTasks(ctx: InsightContext): ScheduledTaskSummary[] {
+	return (ctx.repeatedTasks?.scheduledTasks ?? []).filter(t => t.health === 'stale');
+}
+
+/** Scheduled tasks that failed most of their recent runs. */
+function failingTasks(ctx: InsightContext): ScheduledTaskSummary[] {
+	return (ctx.repeatedTasks?.scheduledTasks ?? []).filter(t => t.health === 'failing');
+}
+
+/** "\"name\" failed 4 of its last 5 runs", plus what the failed runs cost when their sessions are known. */
+function describeFailingTask(ctx: InsightContext, task: ScheduledTaskSummary): string {
+	const runs = task.recentRuns ?? [];
+	const failed = runs.filter(r => !r.ok).length;
+	const cost = failedRunCost(task);
+	return cost.runs.length > 0
+		? ctx.translate('insight.scheduledAutomationFailing.taskCost', task.name, failed, runs.length, formatTokensShort(cost.tokens), cost.costUsd.toFixed(2))
+		: ctx.translate('insight.scheduledAutomationFailing.task', task.name, failed, runs.length);
+}
 
 /** Scheduled tasks with at least one run in the analysis window. */
 function tasksThatRan(ctx: InsightContext): ScheduledTaskSummary[] {
 	return (ctx.repeatedTasks?.scheduledTasks ?? []).filter(t => t.runCount > 0);
 }
 
-/** "\"name\" has not run for 45 days" / "\"name\" failed 4 of its last 5 runs". */
+/** "\"name\" has not run for 45 days" / "\"name\" has never run". */
 function describeAtRiskTask(ctx: InsightContext, task: ScheduledTaskSummary): string {
-	if (task.health === 'failing') {
-		const runs = task.recentRuns ?? [];
-		return ctx.translate('insight.scheduledAutomationAtRisk.failing', task.name, runs.filter(r => !r.ok).length, runs.length);
-	}
 	const days = daysSince(task.lastRun, new Date());
 	return days === null
 		? ctx.translate('insight.scheduledAutomationAtRisk.neverRan', task.name)
@@ -1720,6 +1759,54 @@ export function isToastAllowed(cadenceDays: number, lastNudgeAt: string | null, 
 	const msSinceLastNudge = new Date(now).getTime() - new Date(lastNudgeAt).getTime();
 	const msPerDay = 24 * 60 * 60 * 1000;
 	return msSinceLastNudge >= cadenceDays * msPerDay;
+}
+
+/**
+ * Re-opens the failing-automation insight (drops its stored state, so it is `new` again) when a
+ * scheduled task starts failing that `notifiedKeys` does not name yet. The host stores the
+ * returned `failingKeys` as the next `notifiedKeys`.
+ */
+export function reopenFailingAutomationInsight(
+	tasks: readonly ScheduledTaskSummary[],
+	stateBag: InsightStateBag,
+	notifiedKeys: readonly string[],
+): { reopened: boolean; failingKeys: string[] } {
+	const { newlyFailing, failingKeys } = trackFailingTasks(tasks, notifiedKeys);
+	if (newlyFailing.length > 0) { delete stateBag[SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID]; }
+	return { reopened: newlyFailing.length > 0, failingKeys };
+}
+
+/**
+ * The insight to show as a toast: a just re-opened failing automation regardless of the
+ * cadence (a job newly failing is announced once, when it is found), otherwise the top new
+ * toastable insight when the cadence allows one.
+ */
+export function pickToastInsight(
+	evaluated: readonly EvaluatedInsight[],
+	cadenceDays: number,
+	lastNudgeAt: string | null,
+	now: string,
+	failingReopened: boolean,
+): EvaluatedInsight | undefined {
+	const failing = failingReopened ? evaluated.find(i => i.id === SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID && i.status === 'new') : undefined;
+	if (failing) { return failing; }
+	if (!isToastAllowed(cadenceDays, lastNudgeAt, now)) { return undefined; }
+	return evaluated.find(i => i.allowToast && i.status === 'new');
+}
+
+/** Whether a toast or tooltip should carry the insight's body, not only its title. */
+function showsBodyInline(insight: Pick<EvaluatedInsight, 'id'>): boolean {
+	return insight.id === SCHEDULED_AUTOMATION_FAILING_INSIGHT_ID;
+}
+
+/** Toast text. A failing automation names the job and what its failed runs cost. */
+export function insightToastMessage(insight: Pick<EvaluatedInsight, 'id' | 'title' | 'body'>): string {
+	return showsBodyInline(insight) ? `${insight.title} — ${insight.body}` : `💡 ${insight.title}`;
+}
+
+/** The line the status-bar tooltip shows for the top new insight. */
+export function insightTooltipTitle(insight: Pick<EvaluatedInsight, 'id' | 'title' | 'body'>): string {
+	return showsBodyInline(insight) ? `${insight.title}\n\n${insight.body}` : insight.title;
 }
 
 // ---------------------------------------------------------------------------
