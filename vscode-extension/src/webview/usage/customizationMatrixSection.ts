@@ -53,8 +53,14 @@ export function renderMergedWorkspaceMembers(memberPaths: string[] | undefined):
 /** Summary note for workspace names that still look like worktree / clone artefacts after grouping. */
 export function renderUngroupedWorkspaceNote(names: string[] | undefined): string {
 	if (!names || names.length === 0) { return ''; }
-	const examples = names.slice(0, 3).join(', ');
-	return `<span class="ungrouped-workspace-note" style="display:inline-flex;align-items:center;gap:4px;" title="${escapeHtml(names.join('\n'))}">${statusBadgeHtml('⚠️', localize('customizationMatrix.ungroupedBadge'))} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedNames', names.length, examples))}</span>`;
+	// Collapsed by default: a diagnostic hint about naming patterns the grouping does not know yet,
+	// not something to act on per workspace, so only the count stays in view.
+	const items = names.map(name => `<li>${escapeHtml(name)}</li>`).join('');
+	return `
+		<details class="ungrouped-workspace-note" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+			<summary style="cursor: pointer;"><span style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">${statusBadgeHtml('⚠️', localize('customizationMatrix.ungroupedBadge'))} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedSummary', names.length))}</span></summary>
+			<ul style="margin: 4px 0 0 16px; padding: 0; font-family: 'Courier New', monospace;">${items}</ul>
+		</details>`;
 }
 
 export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): DataTableColumn<WorkspaceCustomizationRow>[] {
@@ -187,8 +193,8 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				${currentMatrix.workspacesWithIssues > 0
 					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.badge.noCustomization'))} ${escapeHtml(localizeFormat('usage.customization.summary.issues', currentMatrix.workspacesWithIssues))}</span>`
 					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.summary.allGood'))}</span>`}
-				${renderUngroupedWorkspaceNote(currentMatrix.ungroupedWorkspaceNames)}
 			</div>
+			${renderUngroupedWorkspaceNote(currentMatrix.ungroupedWorkspaceNames)}
 			${filterToggle}
 			<div class="customization-matrix-container">
 				${renderCustomizationTable(currentMatrix)}

@@ -330,7 +330,34 @@ test('merged-folder list and ungrouped note escape folder names and carry an acc
 	const html = renderMergedWorkspaceMembers(['/a/<b>', '/c/"d"']);
 	assert.ok(!html.includes('<b>'), 'paths are escaped');
 	const note = renderUngroupedWorkspaceNote(['repo-85ed99', 'goofy-wozniak-42f712']);
-	assert.ok(note.includes('2 workspace name(s) look like ungrouped worktrees or clones: repo-85ed99, goofy-wozniak-42f712'));
 	assert.match(note, /aria-label="Ungrouped workspace names"/);
 	assert.equal(renderUngroupedWorkspaceNote([]), '');
+	assert.ok(!renderUngroupedWorkspaceNote(['<img src=x>']).includes('<img'), 'names are escaped');
+});
+
+test('ungrouped note: collapsed by default, count in the summary, every name in the list', () => {
+	const names = ['repo-85ed99', 'goofy-wozniak-42f712', 'animated-pancake-271234ba', 'bookish-happiness-d76281cf'];
+	const dom = new JSDOM(`<body>${renderUngroupedWorkspaceNote(names)}</body>`);
+	try {
+		const details = dom.window.document.querySelector('details.ungrouped-workspace-note') as HTMLDetailsElement;
+		assert.ok(details, 'rendered as a <details> element');
+		assert.equal(details.open, false, 'collapsed by default');
+		const summary = details.querySelector('summary')!.textContent!.replace(/\s+/g, ' ').trim();
+		assert.ok(summary.endsWith('4 workspace name(s) look like ungrouped worktrees or clones'), summary);
+		assert.ok(!summary.includes('repo-85ed99'), 'the names stay out of the summary');
+		assert.deepEqual(Array.from(details.querySelectorAll('li'), li => li.textContent), names, 'all names, not just the first three');
+	} finally {
+		dom.window.close();
+	}
+});
+
+test('ungrouped note sits below the summary line, outside its flex row', () => {
+	const html = buildCustomizationSectionHtml({ ...matrix([row('a', 1)]), ungroupedWorkspaceNames: ['repo-85ed99'] });
+	const dom = new JSDOM(`<body>${html}</body>`);
+	try {
+		const note = dom.window.document.querySelector('.ungrouped-workspace-note')!;
+		assert.equal(note.parentElement!.id, 'section-customization-files');
+	} finally {
+		dom.window.close();
+	}
 });

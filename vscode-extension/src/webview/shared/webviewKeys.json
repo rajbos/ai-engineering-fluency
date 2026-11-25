@@ -533,7 +533,7 @@
   "memoryFiles.table.lastUpdated",
   "customizationMatrix.mergedFolders",
   "customizationMatrix.ungroupedBadge",
-  "customizationMatrix.ungroupedNames",
+  "customizationMatrix.ungroupedSummary",
   "customizationMatrix.worktreesIncluded",
   "memoryFiles.unknownWorkspace",
   "memoryFiles.globalWorkspaceLabel",
