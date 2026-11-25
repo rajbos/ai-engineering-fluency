@@ -1701,4 +1701,13 @@
   ,"GetSymbolInfoAsync": "Get Symbol Info"
   ,"GetThreadsAsync": "Get Threads"
   ,"process.start": "Process Start"
+  ,"io-github-ChromeDevTools-chrome-devtools-mcp-list_pages": "Chrome DevTools: List Pages"
+  ,"io-github-ChromeDevTools-chrome-devtools-mcp-navigate_page": "Chrome DevTools: Navigate Page"
+  ,"io-github-ChromeDevTools-chrome-devtools-mcp-resize_page": "Chrome DevTools: Resize Page"
+  ,"io-github-ChromeDevTools-chrome-devtools-mcp-take_screenshot": "Chrome DevTools: Take Screenshot"
+  ,"microsoft-playwright-mcp-browser_emulate_media": "Playwright MCP: Browser Emulate Media"
+  ,"obsidian-second-brain": "Obsidian Second Brain"
+  ,"obsidian-second-brain-search_notes": "Obsidian Second Brain: Search Notes"
+  ,"remove_artifact_or_reference": "Remove Artifact or Reference"
+  ,"set_workspace": "Set Workspace"
 }
