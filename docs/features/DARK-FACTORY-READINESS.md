@@ -123,6 +123,15 @@ Findings surface the anti-patterns from the research that are actually observabl
 | `agents-before-delivery` | High | AI/agent controls are configured while stage 1 delivery (CI, tests in CI) is absent. |
 | `unbounded-workflow-permissions` | Medium | A workflow declares `permissions: write-all`. |
 | `long-lived-cloud-credentials` | Medium | A workflow references static cloud credentials without requesting an OIDC token. |
+| `stale-scheduled-automation` | Medium | A Claude Code scheduled task or GitHub Copilot automation that targets this repository is enabled but has not run for 30 days. |
+| `failing-scheduled-automation` | Medium | Such a task failed more than half of its recent runs (at least 3). The detail names the tokens and cost the failed runs used. |
+
+The scheduled-automation findings come from the machine, not the repository files: the
+scan takes the scheduled tasks from the last Usage Analysis refresh
+(`DarkFactoryScanOptions.scheduledTasks`) and matches them to a repository by folder or
+`owner/repo` (`scheduledTasksForRepo()` in `src/scheduledTasks.ts`). They do not change any
+stage verdict. See [REPEATED-TASKS.md](REPEATED-TASKS.md#scheduled-automations) for where the
+data comes from.
 
 ## Where the code lives
 

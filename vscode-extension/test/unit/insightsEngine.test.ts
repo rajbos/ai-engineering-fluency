@@ -1038,6 +1038,35 @@ test('scheduled-tasks-running: celebrates tasks already on a schedule and names 
 	assert.equal(evaluateInsights(single, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
 });
 
+test('scheduled-automation-at-risk: names stale and failing automations, not healthy or disabled ones', () => {
+	const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+	const ctx = makeCtx();
+	ctx.repeatedTasks = {
+		minClusterSize: 2, sessionsScanned: 0, clusters: [],
+		scheduledTasks: [
+			{ name: 'stopped', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(45), health: 'stale' },
+			{ name: 'never', platform: 'copilot', runCount: 0, activeDays: 0, lastRun: null, health: 'stale' },
+			{ name: 'broken', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false }, { at: daysAgo(2), ok: false }, { at: daysAgo(3), ok: true }] },
+			{ name: 'fine', platform: 'claude', runCount: 5, activeDays: 5, lastRun: daysAgo(1), health: 'healthy' },
+			{ name: 'off', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(90), health: 'disabled' },
+		],
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'scheduled-automation-at-risk');
+	assert.ok(insight);
+	assert.match(insight.body, /^3 scheduled automations are at risk/);
+	assert.match(insight.body, /"stopped" has not run for 45 days/);
+	assert.match(insight.body, /"never" has never run/);
+	assert.match(insight.body, /"broken" failed 2 of its last 3 runs/);
+	assert.doesNotMatch(insight.body, /"fine"|"off"/);
+	// Only tasks that ran in the window are celebrated.
+	assert.match(results.find(i => i.id === 'scheduled-tasks-running')!.body, /^2 scheduled tasks ran 8 times/);
+
+	const healthy = makeCtx();
+	healthy.repeatedTasks = { ...ctx.repeatedTasks, scheduledTasks: ctx.repeatedTasks.scheduledTasks!.filter(t => t.health === 'healthy') };
+	assert.equal(evaluateInsights(healthy, {}, 7, null).find(i => i.id === 'scheduled-automation-at-risk'), undefined);
+});
+
 test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {
 	const stale = { name: 'old-skill', source: 'skill' };
 	const curation = makeCtx();

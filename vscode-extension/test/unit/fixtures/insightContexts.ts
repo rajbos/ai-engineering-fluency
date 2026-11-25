@@ -429,6 +429,21 @@ export function insightFixtureContexts(translate: Translate): InsightContext[] {
 		contexts.push(ctx);
 	}
 
+	// Scheduled automations at risk: one stale, and several (stale, never run, failing).
+	for (const tasks of [
+		[{ name: 'stopped', platform: 'claude', runCount: 0, activeDays: 0, lastRun: '2026-01-01T00:00:00Z', health: 'stale' }],
+		[
+			{ name: 'a', platform: 'claude', runCount: 0, activeDays: 0, lastRun: '2026-01-01T00:00:00Z', health: 'stale' },
+			{ name: 'b', platform: 'copilot', runCount: 0, activeDays: 0, lastRun: null, health: 'stale' },
+			{ name: 'c', platform: 'copilot', runCount: 2, activeDays: 2, lastRun: '2026-01-01T00:00:00Z', health: 'failing', recentRuns: [{ at: '2026-01-01T00:00:00Z', ok: false }] },
+			{ name: 'd', platform: 'claude', runCount: 0, activeDays: 0, lastRun: '2026-01-01T00:00:00Z', health: 'stale' },
+		],
+	]) {
+		const ctx = base(translate);
+		ctx.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: tasks } as unknown as InsightContext['repeatedTasks'];
+		contexts.push(ctx);
+	}
+
 	// File references only — no codebase/selection breadth.
 	{
 		const ctx = base(translate);

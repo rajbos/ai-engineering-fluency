@@ -358,3 +358,30 @@ test('scan: names the repository by its folder and records the scanned path', ()
 	assert.equal(report.repos[0].name, path.basename(repo));
 	assert.equal(report.repos[0].repoRoot, path.resolve(repo));
 });
+
+test('scan: scheduled automations targeting a repository add its stale and failing findings', () => {
+	const repo = makeRepo({}, 'https://github.com/octo/app.git');
+	const other = makeRepo({}, 'https://github.com/octo/other.git');
+	const task = (name: string, extra: object) => ({ name, platform: 'claude' as const, runCount: 0, activeDays: 0, lastRun: '2026-08-01T00:00:00.000Z', enabled: true, ...extra });
+	const report = scanDarkFactoryReadiness({
+		workspacePaths: [repo, other],
+		now: FIXED_NOW,
+		scheduledTasks: [
+			task('stopped', { folder: repo.toUpperCase(), health: 'stale' }),
+			task('by-remote', { folder: 'C:/somewhere/else', repository: 'octo/app', health: 'failing', recentRuns: [{ at: '2026-08-31T00:00:00Z', ok: false, sessionFile: 'f1', tokens: 2000, costUsd: 1.5 }, { at: '2026-08-30T00:00:00Z', ok: false }, { at: '2026-08-29T00:00:00Z', ok: true }] }),
+		],
+	});
+	const app = report.repos.find(r => r.nameWithOwner === 'octo/app')!;
+	assert.deepEqual(app.findings.map(f => f.id), ['stale-scheduled-automation', 'failing-scheduled-automation']);
+	assert.match(app.findings[0].detail, /"stopped" \(Claude Code scheduled task\) last ran 31 days ago/);
+	assert.match(app.findings[1].detail, /"by-remote" .* failed 2 of its last 3 runs \(the 1 failed run\(s\) with a known session used 2,000 tokens, about \$1\.50\)/);
+	const untouched = report.repos.find(r => r.nameWithOwner === 'octo/other')!;
+	assert.equal(untouched.findings.some(f => f.id.includes('scheduled')), false);
+});
+
+test('scan: no scheduled tasks leaves findings unchanged', () => {
+	const repo = makeRepo({}, 'https://github.com/octo/app.git');
+	const withEmpty = scanDarkFactoryReadiness({ workspacePaths: [repo], now: FIXED_NOW, scheduledTasks: [] });
+	const without = scanDarkFactoryReadiness({ workspacePaths: [repo], now: FIXED_NOW });
+	assert.deepEqual(withEmpty.repos[0].findings, without.repos[0].findings);
+});

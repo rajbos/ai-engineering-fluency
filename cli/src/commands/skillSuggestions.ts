@@ -17,7 +17,8 @@ import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
 import { sanitizeForDisplay } from '../../../src/copilotServerMemories';
 import { describeCadence, resolveAutomationPlatforms, type AutomationPlatform } from '../../../src/repeatedTasks';
-import type { RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskSummary } from '../../../src/types';
+import { failedRunCost, isAtRisk, STALE_AFTER_DAYS } from '../../../src/scheduledTasks';
+import type { RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskHealth, ScheduledTaskSummary } from '../../../src/types';
 
 /** How to schedule a recurring task, per automation platform (see resolveAutomationPlatforms). */
 const AUTOMATION_CLI_HINTS: Record<AutomationPlatform, string> = {
@@ -76,7 +77,18 @@ export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undef
 				...(cluster.recurrence ? { recurrence: { ...cluster.recurrence } } : {}),
 			})),
 			...(report.scheduledTasks ? {
-				scheduledTasks: report.scheduledTasks.map(t => ({ platform: t.platform, runCount: t.runCount, activeDays: t.activeDays, lastRun: t.lastRun })),
+				// Allowlisted like the clusters: everything except the user-chosen name.
+				scheduledTasks: report.scheduledTasks.map((t): Omit<ScheduledTaskSummary, 'name'> => ({
+					platform: t.platform, runCount: t.runCount, activeDays: t.activeDays, lastRun: t.lastRun,
+					...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
+					...(t.enabled !== undefined ? { enabled: t.enabled } : {}),
+					...(t.repository !== undefined ? { repository: t.repository } : {}),
+					...(t.folder !== undefined ? { folder: t.folder } : {}),
+					...(t.nextRunAt !== undefined ? { nextRunAt: t.nextRunAt } : {}),
+					...(t.totalRuns !== undefined ? { totalRuns: t.totalRuns, failedRuns: t.failedRuns ?? 0 } : {}),
+					...(t.recentRuns ? { recentRuns: t.recentRuns.map(r => ({ ...r })) } : {}),
+					...(t.health ? { health: t.health } : {}),
+				})),
 			} : {}),
 		},
 	};
@@ -134,16 +146,51 @@ const SCHEDULED_PLATFORM_LABELS: Record<ScheduledTaskSummary['platform'], string
 	copilot: 'GitHub Copilot automation',
 };
 
-/** "Already on a schedule" block: tasks whose runs were left out of the suggestions. */
+const HEALTH_LABELS: Record<ScheduledTaskHealth, string> = {
+	healthy: 'healthy', stale: 'STALE', failing: 'FAILING', disabled: 'disabled',
+	'one-off': 'one-off', manual: 'manual', 'never-run': 'not run yet',
+};
+
+/** One line per failed recent run whose session was analysed: date, tokens, cost and the session file to open. */
+function formatFailedRuns(t: ScheduledTaskSummary): string[] {
+	const cost = failedRunCost(t);
+	if (cost.runs.length === 0) { return []; }
+	return [
+		`      failed runs: ${cost.runs.length}, ${cost.tokens.toLocaleString('en-US')} tokens, $${cost.costUsd.toFixed(2)}`,
+		...cost.runs.map(r => {
+			const tokens = r.tokens === undefined ? '? tokens' : `${r.tokens.toLocaleString('en-US')} tokens`;
+			const usd = r.costUsd === undefined ? '' : `, $${r.costUsd.toFixed(2)}`;
+			return `        ✗ ${sanitizeForDisplay(r.at).slice(0, 10)} — ${tokens}${usd} — ${sanitizeForDisplay(r.sessionFile ?? '')}`;
+		}),
+	];
+}
+
+function formatRecentSuccess(t: ScheduledTaskSummary): string {
+	const runs = t.recentRuns ?? [];
+	return runs.length > 0 ? `${runs.filter(r => r.ok).length}/${runs.length} recent runs succeeded` : '';
+}
+
+/** Scheduled-automation inventory: health, repository, schedule, last run and success per task. */
 function formatScheduledTasks(report: RepeatedTaskReport): string[] {
 	const tasks = report.scheduledTasks ?? [];
 	if (tasks.length === 0) { return []; }
-	const lines = ['Already on a schedule (runs left out of the suggestions):'];
+	const atRisk = tasks.filter(isAtRisk).length;
+	const lines = [
+		`Scheduled automations (${tasks.length}${atRisk > 0 ? `, ${atRisk} at risk` : ''}) — their runs are left out of the suggestions:`,
+	];
 	for (const t of tasks) {
-		const last = t.lastRun ? `, last ${sanitizeForDisplay(t.lastRun).slice(0, 10)}` : '';
-		lines.push(`  - "${sanitizeForDisplay(t.name)}" (${SCHEDULED_PLATFORM_LABELS[t.platform]}): ${t.runCount} run(s) on ${t.activeDays} day(s)${last}`);
+		lines.push(`  - "${sanitizeForDisplay(t.name)}" (${SCHEDULED_PLATFORM_LABELS[t.platform]})${t.health ? ` — ${HEALTH_LABELS[t.health]}` : ''}`);
+		const where = t.repository ?? t.folder;
+		const details = [
+			where ? `repo ${sanitizeForDisplay(where)}` : '',
+			t.schedule ? `schedule ${sanitizeForDisplay(t.schedule)}` : '',
+			t.lastRun ? `last run ${sanitizeForDisplay(t.lastRun).slice(0, 10)}` : 'never run',
+			formatRecentSuccess(t),
+			`${t.runCount} run(s) in this window`,
+		].filter(Boolean);
+		lines.push(`      ${details.join(' · ')}`, ...formatFailedRuns(t));
 	}
-	lines.push('');
+	lines.push(`  Stale = enabled with no run for ${STALE_AFTER_DAYS} days; failing = most recent runs failed.`, '');
 	return lines;
 }
 

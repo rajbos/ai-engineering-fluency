@@ -424,12 +424,12 @@ test('skillSuggestions: tasks already on a schedule are named as left out, escap
 			{ name: 'no runs', platform: 'claude', runCount: 0 },
 		],
 	})!;
-	assert.deepEqual(report.scheduledTasks!.map(t => t.name), ['repo-health-scan-daily', '<b>nightly</b>']);
+	assert.deepEqual(report.scheduledTasks!.map(t => t.name), ['repo-health-scan-daily', '<b>nightly</b>', 'no runs']);
 	const html = buildSkillSuggestionsSectionHtml(report);
 	assert.ok(!html.includes('<b>nightly'), 'task names are escaped');
 	const note = render(report).querySelector('.skill-suggestions-scheduled')!;
 	assert.match(note.textContent!, /Already on a schedule/);
-	assert.match(note.textContent!, /repo-health-scan-daily \(12 runs\), <b>nightly<\/b> \(3 runs\)/);
+	assert.match(note.textContent!, /repo-health-scan-daily \(12 runs\), <b>nightly<\/b> \(3 runs\)$/, 'a task with no run in the window is left to the automations table');
 
 	assert.equal(render(makeReport(1)).querySelector('.skill-suggestions-scheduled'), null);
 	assert.equal('scheduledTasks' in sanitizeRepeatedTaskReport(makeReport(1))!, false);

@@ -600,3 +600,16 @@ test('buildRepeatedTaskReport: only scheduled runs still yields a report with no
     assert.equal(report.scheduledTasks![0].lastRun, '2026-11-02T06:00:00.000Z');
     assert.equal(buildRepeatedTaskReport([{ file: 'x', firstUserPrompt: 'one-off question about the build', mtime: 0 }]), undefined);
 });
+
+test('buildRepeatedTaskReport: links an inventory run to its analysed session by id, with tokens and cost', () => {
+    const report = buildRepeatedTaskReport([
+        { file: '/home/u/.copilot/session-store.db#run-9', firstUserPrompt: 'review the open dependabot prs', lastInteraction: '2026-11-20T09:00:00.000Z', mtime: 0, copilotAutomation: 'Dependabot review', tokens: 5000, costUsd: 0.12 },
+    ], {
+        now: new Date('2026-11-24T00:00:00.000Z'),
+        scheduledTaskDefinitions: [{ name: 'Dependabot review', platform: 'copilot', schedule: 'daily at 09:00', enabled: true, folder: null, repository: null, lastRunAt: '2026-11-20T09:00:00.000Z', totalRuns: 1, failedRuns: 1, recentRuns: [{ at: '2026-11-20T09:00:00.000Z', ok: false, sessionId: 'RUN-9' }] }],
+    })!;
+    const run = report.scheduledTasks![0].recentRuns![0];
+    assert.equal(run.sessionFile, '/home/u/.copilot/session-store.db#run-9');
+    assert.equal(run.tokens, 5000);
+    assert.equal(run.costUsd, 0.12);
+});

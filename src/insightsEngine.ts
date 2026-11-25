@@ -38,7 +38,8 @@ import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName }
 import { getLongContextInfo, type LongContextInfo } from './tokenEstimation';
 import { CONTEXT_NEAR_LIMIT_RATIO } from './types';
 import { resolveAutomationPlatforms } from './repeatedTasks';
-import type { ModelPricing } from './types';
+import { daysSince, isAtRisk, STALE_AFTER_DAYS } from './scheduledTasks';
+import type { ModelPricing, ScheduledTaskSummary } from './types';
 // The translator type lives in types.ts (re-exported by the extension's l10nCore) so this
 // module stays free of the localization bundles: hosts inject a translator.
 import type { Translate } from './types';
@@ -1533,7 +1534,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		severity: 'celebration',
 		titleKey: 'insight.scheduledTasksRunning.title',
 		buildBody: (ctx) => {
-			const tasks = ctx.repeatedTasks?.scheduledTasks ?? [];
+			const tasks = tasksThatRan(ctx);
 			const runs = tasks.reduce((sum, t) => sum + t.runCount, 0);
 			const named = joinNames(ctx, tasks.slice(0, SCHEDULED_TASKS_NAMED)
 				.map(t => ctx.translate(`insight.scheduledTasksRunning.task.${t.platform}`, t.name, t.runCount)));
@@ -1543,10 +1544,44 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		actionLabelKey: 'insight.action.viewSkillSuggestions',
 		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
-		appliesTo: (ctx) => (ctx.repeatedTasks?.scheduledTasks?.length ?? 0) > 0,
+		appliesTo: (ctx) => tasksThatRan(ctx).length > 0,
 		weight: 40,
 	},
+	{
+		id: 'scheduled-automation-at-risk',
+		category: 'agentic',
+		severity: 'tip',
+		titleKey: 'insight.scheduledAutomationAtRisk.title',
+		buildBody: (ctx) => {
+			const atRisk = (ctx.repeatedTasks?.scheduledTasks ?? []).filter(isAtRisk);
+			const described = joinNames(ctx, atRisk.slice(0, SCHEDULED_TASKS_NAMED).map(t => describeAtRiskTask(ctx, t)));
+			const more = atRisk.length - SCHEDULED_TASKS_NAMED;
+			const list = more > 0 ? `${described} ${ctx.translate('insight.scheduledTasksRunning.more', more)}` : described;
+			return ctx.translate(plural('insight.scheduledAutomationAtRisk.body', atRisk.length), atRisk.length, list, STALE_AFTER_DAYS);
+		},
+		actionLabelKey: 'insight.action.viewSkillSuggestions',
+		actionCommand: 'aiEngineeringFluency.openSkillSuggestions',
+		appliesTo: (ctx) => (ctx.repeatedTasks?.scheduledTasks ?? []).some(isAtRisk),
+		weight: 70,
+	},
 ];
+
+/** Scheduled tasks with at least one run in the analysis window. */
+function tasksThatRan(ctx: InsightContext): ScheduledTaskSummary[] {
+	return (ctx.repeatedTasks?.scheduledTasks ?? []).filter(t => t.runCount > 0);
+}
+
+/** "\"name\" has not run for 45 days" / "\"name\" failed 4 of its last 5 runs". */
+function describeAtRiskTask(ctx: InsightContext, task: ScheduledTaskSummary): string {
+	if (task.health === 'failing') {
+		const runs = task.recentRuns ?? [];
+		return ctx.translate('insight.scheduledAutomationAtRisk.failing', task.name, runs.filter(r => !r.ok).length, runs.length);
+	}
+	const days = daysSince(task.lastRun, new Date());
+	return days === null
+		? ctx.translate('insight.scheduledAutomationAtRisk.neverRan', task.name)
+		: ctx.translate('insight.scheduledAutomationAtRisk.stale', task.name, days);
+}
 
 /** Scheduled tasks named in the insight body before the rest are summarized as "+N more". */
 const SCHEDULED_TASKS_NAMED = 3;

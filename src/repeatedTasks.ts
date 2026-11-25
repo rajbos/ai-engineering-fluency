@@ -18,7 +18,8 @@
  * This module is intentionally pure (no VS Code API, no filesystem access) so
  * it can be unit-tested with mocked data and reused by the CLI and the webview.
  */
-import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskPlatform, ScheduledTaskSummary } from './types';
+import { mergeScheduledTasks, sessionIdFromFile, type RunSessionInfo } from './scheduledTasks';
+import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskDefinition, ScheduledTaskPlatform, ScheduledTaskSummary } from './types';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -378,6 +379,9 @@ export interface RepeatedTaskSessionSource {
 	 * Claude Code scheduled runs need no host help: their prompt names the task.
 	 */
 	copilotAutomation?: string | null;
+	/** Total tokens and cost (USD) of the session, so a failed scheduled run shows what it cost. */
+	tokens?: number | null;
+	costUsd?: number | null;
 }
 
 /** The scheduled task a session is an automated run of, or null for a hand-typed session. */
@@ -385,6 +389,11 @@ export function scheduledRunOf(source: Pick<RepeatedTaskSessionSource, 'firstUse
 	if (source.copilotAutomation) { return { name: source.copilotAutomation, platform: 'copilot' }; }
 	const claudeName = source.firstUserPrompt ? claudeScheduledTaskName(source.firstUserPrompt) : null;
 	return claudeName ? { name: claudeName, platform: 'claude' } : null;
+}
+
+/** Session id → file, tokens and cost of every analysed session, for linking scheduled runs to them. */
+function runSessionLookup(sources: readonly RepeatedTaskSessionSource[]): Map<string, RunSessionInfo> {
+	return new Map(sources.map(s => [sessionIdFromFile(s.file), { file: s.file, tokens: s.tokens, costUsd: s.costUsd }]));
 }
 
 /** Groups scheduled runs by platform and task name, most runs first. */
@@ -445,8 +454,15 @@ function toTaskMember(source: RepeatedTaskSessionSource): TaskMember | null {
  * are left out of the clusters and summarized in `scheduledTasks` instead.
  * Returns undefined when no cluster reaches MIN_CLUSTER_SIZE and nothing runs
  * on a schedule.
+ *
+ * `options.scheduledTaskDefinitions` is the apps' own inventory (Claude desktop
+ * scheduled tasks, Copilot automations): it adds each task's schedule, repository,
+ * recorded runs and health, and keeps tasks that had no run in the window.
  */
-export function buildRepeatedTaskReport(sources: readonly RepeatedTaskSessionSource[]): RepeatedTaskReport | undefined {
+export function buildRepeatedTaskReport(
+	sources: readonly RepeatedTaskSessionSource[],
+	options: { scheduledTaskDefinitions?: readonly ScheduledTaskDefinition[]; now?: Date } = {},
+): RepeatedTaskReport | undefined {
 	const members: TaskMember[] = [];
 	const scheduledRuns: { name: string; platform: ScheduledTaskPlatform; source: RepeatedTaskSessionSource }[] = [];
 	for (const source of sources) {
@@ -459,12 +475,14 @@ export function buildRepeatedTaskReport(sources: readonly RepeatedTaskSessionSou
 		if (member) { members.push(member); }
 	}
 	const clusters = clusterMembers(members);
-	if (clusters.length === 0 && scheduledRuns.length === 0) { return undefined; }
+	const scheduledTasks = mergeScheduledTasks(
+		summarizeScheduledRuns(scheduledRuns), options.scheduledTaskDefinitions ?? [], options.now ?? new Date(), runSessionLookup(sources));
+	if (clusters.length === 0 && scheduledTasks.length === 0) { return undefined; }
 	return {
 		minClusterSize: MIN_CLUSTER_SIZE,
 		sessionsScanned: members.length,
 		clusters,
-		...(scheduledRuns.length > 0 ? { scheduledTasks: summarizeScheduledRuns(scheduledRuns) } : {}),
+		...(scheduledTasks.length > 0 ? { scheduledTasks } : {}),
 	};
 }
 

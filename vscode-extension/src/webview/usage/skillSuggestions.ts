@@ -14,7 +14,12 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatAbsoluteDate } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 import { buildSkillCreationPrompt, resolveAutomationPlatforms, resolveSkillTarget, type AutomationPlatform } from '../../../../src/repeatedTasks';
-import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskSummary } from '../../../../src/types';
+import type { RepeatedTaskCluster, RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../../src/types';
+import { sanitizeScheduledTasks, wireScheduledAutomations } from './scheduledAutomations';
+
+// The Scheduled automations section is built from the same report; re-exported so the
+// usage view gets both sections through one import.
+export { buildScheduledAutomationsSectionHtml } from './scheduledAutomations';
 import {
 	getDataTablePage,
 	getDataTableState,
@@ -88,30 +93,15 @@ function sanitizeRecurrence(value: unknown): { recurrence?: RepeatedTaskRecurren
 export function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null {
 	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clusters)) { return null; }
 	const clusters = raw.clusters.map(sanitizeRepeatedTaskCluster).filter((c: RepeatedTaskCluster | null): c is RepeatedTaskCluster => c !== null);
-	if (clusters.length === 0) { return null; }
+	const scheduledTasks = sanitizeScheduledTasks(raw.scheduledTasks);
+	// A report can carry only scheduled tasks (nothing repeated by hand).
+	if (clusters.length === 0 && scheduledTasks.length === 0) { return null; }
 	return {
 		minClusterSize: typeof raw.minClusterSize === 'number' ? raw.minClusterSize : 2,
 		sessionsScanned: typeof raw.sessionsScanned === 'number' ? raw.sessionsScanned : 0,
 		clusters,
-		...sanitizeScheduledTasks(raw.scheduledTasks),
+		...(scheduledTasks.length > 0 ? { scheduledTasks } : {}),
 	};
-}
-
-function sanitizeScheduledTasks(raw: unknown): { scheduledTasks?: ScheduledTaskSummary[] } {
-	if (!Array.isArray(raw)) { return {}; }
-	const tasks = raw.flatMap((value: unknown): ScheduledTaskSummary[] => {
-		if (!value || typeof value !== 'object') { return []; }
-		const t = value as Partial<Record<keyof ScheduledTaskSummary, unknown>>;
-		if (typeof t.name !== 'string' || (t.platform !== 'claude' && t.platform !== 'copilot') || !isPositiveNumber(t.runCount)) { return []; }
-		return [{
-			name: t.name,
-			platform: t.platform,
-			runCount: Math.floor(t.runCount),
-			activeDays: isPositiveNumber(t.activeDays) ? Math.floor(t.activeDays) : 0,
-			lastRun: typeof t.lastRun === 'string' ? t.lastRun : null,
-		}];
-	});
-	return tasks.length > 0 ? { scheduledTasks: tasks } : {};
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
@@ -272,7 +262,8 @@ function renderSuggestionList(report: RepeatedTaskReport): string {
  * suggestions, and saying so explains why a familiar daily task is missing.
  */
 export function buildScheduledExcludedHtml(report: RepeatedTaskReport): string {
-	const tasks = report.scheduledTasks ?? [];
+	// Only tasks that ran in the window replaced a session here; the full list is the Scheduled automations table.
+	const tasks = (report.scheduledTasks ?? []).filter(t => t.runCount > 0);
 	if (tasks.length === 0) { return ''; }
 	const list = tasks.map(t => localizeFormat('usage.skillSuggestions.scheduledTask', t.name, t.runCount)).join(', ');
 	return `<div class="skill-suggestions-scheduled" style="margin:4px 0 8px; font-size:11px; color:var(--text-secondary);">${escapeHtml(localizeFormat('usage.skillSuggestions.scheduledExcluded', list))}</div>`;
@@ -429,6 +420,8 @@ function handleSectionClick(section: HTMLElement, wiring: SkillSuggestionsWiring
  * across page changes and table re-renders. Safe to call after every render.
  */
 export function wireSkillSuggestions(wiring: SkillSuggestionsWiring): void {
+	// The Scheduled automations section renders from the same report; its Open buttons post the same message.
+	wireScheduledAutomations(wiring.postMessage);
 	const section = document.getElementById(SKILL_SUGGESTIONS_SECTION_ID);
 	if (!section || section.dataset.skillSuggestionsWired === 'true') { return; }
 	section.dataset.skillSuggestionsWired = 'true';

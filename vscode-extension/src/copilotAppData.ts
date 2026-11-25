@@ -20,7 +20,8 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import { readDbBufferWithWal } from '../../src/utils/sqliteWal';
-import { queryCopilotAutomationRuns } from '../../src/copilotAutomationRuns';
+import { queryCopilotAutomationRuns, queryCopilotAutomations, repositoryFromFolder } from '../../src/copilotAutomationRuns';
+import type { ScheduledTaskDefinition } from '../../src/types';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -219,6 +220,20 @@ export class CopilotAppDataAccess {
 			return queryCopilotAutomationRuns(await this.getSharedDb(dbPath));
 		} catch {
 			return new Map();
+		}
+	}
+
+	/**
+	 * Every GitHub Copilot automation with its schedule, project folder,
+	 * `owner/repo` and finished runs. Empty when data.db or the tables are missing.
+	 */
+	async getAutomations(): Promise<ScheduledTaskDefinition[]> {
+		const dbPath = this.getDbPath();
+		if (!fs.existsSync(dbPath)) { return []; }
+		try {
+			return queryCopilotAutomations(await this.getSharedDb(dbPath), repositoryFromFolder);
+		} catch {
+			return [];
 		}
 	}
 

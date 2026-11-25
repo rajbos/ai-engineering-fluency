@@ -205,6 +205,39 @@ test('l10n: skill suggestion UI strings resolve in English and zh-cn', () => {
 		["usage.skillSuggestions.openSessionTooltip", "Open this session in the session viewer", "在会话查看器中打开此会话"],
 		["usage.skillSuggestions.sessionsTableLabel", "Sessions for this suggestion", "此建议的会话"],
 		["usage.skillSuggestions.pagerLabel", "Skill suggestion pages", "技能建议分页"],
+		["usage.scheduledAutomations.failedRuns.title", "Failed runs ({0}) — {1} tokens, {2}", "失败的运行（{0}）— {1} 个令牌，{2}"],
+		["usage.scheduledAutomations.failedRuns.subtitle", "Recent scheduled runs that failed, with the session each one started and what it cost. Open a session to see where the run went wrong.", "最近失败的计划运行，以及每次运行启动的会话及其成本。打开会话即可查看运行在哪里出错。"],
+		["usage.scheduledAutomations.failedRuns.tableLabel", "Failed scheduled runs", "失败的计划运行"],
+		["usage.scheduledAutomations.failedRuns.column.run", "Run", "运行"],
+		["usage.scheduledAutomations.failedRuns.column.tokens", "Tokens", "令牌"],
+		["usage.scheduledAutomations.failedRuns.column.cost", "Cost", "成本"],
+		["usage.scheduledAutomations.title", "Scheduled automations ({0})", "计划自动化（{0}）"],
+		["usage.scheduledAutomations.titleAtRisk", "Scheduled automations ({0}, {1} at risk)", "计划自动化（{0}，{1} 个有风险）"],
+		["usage.scheduledAutomations.subtitle", "Claude Code scheduled tasks and GitHub Copilot automations configured on this machine. An enabled task with no run for {0} days is stale; one that failed most of its recent runs is failing. Their runs are left out of Skill Suggestions.", "在本机配置的 Claude Code 计划任务和 GitHub Copilot 自动化。已启用但 {0} 天内没有运行的任务为“已停滞”；最近多数运行失败的任务为“持续失败”。它们的运行不会出现在技能建议中。"],
+		["usage.scheduledAutomations.tableLabel", "Scheduled automations", "计划自动化"],
+		["usage.scheduledAutomations.column.name", "Automation", "自动化"],
+		["usage.scheduledAutomations.column.platform", "Runs in", "运行于"],
+		["usage.scheduledAutomations.column.repository", "Repository", "仓库"],
+		["usage.scheduledAutomations.column.schedule", "Schedule", "计划"],
+		["usage.scheduledAutomations.column.lastRun", "Last run", "上次运行"],
+		["usage.scheduledAutomations.column.success", "Recent success", "最近成功率"],
+		["usage.scheduledAutomations.column.health", "Status", "状态"],
+		["usage.scheduledAutomations.platform.claude", "Claude Code", "Claude Code"],
+		["usage.scheduledAutomations.platform.copilot", "GitHub Copilot", "GitHub Copilot"],
+		["usage.scheduledAutomations.success", "{0}/{1} runs", "{0}/{1} 次"],
+		["usage.scheduledAutomations.health.healthy", "✅ Healthy", "✅ 正常"],
+		["usage.scheduledAutomations.health.stale", "⚠️ Stale", "⚠️ 已停滞"],
+		["usage.scheduledAutomations.health.failing", "❌ Failing", "❌ 持续失败"],
+		["usage.scheduledAutomations.health.disabled", "⏸ Disabled", "⏸ 已停用"],
+		["usage.scheduledAutomations.health.one-off", "1× One-off", "1× 一次性"],
+		["usage.scheduledAutomations.health.manual", "▶ Manual", "▶ 手动"],
+		["usage.scheduledAutomations.health.never-run", "🕒 Not run yet", "🕒 尚未运行"],
+		["insight.scheduledAutomationAtRisk.title", "⚠️ A scheduled automation needs attention", "⚠️ 有计划自动化需要处理"],
+		["insight.scheduledAutomationAtRisk.body.one", "{0} scheduled automation is at risk: {1}. Unattended work that stops or keeps failing goes unnoticed — fix or retire it. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化存在风险：{1}。无人值守的工作停止或持续失败时很难被发现——请修复或停用它。（“已停滞”指已启用但 {2} 天内没有运行。）"],
+		["insight.scheduledAutomationAtRisk.body.other", "{0} scheduled automations are at risk: {1}. Unattended work that stops or keeps failing goes unnoticed — fix or retire them. (Stale means enabled with no run for {2} days.)", "{0} 个计划自动化存在风险：{1}。无人值守的工作停止或持续失败时很难被发现——请修复或停用它们。（“已停滞”指已启用但 {2} 天内没有运行。）"],
+		["insight.scheduledAutomationAtRisk.stale", "\"{0}\" has not run for {1} days", "“{0}”已有 {1} 天没有运行"],
+		["insight.scheduledAutomationAtRisk.neverRan", "\"{0}\" has never run", "“{0}”从未运行"],
+		["insight.scheduledAutomationAtRisk.failing", "\"{0}\" failed {1} of its last {2} runs", "“{0}”最近 {2} 次运行中失败了 {1} 次"],
 		["usage.skillSuggestions.scheduledExcluded", "⏰ Already on a schedule, so left out of these suggestions: {0}", "⏰ 已按计划运行，因此未列入这些建议：{0}"],
 		["usage.skillSuggestions.scheduledTask", "{0} ({1} runs)", "{0}（{1} 次运行）"],
 		["insight.scheduledTasksRunning.title", "⏰ You already run tasks on a schedule", "⏰ 你已经在按计划运行任务了"],
@@ -1618,7 +1651,7 @@ test('insights l10n: the catalog actually has keys to cover', () => {
 	// Guards the tests below against silently passing on an empty set if the
 	// catalog is ever refactored to a different key prefix.
 	assert.ok(insightKeys().length > 150, `expected the insight catalog's keys, got ${insightKeys().length}`);
-	assert.equal(INSIGHT_CATALOG.length, 55, 'catalog size changed — update the expected count deliberately');
+	assert.equal(INSIGHT_CATALOG.length, 56, 'catalog size changed — update the expected count deliberately');
 });
 
 test('insights l10n: every catalog title and action label resolves in English', () => {

@@ -65,6 +65,7 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  ScheduledTaskSummary,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -226,6 +227,7 @@ import {
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
 import { automationRunName } from '../../src/copilotAutomationRuns';
+import { readClaudeScheduledTasks } from '../../src/scheduledTaskSources';
 import { PiDataAccess } from '../../src/pi';
 import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
@@ -1740,6 +1742,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
+	/** Scheduled tasks from the last Usage Analysis refresh, for the AI Readiness findings. */
+	private _lastScheduledTasks?: ScheduledTaskSummary[];
 
 	// True while this window is refreshing the shared repository-PRs snapshot from the GitHub API
 	private _repoPrRefreshInFlight = false;
@@ -8497,9 +8501,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async buildRepeatedTaskReport(
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 	): Promise<RepeatedTaskReport | undefined> {
-		// GitHub Copilot automation runs from data.db, so scheduled runs are reported as scheduled tasks.
-		const automationRuns = await this.copilotAppData.getAutomationRuns();
-		return _buildRepeatedTaskReport(results
+		// GitHub Copilot automation runs from data.db, so scheduled runs are reported as scheduled tasks,
+		// plus both apps' scheduled-task inventory for their schedule, repository and health.
+		const [automationRuns, copilotAutomations, claudeTasks] = await Promise.all([
+			this.copilotAppData.getAutomationRuns(), this.copilotAppData.getAutomations(), readClaudeScheduledTasks(),
+		]);
+		const report = _buildRepeatedTaskReport(results
 			.filter((r): r is NonNullable<typeof r> => !!r)
 			.map(r => ({
 				file: r.sessionFile,
@@ -8510,7 +8517,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 				repository: r.sessionData.repository,
 				editor: this.getEditorTypeFromPath(r.sessionFile),
 				copilotAutomation: automationRunName(r.sessionFile, automationRuns),
-			})));
+				// So a failed scheduled run can show what its session cost.
+				tokens: r.sessionData.tokens,
+				costUsd: r.sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(r.sessionData.modelUsage || {}),
+			})), { scheduledTaskDefinitions: [...claudeTasks, ...copilotAutomations] });
+		this._lastScheduledTasks = report?.scheduledTasks;
+		return report;
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -11579,6 +11591,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			scheduledTasks: this._lastScheduledTasks,
 		});
 	}
 
