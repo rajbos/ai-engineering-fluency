@@ -6,13 +6,18 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { createPeriodSelector, CANONICAL_PERIODS } from '../shared/periodSelector';
-import { formatNumber } from '../shared/formatUtils';
+import { formatCompact, formatNumber } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 import { applyWebviewLocale, type WebviewLocaleFields } from '../shared/webviewLocale';
 import { FILE_ACTIVITY_KINDS, type FileActivityKind } from '../../../../src/fileActivity';
 import {
+	classifyHotspot,
+	findRepoHeatmapHotspots,
 	summarizeRepoHeatmap,
+	type KindCounts,
 	type RepoHeatmapCell,
+	type RepoHeatmapHotspot,
+	type RepoHeatmapHotspotKind,
 	type RepoHeatmapRepo,
 	type RepoHeatmapSummary,
 	type RepoHeatmapViewData,
@@ -78,6 +83,187 @@ function cellTooltip(cell: RepoHeatmapCell): string {
 	return `${localizeFormat('repoHeatmap.cellTooltip', cell.path, parts.join(', '))}${inferred}`;
 }
 
+/** What to do about a hotspot, with the reads-per-edit ratio where that is the reason. */
+function hotspotHint(kind: RepoHeatmapHotspotKind, counts: KindCounts): string {
+	if (kind !== 'reread') { return localize(`repoHeatmap.hotspots.hint.${kind}`); }
+	const [read, edited] = counts;
+	return edited === 0
+		? localizeFormat('repoHeatmap.hotspots.hint.rereadNeverEdited', formatNumber(read))
+		: localizeFormat('repoHeatmap.hotspots.hint.reread', (read / edited).toFixed(1));
+}
+
+/** The selected file's tooltip, plus what to do about it when it is a hotspot. */
+function cellDetail(cell: RepoHeatmapCell): string {
+	const kind = classifyHotspot(cell.path, cell.counts);
+	return kind ? `${cellTooltip(cell)} — ${hotspotHint(kind, cell.counts)}` : cellTooltip(cell);
+}
+
+function findCell(summary: RepoHeatmapSummary, path: string): RepoHeatmapCell | undefined {
+	for (const folder of summary.folders) {
+		const cell = folder.files.find(f => f.path === path);
+		if (cell) { return cell; }
+	}
+	return undefined;
+}
+
+/**
+ * A prompt the user can paste into their agent to act on a hotspot. For a re-read file it sets
+ * up (or points agents at) a lookup tool rather than asking for a summary, which would go stale.
+ */
+function hotspotPrompt(hotspot: RepoHeatmapHotspot): string {
+	const prompt = hotspotPromptBody(hotspot);
+	// The cost gives the agent (and whoever reviews its change) a sense of what is at stake.
+	return hotspot.readTokens === undefined
+		? prompt
+		: `${prompt} ${localizeFormat('repoHeatmap.hotspots.prompt.tokens', formatCompact(hotspot.readTokens))}`;
+}
+
+function hotspotPromptBody(hotspot: RepoHeatmapHotspot): string {
+	const reads = formatNumber(hotspot.counts[KIND_INDEX.read]);
+	if (hotspot.kind === 'generated') { return localizeFormat('repoHeatmap.hotspots.prompt.generated', hotspot.path, reads); }
+	const tools = data?.codeNavTools;
+	const detected = tools?.detected[0];
+	if (detected) { return localizeFormat('repoHeatmap.hotspots.prompt.rereadUse', hotspot.path, reads, detected.name); }
+	const examples = (tools?.suggested ?? []).map(t => t.name).join(', ');
+	return examples
+		? localizeFormat('repoHeatmap.hotspots.prompt.rereadSetup', hotspot.path, reads, examples)
+		: localizeFormat('repoHeatmap.hotspots.prompt.rereadSetupGeneric', hotspot.path, reads);
+}
+
+/** Reads now against the period before: down is the fix working. */
+function trendCell(hotspot: RepoHeatmapHotspot): HTMLElement {
+	const reads = hotspot.counts[KIND_INDEX.read];
+	const previous = hotspot.previousReads;
+	const cell = el('td', 'data-table-align-right hotspot-trend');
+	if (previous === undefined) { cell.textContent = '—'; return cell; }
+	cell.title = localizeFormat('repoHeatmap.hotspots.trend.tooltip', formatNumber(previous));
+	if (previous === 0) { cell.textContent = localize('repoHeatmap.hotspots.trend.new'); return cell; }
+	const change = Math.round(((reads - previous) / previous) * 100);
+	cell.textContent = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}%`;
+	if (change !== 0) { cell.classList.add(change < 0 ? 'trend-down' : 'trend-up'); }
+	return cell;
+}
+
+/** Estimated tokens the reads put into agents' context; a dash when the logs record no read size. */
+function tokensCell(hotspot: RepoHeatmapHotspot): HTMLElement {
+	const cell = el('td', 'data-table-align-right hotspot-tokens');
+	if (hotspot.readTokens === undefined) {
+		cell.textContent = '—';
+		cell.title = localize('repoHeatmap.hotspots.tokens.unknown');
+		return cell;
+	}
+	cell.textContent = formatCompact(hotspot.readTokens);
+	cell.title = localizeFormat('repoHeatmap.hotspots.tokens.tooltip',
+		formatNumber(hotspot.readTokens), formatNumber(hotspot.sizedReads), formatNumber(Math.max(hotspot.counts[KIND_INDEX.read], hotspot.sizedReads)));
+	return cell;
+}
+
+function copyPromptButton(hotspot: RepoHeatmapHotspot): HTMLElement {
+	const button = el('button', 'hotspot-copy', localize('repoHeatmap.hotspots.copyPrompt'));
+	button.type = 'button';
+	button.title = localize('repoHeatmap.hotspots.copyPromptTitle');
+	button.addEventListener('click', () => {
+		vscode.postMessage({ command: 'copyText', text: hotspotPrompt(hotspot) });
+		button.textContent = localize('repoHeatmap.hotspots.copied');
+		setTimeout(() => { button.textContent = localize('repoHeatmap.hotspots.copyPrompt'); }, 2000);
+	});
+	return button;
+}
+
+function hotspotRow(hotspot: RepoHeatmapHotspot, rerender: () => void): HTMLElement {
+	const row = el('tr');
+	const fileCell = el('td', 'hotspot-file');
+	const open = el('button', 'hotspot-open', hotspot.path);
+	open.type = 'button';
+	open.title = localize('repoHeatmap.hotspots.show');
+	open.addEventListener('click', () => {
+		// Zoom to the file's folder and select it, even when the kind filter currently hides it.
+		const slash = hotspot.path.lastIndexOf('/');
+		state.zoomPath = slash < 0 ? '' : hotspot.path.slice(0, slash);
+		state.kinds = [...FILE_ACTIVITY_KINDS];
+		selectedPath = hotspot.path;
+		persist();
+		rerender();
+		document.querySelector('.tm-file.selected')?.scrollIntoView({ block: 'nearest' });
+	});
+	fileCell.append(open);
+	const patternCell = el('td');
+	patternCell.append(el('span', `hotspot-badge hotspot-${hotspot.kind}`, localize(`repoHeatmap.hotspots.kind.${hotspot.kind}`)));
+	const actionCell = el('td', 'hotspot-action');
+	actionCell.append(copyPromptButton(hotspot));
+	row.append(
+		fileCell,
+		el('td', 'data-table-align-right', formatNumber(hotspot.counts[KIND_INDEX.read])),
+		el('td', 'data-table-align-right', formatNumber(hotspot.counts[KIND_INDEX.edited])),
+		tokensCell(hotspot),
+		trendCell(hotspot),
+		patternCell,
+		el('td', 'hotspot-hint', hotspotHint(hotspot.kind, hotspot.counts)),
+		actionCell,
+	);
+	return row;
+}
+
+/**
+ * The tip above the table when a file is re-read: the lookup tool already set up here, or the
+ * ones worth trying. Absent on hosts that do not report tools.
+ */
+function buildToolTip(): HTMLElement | undefined {
+	const tools = data?.codeNavTools;
+	if (!tools) { return undefined; }
+	const tip = el('div', 'hotspots-tip');
+	const detected = tools.detected[0];
+	if (detected) {
+		tip.append(localizeFormat('repoHeatmap.hotspots.tip.detected', detected.name, localize(`repoHeatmap.hotspots.scope.${detected.scope}`)));
+		return tip;
+	}
+	if (tools.suggested.length === 0) { return undefined; }
+	tip.append(localize('repoHeatmap.hotspots.tip.suggest'), ' ');
+	tools.suggested.forEach((tool, i) => {
+		const link = el('a', 'hotspots-tool', tool.name);
+		link.href = tool.url;
+		tip.append(...(i > 0 ? [' · ', link] : [link]));
+	});
+	return tip;
+}
+
+const HOTSPOT_COLUMNS: [key: string, className: string][] = [
+	['file', ''], ['reads', 'data-table-align-right'], ['edits', 'data-table-align-right'],
+	['tokens', 'data-table-align-right'], ['trend', 'data-table-align-right'], ['pattern', ''], ['suggestion', ''], ['action', ''],
+];
+
+/** Files agents keep reading that the user can do something about, with a ready prompt for each. */
+function buildHotspots(repo: RepoHeatmapRepo, now: Date, rerender: () => void): HTMLElement {
+	const section = el('section', 'hotspots');
+	section.setAttribute('aria-labelledby', 'hotspots-title');
+	const title = el('div', 'hotspots-title', localize('repoHeatmap.hotspots.title'));
+	title.id = 'hotspots-title';
+	section.append(title, el('div', 'hotspots-subtitle', localize('repoHeatmap.hotspots.subtitle')));
+	const hotspots = findRepoHeatmapHotspots(repo, state.period, now);
+	if (hotspots.length === 0) {
+		section.append(el('div', 'hotspots-empty', localize('repoHeatmap.hotspots.empty')));
+		return section;
+	}
+	const tip = hotspots.some(h => h.kind === 'reread') ? buildToolTip() : undefined;
+	if (tip) { section.append(tip); }
+	const table = el('table', 'data-table');
+	const head = el('tr');
+	for (const [key, className] of HOTSPOT_COLUMNS) {
+		const th = el('th', className, localize(`repoHeatmap.hotspots.col.${key}`));
+		th.setAttribute('scope', 'col');
+		head.append(th);
+	}
+	const thead = el('thead');
+	thead.append(head);
+	const tbody = el('tbody');
+	tbody.append(...hotspots.map(h => hotspotRow(h, rerender)));
+	table.append(thead, tbody);
+	const scroll = el('div', 'data-table-scroll');
+	scroll.append(table);
+	section.append(scroll);
+	return section;
+}
+
 /** Folder breadcrumb: the repository, then each folder down to the one currently zoomed into. */
 function buildBreadcrumbs(repo: RepoHeatmapRepo, zoomed: TreeNode, rerender: () => void): HTMLElement {
 	const nav = el('nav', 'crumbs');
@@ -117,7 +303,7 @@ function placeFile(placed: PlacedNode, summary: RepoHeatmapSummary, kinds: Reado
 	if (placed.rect.w >= 52 && placed.rect.h >= 16) { button.append(el('span', 'tm-name', cell.name)); }
 	button.addEventListener('click', () => {
 		selectedPath = cell.path;
-		detail.textContent = cellTooltip(cell);
+		detail.textContent = cellDetail(cell);
 		document.querySelectorAll('.tm-file.selected').forEach(n => n.classList.remove('selected'));
 		button.classList.add('selected');
 	});
@@ -242,11 +428,13 @@ function buildBody(): HTMLElement {
 	const kinds = new Set(state.kinds);
 	// Periods count back from the scan time, so the view matches the data it was built from.
 	const summary = summarizeRepoHeatmap(repo, state.period, new Date(data.lastUpdated), kinds);
-	const detail = el('div', 'detail', localize('repoHeatmap.selectCell'));
+	const selectedCell = selectedPath ? findCell(summary, selectedPath) : undefined;
+	const detail = el('div', 'detail', selectedCell ? cellDetail(selectedCell) : localize('repoHeatmap.selectCell'));
 	detail.id = 'cell-detail';
 	const totals = localizeFormat('repoHeatmap.totals', ...FILE_ACTIVITY_KINDS.map(k => formatNumber(summary.counts[KIND_INDEX[k]])));
 	const headline = localizeFormat('repoHeatmap.summary', repo.label, fileCount(summary.fileCount), totals);
-	body.append(el('div', 'summary', progress ? localizeFormat('repoHeatmap.summaryRefreshing', headline, progressText()) : headline), detail);
+	body.append(el('div', 'summary', progress ? localizeFormat('repoHeatmap.summaryRefreshing', headline, progressText()) : headline));
+	body.append(buildHotspots(repo, new Date(data.lastUpdated), render), detail);
 	if (summary.fileCount === 0) {
 		body.append(el('div', 'empty', localize('repoHeatmap.noMatch')));
 	} else {

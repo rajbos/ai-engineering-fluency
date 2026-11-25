@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 import type { RepoHeatmapCell, RepoHeatmapSummary } from '../repoHeatmapViewBuilder';
 import { buildFolderTree, findNode, layoutTreemap, squarify, type Rect } from '../treemapLayout';
 
-const cell = (path: string, total: number): RepoHeatmapCell => ({ name: path.split('/').pop()!, path, counts: [total, 0, 0, 0], total, inferredDeletes: false });
+const cell = (path: string, total: number): RepoHeatmapCell => ({ name: path.split('/').pop()!, path, counts: [total, 0, 0, 0], total, inferredDeletes: false, readChars: 0, sizedReads: 0 });
 const summaryOf = (files: [string, number][]): RepoHeatmapSummary => {
 	const byFolder = new Map<string, RepoHeatmapCell[]>();
 	for (const [p, n] of files) {

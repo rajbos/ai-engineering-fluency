@@ -5,6 +5,12 @@ import type { FileTouch } from '../fileActivity';
 import {
 	agentWorktreeInfo,
 	buildRepoHeatmapViewData,
+	classifyHotspot,
+	estimateReadTokens,
+	HOTSPOT_CHARS_PER_TOKEN,
+	findRepoHeatmapHotspots,
+	isGeneratedPath,
+	previousPeriodEnd,
 	summarizeRepoHeatmap,
 	toRepoRelativePath,
 	type RepoHeatmapSessionInput,
@@ -156,4 +162,93 @@ test('buildRepoHeatmapViewData: two remotes ending in the same name stay separat
 		session({ repository: undefined, workspaceFolderPath: 'C:/Users/me/.claude/worktrees/r/w', touches: [touch('C:/Users/me/.claude/worktrees/r/w/z.ts', 'read', '2026-10-22')] }),
 	], NOW);
 	assert.equal(data.repos.length, 3);
+});
+
+test('isGeneratedPath: dependency folders, build output, lockfiles and minified files only', () => {
+	for (const p of ['node_modules/x/index.js', 'pkg/dist/a.js', 'out/test.js', 'pnpm-lock.yaml', 'web/package-lock.json', 'assets/app.min.js', 'src/obj/Debug/a.cs']) {
+		assert.equal(isGeneratedPath(p), true, p);
+	}
+	for (const p of ['src/extension.ts', 'distribution/readme.md', 'scripts/bin-pack.js', 'bin/cli.js', 'docs/output.md']) {
+		assert.equal(isGeneratedPath(p), false, p);
+	}
+});
+
+test('classifyHotspot: only re-read and generated files are flagged', () => {
+	assert.equal(classifyHotspot('src/a.ts', [10, 2, 0, 0]), 'reread', 'reads at 5x edits');
+	assert.equal(classifyHotspot('src/a.ts', [10, 0, 0, 0]), 'reread', 'never edited counts as one edit for the ratio');
+	assert.equal(classifyHotspot('src/a.ts', [9, 0, 0, 0]), undefined, 'below the minimum reads');
+	assert.equal(classifyHotspot('src/a.ts', [11, 3, 0, 0]), undefined, 'under 4 reads per edit');
+	assert.equal(classifyHotspot('src/a.ts', [12, 3, 0, 0]), 'reread', 'exactly 4 reads per edit');
+	assert.equal(classifyHotspot('src/a.ts', [10, 30, 0, 0]), undefined, 'heavy editing is normal work');
+	assert.equal(classifyHotspot('tmp.txt', [2, 0, 1, 1]), undefined, 'a throwaway file is not flagged');
+	assert.equal(classifyHotspot('dist/a.js', [3, 0, 0, 0]), 'generated');
+	assert.equal(classifyHotspot('dist/a.js', [2, 0, 5, 0]), undefined, 'writing build output is expected; only reading it is flagged');
+	assert.equal(classifyHotspot('node_modules/x/big.js', [40, 0, 0, 0]), 'generated', 'generated outranks reread');
+});
+
+test('previousPeriodEnd: the day before the period starts; none for all time', () => {
+	assert.equal(previousPeriodEnd('last7', NOW)?.toDateString(), new Date(2026, 9, 15).toDateString());
+	assert.equal(previousPeriodEnd('today', NOW)?.toDateString(), new Date(2026, 9, 21).toDateString());
+	assert.equal(previousPeriodEnd('currentMonth', NOW)?.toDateString(), new Date(2026, 8, 30).toDateString());
+	assert.equal(previousPeriodEnd('allTime', NOW), undefined);
+});
+
+test('findRepoHeatmapHotspots: most-read first, period-bound, with the previous period for comparison', () => {
+	const reads = (path: string, n: number, day = '2026-10-22') => Array.from({ length: n }, () => touch(`C:/code/r/${path}`, 'read', day));
+	const edits = (path: string, n: number) => Array.from({ length: n }, () => touch(`C:/code/r/${path}`, 'edited', '2026-10-22'));
+	const data = buildRepoHeatmapViewData([session({ touches: [
+		...reads('src/big.ts', 30), ...edits('src/big.ts', 2), ...reads('src/big.ts', 45, '2026-10-12'),
+		...reads('src/hot.ts', 5), ...edits('src/hot.ts', 12),
+		...reads('docs/guide.md', 12),
+		...reads('node_modules/x/index.js', 4),
+		...reads('src/old.ts', 50, '2026-01-01'),
+	] })], NOW);
+	const hotspots = findRepoHeatmapHotspots(data.repos[0], 'last7', NOW);
+	assert.deepEqual(hotspots.map(h => [h.path, h.kind, h.previousReads]), [
+		['src/big.ts', 'reread', 45],
+		['docs/guide.md', 'reread', 0],
+		['node_modules/x/index.js', 'generated', 0],
+	]);
+	assert.deepEqual(hotspots[0].counts, [30, 2, 0, 0]);
+	assert.equal(findRepoHeatmapHotspots(data.repos[0], 'last7', NOW, 1).length, 1);
+	const allTime = findRepoHeatmapHotspots(data.repos[0], 'allTime', NOW);
+	assert.equal(allTime[0].path, 'src/big.ts', 'all time adds the earlier reads');
+	assert.equal(allTime[1].path, 'src/old.ts', 'and brings the old file back');
+	assert.equal(allTime[0].previousReads, undefined, 'all time has no previous period');
+});
+
+// ── Read cost ────────────────────────────────────────────────────────────────
+
+test('estimateReadTokens: sized reads scaled to all reads at four characters per token; nothing sized means no estimate', () => {
+	assert.equal(estimateReadTokens(10, 4000, 10), 1000);
+	assert.equal(estimateReadTokens(10, 4000, 5), 2000, 'unsized reads are assumed average');
+	assert.equal(estimateReadTokens(3, 4000, 5), 1000, 'never scaled below the reads that were measured');
+	assert.equal(estimateReadTokens(10, 0, 0), undefined);
+	assert.equal(HOTSPOT_CHARS_PER_TOKEN, 4);
+});
+
+test('read sizes: kept per day, merged across sessions and worktrees, and bound to the period', () => {
+	const read = (day: string, chars?: number): FileTouch => ({ ...touch('C:/code/r/src/big.ts', 'read', day), ...(chars ? { chars } : {}) });
+	const data = buildRepoHeatmapViewData([
+		session({ touches: [read('2026-10-22', 4000), read('2026-10-22'), read('2026-10-12', 8000), touch('C:/code/r/src/plain.ts', 'read', '2026-10-22')] }),
+		session({ workspaceFolderPath: 'C:\\Users\\me\\.claude\\worktrees\\r\\fix', touches: [{ ...touch('C:/Users/me/.claude/worktrees/r/fix/src/big.ts', 'read', '2026-10-22'), chars: 2000 }] }),
+	], NOW);
+	const byPath = Object.fromEntries(data.repos[0].files.map(f => [f.path, f]));
+	assert.deepEqual(byPath['src/big.ts'].readSizes, { '2026-10-22': [6000, 2], '2026-10-12': [8000, 1] });
+	assert.equal(byPath['src/plain.ts'].readSizes, undefined, 'a file with no sized read carries no sizes');
+	const cell = (period: 'last7' | 'allTime') => summarizeRepoHeatmap(data.repos[0], period, NOW).folders[0].files.find(f => f.name === 'big.ts');
+	assert.deepEqual([cell('last7')?.readChars, cell('last7')?.sizedReads], [6000, 2]);
+	assert.deepEqual([cell('allTime')?.readChars, cell('allTime')?.sizedReads], [14000, 3]);
+});
+
+test('findRepoHeatmapHotspots: estimates the tokens the reads cost, and leaves it out when no read was sized', () => {
+	const reads = (path: string, n: number, chars?: number) =>
+		Array.from({ length: n }, (): FileTouch => ({ ...touch(`C:/code/r/${path}`, 'read', '2026-10-22'), ...(chars ? { chars } : {}) }));
+	const data = buildRepoHeatmapViewData([session({ touches: [
+		...reads('src/big.ts', 10, 8000), ...reads('src/big.ts', 10),
+		...reads('docs/guide.md', 12),
+	] })], NOW);
+	const [big, guide] = findRepoHeatmapHotspots(data.repos[0], 'last7', NOW);
+	assert.deepEqual([big.path, big.readTokens, big.sizedReads], ['src/big.ts', 40000, 10]);
+	assert.deepEqual([guide.path, guide.sizedReads, 'readTokens' in guide], ['docs/guide.md', 0, false]);
 });

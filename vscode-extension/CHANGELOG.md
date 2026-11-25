@@ -5,6 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Repository Heatmap: a new **Hotspots** table lists the files you can act on: files agents re-read far more often than they edit, and dependencies, build output or lockfiles they keep opening. Each row shows the estimated tokens those reads put into context, the change against the previous period, and a **Copy prompt** button with a ready prompt for your agent. A tip names the code-graph tool already set up on the machine or in the workspace (graphify, CodeGraph, codebase-memory-mcp, Serena), or links to them. The first open after updating re-reads every session log once. See [docs/features/REPO-HEATMAP.md](../docs/features/REPO-HEATMAP.md)
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. A stopped distro is never read or started. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
 
 ### Bug Fixes
