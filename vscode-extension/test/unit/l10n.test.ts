@@ -2644,3 +2644,22 @@ test('l10n: aligned command titles resolve in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: usage history command strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('command.clearUsageHistory.title'), 'Clear Usage History');
+	assert.equal(t('usageHistory.clear.empty'), 'There is no kept usage history to clear.');
+	assert.equal(t('usageHistory.clear.confirm', 3), 'Clear the usage of 3 session(s) whose files are no longer on disk? Their usage leaves your totals and cannot be read back.');
+	assert.equal(t('usageHistory.clear.confirmButton'), 'Clear History');
+	assert.equal(t('usageHistory.clear.done'), 'Usage history cleared. Statistics were reloaded.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('command.clearUsageHistory.title'), '清除使用历史');
+		assert.equal(t('usageHistory.clear.empty'), '没有可清除的已保留使用历史。');
+		assert.equal(t('usageHistory.clear.confirm', 3), '要清除 3 个文件已不在磁盘上的会话的使用数据吗？这些数据将从统计中移除，且无法重新读取。');
+		assert.equal(t('usageHistory.clear.confirmButton'), '清除历史');
+		assert.equal(t('usageHistory.clear.done'), '使用历史已清除，统计数据已重新加载。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
