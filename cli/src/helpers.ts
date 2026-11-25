@@ -25,7 +25,7 @@ import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
-import { groupWorkspaces, groupFolders, type WorkspaceGroup, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
+import { groupWorkspaces, groupFolders, stripWindowsLongPathPrefix, type WorkspaceGroup, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
 import { buildWorkspaceCustomization, type WorkspaceCustomization } from '../../src/customizationMatrix';
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getTimeWindowStartDate } from '../../src/timeWindows';
@@ -273,7 +273,7 @@ export async function buildWorkspaceCustomizationForSessions(
 		const workspace = await resolveSessionWorkspace(activity, claudeBasePath);
 		if (!workspace) { continue; }
 		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
-		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });
+		entries.push({ path: path.normalize(stripWindowsLongPathPrefix(workspace.path)), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });
 	}
 	if (entries.length === 0) { return undefined; }
 

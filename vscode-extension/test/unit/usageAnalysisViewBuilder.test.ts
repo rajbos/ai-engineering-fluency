@@ -148,6 +148,33 @@ test('buildWorkspaceCustomization: a grouped workspace uses the group name and l
 	});
 	assert.equal(customizationMatrix.workspaces[0].workspaceName, 'owner/app');
 	assert.deepEqual(customizationMatrix.workspaces[0].memberPaths, ['/src/app', '/src/app-wt']);
+	assert.equal(customizationMatrix.workspaces[0].worktreeCount, undefined);
+});
+
+test('buildWorkspaceCustomization: known worktrees are counted, not listed', () => {
+	const wts = ['/home/u/.claude/worktrees/app/a', '/home/u/.claude/worktrees/app/b'];
+	const withClone: WorkspaceGroup = {
+		canonicalPath: '/src/app', displayName: 'app', memberPaths: ['/src/app', '/src/app-wt', ...wts], worktreePaths: wts, sessionCount: 4, interactionCount: 8,
+	};
+	const onlyWorktrees: WorkspaceGroup = {
+		canonicalPath: '/src/lib', displayName: 'lib', memberPaths: ['/src/lib', wts[0]], worktreePaths: [wts[0]], sessionCount: 2, interactionCount: 2,
+	};
+	// A group represented by a worktree (no main checkout found) still lists that folder first.
+	const worktreeCanonical: WorkspaceGroup = {
+		canonicalPath: wts[1], displayName: 'tool', memberPaths: [wts[1]], worktreePaths: [wts[1]], sessionCount: 1, interactionCount: 1,
+	};
+	const { customizationMatrix } = buildWorkspaceCustomization({
+		customizationTypes: types,
+		workspaces: [withClone, onlyWorktrees, worktreeCanonical].map(group => ({ path: group.canonicalPath, sessionCount: group.sessionCount, interactionCount: group.interactionCount, group })),
+		filesFor: () => [file('instructions')],
+	});
+	const [app, lib, tool] = customizationMatrix.workspaces;
+	assert.deepEqual(app.memberPaths, ['/src/app', '/src/app-wt']);
+	assert.equal(app.worktreeCount, 2);
+	assert.equal(lib.memberPaths, undefined, 'only the checkout is left: nothing to expand');
+	assert.equal(lib.worktreeCount, 1);
+	assert.equal(tool.memberPaths, undefined);
+	assert.equal(tool.worktreeCount, undefined, 'the row\'s own folder is not counted as an extra worktree');
 });
 
 test('buildWorkspaceCustomization: missed potential is non-Copilot files without Copilot ones, most active first', () => {

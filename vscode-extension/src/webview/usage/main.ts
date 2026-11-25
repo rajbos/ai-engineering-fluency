@@ -261,6 +261,7 @@ interface WorkspaceCustomizationRow {
 	interactionCount: number;
 	typeStatuses: { [typeId: string]: CustomizationTypeStatus };
 	memberPaths?: string[];
+	worktreeCount?: number;
 }
 
 interface WorkspaceCustomizationMatrix {

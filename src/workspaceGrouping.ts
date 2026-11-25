@@ -66,6 +66,12 @@ export interface WorkspaceGroup {
 	displayName: string;
 	/** Every input path merged into this group, sorted, including the canonical path when it was an input. */
 	memberPaths: string[];
+	/**
+	 * The members known to be linked worktrees: a `.git` pointer to a main checkout (rule 2) or a
+	 * recognised worktree layout (rule 3). Sorted; omitted when there are none. These merges rest
+	 * on strong evidence, so the UI can count them instead of listing every folder.
+	 */
+	worktreePaths?: string[];
 	sessionCount: number;
 	interactionCount: number;
 	/** Normalised `owner/name` repository identity, when one was known for any member. */
@@ -109,6 +115,19 @@ function joinSegments(segments: string[], sep: string): string {
 export function workspaceBasename(p: string): string {
 	const segments = splitSegments(p).filter(s => s.length > 0);
 	return segments.length > 0 ? segments[segments.length - 1] : p;
+}
+
+/**
+ * Drops a Windows extended-length prefix: `\\?\C:\x` → `C:\x`, `\\?\UNC\server\share` →
+ * `\\server\share` (also the `//?/` spelling). Session data sometimes records a folder that way,
+ * and it must key the same workspace as the plain spelling. Other paths are returned unchanged.
+ */
+export function stripWindowsLongPathPrefix(p: string): string {
+	const match = /^[\\/]{2}\?[\\/](.*)$/s.exec(p);
+	if (!match) { return p; }
+	const rest = match[1];
+	const unc = /^UNC[\\/](.*)$/is.exec(rest);
+	return unc ? `\\\\${unc[1]}` : rest;
 }
 
 function isUnresolved(p: string): boolean {
@@ -675,10 +694,14 @@ function buildGroups(nodes: Node[], groups: Groups, pathExists: (p: string) => b
 		const displayName = repositoryId
 			? repositoryName(repositoryId)
 			: canonical.convention?.repoName ?? workspaceBasename(canonical.path);
+		const worktreePaths = inputs
+			.filter(i => nodes[i].mainWorktreePath !== undefined || nodes[i].convention !== undefined)
+			.map(i => nodes[i].path).sort();
 		result.push({
 			canonicalPath: canonical.path,
 			displayName,
 			memberPaths: inputs.map(i => nodes[i].path).sort(),
+			...(worktreePaths.length > 0 ? { worktreePaths } : {}),
 			sessionCount: inputs.reduce((sum, i) => sum + nodes[i].sessionCount, 0),
 			interactionCount: inputs.reduce((sum, i) => sum + nodes[i].interactionCount, 0),
 			...(repositoryId ? { repositoryId } : {}),

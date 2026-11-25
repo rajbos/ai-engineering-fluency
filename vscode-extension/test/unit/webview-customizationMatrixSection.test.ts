@@ -289,6 +289,17 @@ test('merged-folder list: a single worktree grouped under a checkout found only 
 	assert.equal(renderMergedWorkspaceMembers(undefined), '');
 });
 
+test('workspace cell: worktree count goes in the name tooltip, not in the merged list', () => {
+	const matrix: WorkspaceCustomizationMatrix = {
+		customizationTypes: [],
+		workspaces: [{ workspacePath: '/code/app', workspaceName: 'app', sessionCount: 1, interactionCount: 1, typeStatuses: {}, worktreeCount: 85 }],
+		totalWorkspaces: 1, workspacesWithIssues: 0,
+	};
+	const cell = buildCustomizationColumns(matrix)[0].render(matrix.workspaces[0], 0) as { html: string };
+	assert.ok(cell.html.includes('title="/code/app\nAlso includes 85 worktree(s) of this repository"'), cell.html);
+	assert.ok(!cell.html.includes('folders merged'));
+});
+
 test('merged-folder list and ungrouped note escape folder names and carry an accessible badge label', () => {
 	const html = renderMergedWorkspaceMembers(['/a/<b>', '/c/"d"']);
 	assert.ok(!html.includes('<b>'), 'paths are escaped');

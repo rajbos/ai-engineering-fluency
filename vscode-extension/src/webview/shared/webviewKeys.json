@@ -534,6 +534,7 @@
   "customizationMatrix.mergedFolders",
   "customizationMatrix.ungroupedBadge",
   "customizationMatrix.ungroupedNames",
+  "customizationMatrix.worktreesIncluded",
   "memoryFiles.unknownWorkspace",
   "memoryFiles.globalWorkspaceLabel",
   "memoryFiles.renderError",

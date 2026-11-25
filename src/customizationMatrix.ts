@@ -80,7 +80,11 @@ function typeStatusesFor(files: CustomizationFileEntry[], types: CustomizationTy
 }
 
 function resolvedRow(ws: CustomizationWorkspaceInput, files: CustomizationFileEntry[], types: CustomizationType[]): WorkspaceCustomizationRow {
-	const folders = ws.group ? groupFolders(ws.group) : [];
+	// Known worktrees are counted, not listed: dozens of them would bury the folders whose merge
+	// rests on weaker evidence (clones, sibling `-wt` folders, case / WSL spellings).
+	const worktrees = new Set(ws.group?.worktreePaths ?? []);
+	const folders = ws.group ? groupFolders(ws.group).filter((f, i) => i === 0 || !worktrees.has(f)) : [];
+	const worktreeCount = ws.group ? groupFolders(ws.group).slice(1).filter(f => worktrees.has(f)).length : 0;
 	return {
 		workspacePath: ws.path,
 		workspaceName: ws.group?.displayName ?? workspaceBasename(ws.path),
@@ -88,6 +92,7 @@ function resolvedRow(ws: CustomizationWorkspaceInput, files: CustomizationFileEn
 		interactionCount: ws.interactionCount,
 		typeStatuses: typeStatusesFor(files, types),
 		...(folders.length > 1 ? { memberPaths: folders } : {}),
+		...(worktreeCount > 0 ? { worktreeCount } : {}),
 	};
 }
 

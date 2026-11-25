@@ -1246,8 +1246,12 @@ export interface WorkspaceCustomizationRow {
   /**
    * Folders merged into this row by workspace grouping (worktrees, clones, case/remote
    * variants — see src/workspaceGrouping.ts). Present only when more than one folder merged.
+   * Known linked worktrees are left out (counted in `worktreeCount`); the row's own folder
+   * is always first.
    */
   memberPaths?: string[];
+  /** Known linked worktrees merged into this row, beyond the row's own folder. */
+  worktreeCount?: number;
 }
 
 export interface WorkspaceCustomizationMatrix {
