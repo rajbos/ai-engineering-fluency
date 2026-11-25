@@ -94,7 +94,9 @@ together with the apps' own inventory of scheduled tasks.
   has `error`, or when it never finished a turn (`completedTurns` missing or 0): it stalled, for
   example on an unanswered permission prompt, or was cut short (`lastTurnCutShort`). A run with no
   finished turn whose `lastActivityAt` is less than `STALLED_RUN_AFTER_MS` (1 hour) old and that
-  was not cut short may still be running, so it is not counted as failed yet. `<config>` is `%LOCALAPPDATA%\Claude-Data\claude_*` on current Windows
+  was not cut short may still be running, so it is not counted as failed yet. When no session in the
+  folder records `completedTurns` (an app version that does not write it), only `error` marks a
+  failure. `<config>` is `%LOCALAPPDATA%\Claude-Data\claude_*` on current Windows
   installs (the packaged `LocalCache\Roaming\Claude` on older ones) and
   `~/Library/Application Support/Claude` on macOS.
 - **Copilot app** (`queryCopilotAutomations()`): `workflows` gives the name, interval or cron

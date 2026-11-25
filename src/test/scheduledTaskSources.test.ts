@@ -59,6 +59,24 @@ test('readClaudeScheduledTasks: reads schedule, folder, repository and run outco
 	assert.equal(once.totalRuns, 0);
 });
 
+test('readClaudeScheduledTasks: an app version that never writes completedTurns falls back to error only', async (t) => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-desktop-legacy-'));
+	t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+	const machine = path.join(root, 'claude-code-sessions', 'account-1', 'machine-1');
+	fs.mkdirSync(machine, { recursive: true });
+	fs.writeFileSync(path.join(machine, 'scheduled-tasks.json'), JSON.stringify({ scheduledTasks: [{ id: 'weekly', cronExpression: '0 8 * * 1', enabled: true }] }));
+	const session = (name: string, meta: object) => fs.writeFileSync(path.join(machine, `local_${name}.json`), JSON.stringify({ scheduledTaskId: 'weekly', ...meta }));
+	session('a', { createdAt: Date.parse('2026-11-23T08:00:00Z'), lastActivityAt: Date.parse('2026-11-23T08:05:00Z') });
+	session('b', { createdAt: Date.parse('2026-11-16T08:00:00Z'), lastActivityAt: Date.parse('2026-11-16T08:05:00Z'), error: 'boom' });
+	const [weekly] = await readClaudeScheduledTasks([root], Date.parse('2026-11-25T00:00:00Z'));
+	assert.deepEqual(weekly.recentRuns.map(r => r.ok), [true, false], 'no completedTurns anywhere: only the errored run failed');
+
+	// Once any session in the folder records completedTurns, the same idle run counts as stalled.
+	fs.writeFileSync(path.join(machine, 'local_manual.json'), JSON.stringify({ title: 'a hand-started session', completedTurns: 2 }));
+	const [again] = await readClaudeScheduledTasks([root], Date.parse('2026-11-25T00:00:00Z'));
+	assert.deepEqual(again.recentRuns.map(r => r.ok), [false, false]);
+});
+
 test('readClaudeScheduledTasks: missing or empty config dirs yield no tasks', async () => {
 	assert.deepEqual(await readClaudeScheduledTasks([path.join(os.tmpdir(), 'no-such-claude-dir')]), []);
 	assert.deepEqual(await readClaudeScheduledTasks([]), []);
@@ -89,5 +107,6 @@ test('parseRunMetadata: a run fails on an error, or when no turn finished and it
 	assert.equal(ok({ lastActivityAt: now - STALLED_RUN_AFTER_MS }), false, 'stalled: idle for the whole window');
 	assert.equal(ok({ lastActivityAt: now - 1000, lastTurnCutShort: true }), false, 'cut short: ended even though recent');
 	assert.equal(ok({ lastActivityAt: new Date(now - 1000).toISOString() }), true, 'ISO timestamps are read too');
+	assert.equal(parseRunMetadata(JSON.stringify({ scheduledTaskId: 't', createdAt: created, lastActivityAt: created }), now, false)?.run.ok, true, 'app does not track turns: no error means success');
 	assert.equal(parseRunMetadata(JSON.stringify({ title: 'not scheduled' }), now), null);
 });

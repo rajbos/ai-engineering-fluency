@@ -100,9 +100,14 @@ interface RawRunMetadata {
  * that never finished counts as failed once it was cut short or has been idle
  * for `STALLED_RUN_AFTER_MS`; until then it may still be running, so it is not
  * counted as failed.
+ *
+ * `tracksTurns` is false when no session in the run's folder records
+ * `completedTurns` (an app version that does not write it): then only `error`
+ * marks a failure, so finished runs are not mistaken for stalled ones.
  */
-function runSucceeded(meta: RawRunMetadata, at: string, now: number): boolean {
+function runSucceeded(meta: RawRunMetadata, at: string, now: number, tracksTurns: boolean): boolean {
 	if (meta.error) { return false; }
+	if (!tracksTurns) { return true; }
 	if (typeof meta.completedTurns === 'number' && meta.completedTurns > 0) { return true; }
 	if (meta.lastTurnCutShort === true) { return false; }
 	const lastActivity = Date.parse(isoFrom(meta.lastActivityAt) ?? at);
@@ -110,14 +115,14 @@ function runSucceeded(meta: RawRunMetadata, at: string, now: number): boolean {
 }
 
 /** The task id and run one session-metadata file describes, or null when it is not a scheduled run. */
-export function parseRunMetadata(text: string, now: number = Date.now()): { taskId: string; run: ScheduledTaskRun } | null {
+export function parseRunMetadata(text: string, now: number = Date.now(), tracksTurns = true): { taskId: string; run: ScheduledTaskRun } | null {
 	// Cheap pre-check: most sessions are not scheduled runs.
 	if (!text.includes('"scheduledTaskId"')) { return null; }
 	let meta: RawRunMetadata;
 	try { meta = JSON.parse(text); } catch { return null; }
 	const at = isoFrom(meta.createdAt);
 	if (typeof meta.scheduledTaskId !== 'string' || !at) { return null; }
-	const run: ScheduledTaskRun = { at, ok: runSucceeded(meta, at, now) };
+	const run: ScheduledTaskRun = { at, ok: runSucceeded(meta, at, now, tracksTurns) };
 	// cliSessionId names the transcript (~/.claude/projects/<project>/<cliSessionId>.jsonl).
 	if (typeof meta.cliSessionId === 'string' && meta.cliSessionId) { run.sessionId = meta.cliSessionId; }
 	return { taskId: meta.scheduledTaskId, run };
@@ -132,9 +137,15 @@ async function readRuns(folder: string, now: number): Promise<Map<string, Schedu
 	const runs = new Map<string, ScheduledTaskRun[]>();
 	let names: string[] = [];
 	try { names = await fs.promises.readdir(folder); } catch { return runs; }
+	const texts: string[] = [];
 	for (const name of names.filter(n => n.startsWith('local_') && n.endsWith('.json'))) {
 		const text = await readTextOrNull(path.join(folder, name));
-		const parsed = text === null ? null : parseRunMetadata(text, now);
+		if (text !== null) { texts.push(text); }
+	}
+	// Any session here recording finished turns means this app version writes `completedTurns`.
+	const tracksTurns = texts.some(text => text.includes('"completedTurns"'));
+	for (const text of texts) {
+		const parsed = parseRunMetadata(text, now, tracksTurns);
 		if (!parsed) { continue; }
 		runs.set(parsed.taskId, [...(runs.get(parsed.taskId) ?? []), parsed.run]);
 	}
