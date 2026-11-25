@@ -405,3 +405,100 @@ test('runtime_path: unsafe object keys are treated as absent', async () => {
 		assert.equal(await da.isDesktopSession(metaPath), false);
 	} finally { cleanup(); }
 });
+
+// ── Subsession hierarchy (meta.json session_id / parent_session_id / child_sessions) ──
+
+/** Runs fn with VIBE_HOME pointed at a fresh temp dir; always restores env and removes the dir. */
+async function withVibeHome(fn: (root: string) => Promise<void>): Promise<void> {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-home-'));
+	const prev = process.env.VIBE_HOME;
+	process.env.VIBE_HOME = root;
+	try {
+		await fn(root);
+	} finally {
+		if (prev === undefined) { delete process.env.VIBE_HOME; } else { process.env.VIBE_HOME = prev; }
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+}
+
+/** Writes a legacy-layout session dir <root>/logs/session/<dirName>/meta.json; returns the meta path. */
+function writeLegacySessionDir(root: string, dirName: string, meta: unknown): string {
+	const dir = path.join(root, 'logs', 'session', dirName);
+	fs.mkdirSync(dir, { recursive: true });
+	const metaPath = path.join(dir, 'meta.json');
+	fs.writeFileSync(metaPath, JSON.stringify(meta));
+	return metaPath;
+}
+
+/** Writes a unified-store session dir <root>/logs/session/unified/<id>/meta.json; returns the meta path. */
+function writeUnifiedSessionDir(root: string, id: string, meta: unknown): string {
+	const dir = path.join(root, 'logs', 'session', 'unified', id);
+	fs.mkdirSync(dir, { recursive: true });
+	const metaPath = path.join(dir, 'meta.json');
+	fs.writeFileSync(metaPath, JSON.stringify(meta));
+	return metaPath;
+}
+
+test('getSessionIdentity: reads session_id, parent_session_id and child_sessions; unsafe values treated as absent', async () => {
+	const parent = writeMeta({
+		session_id: 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001',
+		parent_session_id: null,
+		child_sessions: ['bbbb2222-0000-0000-0000-000000000002', 42, '__proto__', ''],
+	});
+	const child = writeMeta({
+		session_id: 'bbbb2222-0000-0000-0000-000000000002',
+		parent_session_id: 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001',
+	});
+	const unsafe = writeMeta({ session_id: '__proto__', parent_session_id: '__proto__' });
+	try {
+		const p = await da.getSessionIdentity(parent.metaPath);
+		assert.equal(p.sessionId, 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001');
+		assert.equal(p.parentSessionId, undefined);
+		assert.deepEqual(p.childSessionIds, ['bbbb2222-0000-0000-0000-000000000002']);
+		const c = await da.getSessionIdentity(child.metaPath);
+		assert.equal(c.sessionId, 'bbbb2222-0000-0000-0000-000000000002');
+		assert.equal(c.parentSessionId, 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001');
+		assert.deepEqual(c.childSessionIds, []);
+		const u = await da.getSessionIdentity(unsafe.metaPath);
+		assert.equal(u.sessionId, undefined);
+		assert.equal(u.parentSessionId, undefined);
+		const missing = await da.getSessionIdentity(path.join(os.tmpdir(), 'no-such-vibe', 'meta.json'));
+		assert.equal(missing.sessionId, undefined);
+		assert.equal(missing.parentSessionId, undefined);
+		assert.deepEqual(missing.childSessionIds, []);
+	} finally { parent.cleanup(); child.cleanup(); unsafe.cleanup(); }
+});
+
+test('findSessionMetaById: resolves unified dir by uuid and legacy dir by id[:8] suffix; rejects unsafe/unknown ids', async () => {
+	await withVibeHome(async (root) => {
+		const legacyId = '5327080d-1111-2222-3333-444444444444';
+		const legacyMeta = writeLegacySessionDir(root, 'session_20260922_091515_5327080d', { session_id: legacyId });
+		const unifiedId = '1502172e-554f-f02b-d539-d2473c83eca2';
+		const unifiedMeta = writeUnifiedSessionDir(root, unifiedId, { session_id: unifiedId });
+		assert.equal(await da.findSessionMetaById(unifiedId), unifiedMeta);
+		assert.equal(await da.findSessionMetaById(legacyId), legacyMeta);
+		assert.equal(await da.findSessionMetaById('99999999-0000-0000-0000-000000000000'), undefined);
+		assert.equal(await da.findSessionMetaById('../../etc/passwd'), undefined);
+		assert.equal(await da.findSessionMetaById(''), undefined);
+	});
+});
+
+test('getChildCounts: counts subsessions per parent from parent_session_id across both layouts, restricted to candidates', async () => {
+	await withVibeHome(async (root) => {
+		const parentId = 'aaaa1111-0000-0000-0000-000000000001';
+		const otherRootId = 'aaaa1111-0000-0000-0000-000000000099';
+		writeLegacySessionDir(root, 'session_20260922_091515_aaaa1111', { session_id: parentId, parent_session_id: null });
+		writeLegacySessionDir(root, 'session_20260922_092000_bbbb2222', { session_id: 'bbbb2222-0000-0000-0000-000000000002', parent_session_id: parentId });
+		writeLegacySessionDir(root, 'session_20260922_093000_cccc3333', { session_id: 'cccc3333-0000-0000-0000-000000000003', parent_session_id: parentId });
+		writeUnifiedSessionDir(root, 'dddd4444-0000-0000-0000-000000000004', { session_id: 'dddd4444-0000-0000-0000-000000000004', parent_session_id: parentId });
+		writeUnifiedSessionDir(root, otherRootId, { session_id: otherRootId, parent_session_id: null });
+		// Child pointing at a parent that is not a candidate must be ignored.
+		writeLegacySessionDir(root, 'session_20260922_094000_eeee5555', { session_id: 'eeee5555-0000-0000-0000-000000000005', parent_session_id: 'ffffffff-0000-0000-0000-000000000006' });
+
+		const counts = await da.getChildCounts([parentId, otherRootId]);
+		assert.equal(counts.get(parentId), 3);
+		assert.equal(counts.has(otherRootId), false);
+		assert.equal(counts.size, 1);
+		assert.deepEqual(await da.getChildCounts([]), new Map());
+	});
+});

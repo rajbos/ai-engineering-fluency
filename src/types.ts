@@ -1568,7 +1568,7 @@ export interface ContextPressureStats {
   worstFillPercent?: number;
 }
 
-/** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */
+/** Parent/child session reference used in hierarchy info (Copilot CLI, pi and Mistral Vibe sessions). */
 export interface SessionRelationRef {
   uuid: string;
   name: string;
@@ -1592,9 +1592,9 @@ export interface SessionFileDetails {
   title?: string; // session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
   workspacePath?: string; // absolute local cwd/workspace path the session ran in (from adapter getMeta)
-  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Parent session info (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   parentInfo?: SessionRelationRef | null;
-  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Direct child sessions (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   childInfo?: SessionRelationRef[];
   /**
    * Total child count — may exceed childInfo.length when some
@@ -1678,9 +1678,9 @@ export interface SessionLogData {
   cachedTokens?: number;
   /** Number of distinct subagent sessions started (CLI format: from subagent.started events; pi: from child session count). */
   subAgentsStarted?: number;
-  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Parent session info (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   parentInfo?: SessionRelationRef | null;
-  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Direct child sessions (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   childInfo?: SessionRelationRef[];
   /** Total child count (may exceed childInfo.length when some children fall outside the loaded window). */
   totalChildCount?: number;

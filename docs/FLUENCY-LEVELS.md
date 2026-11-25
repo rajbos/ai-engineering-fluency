@@ -74,7 +74,7 @@ Measures adoption of autonomous, multi-step agent mode workflows.
 - 20+ multi-file edits with average 3+ files per session → Stage 4
 - Sessions with 2+ child workspaces (multi-agent orchestration) → at least Stage 3; 3+ such sessions → at least Stage 4
 
-> **Note about multi-agent orchestration:** This signal is read from `~/.copilot/data.db` (Copilot app only). It counts sessions where you were the *parent* of 2 or more child workspaces — covering both sessions where you manually launched child sessions and sessions where an agent autonomously spawned a subagent fleet. It is absent (and does not affect scoring) when `data.db` is not available.
+> **Note about multi-agent orchestration:** This signal is read from `~/.copilot/data.db` (Copilot CLI/app child workspaces), Hermes's `state.db` (`parent_session_id` subagent rows) and Mistral Vibe's session `meta.json` files (`parent_session_id` on subsessions). It counts sessions where you were the *parent* of 2 or more child sessions — covering both sessions where you manually launched child sessions and sessions where an agent autonomously spawned a subagent fleet. It is absent (and does not affect scoring) when none of those stores are available.
 
 > **Note:** Only *intentional* tools count toward the unique tool thresholds — tools that Copilot calls automatically (file reads, searches, error lookups, confirmations, memory, etc.) are excluded. See [Automatic vs. Intentional Tools](#automatic-vs-intentional-tools) below.
 
