@@ -400,7 +400,8 @@ jobs:
     permissions:
       contents: read
       attestations: read    # gh attestation verify before publishing
-    
+      id-token: write       # OIDC token for VS Code Marketplace Trusted Publishing
+
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -478,18 +479,12 @@ jobs:
         echo "vsix_file=$PRIMARY_VSIX" >> "$GITHUB_OUTPUT"
         # echo "legacy_vsix_file=$LEGACY_VSIX" >> "$GITHUB_OUTPUT"  # legacy disabled
 
+    # Marketplace Trusted Publishing (OIDC): no PAT. The RobBos publisher has a policy
+    # trusting rajbos/ai-engineering-fluency + this workflow file (no environment).
+    # Renaming this file breaks publishing until the policy is updated to match.
     - name: Publish to VS Code Marketplace
       id: publish
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
       run: |
-        if [ -z "$VSCE_PAT" ]; then
-          echo "❌ VSCE_PAT secret is not configured."
-          echo "   Add it at: Settings → Secrets and variables → Actions"
-          echo "   Create a PAT at https://dev.azure.com with 'Marketplace (Publish)' scope"
-          exit 1
-        fi
-        
         # Legacy publishing disabled — migration flow is complete, no longer publishing copilot-token-tracker.
         # Publish legacy first to release the "AI Engineering Fluency" display name,
         # then publish the new extension which claims it.
@@ -514,7 +509,7 @@ jobs:
             if [ "${{ inputs.publish_pre_release }}" == "true" ]; then
               PRE_RELEASE_FLAG="--pre-release"
             fi
-            vscode-extension/node_modules/.bin/vsce publish --packagePath "$vsix" --pat "$VSCE_PAT" $PRE_RELEASE_FLAG
+            vscode-extension/node_modules/.bin/vsce publish --packagePath "$vsix" --oidc $PRE_RELEASE_FLAG
           fi
         }
 
@@ -576,8 +571,8 @@ jobs:
           else
             echo "❌ Failed to publish v${{ needs.release.outputs.version }} to marketplace."
             echo ""
-            echo "Ensure the \`VSCE_PAT\` secret is configured with a valid Azure DevOps PAT"
-            echo "with the \`Marketplace (Publish)\` scope for all accessible organizations."
+            echo "Publishing uses Marketplace Trusted Publishing (OIDC). Check that the RobBos"
+            echo "publisher's Trusted Publishing policy for \`release.yml\` is active."
           fi
           echo ""
           echo "# 🌐 Open VSX Registry"
