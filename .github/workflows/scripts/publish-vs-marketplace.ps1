@@ -151,22 +151,38 @@ Write-Host "✅ Obtained Marketplace credential for publisher '$publisher' via T
 # 3. Publish with VsixPublisher.exe (VS Code's vsce is not for VS IDE extensions).
 #
 # Prefer the copy in the Microsoft.VSSDK.BuildTools NuGet package that the build job
-# already restored (version pinned by packages.lock.json). It takes the token through the
-# Azure DevOps client libraries and ships no Microsoft.Identity.Client (MSAL) at all.
-# The copy installed with Visual Studio changes with every runner image: the VS 18 one on
-# windows-2025-vs2026 (image 2026-11-16) fails before publishing with VsixPub0031,
-# "Could not load ... Microsoft.Identity.Client, Version=4.85.2.0". It stays as a fallback
-# for a job that did not restore the package.
+# already restored, at exactly the version packages.lock.json resolves (never just the
+# newest one in the cache, so the credential only reaches the reviewed, locked binary).
+# It takes the token through the Azure DevOps client libraries and ships no
+# Microsoft.Identity.Client (MSAL) at all. The copy installed with Visual Studio changes
+# with every runner image: the VS 18 one on windows-2025-vs2026 (image 2026-11-16) fails
+# before publishing with VsixPub0031, "Could not load ... Microsoft.Identity.Client,
+# Version=4.85.2.0". It stays as a fallback for a job that did not restore the package.
 function Find-VsixPublisher {
-  $packagesRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' }
-  $fromPackage = Get-ChildItem -LiteralPath (Join-Path $packagesRoot 'microsoft.vssdk.buildtools') -Directory -ErrorAction SilentlyContinue |
-    Sort-Object { $v = $null; if ([version]::TryParse($_.Name, [ref]$v)) { $v } else { [version]'0.0' } } -Descending |
-    ForEach-Object { Join-Path $_.FullName 'tools\vssdk\bin\VsixPublisher.exe' } |
-    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-    Select-Object -First 1
-  if ($fromPackage) { return $fromPackage }
+  param(
+    [string] $LockFile = (Join-Path $PSScriptRoot '..\..\..\visualstudio-extension\src\AIEngineeringFluency\packages.lock.json'),
+    [string] $PackagesRoot = $(if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' })
+  )
 
-  Write-Host "::warning::Microsoft.VSSDK.BuildTools is not restored under $packagesRoot; falling back to the runner's Visual Studio VsixPublisher.exe."
+  $locked = $null
+  try {
+    $lock = Get-Content -LiteralPath $LockFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $locked = $lock.dependencies.PSObject.Properties.Value |
+      ForEach-Object { $_.'Microsoft.VSSDK.BuildTools'.resolved } |
+      Where-Object { $_ } |
+      Select-Object -First 1
+  } catch {
+    Write-Host "::warning::Could not read the locked Microsoft.VSSDK.BuildTools version from ${LockFile}: $($_.Exception.Message)"
+  }
+
+  if ($locked) {
+    # NuGet's global packages folder uses lower-case ids and the normalized version.
+    $fromPackage = Join-Path $PackagesRoot "microsoft.vssdk.buildtools\$($locked.ToLowerInvariant())\tools\vssdk\bin\VsixPublisher.exe"
+    if (Test-Path -LiteralPath $fromPackage -PathType Leaf) { return $fromPackage }
+    Write-Host "::warning::Locked Microsoft.VSSDK.BuildTools $locked is not restored under $PackagesRoot; falling back to the runner's Visual Studio VsixPublisher.exe."
+  } else {
+    Write-Host "::warning::No locked Microsoft.VSSDK.BuildTools version found; falling back to the runner's Visual Studio VsixPublisher.exe."
+  }
   return Get-ChildItem "C:\Program Files\Microsoft Visual Studio" `
     -Recurse -Filter "VsixPublisher.exe" -ErrorAction SilentlyContinue |
     Select-Object -First 1 -ExpandProperty FullName
