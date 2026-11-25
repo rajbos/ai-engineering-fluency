@@ -108,14 +108,29 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 	];
 }
 
+function missingTypeCount(row: WorkspaceCustomizationRow): number {
+	return Object.values(row.typeStatuses ?? {}).filter(status => status === '❌').length;
+}
+
+/**
+ * Default row order, before the user clicks a column: the workspaces missing the most
+ * customization types first (so the ones with none at all lead), then the busiest.
+ */
+export function orderCustomizationRows(rows: readonly WorkspaceCustomizationRow[]): WorkspaceCustomizationRow[] {
+	return [...rows].sort((a, b) =>
+		missingTypeCount(b) - missingTypeCount(a)
+		|| b.interactionCount - a.interactionCount
+		|| b.sessionCount - a.sessionCount);
+}
+
 /** Renders only the paged table root, so sort/page/filter can swap it in place. */
 export function renderCustomizationTable(matrix: WorkspaceCustomizationMatrix): string {
 	return renderDataTable({
 		tableId: CUSTOMIZATION_TABLE_ID,
 		ariaLabel: localize('usage.customization.aria.table'),
-		rows: matrix.workspaces,
+		rows: orderCustomizationRows(matrix.workspaces),
 		columns: buildCustomizationColumns(matrix),
-		initialSort: { columnId: 'interactions', direction: 'desc' },
+		// No column sort by default: the rows keep orderCustomizationRows()'s missing-first order.
 		defaultFilters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false },
 		filterRows: (row, filters) => !filters[CUSTOMIZATION_FILTER_NONE_ONLY] || hasNoCustomization(row),
 		pageSize: CUSTOMIZATION_PAGE_SIZE,
@@ -152,7 +167,7 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				<div style="color: var(--text-muted); padding:12px;">${escapeHtml(localize('usage.customization.empty'))}</div>
 			</div>`;
 	}
-	const state = getDataTableState(CUSTOMIZATION_TABLE_ID, { sort: { columnId: 'interactions', direction: 'desc' }, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false } });
+	const state = getDataTableState(CUSTOMIZATION_TABLE_ID, { filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false } });
 	const noneOnly = state.filters[CUSTOMIZATION_FILTER_NONE_ONLY] === true;
 	// Keep the toggle while the filter is on, even if a refresh left no matching workspaces —
 	// otherwise a persisted filter would hide every row with no way to turn it off.

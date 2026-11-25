@@ -9,6 +9,7 @@ import {
 	bindDataTables,
 	getDataTablePage,
 	getDataTableState,
+	resetDataTableState,
 	setDataTableFilter,
 	setDataTablePage,
 	setDataTableSort,
@@ -22,6 +23,7 @@ import {
 	buildCustomizationSectionHtml,
 	customizationStatusRank,
 	hasNoCustomization,
+	orderCustomizationRows,
 	renderCustomizationTable,
 	renderMergedWorkspaceMembers,
 	renderUngroupedWorkspaceNote,
@@ -287,6 +289,23 @@ test('merged-folder list: a single worktree grouped under a checkout found only 
 	assert.ok(html.includes('/wt/feature'));
 	assert.equal(renderMergedWorkspaceMembers(['/code/only']), '', 'one folder: nothing to expand');
 	assert.equal(renderMergedWorkspaceMembers(undefined), '');
+});
+
+test('default order: most missing customization types first, then most interactions', () => {
+	const row = (name: string, interactions: number, statuses: Record<string, '✅' | '⚠️' | '❌'>): WorkspaceCustomizationRow =>
+		({ workspacePath: `/${name}`, workspaceName: name, sessionCount: 1, interactionCount: interactions, typeStatuses: statuses });
+	const rows = [
+		row('complete-busy', 900, { a: '✅', b: '✅' }),
+		row('one-missing', 50, { a: '✅', b: '❌' }),
+		row('none-quiet', 5, { a: '❌', b: '❌' }),
+		row('stale', 400, { a: '⚠️', b: '✅' }),
+		row('none-busy', 70, { a: '❌', b: '❌' }),
+	];
+	assert.deepEqual(orderCustomizationRows(rows).map(r => r.workspaceName), ['none-busy', 'none-quiet', 'one-missing', 'complete-busy', 'stale']);
+	resetDataTableState(CUSTOMIZATION_TABLE_ID); // other tests leave a column sort behind
+	const html = renderCustomizationTable({ customizationTypes: [], workspaces: rows, totalWorkspaces: 5, workspacesWithIssues: 2 });
+	const order = [...html.matchAll(/class="customization-workspace-name"[^>]*>([^<]+)</g)].map(m => m[1]);
+	assert.deepEqual(order, ['none-busy', 'none-quiet', 'one-missing', 'complete-busy', 'stale'], 'the table renders that order by default');
 });
 
 test('workspace cell: worktree count goes in the name tooltip, not in the merged list', () => {
