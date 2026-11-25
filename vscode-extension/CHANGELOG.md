@@ -4,6 +4,10 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out.
+- A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`).
+
 ## [0.21.0] - 2026-11-25
 
 ### Features
@@ -27,8 +31,6 @@ All notable changes to the VS Code extension will be documented in this file.
 - Older transcript copies Claude Code sets aside as `<session>.orphaned-<timestamp>-<suffix>.jsonl` are no longer read as extra sessions, which counted that session twice (#2728).
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
 - OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
-- Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out.
-- A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`).
 
 ## [0.20.0] - 2026-11-23
 
