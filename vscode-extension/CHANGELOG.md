@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Workspace Health → Copilot Customization Files: workspaces missing the most customization types are listed first (those with none at all lead), then the busiest. Each customization type column header shows its name under the icon, so the table reads without the legend. The note about workspace names that look like ungrouped worktrees or clones is collapsed to a single line with the count; expand it to see every name (#2747)
+
 ## [0.21.0] - 2026-11-25
 
 ### Features

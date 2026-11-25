@@ -617,6 +617,17 @@ body {
 }
 
 
+/* Type column header: icon above a name that may wrap onto two lines. */
+.customization-type-header {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	white-space: normal;
+	line-height: 1.2;
+	text-align: center;
+}
+
 .customization-workspace-name {
 	font-family: 'Courier New', monospace;
 	overflow-wrap: anywhere;
