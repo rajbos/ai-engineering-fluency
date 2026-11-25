@@ -15,6 +15,34 @@ Current month, All time) filters it.
 | Created | `Write` of a new file, `create`, `copilot_createFile` |
 | Deleted | **Inferred** from shell commands: `rm`, `git rm`, `del`, `Remove-Item` |
 
+## Hotspots
+
+Above the treemap, a table lists the files in the selected period that you can do something
+about. Only two patterns are flagged; a file that is simply edited a lot is normal work.
+
+| Pattern | Rule | What to do |
+|---|---|---|
+| Re-read | At least 10 reads and 4 or more reads per edit | Agents navigate the file by reading it. Give them a code-graph or symbol-lookup tool to query instead, or split the file. |
+| Generated file | A dependency folder, build output, lockfile or minified file read at least 3 times | Tell agents to skip it in your agent instructions. |
+
+- **Est. tokens** is the text the reads returned to the model, at 4 characters per token. Reads
+  whose size the log does not record are assumed to be as large as the file's sized reads on
+  average (the tooltip says how many reads the estimate rests on); a dash means no read of the
+  file has a recorded size. Sizes are recorded for Claude Code reads (not images), most Copilot
+  CLI reads and newer VS Code Copilot Chat logs.
+- **vs. previous** compares the reads with the period of the same length just before, so you can
+  see a fix working. All time has no previous period.
+- **Copy prompt** puts a prompt for your agent on the clipboard: set up (or use) a lookup tool and
+  add one line to the agent instructions, or add a "do not read" rule for a generated file. It
+  deliberately does not ask for a summary of the file, which would go stale.
+- The tip above the table names the code-graph tool found on this machine (a skill folder under
+  `~/.claude/skills`, `~/.copilot/skills` or `~/.agents/skills`, a server entry in `~/.mcp.json`
+  or `~/.cursor/mcp.json`) or in an open workspace folder (a workspace skill, an MCP server entry
+  or the tool's output folder). When none is found it links to the tools in
+  `src/codeNavTools.json`. Detection says a tool is set up, not that agents use it.
+
+Clicking a file in the table zooms the treemap to it.
+
 ## Data and privacy
 
 File paths are local-only. They are derived on this machine from your session logs, cached in the
@@ -24,13 +52,17 @@ numeric rollups, not paths.
 
 ## How it is built
 
-- `src/fileActivity.ts` — pure extractor: one session log in, a list of `{path, kind, ts}` out.
+- `src/fileActivity.ts` — pure extractor: one session log in, a list of `{path, kind, ts}` out
+  (plus `chars` for a read whose result size the log records).
   Failed tool calls are dropped; a re-logged streaming fragment counts once.
 - `src/repoHeatmapCollector.ts` — Node-side gathering shared by every host: reads session files,
   resolves the repository (remote URL) and the workspace root, caches per file.
 - `src/repoHeatmapViewBuilder.ts` — pure: anchors paths to the repository, folds sessions into
   per-repository / per-file / per-day counters (`buildRepoHeatmapViewData`) and filters by period
-  and kind, grouped by folder (`summarizeRepoHeatmap`).
+  and kind, grouped by folder (`summarizeRepoHeatmap`). `findRepoHeatmapHotspots` picks the
+  hotspots; the thresholds are constants at the bottom of the file.
+- `src/codeNavTools.ts` and `src/codeNavTools.json` — the catalog of code-graph tools and the
+  detection of the ones set up for the user or in a workspace folder.
 - `src/treemapLayout.ts` — pure: builds the folder tree (single-child folder chains collapse to
   `a/b`) and lays it out with the squarified treemap algorithm.
 - `vscode-extension/src/repoHeatmapPanel.ts` and `src/webview/repoHeatmap/` — the VS Code panel and

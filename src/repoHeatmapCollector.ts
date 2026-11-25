@@ -66,7 +66,7 @@ export async function collectRepoHeatmapSession(
 // ── Whole-history scan with a persistent cache ───────────────────────────────
 
 /** Bump when the extraction or anchoring rules change so cached results are rebuilt. */
-export const REPO_HEATMAP_CACHE_VERSION = 1;
+export const REPO_HEATMAP_CACHE_VERSION = 2;
 
 export interface RepoHeatmapCacheEntry {
 	mtimeMs: number;

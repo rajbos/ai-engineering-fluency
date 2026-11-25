@@ -1,0 +1,46 @@
+{
+  "description": "Code-graph and symbol-lookup tools agents can query instead of re-reading large files, and the on-disk markers that show one is set up. Used by the Repository Heatmap's hotspot tip.",
+  "lastUpdated": "2026-11-24",
+  "skillRoots": {
+    "user": [".claude/skills", ".copilot/skills", ".agents/skills"],
+    "workspace": [".claude/skills", ".github/skills", ".agents/skills"]
+  },
+  "mcpConfigs": {
+    "user": [".mcp.json", ".cursor/mcp.json"],
+    "workspace": [".mcp.json", ".vscode/mcp.json", ".cursor/mcp.json"]
+  },
+  "tools": [
+    {
+      "id": "graphify",
+      "name": "graphify",
+      "url": "https://github.com/Graphify-Labs/graphify",
+      "skillNames": ["graphify"],
+      "mcpServers": ["graphify"],
+      "workspaceMarkers": ["graphify-out"]
+    },
+    {
+      "id": "codegraph",
+      "name": "CodeGraph",
+      "url": "https://github.com/colbymchenry/codegraph",
+      "skillNames": ["codegraph"],
+      "mcpServers": ["codegraph"],
+      "workspaceMarkers": [".codegraph"]
+    },
+    {
+      "id": "codebase-memory-mcp",
+      "name": "codebase-memory-mcp",
+      "url": "https://github.com/DeusData/codebase-memory-mcp",
+      "skillNames": ["codebase-memory", "codebase-memory-mcp"],
+      "mcpServers": ["codebase-memory-mcp", "codebase-memory"],
+      "workspaceMarkers": []
+    },
+    {
+      "id": "serena",
+      "name": "Serena",
+      "url": "https://github.com/oraios/serena",
+      "skillNames": ["serena"],
+      "mcpServers": ["serena"],
+      "workspaceMarkers": [".serena"]
+    }
+  ]
+}
