@@ -23,6 +23,69 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Set-MsalBindingRedirect {
+  <#
+    VsixPublisher.exe loads MSAL (Microsoft.Identity.Client*) from its lib\ folder, but
+    the runner's Visual Studio can ship assemblies that reference a different MSAL
+    version than the one in lib\ and than VsixPublisher.exe.config redirects. Seen on
+    windows-latest (VS 18): a reference to 4.85.2.0 against a redirect of
+    0.0.0.0-4.84.1.0, failing with VsixPub0031 "Could not load file or assembly
+    'Microsoft.Identity.Client, Version=4.85.2.0'".
+    Redirect every version of each MSAL assembly to the copy that is actually shipped.
+  #>
+  param([Parameter(Mandatory)] [string] $VsixPublisherExe)
+
+  $configPath = "$VsixPublisherExe.config"
+  if (-not (Test-Path -LiteralPath $configPath)) {
+    Write-Host "No $configPath; leaving MSAL binding as is."
+    return
+  }
+  $binDir = Split-Path $VsixPublisherExe -Parent
+  $ns = 'urn:schemas-microsoft-com:asm.v1'
+  $config = [xml](Get-Content -LiteralPath $configPath -Raw)
+  $nsm = [System.Xml.XmlNamespaceManager]::new($config.NameTable)
+  $nsm.AddNamespace('asm', $ns)
+  $binding = $config.SelectSingleNode('/configuration/runtime/asm:assemblyBinding', $nsm)
+  if (-not $binding) {
+    Write-Host "::warning::No assemblyBinding in $configPath; leaving MSAL binding as is."
+    return
+  }
+
+  $changed = $false
+  foreach ($name in 'Microsoft.Identity.Client', 'Microsoft.Identity.Client.Extensions.Msal') {
+    $dll = @('lib', 'lib\vsixpublisher', '.') |
+      ForEach-Object { Join-Path $binDir "$_\$name.dll" } |
+      Where-Object { Test-Path -LiteralPath $_ } |
+      Select-Object -First 1
+    if (-not $dll) { continue }
+    $shipped = [System.Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString()
+
+    $dependencies = @($config.SelectNodes("/configuration/runtime/asm:assemblyBinding/asm:dependentAssembly[asm:assemblyIdentity/@name='$name']", $nsm))
+    if ($dependencies.Count -eq 0) {
+      $dependency = $config.CreateElement('dependentAssembly', $ns)
+      $identity = $config.CreateElement('assemblyIdentity', $ns)
+      $identity.SetAttribute('name', $name)
+      $identity.SetAttribute('publicKeyToken', '0a613f4dd989e8ae')
+      $identity.SetAttribute('culture', 'neutral')
+      [void]$dependency.AppendChild($identity)
+      [void]$binding.AppendChild($dependency)
+      $dependencies = @($dependency)
+    }
+    foreach ($dependency in $dependencies) {
+      $redirect = $dependency.SelectSingleNode('asm:bindingRedirect', $nsm)
+      if (-not $redirect) {
+        $redirect = $config.CreateElement('bindingRedirect', $ns)
+        [void]$dependency.AppendChild($redirect)
+      }
+      $redirect.SetAttribute('oldVersion', '0.0.0.0-65535.65535.65535.65535')
+      $redirect.SetAttribute('newVersion', $shipped)
+    }
+    Write-Host "Redirecting all $name versions to shipped $shipped"
+    $changed = $true
+  }
+  if ($changed) { $config.Save($configPath) }
+}
+
 if (-not (Test-Path -LiteralPath $Vsix -PathType Leaf)) {
   Write-Host "::error::VSIX not found: $Vsix"
   exit 1
@@ -92,6 +155,7 @@ if (-not $vsixPublisher) {
   exit 1
 }
 Write-Host "Found: $($vsixPublisher.FullName)"
+Set-MsalBindingRedirect -VsixPublisherExe $vsixPublisher.FullName
 Write-Host "Publishing $Vsix to Visual Studio Marketplace..."
 & $vsixPublisher.FullName publish -payload $Vsix -publishManifest $PublishManifest -personalAccessToken $exchange.credential
 if ($LASTEXITCODE -ne 0) {
