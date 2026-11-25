@@ -1,0 +1,11 @@
+paths:
+  evals:
+    - evals/session-log-data
+  evalFilenames:
+    - '*.eval.yaml'
+
+suites:
+  session-log-data-smoke:
+    evals:
+      - session-log-data.eval.yaml
+      - session-log-data-missing-data.eval.yaml
