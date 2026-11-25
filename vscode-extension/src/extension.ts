@@ -343,7 +343,7 @@ import {
   normalizeToRepoRoot as _normalizeToRepoRoot,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
-import { groupWorkspaces as _groupWorkspaces, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, groupFolders as _groupFolders, type WorkspaceGroup } from '../../src/workspaceGrouping';
+import { groupWorkspaces as _groupWorkspaces, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, groupFolders as _groupFolders, stripWindowsLongPathPrefix as _stripWindowsLongPathPrefix, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
@@ -8587,7 +8587,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// so those workspaces still show up in the Copilot Customization Files health matrix.
 			const workspaceFolder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, fallbackWorkspacePath);
 			if (workspaceFolder) {
-				const norm = path.normalize(workspaceFolder);
+				// `\\?\C:\…` and `C:\…` are one folder: drop the long-path prefix before keying.
+				const norm = path.normalize(_stripWindowsLongPathPrefix(workspaceFolder));
 				sessionCounts.set(norm, (sessionCounts.get(norm) || 0) + 1);
 				interactionCounts.set(norm, (interactionCounts.get(norm) || 0) + interactions);
 				if (repository) {

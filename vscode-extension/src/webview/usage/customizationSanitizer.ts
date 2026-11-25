@@ -51,6 +51,7 @@ export function sanitizeCustomizationMatrix(rawMatrix: unknown): WorkspaceCustom
 					typeStatuses[key] = VALID_STATUSES.has(val as string) ? (val as CustomizationTypeStatus) : '❌';
 				}
 				const memberPaths = coerceStringArray(w.memberPaths);
+				const worktreeCount = coerceNumber(w.worktreeCount);
 				return {
 					workspacePath: typeof w.workspacePath === 'string' ? w.workspacePath : '',
 					workspaceName: typeof w.workspaceName === 'string' ? w.workspaceName : '',
@@ -58,6 +59,7 @@ export function sanitizeCustomizationMatrix(rawMatrix: unknown): WorkspaceCustom
 					interactionCount: coerceNumber(w.interactionCount),
 					typeStatuses,
 					...(memberPaths ? { memberPaths } : {}),
+					...(worktreeCount > 0 ? { worktreeCount: Math.floor(worktreeCount) } : {}),
 				};
 			})
 		: [];

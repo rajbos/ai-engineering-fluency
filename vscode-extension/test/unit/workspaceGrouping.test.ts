@@ -15,6 +15,7 @@ import {
 	workspaceProbePaths,
 	workspaceEntriesWithRemotes,
 	groupFolders,
+	stripWindowsLongPathPrefix,
 	type WorkspaceUsageEntry,
 	type WorkspaceGroupingProbes,
 	type WorkspaceGitInfo,
@@ -620,6 +621,33 @@ test('an existing main checkout found through a worktree pointer becomes canonic
 	);
 	assert.equal(g.canonicalPath, 'C:\\code\\gadget');
 	assert.deepEqual(g.memberPaths, ['C:\\elsewhere\\gadget', 'C:\\wt\\feature']);
+	assert.deepEqual(g.worktreePaths, ['C:\\wt\\feature'], 'only the pointer worktree is a known worktree');
+});
+
+test('stripWindowsLongPathPrefix drops \\\\?\\ and \\\\?\\UNC\\, leaves other paths alone', () => {
+	assert.equal(stripWindowsLongPathPrefix('\\\\?\\C:\\Users\\dev\\repo'), 'C:\\Users\\dev\\repo');
+	assert.equal(stripWindowsLongPathPrefix('//?/C:/Users/dev/repo'), 'C:/Users/dev/repo');
+	assert.equal(stripWindowsLongPathPrefix('\\\\?\\UNC\\server\\share\\repo'), '\\\\server\\share\\repo');
+	assert.equal(stripWindowsLongPathPrefix('\\\\server\\share\\repo'), '\\\\server\\share\\repo', 'plain UNC share');
+	assert.equal(stripWindowsLongPathPrefix('C:\\code\\repo'), 'C:\\code\\repo');
+	assert.equal(stripWindowsLongPathPrefix('/home/dev/repo'), '/home/dev/repo');
+	assert.equal(stripWindowsLongPathPrefix('<unresolved:abc>'), '<unresolved:abc>');
+});
+
+test('worktreePaths: worktree layouts and pointers count, sibling -wt folders and clones do not', () => {
+	const main = 'C:\\code\\repos\\gadget';
+	const copilotWt = 'C:\\Users\\dev\\.copilot\\copilot-worktrees\\gadget\\local-curly-lamp';
+	const claudeWt = 'C:\\Users\\dev\\.claude\\worktrees\\gadget\\fix-a1b2c3';
+	const sibling = 'C:\\code\\repos\\gadget-wt';
+	const [g] = groupWorkspaces(
+		[entry(main, 5, 5), entry(copilotWt), entry(claudeWt), entry(sibling)],
+		probes('win32', [main, copilotWt, claudeWt, sibling]),
+	);
+	assert.equal(g.canonicalPath, main);
+	assert.deepEqual(g.memberPaths, [main, sibling, claudeWt, copilotWt].sort());
+	assert.deepEqual(g.worktreePaths, [claudeWt, copilotWt].sort());
+	const [plain] = groupWorkspaces([entry('/code/solo')], probes('linux'));
+	assert.equal(plain.worktreePaths, undefined, 'no worktrees: no field');
 });
 
 // ── Building blocks ──────────────────────────────────────────────────────────

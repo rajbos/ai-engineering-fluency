@@ -89,6 +89,12 @@ a stale one. `<unresolved:…>` workspaces pass through untouched.
 A Workspace Health row that merged several folders shows "N folders merged"; expand it to see
 the folders (they are also in the tooltip). A wrong merge is therefore visible, not silent.
 
+Known linked worktrees (`WorkspaceGroup.worktreePaths`: a `.git` pointer to the main checkout, or
+a recognised worktree layout from rule 3) rest on strong evidence and can number in the dozens,
+so they are left out of that list: the row only says how many there are in the workspace name's
+tooltip (`worktreeCount`). The list keeps the weaker merges — clones, sibling `-wt` folders,
+case and WSL spellings — that are worth checking.
+
 ## Detecting names the rules do not know yet
 
 `detectArtefactWorkspaceNames()` flags display names that still look like worktree or clone

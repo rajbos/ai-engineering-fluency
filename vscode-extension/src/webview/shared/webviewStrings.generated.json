@@ -534,6 +534,7 @@
   "customizationMatrix.mergedFolders": "{0} folders merged",
   "customizationMatrix.ungroupedBadge": "Ungrouped workspace names",
   "customizationMatrix.ungroupedNames": "{0} workspace name(s) look like ungrouped worktrees or clones: {1}",
+  "customizationMatrix.worktreesIncluded": "Also includes {0} worktree(s) of this repository",
   "memoryFiles.unknownWorkspace": "Unknown workspace",
   "memoryFiles.globalWorkspaceLabel": "User (global)",
   "memoryFiles.renderError": "Memory files are temporarily unavailable due to a rendering error. Try Refresh.",

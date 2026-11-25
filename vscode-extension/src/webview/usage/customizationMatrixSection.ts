@@ -36,8 +36,9 @@ function statusLabel(status: string): string {
 }
 
 /**
- * Expandable list of the folders (worktrees, clones) workspace grouping merged into one row
- * (src/workspaceGrouping.ts), so a wrong merge is visible rather than silent.
+ * Expandable list of the folders (clones, sibling `-wt` folders, case / WSL spellings) workspace
+ * grouping merged into one row (src/workspaceGrouping.ts), so a wrong merge is visible rather
+ * than silent. Known linked worktrees are not in the list: they only count in the tooltip.
  */
 export function renderMergedWorkspaceMembers(memberPaths: string[] | undefined): string {
 	if (!memberPaths || memberPaths.length < 2) { return ''; }
@@ -78,7 +79,12 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 				const badge = hasNoCustomization(row)
 					? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', localize('usage.customization.badge.noCustomization'))}</span>`
 					: '';
-				const title = row.workspacePath || row.workspaceName;
+				// Known worktrees are merged but not listed (they would bury the other merged
+				// folders); the tooltip still says how many there are.
+				const path = row.workspacePath || row.workspaceName;
+				const title = row.worktreeCount
+					? `${path}\n${localizeFormat('customizationMatrix.worktreesIncluded', row.worktreeCount)}`
+					: path;
 				return { html: `<span class="customization-workspace-name" title="${escapeHtml(title)}">${escapeHtml(row.workspaceName)}</span>${badge}${renderMergedWorkspaceMembers(row.memberPaths)}` };
 			},
 		},
