@@ -3,7 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { readClaudeScheduledTasks, toClaudeTaskDefinition } from '../scheduledTaskSources';
+import { parseRunMetadata, readClaudeScheduledTasks, STALLED_RUN_AFTER_MS, toClaudeTaskDefinition } from '../scheduledTaskSources';
 
 /** A Claude desktop config dir with one account/machine folder holding scheduled tasks and session metadata. */
 function createClaudeConfigFixture(t: { after: (fn: () => void) => void }) {
@@ -22,9 +22,11 @@ function createClaudeConfigFixture(t: { after: (fn: () => void) => void }) {
 		],
 	}));
 	const session = (name: string, meta: object) => fs.writeFileSync(path.join(machine, `local_${name}.json`), JSON.stringify(meta));
-	session('a', { scheduledTaskId: 'nightly-review', cliSessionId: 'cli-a', createdAt: Date.parse('2026-11-23T08:00:00Z') });
+	session('a', { scheduledTaskId: 'nightly-review', cliSessionId: 'cli-a', createdAt: Date.parse('2026-11-23T08:00:00Z'), completedTurns: 1 });
 	session('b', { scheduledTaskId: 'nightly-review', createdAt: Date.parse('2026-11-22T08:00:00Z'), error: 'Claude Code process exited with code 1.' });
-	session('c', { scheduledTaskId: 'nightly-review', createdAt: Date.parse('2026-11-21T08:00:00Z') });
+	session('c', { scheduledTaskId: 'nightly-review', createdAt: Date.parse('2026-11-21T08:00:00Z'), completedTurns: 2 });
+	// Stalled on a permission prompt: no turn ever finished, idle for hours.
+	session('e', { scheduledTaskId: 'nightly-review', createdAt: Date.parse('2026-11-20T08:00:00Z'), lastActivityAt: Date.parse('2026-11-20T08:01:00Z') });
 	session('d', { title: 'a hand-started session', createdAt: Date.parse('2026-11-21T09:00:00Z') });
 	fs.writeFileSync(path.join(machine, 'local_broken.json'), '{"scheduledTaskId": ');
 	return { root, repo };
@@ -32,7 +34,7 @@ function createClaudeConfigFixture(t: { after: (fn: () => void) => void }) {
 
 test('readClaudeScheduledTasks: reads schedule, folder, repository and run outcomes', async (t) => {
 	const { root, repo } = createClaudeConfigFixture(t);
-	const tasks = await readClaudeScheduledTasks([root]);
+	const tasks = await readClaudeScheduledTasks([root], Date.parse('2026-11-25T00:00:00Z'));
 	assert.deepEqual(tasks.map(x => x.name).sort(), ['nightly-review', 'one-time-check']);
 	const nightly = tasks.find(x => x.name === 'nightly-review')!;
 	assert.equal(nightly.platform, 'claude');
@@ -42,9 +44,9 @@ test('readClaudeScheduledTasks: reads schedule, folder, repository and run outco
 	assert.equal(nightly.repository, 'octo/app');
 	assert.equal(nightly.createdAt, '2026-09-01T00:00:00.000Z');
 	assert.equal(nightly.lastRunAt, '2026-11-23T08:00:00.000Z');
-	assert.equal(nightly.totalRuns, 3);
-	assert.equal(nightly.failedRuns, 1);
-	assert.deepEqual(nightly.recentRuns.map(r => r.ok), [true, false, true], 'newest first');
+	assert.equal(nightly.totalRuns, 4);
+	assert.equal(nightly.failedRuns, 2, 'the errored run and the stalled run');
+	assert.deepEqual(nightly.recentRuns.map(r => r.ok), [true, false, true, false], 'newest first');
 	assert.equal(nightly.recentRuns[0].sessionId, 'cli-a', 'the transcript id, to link the run to its session');
 	assert.equal(nightly.recentRuns[1].sessionId, undefined);
 
@@ -68,4 +70,24 @@ test('toClaudeTaskDefinition: falls back to the newest recorded run when lastRun
 	assert.equal(def.enabled, true, 'enabled unless explicitly false');
 	assert.equal(def.lastRunAt, '2026-11-20T06:00:00.000Z');
 	assert.equal(toClaudeTaskDefinition({ cronExpression: '* * * * *' }, []), null);
+});
+
+test('parseRunMetadata: a run fails on an error, or when no turn finished and it is no longer running', () => {
+	const now = Date.parse('2026-11-25T12:00:00Z');
+	const created = Date.parse('2026-11-25T08:00:00Z');
+	const ok = (meta: object) => parseRunMetadata(JSON.stringify({ scheduledTaskId: 't', createdAt: created, ...meta }), now)?.run.ok;
+
+	assert.equal(ok({ completedTurns: 1, lastActivityAt: created + 60_000 }), true, 'finished');
+	assert.equal(ok({ completedTurns: 3, lastTurnCutShort: true }), true, 'a later turn cut short after earlier turns finished');
+	assert.equal(ok({ completedTurns: 1, error: 'Claude Code process exited with code 1.' }), false, 'errored');
+	assert.equal(ok({ error: 'boom', lastActivityAt: now - 1000 }), false, 'errored while recent');
+	assert.equal(ok({ lastActivityAt: created + 30_000 }), false, 'stalled: no finished turn, idle for hours');
+	assert.equal(ok({}), false, 'stalled: no finished turn and no activity time, created hours ago');
+	assert.equal(ok({ completedTurns: 0, lastActivityAt: created + 30_000 }), false, 'zero finished turns is not finished');
+	assert.equal(ok({ lastActivityAt: now - 5 * 60_000 }), true, 'still running: recent activity');
+	assert.equal(ok({ lastActivityAt: now - STALLED_RUN_AFTER_MS + 1000 }), true, 'still running: just inside the idle window');
+	assert.equal(ok({ lastActivityAt: now - STALLED_RUN_AFTER_MS }), false, 'stalled: idle for the whole window');
+	assert.equal(ok({ lastActivityAt: now - 1000, lastTurnCutShort: true }), false, 'cut short: ended even though recent');
+	assert.equal(ok({ lastActivityAt: new Date(now - 1000).toISOString() }), true, 'ISO timestamps are read too');
+	assert.equal(parseRunMetadata(JSON.stringify({ title: 'not scheduled' }), now), null);
 });

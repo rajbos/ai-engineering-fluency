@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Fixed
+- `skill-suggestions`: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run and toward the **failing** status. A run that is still going (active in the last hour) is not counted as failed.
+
 ## [0.7.2] - 2026-11-24
 
 ### Features
