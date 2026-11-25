@@ -24,7 +24,8 @@ import {
 	type DarkFactoryRepoSignals,
 } from '../../src/darkFactoryReadiness';
 import { collectDarkFactoryFileSignals, isGitRepoRoot, readGitOriginUrl, resolveRepoIdentity } from '../../src/darkFactorySignals';
-import type { DarkFactoryHosting, DarkFactoryReport } from '../../src/types';
+import { scheduledTaskFindings, scheduledTasksForRepo } from '../../src/scheduledTasks';
+import type { DarkFactoryHosting, DarkFactoryReport, ScheduledTaskSummary } from '../../src/types';
 import { buildGitHubHosts, parseGitHubRemote, type RepoPrStatsResult } from './githubPrService';
 
 /**
@@ -152,6 +153,12 @@ export interface DarkFactoryScanOptions {
 	prStats?: RepoPrStatsResult;
 	/** Configured GitHub Enterprise URI, so enterprise remotes resolve to `owner/repo` too. */
 	enterpriseUri?: string;
+	/**
+	 * Scheduled agent tasks (Claude Code scheduled tasks, Copilot automations) from the
+	 * last Usage Analysis refresh; the ones targeting a repository add its stale and failing
+	 * findings.
+	 */
+	scheduledTasks?: readonly ScheduledTaskSummary[];
 	/** Injected clock, for deterministic tests. */
 	now?: () => Date;
 }
@@ -166,6 +173,7 @@ export function scanDarkFactoryReadiness(options: DarkFactoryScanOptions): DarkF
 	const { roots, skipped } = selectRepoRoots(options.workspacePaths);
 	const hosts = buildGitHubHosts(options.enterpriseUri);
 	const prIndex = indexPrStats(options.prStats);
+	const now = options.now?.() ?? new Date();
 
 	const reports = roots.map(repoRoot => {
 		const { observations, facts } = collectDarkFactoryFileSignals(repoRoot);
@@ -185,11 +193,13 @@ export function scanDarkFactoryReadiness(options: DarkFactoryScanOptions): DarkF
 			},
 			facts,
 		};
-		return scoreDarkFactoryReadiness(signals);
+		const report = scoreDarkFactoryReadiness(signals);
+		const scheduled = scheduledTasksForRepo(options.scheduledTasks ?? [], { repoRoot, nameWithOwner });
+		return scheduled.length > 0 ? { ...report, findings: [...report.findings, ...scheduledTaskFindings(scheduled, now)] } : report;
 	});
 
 	return buildDarkFactoryReport(reports, {
-		scannedAt: (options.now?.() ?? new Date()).toISOString(),
+		scannedAt: now.toISOString(),
 		apiSignalsIncluded: prIndex.size > 0,
 		skippedRepoCount: skipped,
 	});

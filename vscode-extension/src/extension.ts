@@ -65,6 +65,7 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  ScheduledTaskSummary,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -184,7 +185,7 @@ import {
   evaluateUsageInsights as _evaluateUsageInsights,
   mergeInsightStates as _mergeInsightStates,
   countNewInsights as _countNewInsights,
-  isToastAllowed as _isToastAllowed,
+  pickToastInsight as _pickToastInsight, insightToastMessage as _insightToastMessage, insightTooltipTitle as _insightTooltipTitle, reopenFailingAutomationInsight as _reopenFailingAutomationInsight,
 } from '../../src/insightsEngine';
 
 // --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
@@ -225,6 +226,8 @@ import {
 } from '../../src/diagnosticsViewBuilder';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
+import { automationRunName } from '../../src/copilotAutomationRuns';
+import { readClaudeScheduledTasks } from '../../src/scheduledTaskSources';
 import { PiDataAccess } from '../../src/pi';
 import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
@@ -455,6 +458,7 @@ import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { registerBadgeSetup, type BadgeSnapshot } from './badge/registerBadgeSetup';
+import { registerUsageHistoryCommands } from './usageHistoryCommands';
 import { formatWindsurfDiagnosticsContent } from './windsurfDiagnosticsReport';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 import { TtftScanResultCache } from './ttftAnalysisCache';
@@ -1258,7 +1262,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public windsurf!: WindsurfDataAccess;
 	private hermes!: HermesDataAccess;
 	public ecosystems!: IEcosystemAdapter[];
-	private cacheManager!: CacheManager;
+	cacheManager!: CacheManager;
 	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
@@ -1739,6 +1743,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
+	/** Scheduled tasks from the last Usage Analysis refresh, for the AI Readiness findings. */
+	private _lastScheduledTasks?: ScheduledTaskSummary[];
 
 	// True while this window is refreshing the shared repository-PRs snapshot from the GitHub API
 	private _repoPrRefreshInFlight = false;
@@ -2741,7 +2747,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
 		this.cacheManager = new CacheManager(context, {
-			log: (m: string) => this.log(m),
+			log: (m: string) => this.log(m), editorTypeOf: (p: string) => this.getEditorTypeFromPath(p),
 			warn: (m: string) => this.warn(m),
 			error: (m: string) => this.error(m),
 			// Mirrors clearCache()'s own local-clear invalidation, minus the two steps that are
@@ -3877,7 +3883,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const topNew = newInsights[0];
 		this.refreshStatusBarInsightBadge(
 			newInsights.length,
-			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+			topNew ? { title: _insightTooltipTitle(topNew), id: topNew.id } : undefined,
 		);
 	}
 
@@ -5414,7 +5420,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
 		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
 			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {
-				this.cacheManager.deleteCachedSessionData(rawPath);
+				this.cacheManager.evictUndiscoveredSessionData(rawPath);
 			}
 		}
 		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
@@ -6659,13 +6665,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
 		const now = new Date().toISOString();
 
+		// A scheduled task that started failing since the last refresh re-opens its insight, even if dismissed.
+		const failing = _reopenFailingAutomationInsight(stats.repeatedTasks?.scheduledTasks ?? [], this._insightStateBag, this.context.globalState.get<string[]>('insights.notifiedFailingAutomations', []));
 		// The same evaluation the Usage Analysis payload runs, so a toast never sees fewer inputs than the panel.
 		const evaluated = _evaluateUsageInsights(stats, this.insightEvaluationState());
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
 		this.refreshInsightBadgeFromState(now, evaluated);
 
-		await this.context.globalState.update('insights.state', this._insightStateBag);
+		await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag), this.context.globalState.update('insights.notifiedFailingAutomations', failing.failingKeys)]);
 		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open
@@ -6679,9 +6687,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Surface a toast for the highest-weight 'new' allowToast insight (rate-limited)
 		const toastsEnabled = vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('insights.toastsEnabled', true);
 		if (!toastsEnabled) { return; }
-		if (!_isToastAllowed(cadenceDays, this._lastInsightNudgeAt, now)) { return; }
-
-		const toastCandidate = evaluated.find(i => i.allowToast && i.status === 'new');
+		// Rate-limited by the cadence, except a scheduled automation that just started failing.
+		const toastCandidate = _pickToastInsight(evaluated, cadenceDays, this._lastInsightNudgeAt, now, failing.reopened);
 		if (!toastCandidate) { return; }
 
 		this._lastInsightNudgeAt = now;
@@ -6693,7 +6700,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const view = l10n.t('button.openInsightsTab');
 		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			`💡 ${toastCandidate.title}`,
+			_insightToastMessage(toastCandidate),
 			view,
 			dismiss,
 		);
@@ -6797,6 +6804,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 					aggregateInputs.push({ editorType: this.getEditorTypeFromPath(r.sessionFile), sessionData: r.sessionData, mtime: r.mtime, lastInteraction: r.sessionData.lastInteraction || r.details.lastInteraction });
 				} catch (fileError) { this.warn(`Error processing session file ${r.sessionFile}: ${fileError}`); }
 			}
+			// Sessions whose files are gone keep counting (issue #2728); skipped for sample data.
+			if (!this.isSampleDataModeActive()) { aggregateInputs.push(...this.cacheManager.usageHistory.toAggregateInputs(this.cacheManager.cache.keys(), p => this.getEditorTypeFromPath(p), fileLoadCutoffMs)); }
 
 			const aggregated = aggregatePeriodStats(aggregateInputs, { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs });
 			todayStats = aggregated.todayStats; monthStats = aggregated.monthStats;
@@ -7359,7 +7368,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions = timedStepSync(lg, 'recent session buckets', () => this.buildRecentSessionBuckets(usageResults, now));
 			autoCompactionsLast7Days = timedStepSync(lg, 'auto-compaction stats', () => this.buildAutoCompactionStats(usageResults, now));
 			correctionReport = timedStepSync(lg, 'correction report', () => this.buildCorrectionReport(usageResults));
-			repeatedTasks = timedStepSync(lg, 'repeated-task report', () => this.buildRepeatedTaskReport(usageResults));
+			repeatedTasks = await timedStep(lg, 'repeated-task report (+ copilot automation runs)', () => this.buildRepeatedTaskReport(usageResults));
 			await timedStep(lg, 'workspace dedup + customization scans', () => this.deduplicateWorkspacePathsWithScans(workspaceSessionCounts, workspaceInteractionCounts));
 			timedStepSync(lg, 'customization matrix', () => this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts));
 			await timedStep(lg, 'multi-agent parent count (data.db)', () => this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey));
@@ -8488,14 +8497,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Build the repeated-task report from already-parsed session results:
 	 * cluster the first user prompt of every scanned session (across all
 	 * repositories) into tasks the user keeps prompting for manually —
-	 * candidates for a reusable skill or prompt file. Pure in-memory
-	 * clustering over cached prompts; returns undefined when no cluster
-	 * reaches the minimum size.
+	 * candidates for a reusable skill or prompt file. In-memory clustering
+	 * over cached prompts; runs of Claude Code scheduled tasks and GitHub
+	 * Copilot automations (data.db) are reported as scheduled tasks instead.
+	 * Returns undefined when there is neither a cluster nor a scheduled run.
 	 */
-	private buildRepeatedTaskReport(
-		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
-	): RepeatedTaskReport | undefined {
-		return _buildRepeatedTaskReport(results
+	private async buildRepeatedTaskReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+	): Promise<RepeatedTaskReport | undefined> {
+		// GitHub Copilot automation runs from data.db, so scheduled runs are reported as scheduled tasks,
+		// plus both apps' scheduled-task inventory for their schedule, repository and health.
+		const [automationRuns, copilotAutomations, claudeTasks] = await Promise.all([
+			this.copilotAppData.getAutomationRuns(), this.copilotAppData.getAutomations(), readClaudeScheduledTasks(),
+		]);
+		const report = _buildRepeatedTaskReport(results
 			.filter((r): r is NonNullable<typeof r> => !!r)
 			.map(r => ({
 				file: r.sessionFile,
@@ -8504,7 +8519,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastInteraction: r.sessionData.lastInteraction,
 				mtime: r.mtime,
 				repository: r.sessionData.repository,
-			})));
+				editor: this.getEditorTypeFromPath(r.sessionFile),
+				copilotAutomation: automationRunName(r.sessionFile, automationRuns),
+				// So a failed scheduled run can show what its session cost.
+				tokens: r.sessionData.tokens,
+				costUsd: r.sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(r.sessionData.modelUsage || {}),
+			})), { scheduledTaskDefinitions: [...claudeTasks, ...copilotAutomations] });
+		this._lastScheduledTasks = report?.scheduledTasks;
+		return report;
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -11573,6 +11595,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			scheduledTasks: this._lastScheduledTasks,
 		});
 	}
 
@@ -16174,6 +16197,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   registerViewCommands(context, tokenTracker);
   registerDiagnosticAndAuthCommands(context, tokenTracker);
   registerBadgeSetup(context, tokenTracker);
+  registerUsageHistoryCommands(context, tokenTracker);
 
   context.subscriptions.push(tokenTracker);
 

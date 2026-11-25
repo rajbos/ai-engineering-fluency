@@ -42,6 +42,9 @@ function writeSessions(t: { after: (fn: () => void) => void }, prompts: string[]
 	});
 }
 
+/** Never reads the real ~/.copilot/data.db or Claude desktop data. */
+const NO_SCHEDULED_TASKS = async () => ({ automationRuns: new Map<string, string>(), definitions: [] });
+
 const REPEATED_PROMPTS = [
 	'run the tests and fix the failures',
 	'please run the tests and fix any failures',
@@ -56,7 +59,7 @@ test('calculateUsageAnalysisStats omits repeatedTasks unless asked', async (t) =
 
 test('calculateUsageAnalysisStats builds the repeated-task report from session first prompts', async (t) => {
 	const files = writeSessions(t, REPEATED_PROMPTS);
-	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true });
+	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true, loadScheduledTaskSources: NO_SCHEDULED_TASKS });
 	const report = stats.repeatedTasks;
 	assert.ok(report, 'expected a repeated-task report');
 	assert.equal(report.sessionsScanned, 3);
@@ -68,7 +71,7 @@ test('calculateUsageAnalysisStats builds the repeated-task report from session f
 
 test('calculateUsageAnalysisStats leaves repeatedTasks undefined when no prompt recurs', async (t) => {
 	const files = writeSessions(t, ['run the tests and fix the failures', 'update the changelog and bump the version']);
-	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true });
+	const stats = await calculateUsageAnalysisStats(files, { includeRepeatedTasks: true, loadScheduledTaskSources: NO_SCHEDULED_TASKS });
 	assert.equal(stats.repeatedTasks, undefined);
 	assert.equal(JSON.parse(JSON.stringify(stats)).repeatedTasks, undefined);
 });
@@ -182,6 +185,33 @@ test('skill-suggestions text report lists each repeated task', () => {
 	assert.match(text, /Repositories:\s+o\/r/);
 	assert.match(text, /Last seen:\s+2026-08-02/);
 	assert.match(formatSkillSuggestionsReport(undefined), /No repeated tasks found/);
+	assert.doesNotMatch(text, /Recurs:|Automate:|can also be scheduled/);
+});
+
+const RECURRING_REPORT: RepeatedTaskReport = {
+	...REPORT,
+	clusters: [{
+		...REPORT.clusters[0],
+		sessions: REPORT.clusters[0].sessions.map((s, i) => ({ ...s, editor: i === 0 ? 'Claude Code' : 'Copilot CLI' })),
+		editors: ['Claude Code', 'Copilot CLI'],
+		recurrence: { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 },
+	}],
+};
+
+test('skill-suggestions text report shows editors, cadence and an automation option per platform for recurring tasks', () => {
+	const text = formatSkillSuggestionsReport(RECURRING_REPORT);
+	assert.match(text, /Editors:\s+Claude Code, Copilot CLI/);
+	assert.match(text, /Recurs:\s+about weekly \(4 days\)/);
+	assert.match(text, /Automate:\s+Claude Code scheduled task/);
+	assert.match(text, /Automate:\s+GitHub Copilot automation/);
+	assert.match(text, /can also be scheduled/);
+});
+
+test('skill-suggestions redacted JSON keeps editors and recurrence (no prompt text in them)', () => {
+	const cluster = createSkillSuggestionsPayload(RECURRING_REPORT, false).repeatedTasks!.clusters[0];
+	assert.deepEqual(cluster.editors, ['Claude Code', 'Copilot CLI']);
+	assert.deepEqual(cluster.recurrence, { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 });
+	assert.equal(cluster.sessions[0].editor, 'Claude Code');
 });
 
 test('skill-suggestions text report strips newlines and terminal control sequences from session data', () => {
@@ -201,4 +231,71 @@ test('skill-suggestions text report strips newlines and terminal control sequenc
 	assert.ok(!text.includes('\n2. "forged line"'), 'a prompt newline forged a report line');
 	assert.equal(text.split('\n').filter(line => line.startsWith('   Repositories:')).length, 1);
 	assert.ok(text.includes('1. "fix tests 2. "forged line" ]0;pwned [2J 31m"'));
+});
+
+const SCHEDULED_REPORT: RepeatedTaskReport = {
+	...REPORT,
+	scheduledTasks: [
+		{ name: 'repo-health-scan-daily', platform: 'claude', runCount: 12, activeDays: 11, lastRun: '2026-11-24T06:00:00.000Z' },
+		{ name: 'Dependabot review', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: null },
+	],
+};
+
+test('skill-suggestions text report lists tasks already on a schedule', () => {
+	const text = formatSkillSuggestionsReport(SCHEDULED_REPORT);
+	assert.match(text, /Scheduled automations \(2\)/);
+	assert.match(text, /"repo-health-scan-daily" \(Claude Code scheduled task\)\n.*last run 2026-11-24 · 12 run\(s\) in this window/);
+	assert.match(text, /"Dependabot review" \(GitHub Copilot automation\)\n.*never run · 3 run\(s\) in this window/);
+
+	const onlyScheduled = formatSkillSuggestionsReport({ ...SCHEDULED_REPORT, clusters: [] });
+	assert.match(onlyScheduled, /No repeated tasks found/);
+	assert.match(onlyScheduled, /Scheduled automations/);
+});
+
+test('skill-suggestions redacted JSON keeps scheduled-task counts but not their names', () => {
+	const payload = createSkillSuggestionsPayload(SCHEDULED_REPORT, false);
+	assert.deepEqual(payload.repeatedTasks!.scheduledTasks, [
+		{ platform: 'claude', runCount: 12, activeDays: 11, lastRun: '2026-11-24T06:00:00.000Z' },
+		{ platform: 'copilot', runCount: 3, activeDays: 3, lastRun: null },
+	]);
+	assert.ok(!JSON.stringify(payload).includes('repo-health-scan-daily'));
+});
+
+test('skill-suggestions text report shows health, repository, schedule and recent success, and counts at-risk tasks', () => {
+	const text = formatSkillSuggestionsReport({
+		...REPORT,
+		scheduledTasks: [
+			{ name: 'stopped', platform: 'copilot', runCount: 0, activeDays: 0, lastRun: '2026-09-01T00:00:00.000Z', schedule: 'daily at 09:00', enabled: true, repository: 'octo/app', health: 'stale', recentRuns: [{ at: '2026-09-01T00:00:00.000Z', ok: true }, { at: '2026-08-31T00:00:00.000Z', ok: false }] },
+		],
+	});
+	assert.match(text, /Scheduled automations \(1, 1 at risk\)/);
+	assert.match(text, /"stopped" \(GitHub Copilot automation\) — STALE/);
+	assert.match(text, /repo octo\/app · schedule daily at 09:00 · last run 2026-09-01 · 1\/2 recent runs succeeded/);
+	assert.match(text, /Stale = enabled with no run for 30 days/);
+});
+
+test('skill-suggestions redacted JSON keeps the inventory fields but not task names', () => {
+	const payload = createSkillSuggestionsPayload({
+		...REPORT,
+		scheduledTasks: [{ name: 'secret-task-name', platform: 'claude', runCount: 1, activeDays: 1, lastRun: null, schedule: '0 8 * * *', enabled: true, repository: 'octo/app', folder: 'C:/code/app', totalRuns: 5, failedRuns: 1, recentRuns: [{ at: '2026-11-01T00:00:00Z', ok: false }], health: 'healthy' }],
+	}, false);
+	assert.deepEqual(payload.repeatedTasks!.scheduledTasks, [{
+		platform: 'claude', runCount: 1, activeDays: 1, lastRun: null, schedule: '0 8 * * *', enabled: true, repository: 'octo/app',
+		folder: 'C:/code/app', totalRuns: 5, failedRuns: 1, recentRuns: [{ at: '2026-11-01T00:00:00Z', ok: false }], health: 'healthy',
+	}]);
+	assert.ok(!JSON.stringify(payload).includes('secret-task-name'));
+});
+
+test('skill-suggestions text report lists failed runs with their session, tokens and cost', () => {
+	const text = formatSkillSuggestionsReport({
+		...REPORT,
+		scheduledTasks: [{ name: 'nightly', platform: 'claude', runCount: 2, activeDays: 2, lastRun: '2026-11-20T00:00:00.000Z', health: 'failing', recentRuns: [
+			{ at: '2026-11-20T00:00:00.000Z', ok: false, sessionFile: 'C:/logs/a.jsonl', tokens: 1234567, costUsd: 2.5 },
+			{ at: '2026-11-19T00:00:00.000Z', ok: false, sessionFile: 'C:/logs/b.jsonl' },
+			{ at: '2026-11-18T00:00:00.000Z', ok: false },
+		] }],
+	});
+	assert.match(text, /failed runs: 2, 1,234,567 tokens, \$2\.50/);
+	assert.match(text, /✗ 2026-11-20 — 1,234,567 tokens, \$2\.50 — C:\/logs\/a\.jsonl/);
+	assert.match(text, /✗ 2026-11-19 — \? tokens — C:\/logs\/b\.jsonl/);
 });

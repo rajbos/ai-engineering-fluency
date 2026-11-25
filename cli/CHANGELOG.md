@@ -4,10 +4,21 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Bug Fixes
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
+
+## [0.7.2] - 2026-11-24
+
 ### Features
+- `skill-suggestions` lists every scheduled automation on this machine (Claude desktop scheduled tasks, Copilot app automations) with its status (healthy, stale after 30 days without a run, failing, disabled, ...), repository, schedule, last run and recent success, and each failed run's session with its tokens and cost; `--json` carries the same fields
+- `skill-suggestions` recognizes runs of Claude Code scheduled tasks and GitHub Copilot automations (from `~/.copilot/data.db`), leaves them out of the suggestions and lists them under "Already on a schedule"; `--json` adds `scheduledTasks` (names only with `--include-prompts`). Claude Code's injected `<system-reminder>` text is ignored when comparing prompts
+- `skill-suggestions` shows the editors each repeated task ran in and, for a task that recurs on a rhythm (about daily, weekly or every few days, on at least 3 different days), its cadence and how to automate it: Claude Code scheduled tasks, GitHub Copilot automations, or a scheduled job running the agent's CLI. `--json` carries `editors`, per-session `editor` and `recurrence` (none of them prompt text, so they are kept in the redacted output)
 - On Windows the CLI also reads session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores under `~/.vibe/sandbox-v2/*/`) from WSL distros that are already running. A stopped distro is never read or started. Turn off with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`; `stats --verbose` and `diagnostics` list each running distro
+- Mistral Vibe Desktop sessions are tracked and reported as their own editor (#2721)
 
 ### Bug Fixes
+- Mistral Vibe sessions in the unified session store are discovered and included, and Mistral Large 4 usage is priced (#2576)
+- Copilot app "auto" sessions routed by Copilot Fusion are attributed to Copilot Fusion (#2687)
 - Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once per run instead of once per session query, so `all --json` no longer runs for many minutes on a large OpenCode store (#2710)
 - The session cache (`cli-cache.json`) is now saved every 30 seconds during a run and when the CLI is stopped with Ctrl+C or `SIGTERM`, and is written atomically, so a run killed by a caller's timeout keeps its progress. It now holds up to 20,000 entries instead of 2,000, so large histories are no longer re-parsed on every run (#2710)
