@@ -113,6 +113,20 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
+		version: '0.21.0',
+		date: null,
+		headlineKey: 'whatsNew.release.0.21.0.headline',
+		features: [
+			{
+				id: 'usage.scheduled-automations',
+				titleKey: 'whatsNew.feature.usage.scheduled-automations.title',
+				descriptionKey: 'whatsNew.feature.usage.scheduled-automations.description',
+				kind: 'section',
+				surface: { view: 'usage', tab: 'insights', anchor: 'section-scheduled-automations' },
+			},
+		],
+	},
+	{
 		version: '0.20.0',
 		date: '2026-11-23',
 		headlineKey: 'whatsNew.release.0.20.0.headline',
