@@ -4,7 +4,14 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-25
+
+### Features
+- Mistral Vibe subsessions are now linked to the session that started them and count toward the multi-agent metrics, instead of showing up as unrelated standalone sessions (#2743)
+
 ### Bug Fixes
+- Cursor: chats from newer Cursor builds (3.3x), which store their conversation headers in chunks, are counted again. Every new chat counted 0 interactions and was left out of the totals (#2735)
+- Workspace folders with the Windows `\\?\` long-path prefix are no longer reported as separate workspaces (#2745)
 - Windows: Claude Desktop Cowork sessions are found again on current Claude desktop installs, which moved their data from the app package's `LocalCache\Roaming\Claude` folder to `%LOCALAPPDATA%\Claude-Data\claude_<package>`. Every existing location is read, newest first, and a session present in two locations is counted once
 - Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
 - `usage`, `environmental` and `segment` no longer parse sessions last active before the start of last month, so a first run (or one after the session cache was cleared) on a large history is much faster. A database-backed session (OpenCode, Kilo Code, Cursor, ...) is judged by its own last activity, so an old session in a database that was written to recently no longer shows up in today's, this month's or last month's numbers
