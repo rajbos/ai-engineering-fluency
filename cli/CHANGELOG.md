@@ -4,7 +4,8 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
-### Fixed
+### Bug Fixes
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
 - `skill-suggestions`: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run and toward the **failing** status. A run that is still going (active in the last hour) is not counted as failed.
 
 ## [0.7.2] - 2026-11-24

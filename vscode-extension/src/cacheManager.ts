@@ -17,6 +17,7 @@ import {
 } from '../../src/machineParseLock';
 import { mergePlaceholderDetails } from './detailsOnlyCache';
 import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
+import { UsageHistoryStore } from './usageHistoryStore';
 
 export interface CacheManagerDeps {
 	log: (msg: string) => void;
@@ -37,6 +38,9 @@ export interface CacheManagerDeps {
 	// process and step time past the stall limits. Default: vscode.env.sessionId and Date.now.
 	lockOwnerId?: string;
 	now?: () => number;
+	// Editor label for a session path, recorded when a session's file disappears so the usage
+	// history (see usageHistoryStore.ts) keeps attributing it to the right editor afterwards.
+	editorTypeOf?: (filePath: string) => string;
 }
 
 /** True when two entries describe the same version of a file (same mtime and size). */
@@ -222,6 +226,52 @@ export class CacheManager {
 		return this.sessionFileCache;
 	}
 
+	private usageHistoryStore: UsageHistoryStore | undefined;
+
+	/**
+	 * Usage of sessions whose files are gone (moved, archived, or deleted by the tool's own
+	 * retention sweep), kept so totals don't drop it (issue #2728). Separate from the session
+	 * cache on purpose: "Clear Session Cache" re-parses what exists and must not erase history;
+	 * only the "Clear Usage History" command does. Created lazily because the file name needs
+	 * getCacheIdentifier().
+	 */
+	get usageHistory(): UsageHistoryStore {
+		this.usageHistoryStore ??= new UsageHistoryStore(
+			path.join(this.context.globalStorageUri.fsPath, `usage-history_${this.getCacheIdentifier()}.json`),
+			{ log: (m) => this.deps.log(m), warn: (m) => this.deps.warn(m), lockOwner: () => this.lockOwner, now: () => this.now() },
+		);
+		return this.usageHistoryStore;
+	}
+
+	/**
+	 * Evict a session file's cache entry because its file is confirmed gone, first keeping its
+	 * usage in {@link usageHistory}. Use this instead of deleteCachedSessionData() wherever the
+	 * reason for eviction is "the file no longer exists", so totals keep that usage.
+	 */
+	retireMissingSessionData(filePath: string): void {
+		const existing = this.sessionFileCache.get(filePath);
+		if (existing) {
+			let editorType: string | undefined;
+			try { editorType = this.deps.editorTypeOf?.(filePath); } catch { /* best effort */ }
+			this.usageHistory.retain(filePath, existing, editorType);
+		}
+		this.deleteCachedSessionData(filePath);
+	}
+
+	/**
+	 * Evict an entry this run's discovery no longer reports. When the file is gone (moved or
+	 * deleted) its usage is kept in {@link usageHistory}; when it still exists but no adapter
+	 * claims it any more (matching rules changed, integration removed), it is dropped outright,
+	 * as before. Virtual DB/URI paths can't be checked with a file stat and are dropped outright.
+	 */
+	evictUndiscoveredSessionData(filePath: string): void {
+		if (!CacheManager.isVirtualSessionPath(filePath) && !fs.existsSync(filePath)) {
+			this.retireMissingSessionData(filePath);
+			return;
+		}
+		this.deleteCachedSessionData(filePath);
+	}
+
 	/**
 	 * Clears every in-memory cache entry and tombstone, and bumps cacheClearGeneration so a
 	 * checkpoint already mid-flight (built from pre-clear data) discards its write instead of
@@ -364,12 +414,14 @@ export class CacheManager {
 						// "this path definitely doesn't exist" error is trustworthy enough to tombstone.
 						const code = (err as NodeJS.ErrnoException)?.code;
 						if (code === 'ENOENT' || code === 'ENOTDIR') {
-							this.deleteCachedSessionData(filePath);
+							this.retireMissingSessionData(filePath);
 						}
 					}
 				})
 			);
 		}
+		// Also persists what reconcilePreloadedAgainstDiscovery() retained just before this sweep.
+		await this.usageHistory.save();
 	}
 
 	private static isVirtualSessionPath(filePath: string): boolean {
@@ -1064,6 +1116,7 @@ export class CacheManager {
 
 			// Load from the shared on-disk snapshot (globalStorageUri).
 			await this._loadEntriesFromSharedSnapshot(cacheId, loadStartedAt);
+			await this.usageHistory.load();
 		} catch (error) {
 			this.deps.error(`Error loading cache from storage: ${error}`);
 			this.sessionFileCache = new Map();
