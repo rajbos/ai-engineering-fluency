@@ -597,6 +597,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write  # OIDC token for Visual Studio Marketplace Trusted Publishing
 
     steps:
     - name: Harden the runner (Audit all outbound calls)
@@ -774,30 +775,13 @@ jobs:
 
     - name: Publish to Visual Studio Marketplace
       if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true
+      # Marketplace Trusted Publishing (OIDC): no PAT. Uses the RobBos publisher's
+      # policy for this workflow file (release.yml, no environment).
       shell: pwsh
-      env:
-        VS_MARKETPLACE_PAT: ${{ secrets.VSCE_PAT }} # same one for the VSCode Marketplace works for Visual Studio Marketplace as well
       run: |
-        if (-not $env:VS_MARKETPLACE_PAT) {
-          Write-Error "❌ VS_MARKETPLACE_PAT secret is not configured."
-          exit 1
-        }
-        # VsixPublisher.exe is the correct tool for Visual Studio IDE extensions
-        # (not @vscode/vsce, which is for VS Code extensions only)
-        $vsixPublisher = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" `
-          -Recurse -Filter "VsixPublisher.exe" -ErrorAction SilentlyContinue |
-          Select-Object -First 1
-        if (-not $vsixPublisher) {
-          Write-Error "❌ VsixPublisher.exe not found on this runner."
-          exit 1
-        }
-        Write-Host "Found: $($vsixPublisher.FullName)"
-        $vsix = "${{ steps.vsix.outputs.vsix_path }}"
-        $manifest = "visualstudio-extension/publish-manifest.json"
-        Write-Host "Publishing $vsix to Visual Studio Marketplace..."
-        & $vsixPublisher.FullName publish -payload $vsix -publishManifest $manifest -personalAccessToken $env:VS_MARKETPLACE_PAT
-        if ($LASTEXITCODE -ne 0) { throw "Marketplace publish failed" }
-        Write-Host "✅ Published to Visual Studio Marketplace"
+        ./.github/workflows/scripts/publish-vs-marketplace.ps1 `
+          -Vsix "${{ steps.vsix.outputs.vsix_path }}" `
+          -PublishManifest "visualstudio-extension/publish-manifest.json"
 
     - name: Tag Visual Studio release (vs/v<manifest version>)
       # Marketplace publishes from release.yml / dispatch carry no vs/v* tag otherwise,
