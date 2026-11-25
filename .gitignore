@@ -103,6 +103,9 @@ pr-risk/
 session-logs/
 usage-data/
 
+# Local Vally results can contain agent trajectories. Keep them out of commits.
+.copilot/evals/
+
 # Throwaway fixture directories created by the vscode-extension unit suite.
 # The tests create these under os.tmpdir(), or under .test-fixtures/ where the
 # subject refuses to read out of the temp directory, and clean them up (see

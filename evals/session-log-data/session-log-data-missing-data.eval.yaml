@@ -1,0 +1,44 @@
+name: session-log-data-missing-data
+description: Checks that the skill reports absent eval inputs without inventing data.
+type: capability
+version: "1.0"
+
+agent_environment:
+  skills:
+    - ../../.github/skills/session-log-data
+
+defaults:
+  executor: copilot-sdk
+  runs: 1
+  timeout: 120s
+  model: claude-sonnet-5.5
+
+scoring:
+  threshold: 1
+
+stimuli:
+  - name: no-hydrated-data
+    prompt: |
+      Use /session-log-data. Inspect this evaluation workspace for session-logs/
+      and usage-data/usage-agg-daily.json.
+      Do not access any external service or infer whether Azure is configured.
+      Return one compact JSON object with no Markdown. Use the keys
+      session_logs_available and usage_aggregate_available, in that order, with
+      boolean values indicating whether each input is present. Add cause as the
+      final key: use "not-present-in-eval-workspace" if either input is absent,
+      otherwise use "available".
+    constraints:
+      max_turns: 6
+      max_tokens: 10000
+      max_duration: 2m
+      max_agent_duration: 90s
+    graders:
+      - type: skill-invocation
+        name: session-log-data-was-invoked
+        config:
+          required:
+            - session-log-data
+      - type: output-matches
+        name: does-not-invent-missing-data
+        config:
+          pattern: '^\{"session_logs_available":false,"usage_aggregate_available":false,"cause":"not-present-in-eval-workspace"\}$(?![\s\S])'
