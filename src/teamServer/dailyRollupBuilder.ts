@@ -14,7 +14,7 @@ import * as os from 'os';
 import type { DailyRollupKey } from './rollups';
 import { upsertDailyRollup } from './rollups';
 import type { DailyRollupValue, ChatRequest } from './types';
-import type { SessionFileCache, ModelUsage } from '../types';
+import type { SessionFileCache, ModelUsage, DailyRollupEntry, SessionUsageAnalysis } from '../types';
 import { BackendUtility } from './utility';
 import { isCopilotFusionAutoSession, resolveCopilotRouterModel } from '../hydrafusion';
 import { isJsonlContent } from '../tokenEstimation';
@@ -31,6 +31,42 @@ export type ModelUsageEntry = { inputTokens: number; outputTokens: number; inter
  */
 function isEventRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Model reference carried by a VS Code delta event (`selectedModel` and kind:0 state). */
+type DeltaModelRef = { identifier?: string; metadata?: { id?: string } };
+
+/** The `v` payload of a VS Code delta event, as read when looking for the selected model. */
+type DeltaModelPayload = DeltaModelRef & {
+	selectedModel?: DeltaModelRef;
+	inputState?: { selectedModel?: DeltaModelRef };
+};
+
+/** A Copilot CLI JSONL event, as read by the fallback parser. Fields are checked before use. */
+type CliEvent = {
+	type?: unknown;
+	model?: unknown;
+	timestamp?: unknown;
+	data?: { selectedModel?: unknown; newModel?: unknown; model?: unknown; content?: string; output?: string };
+};
+
+/** The `result` of a chat request, in each of the shapes that carry API-reported token counts. */
+type ChatRequestResult = {
+	usage?: { promptTokens?: unknown; completionTokens?: unknown };
+	promptTokens?: unknown;
+	outputTokens?: unknown;
+	metadata?: { promptTokens?: unknown; outputTokens?: unknown; modelId?: unknown };
+};
+
+/** Fluency metrics stored on a daily rollup. */
+type FluencyMetrics = NonNullable<DailyRollupValue['fluencyMetrics']>;
+
+/** Usage analysis as read back from the cache: any field may be missing, and repository lists may be attached. */
+type CachedUsageAnalysis = Partial<SessionUsageAnalysis> & { repositories?: string[]; repositoriesWithCustomization?: string[] };
+
+/** Model id of a delta-format chat request, from the request itself or its result metadata. */
+function getRequestModelId(req: ChatRequest): unknown {
+	return req.modelId || (req.result as ChatRequestResult | undefined)?.metadata?.modelId;
 }
 
 /** Logger callbacks for the rollup builder. */
@@ -245,35 +281,37 @@ return dayModelInteractions;
  * Nested updates (`k.length > 1`, e.g. `['requests', 0, 'response']`) legitimately
  * carry non-array values, so only the top-level path can be malformed.
  */
-protected readDeltaRequestsPayload(event: any): unknown[] | 'not-requests' | 'malformed' {
+protected readDeltaRequestsPayload(event: Record<string, unknown>): unknown[] | 'not-requests' | 'malformed' {
 if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests') { return 'not-requests'; }
 if (Array.isArray(event.v)) { return event.v; }
 return event.k.length === 1 ? 'malformed' : 'not-requests';
 }
 
-protected updateDeltaDefaultModel(event: any, defaultModel: string): string {if (event.kind === 0) {
+protected updateDeltaDefaultModel(event: Record<string, unknown>, defaultModel: string): string {if (event.kind === 0) {
 const modelId = this.extractModelIdFromKind0Event(event);
-if (modelId) { return (modelId as string).replace(/^copilot\//, ''); }
+if (modelId) { return modelId.replace(/^copilot\//, ''); }
 }
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
 const modelId = this.extractModelIdFromSelectedModelEvent(event);
-if (modelId) { return (modelId as string).replace(/^copilot\//, ''); }
+if (modelId) { return modelId.replace(/^copilot\//, ''); }
 }
 return defaultModel;
 }
 
-protected extractModelIdFromKind0Event(event: any): string | undefined {
-return event.v?.selectedModel?.identifier ||
-event.v?.selectedModel?.metadata?.id ||
-event.v?.inputState?.selectedModel?.metadata?.id;
+protected extractModelIdFromKind0Event(event: Record<string, unknown>): string | undefined {
+const v = event.v as DeltaModelPayload | undefined;
+return v?.selectedModel?.identifier ||
+v?.selectedModel?.metadata?.id ||
+v?.inputState?.selectedModel?.metadata?.id;
 }
 
-protected extractModelIdFromSelectedModelEvent(event: any): string | undefined {
-return event.v?.identifier || event.v?.metadata?.id;
+protected extractModelIdFromSelectedModelEvent(event: Record<string, unknown>): string | undefined {
+const v = event.v as DeltaModelPayload | undefined;
+return v?.identifier || v?.metadata?.id;
 }
 
 protected processDeltaRequests(
-requests: any[],
+requests: unknown[],
 defaultModel: string,
 seenRequestIds: Set<string>,
 fileMtimeMs: number,
@@ -298,14 +336,14 @@ fileMtimeMs: number,
 startMs: number,
 dayModelInteractions: Map<string, Map<string, number>>
 ): void {
-const reqId = (req as any).requestId as string | undefined;
+const reqId = req.requestId as string | undefined;
 if (reqId && seenRequestIds.has(reqId)) { return; }
 if (reqId) { seenRequestIds.add(reqId); }
 const normalizedTs = this.utility.normalizeTimestampToMs(req.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { return; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
+const rawModel = getRequestModelId(req);
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
 if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Map()); }
 const dayMap = dayModelInteractions.get(dayKey)!;
@@ -568,16 +606,17 @@ return false;
 }
 }
 
-protected validateCachedData(cachedData: any, sessionFile: string): boolean {
+protected validateCachedData(cachedData: unknown, sessionFile: string): cachedData is SessionFileCache {
 if (!cachedData || typeof cachedData !== 'object') {
 this.deps.logger.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
 return false;
 }
-if (typeof cachedData.modelUsage !== 'object' || cachedData.modelUsage === null) {
+const candidate = cachedData as Record<string, unknown>;
+if (typeof candidate.modelUsage !== 'object' || candidate.modelUsage === null) {
 this.deps.logger.warn(`Backend sync: invalid modelUsage in cached data for ${sessionFile}`);
 return false;
 }
-if (!Number.isFinite(cachedData.interactions) || cachedData.interactions < 0) {
+if (typeof candidate.interactions !== 'number' || !Number.isFinite(candidate.interactions) || candidate.interactions < 0) {
 this.deps.logger.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
 return false;
 }
@@ -585,7 +624,7 @@ return true;
 }
 
 protected processDailyRollupsFastPath(
-cachedData: any,
+cachedData: SessionFileCache,
 workspaceId: string,
 machineId: string,
 userId: string | undefined,
@@ -594,9 +633,10 @@ editor: string | undefined,
 startMs: number
 ): boolean {
 const totalSessionInteractions = cachedData.interactions || 1;
-const dayKeys = Object.keys(cachedData.dailyRollups).sort();
+const dailyRollups = cachedData.dailyRollups ?? {};
+const dayKeys = Object.keys(dailyRollups).sort();
 for (const dayKey of dayKeys) {
-const dayEntry = cachedData.dailyRollups[dayKey];
+const dayEntry = dailyRollups[dayKey];
 const dayStartMs = new Date(dayKey + 'T00:00:00Z').getTime();
 if (dayStartMs < startMs) { continue; }
 this.processDailyRollupsDayEntry(dayKey, dayEntry, totalSessionInteractions, cachedData, workspaceId, machineId, userId, rollups, editor);
@@ -609,16 +649,16 @@ return true;
 
 protected processDailyRollupsDayEntry(
 dayKey: string,
-dayEntry: any,
+dayEntry: DailyRollupEntry,
 totalSessionInteractions: number,
-cachedData: any,
+cachedData: SessionFileCache,
 workspaceId: string,
 machineId: string,
 userId: string | undefined,
 rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
 editor: string | undefined
 ): void {
-const modelEntries = Object.entries<any>(dayEntry.modelUsage).filter(([, mu]) =>
+const modelEntries = Object.entries(dayEntry.modelUsage).filter(([, mu]) =>
 mu && ((mu.inputTokens || 0) > 0 || (mu.outputTokens || 0) > 0)
 );
 if (modelEntries.length === 0) { return; }
@@ -675,10 +715,10 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 	 * @param ratio - Optional ratio to proportionally distribute metrics (for multi-day sessions)
 	 * @returns Fluency metrics object ready for storage
 	 */
-	protected extractFluencyMetricsFromCache(cachedData: any, ratio: number = 1): any {
+	protected extractFluencyMetricsFromCache(cachedData: { usageAnalysis?: CachedUsageAnalysis }, ratio: number = 1): FluencyMetrics | undefined {
 		if (!cachedData.usageAnalysis) { return undefined; }
 		const analysis = cachedData.usageAnalysis;
-		const fluencyMetrics: any = {
+		const fluencyMetrics: FluencyMetrics = {
 			...this.extractModeUsageFluency(analysis, ratio),
 			...this.extractJsonFieldsFluency(analysis),
 			...this.extractEditScopeFluency(analysis),
@@ -689,7 +729,7 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 		return Object.keys(fluencyMetrics).length > 0 ? fluencyMetrics : undefined;
 	}
 
-	protected extractModeUsageFluency(analysis: any, ratio: number): any {
+	protected extractModeUsageFluency(analysis: CachedUsageAnalysis, ratio: number): FluencyMetrics {
 		if (!analysis.modeUsage) { return {}; }
 		return {
 			askModeCount: Math.round((analysis.modeUsage.ask || 0) * ratio),
@@ -701,8 +741,8 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 		};
 	}
 
-	protected extractJsonFieldsFluency(analysis: any): any {
-		const result: any = {};
+	protected extractJsonFieldsFluency(analysis: CachedUsageAnalysis): FluencyMetrics {
+		const result: FluencyMetrics = {};
 		if (analysis.toolCalls) { result.toolCallsJson = JSON.stringify(stripLatencyHistograms(analysis.toolCalls)); }
 		if (analysis.contextReferences) { result.contextRefsJson = JSON.stringify(analysis.contextReferences); }
 		if (analysis.mcpTools) { result.mcpToolsJson = JSON.stringify(stripLatencyHistograms(analysis.mcpTools)); }
@@ -712,7 +752,7 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 		return result;
 	}
 
-	protected extractEditScopeFluency(analysis: any): any {
+	protected extractEditScopeFluency(analysis: CachedUsageAnalysis): FluencyMetrics {
 		if (!analysis.editScope) { return {}; }
 		return {
 			editScopeJson: JSON.stringify(analysis.editScope),
@@ -721,21 +761,21 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 		};
 	}
 
-	protected extractRepositoriesFluency(analysis: any): any {
+	protected extractRepositoriesFluency(analysis: CachedUsageAnalysis): FluencyMetrics {
 		if (!analysis.repositories && !analysis.repositoriesWithCustomization) { return {}; }
 		const repoData = {
 			repositories: analysis.repositories || [],
 			repositoriesWithCustomization: analysis.repositoriesWithCustomization || []
 		};
-		const result: any = { repositoriesJson: JSON.stringify(repoData) };
+		const result: FluencyMetrics = { repositoriesJson: JSON.stringify(repoData) };
 		const totalRepos = (analysis.repositories || []).length;
 		const customizedRepos = (analysis.repositoriesWithCustomization || []).length;
 		if (totalRepos > 0) { result.repoCustomizationRate = customizedRepos / totalRepos; }
 		return result;
 	}
 
-	protected extractActivityFluency(analysis: any): any {
-		const result: any = {};
+	protected extractActivityFluency(analysis: CachedUsageAnalysis): FluencyMetrics {
+		const result: FluencyMetrics = {};
 		if (analysis.applyUsage) {
 			result.applyUsageJson = JSON.stringify(analysis.applyUsage);
 			result.codeBlockApplyRate = analysis.applyUsage.applyRate || 0;
@@ -783,12 +823,13 @@ protected extractTokenCountsFromRequest(
 req: ChatRequest,
 model: string
 ): { inputTokens: number; outputTokens: number } {
-const apiTokens = this.extractApiReportedTokens((req as any).result);
+const apiTokens = this.extractApiReportedTokens(req.result);
 if (apiTokens) { return apiTokens; }
 return this.estimateTokenCountsFromMessage(req, model);
 }
 
-protected extractApiReportedTokens(result: any): { inputTokens: number; outputTokens: number } | null {
+protected extractApiReportedTokens(rawResult: unknown): { inputTokens: number; outputTokens: number } | null {
+const result = rawResult as ChatRequestResult | null | undefined;
 if (result?.usage) {
 return {
 inputTokens: typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0,
@@ -807,7 +848,7 @@ return null;
 protected estimateTokenCountsFromMessage(req: ChatRequest, model: string): { inputTokens: number; outputTokens: number } {
 let inputTokens = 0;
 let outputTokens = 0;
-const msgText = (req as any).message?.text;
+const msgText = (req.message as { text?: string } | undefined)?.text;
 if (msgText) {
 inputTokens = this.deps.sessionHandlers.estimateTokensFromText(msgText, model);
 } else if (req.message?.parts) {
@@ -815,7 +856,7 @@ for (const part of req.message.parts) {
 if (part?.text) { inputTokens += this.deps.sessionHandlers.estimateTokensFromText(part.text, model); }
 }
 }
-const response = (req as any).response ?? req.response;
+const response = req.response;
 if (Array.isArray(response)) {
 for (const r of response) {
 if (typeof r?.value === 'string') { outputTokens += this.deps.sessionHandlers.estimateTokensFromText(r.value, model); }
@@ -889,26 +930,28 @@ failedLines += this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds
 return failedLines;
 }
 
-protected updateFallbackVsCodeModel(event: any, defaultModel: string): string {
+protected updateFallbackVsCodeModel(event: Record<string, unknown>, defaultModel: string): string {
 if (event.kind === 0) {
 const mId = this.getFallbackKind0ModelId(event);
 if (mId) { return mId.replace(/^copilot\//, ''); }
 }
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
-const mId = event.v?.identifier || event.v?.metadata?.id;
+const v = event.v as DeltaModelPayload | undefined;
+const mId = v?.identifier || v?.metadata?.id;
 if (mId) { return mId.replace(/^copilot\//, ''); }
 }
 return defaultModel;
 }
 
-protected getFallbackKind0ModelId(event: any): string | undefined {
-return event.v?.selectedModel?.identifier ||
-event.v?.selectedModel?.metadata?.id ||
-event.v?.inputState?.selectedModel?.metadata?.id;
+protected getFallbackKind0ModelId(event: Record<string, unknown>): string | undefined {
+const v = event.v as DeltaModelPayload | undefined;
+return v?.selectedModel?.identifier ||
+v?.selectedModel?.metadata?.id ||
+v?.inputState?.selectedModel?.metadata?.id;
 }
 
 protected upsertVsCodeFallbackRequests(
-event: any,
+event: Record<string, unknown>,
 defaultModel: string,
 seenReqIds: Set<string>,
 fileMtimeMs: number,
@@ -929,7 +972,7 @@ return failed;
 }
 
 protected upsertVsCodeFallbackSingleRequest(
-request: any,
+request: Record<string, unknown>,
 defaultModel: string,
 seenReqIds: Set<string>,
 fileMtimeMs: number,
@@ -937,14 +980,14 @@ startMs: number,
 ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
 ): void {
 const req = request as ChatRequest;
-const reqId = (req as any).requestId as string | undefined;
+const reqId = req.requestId as string | undefined;
 if (reqId && seenReqIds.has(reqId)) { return; }
 if (reqId) { seenReqIds.add(reqId); }
 const normalizedTs = this.utility.normalizeTimestampToMs(typeof req.timestamp !== 'undefined' ? req.timestamp : undefined);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { return; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
+const rawModel = getRequestModelId(req);
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
 const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
 if (inputTokens === 0 && outputTokens === 0) { return; }
@@ -982,17 +1025,20 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions })
 return failedLines;
 }
 
-protected updateCliDefaultModel(event: any, defaultModel: string): string {
+protected updateCliDefaultModel(record: Record<string, unknown>, defaultModel: string): string {
+const event = record as CliEvent;
 if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') { return event.data.selectedModel; }
 if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { return event.data.newModel; }
 return defaultModel;
 }
 
-protected getCliEventModel(event: any, defaultModel: string): string {
-return (event.data?.model || event.model || defaultModel).toString();
+protected getCliEventModel(record: Record<string, unknown>, defaultModel: string): string {
+const event = record as CliEvent;
+return String(event.data?.model || event.model || defaultModel);
 }
 
-protected getCliEventTokenCounts(event: any, model: string): { inputTokens: number; outputTokens: number; interactions: number } {
+protected getCliEventTokenCounts(record: Record<string, unknown>, model: string): { inputTokens: number; outputTokens: number; interactions: number } {
+const event = record as CliEvent;
 if (event.type === 'user.message' && event.data?.content) {
 return { inputTokens: this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model), outputTokens: 0, interactions: 1 };
 }
@@ -1303,7 +1349,7 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
  * seen. Drop them from the uploaded JSON so the payload stays bounded by the
  * number of distinct tools times a few counters; the count maps are kept.
  */
-export function stripLatencyHistograms<T extends Record<string, unknown>>(usage: T): Omit<T, 'latencyByTool' | 'latencyByServer'> {
+export function stripLatencyHistograms<T extends object>(usage: T): Omit<T, 'latencyByTool' | 'latencyByServer'> {
 	const { latencyByTool: _lt, latencyByServer: _ls, ...rest } = usage as T & { latencyByTool?: unknown; latencyByServer?: unknown };
 	return rest;
 }
