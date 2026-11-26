@@ -94,17 +94,44 @@ export interface UploadEntry {
 
 let _db: DatabaseSync | undefined;
 
-/** Restore the database from Azure Files backup (if one exists) onto local disk. */
-export function restoreFromBackup(): void {
+/**
+ * Set when a backup exists but could not be restored. The live database is then not the
+ * backed-up one (it starts empty), so copying it over the backup would destroy the only good
+ * copy of the data: every later backup is refused until the process restarts and a restore
+ * succeeds. Production once started empty after a failed restore and the periodic backup then
+ * overwrote the good backup with that empty database.
+ */
+let backupOverwriteBlocked = false;
+
+/** Whether backups are refused because the startup restore failed (see `restoreFromBackup`). */
+export function isBackupOverwriteBlocked(): boolean {
+	return backupOverwriteBlocked;
+}
+
+/**
+ * Restore the database from Azure Files backup (if one exists) onto local disk.
+ *
+ * Returns `false` when a backup exists but copying it failed. The server then runs on an empty
+ * local database, and `backupToAzureFiles` refuses to overwrite the existing backup with it.
+ * No backup at all (first deploy, or no backup location configured) is not a failure.
+ */
+export function restoreFromBackup(): boolean {
 	const backupPath = getBackupPath();
-	if (!backupPath || !existsSync(backupPath)) return;
+	if (!backupPath || !existsSync(backupPath)) {
+		backupOverwriteBlocked = false;
+		return true;
+	}
 	const localPath = getDatabasePath();
 	try {
 		mkdirSync(dirname(localPath), { recursive: true });
 		copyFileSync(backupPath, localPath);
+		backupOverwriteBlocked = false;
 		console.log('[db] Restored database from Azure Files backup');
+		return true;
 	} catch (err) {
-		console.error('[db] Failed to restore from backup (will start fresh):', err);
+		backupOverwriteBlocked = true;
+		console.error(`[db] Failed to restore from backup ${backupPath}. Backups are disabled until a restart restores it, so the existing backup is not overwritten; data uploaded meanwhile is not backed up:`, err);
+		return false;
 	}
 }
 
@@ -112,6 +139,10 @@ export function restoreFromBackup(): void {
 export function backupToAzureFiles(): void {
 	const backupPath = getBackupPath();
 	if (!backupPath) return;
+	if (backupOverwriteBlocked) {
+		console.error(`[db] Not backing up: the startup restore from ${backupPath} failed, and overwriting it would replace the good backup with this database. Fix the restore and restart.`);
+		return;
+	}
 	const localPath = getDatabasePath();
 	if (!existsSync(localPath)) return;
 	try {

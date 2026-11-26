@@ -19,13 +19,13 @@ importers:
         version: 6.0.1
       commander:
         specifier: ^15.0.0
-        version: 15.0.0
+        version: 15.1.0
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
       sql.js:
         specifier: ^1.12.0
-        version: 1.15.2
+        version: 1.16.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -319,8 +319,8 @@ packages:
     resolution: {integrity: sha512-/Ce6KNm3vIbWdMlNna6RVIZ/ICQxnJxCicet5LBKK9ZffBkqzDw0xh9EiKSljdRtiIQ1S1z4YgcscUUGzNCWrA==}
     engines: {node: '>=22'}
 
-  commander@15.0.0:
-    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+  commander@15.1.0:
+    resolution: {integrity: sha512-cgnQ88TRrWcC7pVq46RzJVRMktu3W2RcbnoidnfBsl1bmDCBwJS/udcIZpKoCrbAYYaCqsz1yZCVIgbIaU3ddQ==}
     engines: {node: '>=22.12.0'}
 
   esbuild@0.28.2:
@@ -328,8 +328,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  sql.js@1.15.2:
-    resolution: {integrity: sha512-ZmMYFsZPZWDKIJUh3A5rdnpRV3hB/r7AijwAzSzLnfv/9CSx4obUmDtA8brAjWJWjGtUVh43nIEJ+6nl6HuOUg==}
+  sql.js@1.16.0:
+    resolution: {integrity: sha512-q/JOZuJfmVh8Zf8Eo+cMJvtxAWeWBqTfJ6AQYGXZmcaLGHMwhA2niH3fQYHrBtPeOss1ttzHec07K5+rHaMRMw==}
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -487,7 +487,7 @@ snapshots:
 
   chalk@6.0.1: {}
 
-  commander@15.0.0: {}
+  commander@15.1.0: {}
 
   esbuild@0.28.2:
     optionalDependencies:
@@ -518,7 +518,7 @@ snapshots:
       '@esbuild/win32-ia32': 0.28.2
       '@esbuild/win32-x64': 0.28.2
 
-  sql.js@1.15.2: {}
+  sql.js@1.16.0: {}
 
   typescript@7.0.2:
     optionalDependencies:

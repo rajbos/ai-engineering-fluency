@@ -4,7 +4,8 @@ import type { ModelUsage, ChatTurn, SessionUsageAnalysis } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { EclipseDataAccess } from '../eclipse';
 import { createEmptyContextRefs } from '../tokenEstimation';
-import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
+import { applyModelSwitchingStats } from './modelSwitching';
 
 /** Map an Eclipse chatMode value (e.g. "Agent", "Ask", "Edit") to a ChatTurn mode. */
 function mapEclipseMode(chatMode: string | null): ChatTurn['mode'] {
@@ -131,16 +132,7 @@ export class EclipseAdapter implements IEcosystemAdapter, IDiscoverableEcosystem
 				analysis.toolCalls.byTool[tc.toolName] = (analysis.toolCalls.byTool[tc.toolName] || 0) + 1;
 			}
 		}
-		const uniqueModels = [...new Set(models)];
-		analysis.modelSwitching.uniqueModels = uniqueModels;
-		analysis.modelSwitching.modelCount = uniqueModels.length;
-		analysis.modelSwitching.totalRequests = models.length;
-		let switchCount = 0;
-		for (let i = 1; i < models.length; i++) {
-			if (models[i] !== models[i - 1]) { switchCount++; }
-		}
-		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
+		applyModelSwitchingStats(analysis, models, ctx.modelPricing);
 		return analysis;
 	}
 

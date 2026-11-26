@@ -148,12 +148,14 @@ function extractIconMapKeys(source) {
 function extractIncludesRules(body) {
   const rules = [];
   // Find every `return 'Name';` statement, then look backward for its `if (`.
-  // `return detectClaudeCodeEditorVariant(...)` is treated as 'Claude Code'
-  // (that helper's default) so the /.claude/projects/ rule is still simulated.
-  const returnRe = /\breturn\s+(?:'([^']+)'|detectClaudeCodeEditorVariant\([^)]*\))\s*;/g;
+  // `return detectClaudeCodeEditorVariant(...)` is treated as 'Claude Code' and
+  // `return detectVibeSessionEditorVariant(...)` as 'Mistral Vibe' (those helpers'
+  // default labels) so the /.claude/projects/ and /.vibe/logs/session/ rules are
+  // still simulated.
+  const returnRe = /\breturn\s+(?:'([^']+)'|detectClaudeCodeEditorVariant\([^)]*\)|detectVibeSessionEditorVariant\([^)]*\))\s*;/g;
   let m;
   while ((m = returnRe.exec(body)) !== null) {
-    const name = m[1] ?? 'Claude Code';
+    const name = m[1] ?? (m[0].includes('detectClaudeCodeEditorVariant') ? 'Claude Code' : 'Mistral Vibe');
     if (/^\d+$/.test(name)) continue; // skip numeric strings
 
     // Walk outward through the enclosing if-chain: for each `if (` found

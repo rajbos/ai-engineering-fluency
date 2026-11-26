@@ -578,3 +578,31 @@ test('uploadFluencyScore: sends score as JSON body', async () => {
 	assert.ok(body?.includes('0.85'));
 	assert.ok(body?.includes('3'));
 });
+
+/** A fetch that never answers on its own, like a server that accepts the connection and hangs. */
+function hangingFetch(): typeof fetch {
+	return ((_url: RequestInfo | URL, options?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+		const signal = options?.signal;
+		if (!signal) { return; } // no timeout passed: hangs forever and the test times out
+		signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+	})) as typeof fetch;
+}
+
+test('uploadRollups: a server that never answers is abandoned after the request timeout', { timeout: 5000 }, async () => {
+	const service = new SharingServerUploadService(50);
+	global.fetch = hangingFetch();
+	const warnMsgs: string[] = [];
+	const result = await service.uploadRollups('https://server.example.com', 'github-token', [createTestEntry()], () => {}, (msg) => warnMsgs.push(msg));
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+	assert.ok(warnMsgs.some(msg => msg.includes('Upload failed')));
+});
+
+test('uploadFluencyScore: a server that never answers is abandoned after the request timeout', { timeout: 5000 }, async () => {
+	const service = new SharingServerUploadService(50);
+	global.fetch = hangingFetch();
+	const warnMsgs: string[] = [];
+	const uploaded = await service.uploadFluencyScore('https://server.example.com', 'github-token', { score: 1 }, () => {}, (msg) => warnMsgs.push(msg));
+	assert.equal(uploaded, false);
+	assert.ok(warnMsgs.some(msg => msg.includes('failed')));
+});

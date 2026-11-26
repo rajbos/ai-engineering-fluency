@@ -5,9 +5,40 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 ## [Unreleased]
 
 ### Bug Fixes
-- `segment` no longer starts a full re-parse of every session file on each call once its cached value expires. Shell prompts and Copilot CLI or Claude Code statuslines that call it every few seconds from several terminals could stack up many parallel scans and keep the CPU busy (and drain a laptop battery) for hours. It now prints the last cached value immediately and refreshes it in a single background process at low CPU priority; a lock file naming that process stops other terminals from starting their own scan until it exits. Parsed sessions are saved to `cli-cache.json` every 100 files during a scan, so a killed scan no longer makes the next one start from zero, and cache files are written atomically
-- `segment`, `usage`, `environmental` and `all` no longer parse sessions last active before the start of the previous month, which none of their periods count; on a machine with years of session history this skips thousands of files per run. The parsed-session cache now keeps up to 6,000 entries instead of 2,000, so heavy users' recent sessions are no longer evicted and re-parsed on every run
+- `segment` no longer starts a full re-parse of every session file on each call once its cached value expires. Shell prompts and Copilot CLI or Claude Code statuslines that call it every few seconds from several terminals could stack up many parallel scans and keep the CPU busy (and drain a laptop battery) for hours. It now prints the last cached value immediately and refreshes it in a single background process at low CPU priority; a lock file naming that process stops other terminals from starting their own scan until it exits
+
+## [0.8.0] - 2026-11-26
+
+### Features
+- Mistral Vibe subsessions are now linked to the session that started them and count toward the multi-agent metrics, instead of showing up as unrelated standalone sessions (#2743)
+
+### Bug Fixes
+- Cursor: chats from newer Cursor builds (3.3x), which store their conversation headers in chunks, are counted again. Every new chat counted 0 interactions and was left out of the totals (#2735)
+- Workspace folders with the Windows `\\?\` long-path prefix are no longer reported as separate workspaces (#2745)
+- Windows: Claude Desktop Cowork sessions are found again on current Claude desktop installs, which moved their data from the app package's `LocalCache\Roaming\Claude` folder to `%LOCALAPPDATA%\Claude-Data\claude_<package>`. Every existing location is read, newest first, and a session present in two locations is counted once
+- Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
+- `skill-suggestions`: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run and toward the **failing** status. A run that is still going (active in the last hour) is not counted as failed.
+
+### Performance
+- `usage`, `environmental` and `segment` no longer parse sessions last active before the start of last month, so a first run (or one after the session cache was cleared) on a large history is much faster. A database-backed session (OpenCode, Kilo Code, Cursor, ...) is judged by its own last activity, so an old session in a database that was written to recently no longer shows up in today's, this month's or last month's numbers (#2755)
+
+## [0.7.2] - 2026-11-24
+
+### Features
+- `skill-suggestions` lists every scheduled automation on this machine (Claude desktop scheduled tasks, Copilot app automations) with its status (healthy, stale after 30 days without a run, failing, disabled, ...), repository, schedule, last run and recent success, and each failed run's session with its tokens and cost; `--json` carries the same fields
+- `skill-suggestions` recognizes runs of Claude Code scheduled tasks and GitHub Copilot automations (from `~/.copilot/data.db`), leaves them out of the suggestions and lists them under "Already on a schedule"; `--json` adds `scheduledTasks` (names only with `--include-prompts`). Claude Code's injected `<system-reminder>` text is ignored when comparing prompts
+- `skill-suggestions` shows the editors each repeated task ran in and, for a task that recurs on a rhythm (about daily, weekly or every few days, on at least 3 different days), its cadence and how to automate it: Claude Code scheduled tasks, GitHub Copilot automations, or a scheduled job running the agent's CLI. `--json` carries `editors`, per-session `editor` and `recurrence` (none of them prompt text, so they are kept in the redacted output)
+- On Windows the CLI also reads session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores under `~/.vibe/sandbox-v2/*/`) from WSL distros that are already running. A stopped distro is never read or started. Turn off with `--no-wsl` or `AI_ENGINEERING_FLUENCY_WSL=0`; `stats --verbose` and `diagnostics` list each running distro
+- Mistral Vibe Desktop sessions are tracked and reported as their own editor (#2721)
+
+### Bug Fixes
+- Mistral Vibe sessions in the unified session store are discovered and included, and Mistral Large 4 usage is priced (#2576)
+- Copilot app "auto" sessions routed by Copilot Fusion are attributed to Copilot Fusion (#2687)
 - Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
+- An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once per run instead of once per session query, so `all --json` no longer runs for many minutes on a large OpenCode store (#2710)
+- The session cache (`cli-cache.json`) is now saved every 30 seconds during a run and when the CLI is stopped with Ctrl+C or `SIGTERM`, and is written atomically, so a run killed by a caller's timeout keeps its progress. It now holds up to 20,000 entries instead of 2,000, so large histories are no longer re-parsed on every run (#2710)
+- OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710)
+- Sessions stored in a database (OpenCode, Crush) are now cached under each session's own last-activity time instead of the database file's modification time, so a write to one session no longer forces every other session in that database to be re-parsed on the next run. An OpenCode session's last activity now also counts its message and part writes, which OpenCode does not always record on the session itself, so these sessions are no longer dated too early or served stale from the cache (#2710)
 
 ## [0.7.1] - 2026-10-27
 

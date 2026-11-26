@@ -2,7 +2,9 @@
  * Mistral Vibe data access layer.
  * Handles reading session data from Mistral Vibe's JSON/JSONL session directories.
  *
- * Mistral Vibe (https://github.com/mistralai/mistral-vibe) is a terminal-based coding agent.
+ * Mistral Vibe (https://github.com/mistralai/mistral-vibe) is a terminal-based coding agent;
+ * the same agent also runs as the local Vibe Desktop app, which writes unified-store sessions
+ * with `runtime_path: "session_api"` in meta.json (labelled "Mistral Vibe Desktop" in the UI).
  * Sessions are stored as individual directories under ~/.vibe/logs/session/
  *
  * Two on-disk layouts are supported:
@@ -42,6 +44,58 @@ import * as os from 'os';
 import type { ModelUsage } from './types';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './utils/pathUtils';
+
+/** The few fs.promises calls Vibe session discovery needs; injectable so tests can observe every path touched. */
+export interface VibeDiscoveryFs {
+	readdir(dir: string, options: { withFileTypes: true }): Promise<{ name: string; isDirectory(): boolean }[]>;
+	access(p: string): Promise<void>;
+}
+
+/**
+ * Collect the meta.json of every session under one Vibe root (a `.vibe` home or an AoE sandbox store):
+ * legacy `logs/session/session_*` directories and unified-store `logs/session/unified/<uuid>` directories.
+ */
+export async function discoverVibeSessionsInRoot(root: string, fsApi: VibeDiscoveryFs = fs.promises): Promise<string[]> {
+	const sessions: string[] = [];
+	const collect = async (dir: string): Promise<void> => {
+		try {
+			for (const entry of await fsApi.readdir(dir, { withFileTypes: true })) {
+				if (!entry.isDirectory()) { continue; }
+				const metaPath = path.join(dir, entry.name, 'meta.json');
+				try {
+					await fsApi.access(metaPath);
+					sessions.push(metaPath);
+				} catch {
+					// meta.json missing — skip
+				}
+			}
+		} catch {
+			// directory missing — nothing to collect
+		}
+	};
+	const sessionDir = path.join(root, 'logs', 'session');
+	await collect(sessionDir);
+	await collect(path.join(sessionDir, 'unified'));
+	return sessions;
+}
+
+/**
+ * Agent of Empires (AoE) sandbox stores under a Vibe home: `<home>/sandbox-v2/<aoe-session-id>/`.
+ * Each is bind-mounted as `/root/.vibe` in a container, so it has the same `logs/session/...` layout as a Vibe home.
+ */
+export async function findVibeSandboxRoots(vibeHome: string, fsApi: VibeDiscoveryFs = fs.promises): Promise<string[]> {
+	const base = path.join(vibeHome, 'sandbox-v2');
+	try {
+		return (await fsApi.readdir(base, { withFileTypes: true }))
+			.filter(e => e.isDirectory())
+			.map(e => path.join(base, e.name));
+	} catch {
+		return [];
+	}
+}
+
+/** Matches a Vibe session meta.json path in a Vibe home or an AoE sandbox store (forward-slash, lower-case input). */
+const VIBE_SESSION_PATH_RE = /\/\.vibe\/(?:sandbox-v2\/[^/]+\/)?logs\/session\//;
 
 /**
  * Numeric session statistics from meta.json `stats`, beyond the token totals.
@@ -86,7 +140,7 @@ interface VibeUnifiedEntry {
 	createdAt?: unknown;
 	content?: unknown;
 	detail?: { kind?: unknown; toolName?: unknown; input?: unknown; display?: { settledMessage?: unknown } };
-	state?: { outputText?: unknown };
+	state?: { outputText?: unknown; output?: unknown; error?: unknown };
 }
 
 /** One op in a projection_delta journal record of a unified-store session. */
@@ -96,10 +150,27 @@ interface VibeUnifiedDeltaOp {
 	state?: { session?: { contextUsage?: unknown } };
 }
 
+/** A `core_input` record's command (user_message carries the turn text in content[] parts). */
+interface VibeUnifiedCoreCommand {
+	type?: string;
+	content?: unknown;
+	mode?: string;
+	turn_id?: string;
+}
+
 /** One parsed line of a unified-store journal segment. */
 interface VibeUnifiedJournalRecord {
 	type?: string;
-	payload?: { delta?: VibeUnifiedDeltaOp[] };
+	payload?: {
+		delta?: VibeUnifiedDeltaOp[];
+		client_command_id?: unknown;
+		params?: { injected?: unknown };
+		input?: {
+			input_id?: unknown;
+			command?: VibeUnifiedCoreCommand;
+			determinism?: { time_unix_ms?: unknown };
+		};
+	};
 }
 
 /** A synthesized message in the legacy messages.jsonl shape the adapter consumes. */
@@ -148,8 +219,11 @@ return path.join(this.getSessionLogDir(), 'unified');
 isVibeSessionFile(filePath: string): boolean {
 const normalized = normalizePathForComparison(filePath);
 if (!normalized.endsWith('/meta.json')) { return false; }
-if (normalized.includes('/.vibe/logs/session/')) { return true; }
-return normalized.startsWith(normalizePathForComparison(this.getSessionLogDir()) + '/');
+if (VIBE_SESSION_PATH_RE.test(normalized)) { return true; }
+if (normalized.startsWith(normalizePathForComparison(this.getSessionLogDir()) + '/')) { return true; }
+// An AoE sandbox store under a relocated $VIBE_HOME whose folder is not named .vibe.
+const sandboxBase = normalizePathForComparison(path.join(this.getVibeHomeDir(), 'sandbox-v2')) + '/';
+return normalized.startsWith(sandboxBase) && /^[^/]+\/logs\/session\//.test(normalized.slice(sandboxBase.length));
 }
 
 /**
@@ -163,30 +237,14 @@ return path.dirname(metaJsonPath);
  * Discover all Mistral Vibe sessions by scanning the session log directory.
  * Covers both layouts: legacy session_* directories directly under logs/session/ and
  * unified-store <uuid> directories under logs/session/unified/.
+ * Also scans AoE sandbox stores at <home>/sandbox-v2/<aoe-session-id>/ as extra roots.
  * Returns an array of meta.json paths, one per session.
  */
 async discoverSessions(): Promise<string[]> {
-const sessions: string[] = [];
-const collect = async (dir: string): Promise<void> => {
-try {
-const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-for (const entry of entries) {
-if (!entry.isDirectory()) { continue; }
-const metaPath = path.join(dir, entry.name, 'meta.json');
-try {
-await fs.promises.access(metaPath);
-sessions.push(metaPath);
-} catch {
-// meta.json missing — skip
-}
-}
-} catch {
-// directory missing — nothing to collect
-}
-};
-await collect(this.getSessionLogDir());
-await collect(this.getUnifiedSessionLogDir());
-return sessions;
+const home = this.getVibeHomeDir();
+const roots = [home, ...await findVibeSandboxRoots(home)];
+const perRoot = await Promise.all(roots.map(root => discoverVibeSessionsInRoot(root)));
+return perRoot.flat();
 }
 
 /**
@@ -278,57 +336,131 @@ return undefined;
 
 /**
  * Read all projection entries of a unified-store session: checkpointed entries from
- * chunks/*.json merged with journal append_entry ops, deduplicated by entry id and ordered
- * by createdAt. Entry types: message (user/assistant), reasoning, effect (tool calls).
+ * chunks/*.json merged with journal projection_delta ops (append_entry / replace_entry)
+ * and core_input user-message records, deduplicated by entry id and ordered by createdAt.
+ * Entry types: message (user/assistant), reasoning, effect (tool calls).
+ *
+ * User turns deserve a note: in a live session they are journaled as `core_input`
+ * `user_message` records and only become projection entries at checkpoint time (chunks),
+ * so they are synthesized from `core_input` here. The checkpointed entry carries the same
+ * id (`_meta.vibe_client_message_id`), which is what deduplicates the two.
  */
 private async readUnifiedEntries(sessionDir: string): Promise<VibeUnifiedEntry[]> {
-const entries: VibeUnifiedEntry[] = [];
-const seen = new Set<string>();
-const addEntry = (e: unknown): void => {
-const candidate = e as VibeUnifiedEntry;
-if (candidate && typeof candidate === 'object' && typeof candidate.type === 'string' && typeof candidate.id === 'string' && !seen.has(candidate.id)) {
-seen.add(candidate.id);
-entries.push(candidate);
-}
-};
-await this.collectChunkEntries(sessionDir, addEntry);
-await this.collectJournalEntries(sessionDir, addEntry);
+const byId = new Map<string, VibeUnifiedEntry>();
+await this.collectChunkEntries(sessionDir, byId);
+await this.collectJournalEntries(sessionDir, byId);
+const entries = [...byId.values()];
 entries.sort((a, b) => (nonNegativeNumber(a.createdAt) ?? 0) - (nonNegativeNumber(b.createdAt) ?? 0));
 return entries;
 }
 
+/** A plausible projection entry: object with a string type and a string id. */
+private isEntry(e: unknown): e is VibeUnifiedEntry {
+return !!e && typeof e === 'object' && typeof (e as VibeUnifiedEntry).type === 'string' && typeof (e as VibeUnifiedEntry).id === 'string';
+}
+
 /** Checkpointed projection entries from chunks/*.json (each chunk is an array of entries). */
-private async collectChunkEntries(sessionDir: string, addEntry: (e: unknown) => void): Promise<void> {
+private async collectChunkEntries(sessionDir: string, byId: Map<string, VibeUnifiedEntry>): Promise<void> {
 try {
 for (const file of await fs.promises.readdir(path.join(sessionDir, 'chunks'))) {
 if (!file.endsWith('.json')) { continue; }
 try {
 const chunk = JSON.parse(await fs.promises.readFile(path.join(sessionDir, 'chunks', file), 'utf8'));
-if (Array.isArray(chunk)) { chunk.forEach(addEntry); } else { addEntry(chunk); }
+const list = Array.isArray(chunk) ? chunk : [chunk];
+for (const e of list) {
+if (this.isEntry(e) && !byId.has(e.id)) { byId.set(e.id, e); }
+}
 } catch { /* skip malformed chunk */ }
 }
 } catch { /* no chunks directory */ }
 }
 
-/** append_entry projection entries in one parsed journal line, if it is a projection_delta. */
-private journalEntriesFromLine(line: string, addEntry: (e: unknown) => void): void {
-let rec: VibeUnifiedJournalRecord;
-try { rec = JSON.parse(line); } catch { return; }
-if (rec?.type !== 'projection_delta' || !Array.isArray(rec.payload?.delta)) { return; }
-for (const op of rec.payload.delta) {
-if (op?.op === 'append_entry' && op.entry) { addEntry(op.entry); }
+/** The client message id a user_message command's content parts carry in `_meta`. */
+private clientMessageId(content: unknown): string | undefined {
+if (!Array.isArray(content)) { return undefined; }
+for (const part of content) {
+const id = (part as { _meta?: { vibe_client_message_id?: unknown } } | null)?._meta?.vibe_client_message_id;
+if (typeof id === 'string' && id && !isUnsafeObjectKey(id)) { return id; }
+}
+return undefined;
+}
+
+/**
+ * Synthesize the projection entry a `core_input` user_message record represents: a user
+ * message whose id is the client message id, so a later checkpointed chunk entry with the
+ * same id deduplicates it. Injected (steered/queued) turns are flagged by a matching
+ * `command_reserved` record and get a non-turn_start source, which marks them injected
+ * downstream.
+ */
+/** Fallback entry id for a core_input record whose content parts carry no client message id. */
+private inputFallbackId(inputId: unknown): string | undefined {
+return typeof inputId === 'number' || typeof inputId === 'string' ? `input-${String(inputId)}` : undefined;
+}
+
+private coreInputUserEntry(rec: VibeUnifiedJournalRecord, injectedByClientId: Map<string, boolean>): VibeUnifiedEntry | undefined {
+const input = rec.payload?.input;
+const command = input?.command;
+if (command?.type !== 'user_message') { return undefined; }
+const clientId = this.clientMessageId(command.content);
+const id = clientId ?? this.inputFallbackId(input?.input_id);
+if (!id) { return undefined; }
+const injected = clientId !== undefined && injectedByClientId.get(clientId) === true;
+return {
+id,
+type: 'message',
+role: 'user',
+source: injected ? 'steer' : 'turn_start',
+createdAt: nonNegativeNumber(input?.determinism?.time_unix_ms),
+content: command.content,
+};
+}
+
+/** Apply one projection_delta op: append_entry adds when absent, replace_entry overwrites. */
+private applyDeltaOp(op: VibeUnifiedDeltaOp, byId: Map<string, VibeUnifiedEntry>): void {
+if (!this.isEntry(op?.entry)) { return; }
+if (op.op === 'replace_entry' || (op.op === 'append_entry' && !byId.has(op.entry.id))) {
+byId.set(op.entry.id, op.entry);
 }
 }
 
-/** Live projection entries from journal append_entry ops across all segments. */
-private async collectJournalEntries(sessionDir: string, addEntry: (e: unknown) => void): Promise<void> {
+/** Remember which client commands a command_reserved record marked as injected. */
+private noteReservedInjection(rec: VibeUnifiedJournalRecord, injectedByClientId: Map<string, boolean>): void {
+const clientId = rec.payload?.client_command_id;
+if (typeof clientId === 'string' && clientId && !isUnsafeObjectKey(clientId) && rec.payload?.params?.injected === true) {
+injectedByClientId.set(clientId, true);
+}
+}
+
+/** Apply one journal record to the entry map. */
+private applyJournalRecord(rec: VibeUnifiedJournalRecord, byId: Map<string, VibeUnifiedEntry>, injectedByClientId: Map<string, boolean>): void {
+if (rec?.type === 'projection_delta' && Array.isArray(rec.payload?.delta)) {
+for (const op of rec.payload.delta) { this.applyDeltaOp(op, byId); }
+} else if (rec?.type === 'command_reserved') {
+this.noteReservedInjection(rec, injectedByClientId);
+} else if (rec?.type === 'core_input') {
+const entry = this.coreInputUserEntry(rec, injectedByClientId);
+if (entry && !byId.has(entry.id)) { byId.set(entry.id, entry); }
+}
+}
+
+/**
+ * Apply journal records across all segments in sequence: projection_delta ops
+ * (append_entry adds when absent, replace_entry overwrites — effects settle through
+ * replace), command_reserved records (remember which client commands were injected),
+ * and core_input user_message records (live user turns).
+ */
+private async collectJournalEntries(sessionDir: string, byId: Map<string, VibeUnifiedEntry>): Promise<void> {
 const journalDir = path.join(sessionDir, 'journal');
+const injectedByClientId = new Map<string, boolean>();
 for (const file of await this.journalFiles(journalDir)) {
 let content: string;
 try { content = await fs.promises.readFile(path.join(journalDir, file), 'utf8'); } catch { continue; }
 for (const line of content.split('\n')) {
 const trimmed = line.trim();
-if (trimmed) { this.journalEntriesFromLine(trimmed, addEntry); }
+if (!trimmed) { continue; }
+let rec: VibeUnifiedJournalRecord;
+try { rec = JSON.parse(trimmed); } catch { continue; }
+this.applyJournalRecord(rec, byId, injectedByClientId);
 }
 }
 }
@@ -357,8 +489,45 @@ name: toolName,
 arguments: e.detail?.input !== undefined ? JSON.stringify(e.detail.input) : undefined,
 },
 });
-const out = e.state?.outputText ?? e.detail?.display?.settledMessage;
-messages.push({ role: 'tool', content: typeof out === 'string' ? out : undefined });
+messages.push({ role: 'tool', content: this.effectOutputText(e) });
+}
+
+/**
+ * The settled text of a tool-effect entry. The unified store writes it as
+ * `state.outputText`, but desktop (session_api) sessions carry the real result in
+ * `state.output` (an MCP-style `{content: [{text}], structured_content, error}` object)
+ * once the effect settles via replace_entry — read content-part text first, then
+ * structured_content (stdout/stderr, else JSON), then error, then the display fallback.
+ */
+/** Render an effect's `state.output.structured_content`: stdout/stderr, else JSON. */
+private structuredOutputText(structured: unknown): string | undefined {
+if (typeof structured === 'string' && structured) { return structured; }
+if (!structured || typeof structured !== 'object') { return undefined; }
+const scr = structured as Record<string, unknown>;
+const stdout = typeof scr.stdout === 'string' ? scr.stdout : '';
+const stderr = typeof scr.stderr === 'string' ? scr.stderr : '';
+const joined = [stdout, stderr].filter(s => s).join('\n');
+if (joined) { return joined; }
+try { return JSON.stringify(structured); } catch { return undefined; }
+}
+
+/** Text of an effect's `state.output` object: content-part text, then structured_content, then error. */
+private outputObjectText(output: unknown): string | undefined {
+if (!output || typeof output !== 'object') { return undefined; }
+const rec = output as Record<string, unknown>;
+const text = this.entryText(rec.content) || this.structuredOutputText(rec.structured_content);
+if (text) { return text; }
+return typeof rec.error === 'string' && rec.error ? rec.error : undefined;
+}
+
+private effectOutputText(e: VibeUnifiedEntry): string | undefined {
+const state = e.state;
+if (typeof state?.outputText === 'string' && state.outputText) { return state.outputText; }
+const fromOutput = this.outputObjectText(state?.output);
+if (fromOutput) { return fromOutput; }
+if (typeof state?.error === 'string' && state.error) { return state.error; }
+const display = e.detail?.display?.settledMessage;
+return typeof display === 'string' && display ? display : undefined;
 }
 
 /**
@@ -530,24 +699,132 @@ toolCallsHookDenied: nonNegativeNumber(stats.tool_calls_hook_denied),
 }
 
 /**
- * Get session metadata: title, timestamps, model.
+ * The writer of a session, from meta.json `runtime_path`: "session_api" for sessions
+ * written by the Vibe desktop app's session API, absent for the CLI. Undefined when the
+ * field is missing or unreadable.
+ */
+async getRuntimePath(metaJsonPath: string): Promise<string | undefined> {
+const meta = await this.readSessionMeta(metaJsonPath);
+const runtimePath = meta?.runtime_path;
+return typeof runtimePath === 'string' && runtimePath && !isUnsafeObjectKey(runtimePath) ? runtimePath : undefined;
+}
+
+/** Whether the session was written by the Vibe desktop app (runtime_path "session_api"). */
+async isDesktopSession(metaJsonPath: string): Promise<boolean> {
+return (await this.getRuntimePath(metaJsonPath)) === 'session_api';
+}
+
+/**
+ * Identity + hierarchy fields of one session from its meta.json, in both layouts:
+ * `session_id`, `parent_session_id` (set on a subsession pointing at the session that
+ * spawned it; null for root sessions) and `child_sessions` (the parent's own list —
+ * only the unified store writes it; the legacy layout relies on the children's
+ * `parent_session_id` instead). Untrusted strings are treated as absent (protoGuard).
+ */
+async getSessionIdentity(metaJsonPath: string): Promise<{ sessionId?: string; parentSessionId?: string; childSessionIds: string[] }> {
+const meta = await this.readSessionMeta(metaJsonPath);
+const out: { sessionId?: string; parentSessionId?: string; childSessionIds: string[] } = { childSessionIds: [] };
+if (!meta) { return out; }
+const sessionId = meta.session_id;
+if (typeof sessionId === 'string' && sessionId && !isUnsafeObjectKey(sessionId)) { out.sessionId = sessionId; }
+const parent = meta.parent_session_id;
+if (typeof parent === 'string' && parent && !isUnsafeObjectKey(parent)) { out.parentSessionId = parent; }
+if (Array.isArray(meta.child_sessions)) {
+out.childSessionIds = meta.child_sessions.filter((c: unknown): c is string => typeof c === 'string' && !!c && !isUnsafeObjectKey(c));
+}
+return out;
+}
+
+/**
+ * Resolve the meta.json path of a session by its session_id, across the Vibe home and any
+ * AoE sandbox stores: the unified store names the directory `<uuid>` directly, the legacy
+ * layout names it `session_<YYYYMMDD>_<HHMMSS>_<session_id[:8]>`. Returns undefined when no
+ * session with that id exists. The id is allow-listed to path-safe characters first, since
+ * it comes from parsed (untrusted) meta.json.
+ */
+async findSessionMetaById(sessionId: string): Promise<string | undefined> {
+if (!sessionId || isUnsafeObjectKey(sessionId) || !/^[0-9a-z-]+$/i.test(sessionId)) { return undefined; }
+const home = this.getVibeHomeDir();
+const roots = [home, ...await findVibeSandboxRoots(home)];
+const id8 = sessionId.slice(0, 8).toLowerCase();
+for (const root of roots) {
+const unifiedMeta = await this.findUnifiedMetaById(root, sessionId);
+if (unifiedMeta) { return unifiedMeta; }
+const legacyMeta = await this.findLegacyMetaById(root, id8);
+if (legacyMeta) { return legacyMeta; }
+}
+return undefined;
+}
+
+/** The unified store's meta.json for `sessionId` under one root, when it exists. */
+private async findUnifiedMetaById(root: string, sessionId: string): Promise<string | undefined> {
+const unifiedMeta = path.join(root, 'logs', 'session', 'unified', sessionId, 'meta.json');
+try { await fs.promises.access(unifiedMeta); return unifiedMeta; } catch { return undefined; }
+}
+
+/** The legacy `session_*_<id8>` directory's meta.json under one root, when it exists. */
+private async findLegacyMetaById(root: string, id8: string): Promise<string | undefined> {
+let entries: { name: string; isDirectory(): boolean }[];
+try {
+entries = await fs.promises.readdir(path.join(root, 'logs', 'session'), { withFileTypes: true });
+} catch { return undefined; }
+for (const entry of entries) {
+if (!entry.isDirectory() || !entry.name.toLowerCase().endsWith(`_${id8}`)) { continue; }
+const metaPath = path.join(root, 'logs', 'session', entry.name, 'meta.json');
+try { await fs.promises.access(metaPath); return metaPath; } catch { /* keep looking */ }
+}
+return undefined;
+}
+
+/**
+ * Child-session counts keyed by parent session id, restricted to `candidateSessionIds`.
+ * Mirrors HermesDataAccess.getChildCounts: scans every discovered session's meta.json
+ * `parent_session_id` (recorded on the child in both layouts) and counts children per
+ * parent. A parent listed in the candidates but whose children were deleted is absent
+ * from the map. Errors are suppressed — optional enrichment only.
+ */
+async getChildCounts(candidateSessionIds: string[]): Promise<Map<string, number>> {
+const counts = new Map<string, number>();
+if (candidateSessionIds.length === 0) { return counts; }
+const candidateSet = new Set(candidateSessionIds);
+let sessionFiles: string[];
+try {
+sessionFiles = await this.discoverSessions();
+} catch { return counts; }
+await Promise.all(sessionFiles.map(async (metaPath) => {
+try {
+const identity = await this.getSessionIdentity(metaPath);
+if (identity.parentSessionId && candidateSet.has(identity.parentSessionId)) {
+counts.set(identity.parentSessionId, (counts.get(identity.parentSessionId) ?? 0) + 1);
+}
+} catch { /* skip unreadable sessions */ }
+}));
+return counts;
+}
+
+/**
+ * Get session metadata: title, timestamps, model, workspace directory.
  * Timestamps are ISO 8601 strings in meta.json (no epoch conversion needed).
+ * `workspacePath` is `environment.working_directory`, present in both layouts.
  */
 async getSessionMeta(metaJsonPath: string): Promise<{
 title: string | undefined;
 firstInteraction: string | null;
 lastInteraction: string | null;
 model: string | undefined;
+workspacePath: string | undefined;
 }> {
 const meta = await this.readSessionMeta(metaJsonPath);
 if (!meta) {
-return { title: undefined, firstInteraction: null, lastInteraction: null, model: undefined };
+return { title: undefined, firstInteraction: null, lastInteraction: null, model: undefined, workspacePath: undefined };
 }
+const workingDirectory = meta.environment?.working_directory;
 return {
 title: meta.title || undefined,
 firstInteraction: meta.start_time || null,
 lastInteraction: meta.end_time || null,
 model: meta.config?.active_model || undefined,
+workspacePath: typeof workingDirectory === 'string' && workingDirectory ? workingDirectory : undefined,
 };
 }
 

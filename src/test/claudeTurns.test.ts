@@ -68,6 +68,20 @@ test('buildClaudeChatTurns: joins text blocks of array content into the user mes
 	assert.equal(turns[0].userMessage, 'line one\nline two');
 });
 
+test('buildClaudeChatTurns: viewer-only sidechain instructions are marked delegated and tool results do not create turns', () => {
+	const events = [
+		user('Inspect the module', { isSidechain: true }),
+		assistant('Tool activity and response'),
+		user([{ type: 'tool_result', content: 'file contents' }], { isSidechain: true }),
+	];
+	assert.equal(buildClaudeChatTurns(events, joinText, charCount).length, 0);
+	const turns = buildClaudeChatTurns(events, joinText, charCount, true);
+	assert.equal(turns.length, 1);
+	assert.equal(turns[0].instructionSource, 'delegated');
+	assert.equal(turns[0].userMessage, 'Inspect the module');
+	assert.equal(turns[0].assistantResponse, 'Tool activity and response');
+});
+
 test('buildClaudeChatTurns: uses actual usage when present, else estimates with the default model', () => {
 	const estimated = buildClaudeChatTurns([user('hello'), assistant('abc')], joinText, charCount)[0];
 	assert.equal(estimated.model, 'claude-sonnet-4-6');

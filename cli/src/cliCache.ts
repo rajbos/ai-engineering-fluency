@@ -17,21 +17,22 @@ import { CliCachePolicy } from '../../src/cachePolicy';
 // 12 (#2316): all of the above in one version.
 // 13 (#2316): deletion-only sessions keep their lines of code.
 // 14 (#2483): Mistral Vibe sessions gain vendorStats and a wall-clock sessionDuration in their usage analysis.
-const CACHE_VERSION = 14;
+// 15: Copilot app sessions that selected `auto` and were routed by Copilot Fusion count as `hydrafusion`.
+const CACHE_VERSION = 15;
 
 /**
- * Maximum number of entries to keep in the cache file. Must comfortably exceed the number of
- * sessions active in the stats window (current + previous month); heavy agent users easily
- * have a few thousand, and entries evicted here are re-parsed on every run.
+ * Maximum number of entries to keep in the cache file. Real histories reach several thousand
+ * session files (one Codex store alone had ~7,800), and a cap below that evicts and re-parses
+ * the oldest sessions on every run (#2710). At roughly 1 KB per entry this bounds the file near 20 MB.
  */
-const MAX_CACHE_ENTRIES = 6000;
+export const MAX_CACHE_ENTRIES = 20_000;
 
 /**
- * While a long scan runs, save progress after this many newly parsed files or this much time,
- * so a scan that is killed or crashes doesn't make the next run start from zero.
+ * How often a run that is still parsing flushes the cache to disk. Without it, a run killed
+ * before it finishes (a caller's timeout, Ctrl+C) discards everything it parsed, so the next
+ * run starts from the same point and never converges (#2710).
  */
-const CHECKPOINT_EVERY_ENTRIES = 100;
-const CHECKPOINT_EVERY_MS = 15_000;
+export const CACHE_SAVE_INTERVAL_MS = 30_000;
 
 interface CacheEntry {
 	/** File modification time (ms since epoch) */
@@ -47,14 +48,13 @@ interface CacheFile {
 	entries: Record<string, CacheEntry>;
 }
 
-const CACHE_DIR = path.join(os.homedir(), '.copilot-token-tracker');
-const CACHE_PATH = path.join(CACHE_DIR, 'cli-cache.json');
+/** Resolved on use (not at load) so tests can point the home directory at a temp folder. */
+function cacheDir(): string { return path.join(os.homedir(), '.copilot-token-tracker'); }
+export function getCachePath(): string { return path.join(cacheDir(), 'cli-cache.json'); }
 
 let cache: Map<string, CacheEntry> = new Map();
 let cacheEnabled = true;
 let dirty = false;
-let checkpointsEnabled = false;
-let entriesSinceSave = 0;
 let lastSaveAt = Date.now();
 
 const cachePolicy = new CliCachePolicy<CacheEntry>(MAX_CACHE_ENTRIES);
@@ -80,19 +80,14 @@ export function disableCache(): void {
 	cache.clear();
 }
 
-/** Save parsed sessions to disk periodically during a scan, not only when the command ends. */
-export function enableCacheCheckpoints(): void {
-	checkpointsEnabled = true;
-	entriesSinceSave = 0;
-	lastSaveAt = Date.now();
-}
-
 /** Load cache from disk. Safe to call multiple times — only loads once. */
 export function loadCache(): void {
 	if (!cacheEnabled) { return; }
+	lastSaveAt = Date.now();
 	try {
-		if (!fs.existsSync(CACHE_PATH)) { return; }
-		const raw = fs.readFileSync(CACHE_PATH, 'utf-8');
+		const cachePath = getCachePath();
+		if (!fs.existsSync(cachePath)) { return; }
+		const raw = fs.readFileSync(cachePath, 'utf-8');
 		const parsed: CacheFile = JSON.parse(raw);
 		if (parsed.version !== CACHE_VERSION) {
 			// Version mismatch — discard stale cache
@@ -106,37 +101,51 @@ export function loadCache(): void {
 	}
 }
 
-/** Save cache to disk (only if entries were added/updated). */
+/**
+ * Save cache to disk (only if entries were added/updated since the last save).
+ *
+ * Written to a temp file and renamed over the cache, so a process killed mid-write (which an
+ * incremental save makes likelier) leaves the previous cache intact rather than a truncated one.
+ */
 export function saveCache(): void {
+	lastSaveAt = Date.now();
 	if (!cacheEnabled || !dirty) { return; }
+	const cachePath = getCachePath();
+	const tmpPath = `${cachePath}.${process.pid}.tmp`;
 	try {
 		cachePolicy.evict(cache);
-		writeCacheFile(cache);
+
+		fs.mkdirSync(cacheDir(), { recursive: true });
+		const payload: CacheFile = {
+			version: CACHE_VERSION,
+			entries: Object.fromEntries(cache),
+		};
+		fs.writeFileSync(tmpPath, JSON.stringify(payload), 'utf-8');
+		fs.renameSync(tmpPath, cachePath);
 		dirty = false;
 	} catch {
 		// Best-effort — don't crash the CLI if cache write fails
+		try { fs.unlinkSync(tmpPath); } catch { /* not created */ }
 	}
 }
 
-function writeCacheFile(entries: Map<string, CacheEntry>): void {
-	fs.mkdirSync(CACHE_DIR, { recursive: true });
-	const payload: CacheFile = {
-		version: CACHE_VERSION,
-		entries: Object.fromEntries(entries),
-	};
-	writeFileAtomic(CACHE_PATH, JSON.stringify(payload));
-	entriesSinceSave = 0;
-	lastSaveAt = Date.now();
+/** Flushes the cache when the last save is {@link CACHE_SAVE_INTERVAL_MS} old, so long runs persist progress. */
+function saveCacheIfDue(): void {
+	if (Date.now() - lastSaveAt >= CACHE_SAVE_INTERVAL_MS) { saveCache(); }
 }
 
-/** Save progress mid-scan. Evicts on a copy so entries still in use by this run stay in memory. */
-function checkpointCache(): void {
-	try {
-		const snapshot = new Map(cache);
-		cachePolicy.evict(snapshot);
-		writeCacheFile(snapshot);
-	} catch {
-		// Best-effort — the final saveCache() still runs at the end of the command
+/**
+ * Save the cache before the process is stopped by SIGINT (Ctrl+C) or SIGTERM (a caller's
+ * timeout on Linux/macOS), then exit with the conventional 128 + signal code. On Windows an
+ * external kill cannot be intercepted, which is what the periodic save in {@link setCached}
+ * covers. Call once from the CLI entry point; never from library code.
+ */
+export function saveCacheOnSignals(): void {
+	for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]] as const) {
+		process.once(signal, () => {
+			saveCache();
+			process.exit(code);
+		});
 	}
 }
 
@@ -169,10 +178,7 @@ export function setCached(filePath: string, mtime: number, size: number, data: S
 			lastModified: data.lastModified.toISOString(),
 		},
 	});
-	entriesSinceSave++;
-	if (checkpointsEnabled && (entriesSinceSave >= CHECKPOINT_EVERY_ENTRIES || Date.now() - lastSaveAt >= CHECKPOINT_EVERY_MS)) {
-		checkpointCache();
-	}
+	saveCacheIfDue();
 }
 
 /** Return cache hit/miss stats for display. */

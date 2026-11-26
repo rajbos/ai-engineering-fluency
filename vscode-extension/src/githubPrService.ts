@@ -99,14 +99,26 @@ export type CopilotPlanInfo = {
 
 export type CopilotPlanResult = { planInfo?: CopilotPlanInfo; statusCode?: number; error?: string };
 
-/** Internal low-level fetcher for the copilot_internal/user endpoint. */
-function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
+/** Parsed JSON object (or failure) from a GET against a `copilot_internal` endpoint. */
+type CopilotInternalResponse = { body?: object; statusCode?: number; error?: string };
+
+/**
+ * GET `<restPathPrefix><path>` with the user's token and resolve with the parsed JSON object.
+ * Never rejects: a non-2xx status, a non-object body, a parse error or a transport failure
+ * resolves with `error` set instead of `body`.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+function fetchCopilotInternalJson(
+	token: string,
+	path: string,
+	requestFn: typeof https.request = https.request,
+): Promise<CopilotInternalResponse> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
-		const req = https.request(
+		const req = requestFn(
 			{
 				hostname,
-				path: `${restPathPrefix}/copilot_internal/user`,
+				path: `${restPathPrefix}${path}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -128,7 +140,7 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
 							resolve({ statusCode, error: 'Unexpected response format' });
 							return;
 						}
-						resolve({ planInfo: parsed as CopilotPlanInfo, statusCode });
+						resolve({ body: parsed, statusCode });
 					} catch (e) {
 						resolve({ statusCode, error: String(e) });
 					}
@@ -141,6 +153,15 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
 }
 
 /**
+ * Low-level fetcher for the copilot_internal/user endpoint.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+export async function fetchCopilotPlanInfoPage(token: string, requestFn: typeof https.request = https.request): Promise<CopilotPlanResult> {
+	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/user', requestFn);
+	return body ? { planInfo: body as CopilotPlanInfo, ...result } : result;
+}
+
+/**
  * Fetch GitHub Copilot plan information for the authenticated user.
  * Uses the VS Code-only internal endpoint `https://api.github.com/copilot_internal/user`.
  * Treat as best-effort — this endpoint may not be available for all accounts.
@@ -148,7 +169,7 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
  */
 export function fetchCopilotPlanInfo(
 	token: string,
-	fetcher: (token: string) => Promise<CopilotPlanResult> = fetchCopilotPlanInfoPage,
+	fetcher: (token: string) => Promise<CopilotPlanResult> = (t) => fetchCopilotPlanInfoPage(t),
 ): Promise<CopilotPlanResult> {
 	return fetcher(token);
 }
@@ -180,47 +201,16 @@ export type CopilotTokenEndpointInfo = {
 
 export type CopilotTokenEndpointResult = { info?: CopilotTokenEndpointInfo; statusCode?: number; error?: string };
 
-/** Internal low-level fetcher for the copilot_internal/v2/token endpoint. */
-function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenEndpointResult> {
-	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
-	return new Promise((resolve) => {
-		const req = https.request(
-			{
-				hostname,
-				path: `${restPathPrefix}/copilot_internal/v2/token`,
-				headers: {
-					Authorization: `Bearer ${token}`,
-					'User-Agent': GITHUB_API_USER_AGENT,
-					Accept: 'application/json',
-				},
-			},
-			(res) => {
-				let data = '';
-				res.on('data', (chunk) => (data += chunk));
-				res.on('end', () => {
-					const statusCode = res.statusCode ?? 0;
-					if (statusCode < 200 || statusCode >= 300) {
-						resolve({ statusCode, error: `HTTP ${statusCode}` });
-						return;
-					}
-					try {
-						const parsed = JSON.parse(data);
-						if (typeof parsed !== 'object' || parsed === null) {
-							resolve({ statusCode, error: 'Unexpected response format' });
-							return;
-						}
-						// Exclude the short-lived token string — we only care about the metadata.
-						const { token: _token, ...rest } = parsed as { token?: string } & CopilotTokenEndpointInfo;
-						resolve({ info: rest as CopilotTokenEndpointInfo, statusCode });
-					} catch (e) {
-						resolve({ statusCode, error: String(e) });
-					}
-				});
-			},
-		);
-		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
-		req.end();
-	});
+/**
+ * Low-level fetcher for the copilot_internal/v2/token endpoint.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+export async function fetchCopilotTokenEndpointInfoPage(token: string, requestFn: typeof https.request = https.request): Promise<CopilotTokenEndpointResult> {
+	const { body, ...result } = await fetchCopilotInternalJson(token, '/copilot_internal/v2/token', requestFn);
+	if (!body) { return result; }
+	// Exclude the short-lived token string — we only care about the metadata.
+	const { token: _token, ...rest } = body as { token?: string } & CopilotTokenEndpointInfo;
+	return { info: rest as CopilotTokenEndpointInfo, ...result };
 }
 
 /**
@@ -232,7 +222,7 @@ function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenE
  */
 export function fetchCopilotTokenEndpointInfo(
 	token: string,
-	fetcher: (token: string) => Promise<CopilotTokenEndpointResult> = fetchCopilotTokenEndpointInfoPage,
+	fetcher: (token: string) => Promise<CopilotTokenEndpointResult> = (t) => fetchCopilotTokenEndpointInfoPage(t),
 ): Promise<CopilotTokenEndpointResult> {
 	return fetcher(token);
 }

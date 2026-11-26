@@ -20,7 +20,7 @@ import { buildUsageAnalysisViewData } from '../../src/usageAnalysisViewBuilder';
 import { buildCacheInfo, buildDiagnosticsViewData, buildSessionFolderData } from '../../src/diagnosticsViewBuilder';
 import { getEcosystems } from '../../cli/src/sessionProcessing';
 import { getEditorSourceFromPath, runWithConcurrency } from '../../cli/src/analysis';
-import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
+import type { DetailedStats, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../src/types';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import { detectEditorSource } from '../../src/workspaceHelpers';
 import { buildWebviewLocalization } from '../../vscode-extension/src/webviewLocalization';
@@ -247,6 +247,16 @@ export interface PanelDataSource {
     getEfficiencyPayload(): Promise<object>;
     getUsageStats(): Promise<UsageAnalysisStats>;
     getSessionFiles(): Promise<string[]>;
+    /** Workspace customization matrix for the Customization category, as the CLI's `fluency` command builds it. */
+    getCustomizationMatrix?(): Promise<WorkspaceCustomizationMatrix | undefined>;
+}
+
+/**
+ * The fluency score, computed once for both the Fluency Score panel and the team-server upload
+ * so the server always shows what the panel shows.
+ */
+export async function computeFluencyScore(data: Pick<PanelDataSource, 'getUsageStats' | 'getCustomizationMatrix'>): Promise<Awaited<ReturnType<typeof calculateMaturityScores>>> {
+    return calculateMaturityScores(await data.getCustomizationMatrix?.(), () => data.getUsageStats());
 }
 
 export async function buildPanelHtml(panel: PanelId, host: PanelHost, data: PanelDataSource, appVersion: string): Promise<string> {
@@ -357,10 +367,7 @@ export async function buildPanelHtml(panel: PanelId, host: PanelHost, data: Pane
 
     } else if (panel === 'maturity') {
         title = 'AI Engineering Fluency Score';
-        const maturityData = await calculateMaturityScores(
-            undefined,
-            () => data.getUsageStats()
-        );
+        const maturityData = await computeFluencyScore(data);
         const maturityWithMeta = { ...maturityData, backendConfigured: false, dismissedTips: [], isDebugMode: false };
         initialDataScript = panelPayloadScript('__INITIAL_MATURITY__', maturityWithMeta, host);
 

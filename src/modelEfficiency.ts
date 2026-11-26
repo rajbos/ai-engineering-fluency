@@ -376,6 +376,13 @@ function ensureDailyEntry(target: DailyModelEfficiency, model: string): DailyMod
 export interface SessionEfficiencyAttribution {
 	/** Per-model token usage for the whole session — the source of the split weights. */
 	modelUsage?: ModelUsage;
+	/**
+	 * The session's token usage as recorded, keyed by the real models that served it,
+	 * before a routed session was folded onto its router (see {@link attributeRoutedModelUsage}).
+	 * The router has no price of its own, so its session-record cost is the sum of these
+	 * real models at their own rates. Absent when `modelUsage` was never re-keyed.
+	 */
+	unroutedModelUsage?: ModelUsage;
 	/** Per-model turn counters for the session (already exact per model, never split). */
 	modelEfficiency?: ModelEfficiencyUsage;
 	/** Net active session duration in ms (excluding idle gaps), if derivable. */
@@ -606,6 +613,32 @@ function sessionRecordLatency(c: ModelEfficiencyCounters): Pick<ModelSessionReco
 	return out;
 }
 
+/**
+ * The estimated provider cost of `model`'s part of one session.
+ *
+ * A routed session's usage arrives folded onto the router id (`hydrafusion`, `auto`),
+ * which has no price entry: pricing that folded entry directly gives $0, so the
+ * Efficiency view's head-to-head (which reads session records whenever a filter is
+ * on) showed a router as free. Each real model that served the router is priced at
+ * its own rate instead, the way {@link accumulateDailyModelTokens} prices the day row.
+ */
+function sessionRecordEstimatedCost(
+	model: string,
+	input: SessionEfficiencyAttribution,
+	pricing: { [model: string]: ModelPricing },
+): number {
+	const source = input.unroutedModelUsage ?? input.modelUsage;
+	if (!source) { return 0; }
+	const router = findRoutedSessionModel(source, input.modelEfficiency);
+	let cost = 0;
+	for (const [m, usage] of Object.entries(source)) {
+		if (efficiencyModelKey(m, router, input.modelEfficiency) === model) {
+			cost += calculateEstimatedCost({ [m]: usage }, pricing);
+		}
+	}
+	return cost;
+}
+
 /** One session's whole-session footprint for `model`; see {@link ModelSessionRecord}. */
 function buildModelSessionRecord(
 	model: string,
@@ -624,7 +657,7 @@ function buildModelSessionRecord(
 		inputTokens: usage?.inputTokens || 0,
 		outputTokens: usage?.outputTokens || 0,
 		cachedReadTokens: usage?.cachedReadTokens || 0,
-		cost: usage ? calculateEstimatedCost({ [model]: usage }, pricing) : 0,
+		cost: sessionRecordEstimatedCost(model, input, pricing),
 		...(input.exactCostDollars !== undefined ? { exactCost: scaled(input.exactCostDollars) } : {}),
 		calls: c.calls,
 		editTurns: c.editTurns,
@@ -654,6 +687,7 @@ export function buildSessionEfficiencyAttribution(sessionData: SessionEfficiency
 		// Routed sessions are re-keyed so the router's token share lands on the
 		// same entry as its turn counters (see findRoutedSessionModel).
 		modelUsage: attributeRoutedModelUsage(sessionData.modelUsage, analysis?.modelEfficiency),
+		unroutedModelUsage: sessionData.modelUsage,
 		modelEfficiency: analysis?.modelEfficiency,
 		activeDurationMs: analysis?.sessionDuration?.activeDurationMs,
 		linesAdded: sessionData.linesAdded ?? analysis?.editScope?.linesAdded,

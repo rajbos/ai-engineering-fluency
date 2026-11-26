@@ -840,7 +840,7 @@ test('wiring: a helper that publishes after its own await checks the generation 
 		],
 		[
 			'private async evaluateAndSurfaceInsights(',
-			"await this.context.globalState.update('insights.state', this._insightStateBag);", 'command: \'updateInsights\'',
+			"await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag)", 'command: \'updateInsights\'',
 		],
 	]) {
 		const fn = methodBody(entry);

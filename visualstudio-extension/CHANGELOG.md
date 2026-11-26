@@ -4,6 +4,18 @@ All notable changes to the Visual Studio extension will be documented in this fi
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-25
+
+### ✨ Features & Improvements
+- Updated webview bundles with the latest shared-view changes: AI Readiness shows every stage and its checks per repository, the chart can be filtered by editor, Fluency Score has a single Share section (score or toolbox, with PNG export), Efficiency uses one period picker, and the former Diagnostics Research tabs now live in Usage Analysis and Efficiency
+- Updated bundled CLI: Mistral Vibe (including Vibe Desktop) sessions are tracked, Copilot Fusion sessions are attributed correctly, and large OpenCode and Kilo Code stores are read much faster
+
+### 🐛 Bug Fixes
+- Views that read the bundled CLI's JSON output no longer fail when a session file is skipped as oversized: the CLI now writes that diagnostic to stderr instead of ahead of the JSON
+
+### 🔧 Maintenance
+- Marketplace publishing now uses Trusted Publishing (GitHub OIDC) instead of a personal access token
+
 ## [1.4.3] - 2026-10-27
 
 ### ✨ Features & Improvements

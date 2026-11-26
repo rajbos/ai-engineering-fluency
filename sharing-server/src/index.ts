@@ -18,6 +18,7 @@ export { renderNavExtra, navExtraMiddleware, type NavLink, type NavVariables } f
 export {
 	startServer,
 	initDbWithRetry,
+	restoreFromBackupWithRetry,
 	registerShutdownHandlers,
 	type StartServerOptions,
 } from './lifecycle.js';
@@ -70,6 +71,7 @@ export {
 	registerSchemaExtension,
 	restoreFromBackup,
 	backupToAzureFiles,
+	isBackupOverwriteBlocked,
 	syncAdminLogins,
 	upsertUser,
 	getUserById,

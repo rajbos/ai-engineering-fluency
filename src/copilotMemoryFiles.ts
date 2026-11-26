@@ -164,6 +164,39 @@ function resolveWorkspaceName(userPath: string, hash: string): string | undefine
 	return undefined;
 }
 
+/**
+ * Classify one sub-folder of a `memories/` dir: "repo" is repo scope; a literal "session" folder
+ * or one that decodes to a session UUID is session scope. Returns undefined for anything else.
+ */
+function classifyMemoriesSubDir(subDir: string): { scope: MemoryFileEntry['scope']; sessionId?: string } | undefined {
+	if (subDir === 'repo') { return { scope: 'repo' }; }
+	// Some memory-tool layouts (per current VS Code agent-memory docs) use a literal
+	// "session" folder rather than encoding the session UUID into the folder name.
+	if (subDir === 'session') { return { scope: 'session' }; }
+	const sessionId = decodeSessionFolderName(subDir);
+	// Anything under memories/ that isn't "repo"/"session" and doesn't decode to a session
+	// UUID is an unrecognized layout (future memory-tool version?) — skip it rather than
+	// misclassify it.
+	return sessionId ? { scope: 'session', sessionId } : undefined;
+}
+
+/** Memory files in one recognized sub-folder of a `memories/` dir. */
+function discoverMemoriesSubDirFiles(
+	memoriesDir: string,
+	subDir: string,
+	hash: string,
+	workspaceName: string | undefined,
+): MemoryFileEntry[] {
+	const classified = classifyMemoriesSubDir(subDir);
+	if (!classified) { return []; }
+	const entries: MemoryFileEntry[] = [];
+	for (const file of listMdFiles(path.join(memoriesDir, subDir))) {
+		const entry = toEntry(file, classified.scope, { workspaceHash: hash, workspaceName, sessionId: classified.sessionId });
+		if (entry) { entries.push(entry); }
+	}
+	return entries;
+}
+
 /** Discover memory files for one `workspaceStorage/<hash>` folder (repo + session scope subdirs). */
 function discoverWorkspaceHashMemoryFiles(userPath: string, hash: string): MemoryFileEntry[] {
 	const memoriesDirs = findWorkspaceMemoriesDirs(userPath, hash);
@@ -173,21 +206,7 @@ function discoverWorkspaceHashMemoryFiles(userPath: string, hash: string): Memor
 	const entries: MemoryFileEntry[] = [];
 	for (const memoriesDir of memoriesDirs) {
 		for (const subDir of listSubDirNames(memoriesDir)) {
-			const isRepoScope = subDir === 'repo';
-			// Some memory-tool layouts (per current VS Code agent-memory docs) use a literal
-			// "session" folder rather than encoding the session UUID into the folder name.
-			const isLiteralSessionScope = subDir === 'session';
-			const sessionId = (isRepoScope || isLiteralSessionScope) ? undefined : decodeSessionFolderName(subDir);
-			// Anything under memories/ that isn't "repo"/"session" and doesn't decode to a session
-			// UUID is an unrecognized layout (future memory-tool version?) — skip it rather than
-			// misclassify it.
-			if (!isRepoScope && !isLiteralSessionScope && !sessionId) { continue; }
-			const scope: MemoryFileEntry['scope'] = isRepoScope ? 'repo' : 'session';
-
-			for (const file of listMdFiles(path.join(memoriesDir, subDir))) {
-				const entry = toEntry(file, scope, { workspaceHash: hash, workspaceName, sessionId });
-				if (entry) { entries.push(entry); }
-			}
+			entries.push(...discoverMemoriesSubDirFiles(memoriesDir, subDir, hash, workspaceName));
 		}
 	}
 	return entries;

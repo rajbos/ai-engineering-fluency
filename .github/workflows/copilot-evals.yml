@@ -1,0 +1,98 @@
+name: Copilot Evals Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_model_run:
+        description: "Run the model-backed synthetic eval (may incur Copilot usage charges)"
+        required: true
+        type: boolean
+        default: false
+  schedule:
+    - cron: '45 6 * * 3' # Weekly Wednesday at 06:45 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copilot-evals-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check synthetic fixtures
+        run: node --test .github/workflows/scripts/copilot-evals.test.mjs
+
+      - name: Lint the target skill and pilot eval specs (no model calls)
+        run: npm exec --yes --ignore-scripts --package=@microsoft/vally-cli@0.21.0 -- vally lint .github/skills/session-log-data --eval-spec evals/session-log-data --strict
+        env:
+          VALLY_TELEMETRY_OPTOUT: '1'
+
+  unconfirmed-manual-run:
+    if: github.event_name == 'workflow_dispatch' && (!inputs.confirm_model_run || github.ref != format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Mark the eval as not run
+        run: |
+          echo "::error::The model-backed eval was not run. Use the default branch and re-dispatch with confirm_model_run enabled."
+          exit 1
+
+  evaluate:
+    needs: lint
+    if: needs.lint.result == 'success' && (github.event_name == 'schedule' || (inputs.confirm_model_run && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      copilot-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the synthetic session-log-data suite
+        id: pilot
+        uses: github/evals-action@6e4c077e92194c7e75663d8d782426841047e887 # v0.2.0
+        with:
+          command: run
+          working-directory: .
+          suite: session-log-data-smoke
+          report-id: copilot-evals-pilot
+          vally-version: '0.21.0'
+          model: claude-sonnet-5.5
+          runs: 1
+          workers: 1
+          timeout: 180
+          max-retries: 0
+          artifact-retention-days: 90
+          upload-transcripts: false
+          copilot-token: ${{ github.token }}
+        env:
+          VALLY_TELEMETRY_OPTOUT: '1'
+
+      - name: Require an executed, passing evaluation
+        env:
+          OUTCOME: ${{ steps.pilot.outputs.outcome }}
+          EXECUTED: ${{ steps.pilot.outputs.executed }}
+        run: |
+          if [[ "$OUTCOME" != "passed" || ! "$EXECUTED" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::The evaluation did not produce an executed, passing result (outcome: ${OUTCOME:-unknown}, executed: ${EXECUTED:-unknown})."
+            exit 1
+          fi

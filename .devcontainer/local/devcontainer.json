@@ -1,0 +1,39 @@
+{
+  "name": "AI Engineering Fluency Extension (local Windows)",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/powershell:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.extension-test-runner",
+        "amodio.tsc-problem-matcher",
+        "github.copilot",
+        "github.copilot-chat"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "eslint.enable": true,
+        "js/ts.tsdk.path": "node_modules/typescript/lib",
+        "chat.tools.autoApprove": true
+      }
+    }
+  },
+  "initializeCommand": "powershell -ExecutionPolicy Bypass -File .devcontainer/init-mounts.ps1",
+  "mounts": [
+    "source=${localEnv:APPDATA}/Code/User,target=/home/node/.config/Code/User,type=bind,readonly=true",
+    "source=${localEnv:APPDATA}/Code - Insiders/User,target=/home/node/.config/Code - Insiders/User,type=bind,readonly=true",
+    "source=ai-engineering-fluency-nodemodules,target=/workspaces/ai-engineering-fluency/vscode-extension/node_modules,type=volume",
+    "source=ai-engineering-fluency-cli-nodemodules,target=/workspaces/ai-engineering-fluency/cli/node_modules,type=volume"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
+  "postCreateCommand": "sudo chown node:node vscode-extension/node_modules cli/node_modules && cd vscode-extension && pnpm install --frozen-lockfile && cd ../cli && pnpm install --frozen-lockfile",
+  "remoteUser": "node"
+}

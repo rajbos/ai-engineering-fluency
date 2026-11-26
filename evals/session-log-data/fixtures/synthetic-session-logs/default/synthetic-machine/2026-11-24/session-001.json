@@ -1,0 +1,23 @@
+{
+  "requests": [
+    {
+      "message": {
+        "parts": [
+          {
+            "text": "Synthetic example request; not a real prompt."
+          }
+        ]
+      },
+      "response": [
+        {
+          "value": "Synthetic example response."
+        }
+      ],
+      "result": {
+        "metadata": {
+          "modelId": "gpt-4o"
+        }
+      }
+    }
+  ]
+}

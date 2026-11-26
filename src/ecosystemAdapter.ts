@@ -106,8 +106,9 @@ export interface IEcosystemAdapter {
 	 * Build chat turns for the log viewer.
 	 * Returns turns plus optional actualTokens (only MistralVibe has session-level actual usage).
 	 * When absent, getSessionLogData() falls through to the built-in Copilot Chat parser.
+	 * includeSidechainInstructions is viewer-only; metrics callers must leave it off.
 	 */
-	buildTurns?(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }>;
+	buildTurns?(sessionFile: string, options?: { includeSidechainInstructions?: boolean }): Promise<{ turns: ChatTurn[]; actualTokens?: number }>;
 
 	/**
 	 * Return the raw decoded content of the session file as a string.

@@ -39,12 +39,13 @@ jobs:
       contents: write      # push the version bump branch, open the PR, create the release
       pull-requests: write # open the version bump PR
       id-token: write      # required for OIDC authentication to the npm registry
+      attestations: write  # attest the npm tarball (also attached to the GitHub release)
     defaults:
       run:
         working-directory: sharing-server
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -52,7 +53,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: '11.2.2'
 
@@ -157,13 +158,76 @@ jobs:
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pack once and publish that exact tarball, so the file attested below, the file
+      # npm serves and the file attached to the GitHub release are the same bytes.
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          # Publishing a tarball skips the hooks `pnpm publish` runs around its own pack
+          # (prepack/prepare/postpack still run here). Fail rather than silently drop one.
+          HOOKS=$(node -p 'Object.keys(require("./package.json").scripts||{}).filter(s=>["prepublishOnly","prepublish","publish","postpublish"].includes(s)).join(" ")')
+          if [ -n "$HOOKS" ]; then
+            echo "::error::package.json defines publish lifecycle scripts ($HOOKS) that tarball publishing would skip. Move them to prepack or run them explicitly here."
+            exit 1
+          fi
+          PACK_DIR="$RUNNER_TEMP/npm-pack"
+          rm -rf "$PACK_DIR" && mkdir -p "$PACK_DIR"
+          pnpm pack --pack-destination "$PACK_DIR"
+          shopt -s nullglob
+          TARBALLS=("$PACK_DIR"/*.tgz)
+          if [ ${#TARBALLS[@]} -ne 1 ]; then
+            echo "::error::Expected exactly one tarball in $PACK_DIR, found ${#TARBALLS[@]}"
+            exit 1
+          fi
+          TARBALL="${TARBALLS[0]}"
+          echo "sha256 $(sha256sum "$TARBALL" | cut -d' ' -f1)  $TARBALL"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+
+      # GitHub build-provenance attestation for the tarball (verifiable with
+      # `gh attestation verify`), on top of the npm provenance `--provenance` adds.
+      - name: Attest and verify the npm tarball
+        if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
+        uses: $/.github/actions/attest-files
+        with:
+          subject-path: ${{ steps.pack.outputs.tarball }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to npm
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
-        run: pnpm publish --provenance --access public --no-git-checks
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: pnpm publish "$TARBALL" --provenance --access public --no-git-checks
 
       - name: Dry run publish
         if: ${{ inputs.dry_run }}
-        run: pnpm publish --provenance --access public --no-git-checks --dry-run
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: pnpm publish "$TARBALL" --provenance --access public --no-git-checks --dry-run
+
+      # Before anything else is promoted (version-bump PR, GitHub release): prove npm
+      # serves the attested tarball and holds its SLSA provenance. A different integrity
+      # or missing provenance (exit 1) fails here and stops the release. If the version
+      # only has not shown up within ~15 minutes (exit 2, registry lag), the release
+      # steps still run: they ship the local attested tarball, not npm's copy, and a
+      # re-run cannot recover them (check_published skips everything once npm has the
+      # version). The "Re-verify" step at the end then checks npm again and fails the
+      # run if it still cannot confirm the tarball.
+      - name: Verify the published package matches the attested tarball
+        id: verify
+        if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PACKAGE_NAME=$(node -p 'require("./package.json").name')
+          rc=0
+          bash ../.github/workflows/scripts/verify-npm-publish.sh "$PACKAGE_NAME" "$VERSION" "$TARBALL" || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::${PACKAGE_NAME}@${VERSION} is not visible on npm yet; continuing the release and re-verifying at the end of this run."
+            echo "timed_out=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit "$rc"
 
       - name: Commit version bump and create PR
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' && steps.trigger_type.outputs.is_tag != 'true' }}
@@ -206,11 +270,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
           TAG_NAME="sharing-server/v${VERSION}"
+          # Attach the attested tarball npm serves, so `gh attestation verify` works on the download.
           gh release create "$TAG_NAME" \
             --title "Sharing server v${VERSION}" \
-            --notes-file /tmp/release_notes.md
+            --notes-file /tmp/release_notes.md \
+            "$TARBALL"
           echo "✅ GitHub release created: $TAG_NAME"
 
       - name: Summary
@@ -243,3 +310,15 @@ jobs:
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Only when the first verification timed out on registry lag: check npm again now
+      # that the release steps have run. Fails the run on an integrity or provenance
+      # mismatch, or if npm still does not serve the version.
+      - name: Re-verify the published package after registry lag
+        if: ${{ steps.verify.outputs.timed_out == 'true' }}
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PACKAGE_NAME=$(node -p 'require("./package.json").name')
+          bash ../.github/workflows/scripts/verify-npm-publish.sh "$PACKAGE_NAME" "$VERSION" "$TARBALL"

@@ -16,16 +16,27 @@ import { Command } from 'commander';
 import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
 import { sanitizeForDisplay } from '../../../src/copilotServerMemories';
-import type { RepeatedTaskReport, RepeatedTaskSessionRef } from '../../../src/types';
+import { describeCadence, resolveAutomationPlatforms, type AutomationPlatform } from '../../../src/repeatedTasks';
+import { failedRunCost, isAtRisk, STALE_AFTER_DAYS } from '../../../src/scheduledTasks';
+import type { RepeatedTaskRecurrence, RepeatedTaskReport, RepeatedTaskSessionRef, ScheduledTaskHealth, ScheduledTaskSummary } from '../../../src/types';
+
+/** How to schedule a recurring task, per automation platform (see resolveAutomationPlatforms). */
+const AUTOMATION_CLI_HINTS: Record<AutomationPlatform, string> = {
+	claude: 'Claude Code scheduled task (Scheduled in the desktop app, or /schedule for a cloud routine)',
+	copilot: 'GitHub Copilot automation on a schedule',
+	other: "scheduled job (cron, Task Scheduler or CI) running the agent's CLI non-interactively",
+};
 
 /** A session in the redacted payload: no title. */
-export type RedactedSessionRef = Pick<RepeatedTaskSessionRef, 'file' | 'lastInteraction' | 'repository'>;
+export type RedactedSessionRef = Pick<RepeatedTaskSessionRef, 'file' | 'lastInteraction' | 'repository' | 'editor'>;
 
 /** A cluster in the redacted payload: no prompt, keywords or session titles. */
 export interface RedactedCluster {
 	sessionCount: number;
 	repositories: string[];
 	sessions: RedactedSessionRef[];
+	editors?: string[];
+	recurrence?: RepeatedTaskRecurrence;
 }
 
 /** The repeated-task report as emitted without `--include-prompts`. */
@@ -33,6 +44,8 @@ export interface RedactedRepeatedTaskReport {
 	minClusterSize: number;
 	sessionsScanned: number;
 	clusters: RedactedCluster[];
+	/** Scheduled tasks without their user-chosen names. */
+	scheduledTasks?: Omit<ScheduledTaskSummary, 'name'>[];
 }
 
 /** `skill-suggestions --json` output; the flag decides which report shape is present. */
@@ -58,8 +71,25 @@ export function createSkillSuggestionsPayload(report: RepeatedTaskReport | undef
 					file: session.file,
 					lastInteraction: session.lastInteraction,
 					repository: session.repository,
+					...(session.editor ? { editor: session.editor } : {}),
 				})),
+				...(cluster.editors ? { editors: cluster.editors } : {}),
+				...(cluster.recurrence ? { recurrence: { ...cluster.recurrence } } : {}),
 			})),
+			...(report.scheduledTasks ? {
+				// Allowlisted like the clusters: everything except the user-chosen name.
+				scheduledTasks: report.scheduledTasks.map((t): Omit<ScheduledTaskSummary, 'name'> => ({
+					platform: t.platform, runCount: t.runCount, activeDays: t.activeDays, lastRun: t.lastRun,
+					...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
+					...(t.enabled !== undefined ? { enabled: t.enabled } : {}),
+					...(t.repository !== undefined ? { repository: t.repository } : {}),
+					...(t.folder !== undefined ? { folder: t.folder } : {}),
+					...(t.nextRunAt !== undefined ? { nextRunAt: t.nextRunAt } : {}),
+					...(t.totalRuns !== undefined ? { totalRuns: t.totalRuns, failedRuns: t.failedRuns ?? 0 } : {}),
+					...(t.recentRuns ? { recentRuns: t.recentRuns.map(r => ({ ...r })) } : {}),
+					...(t.health ? { health: t.health } : {}),
+				})),
+			} : {}),
 		},
 	};
 }
@@ -76,6 +106,11 @@ export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefi
 		lines.push('No repeated tasks found: no first prompt recurred across enough sessions.', '');
 		return lines.join('\n');
 	}
+	const scheduled = formatScheduledTasks(report);
+	if (report.clusters.length === 0) {
+		lines.push('No repeated tasks found: no hand-typed first prompt recurred across enough sessions.', '', ...scheduled);
+		return lines.join('\n');
+	}
 	lines.push(
 		`${report.clusters.length} repeated task(s) in ${report.sessionsScanned} session(s) with a usable first prompt`
 		+ ` (a task needs at least ${report.minClusterSize} similar sessions).`,
@@ -86,12 +121,77 @@ export function formatSkillSuggestionsReport(report: RepeatedTaskReport | undefi
 		lines.push(`   Sessions:     ${cluster.sessionCount}`);
 		if (cluster.sharedKeywords.length > 0) { lines.push(`   Keywords:     ${cluster.sharedKeywords.map(sanitizeForDisplay).join(', ')}`); }
 		if (cluster.repositories.length > 0) { lines.push(`   Repositories: ${cluster.repositories.map(sanitizeForDisplay).join(', ')}`); }
+		const editors = cluster.editors ?? [];
+		if (editors.length > 0) { lines.push(`   Editors:      ${editors.map(sanitizeForDisplay).join(', ')}`); }
 		const last = cluster.sessions[0]?.lastInteraction;
 		if (last) { lines.push(`   Last seen:    ${sanitizeForDisplay(last).slice(0, 10)}`); }
+		if (cluster.recurrence) {
+			lines.push(`   Recurs:       ${describeCadence(cluster.recurrence)} (${cluster.recurrence.activeDays} days)`);
+			for (const platform of resolveAutomationPlatforms(cluster)) {
+				lines.push(`   Automate:     ${AUTOMATION_CLI_HINTS[platform]}`);
+			}
+		}
 		lines.push('');
 	});
-	lines.push('Consider turning these into a reusable skill, prompt file or custom agent.', '');
+	lines.push('Consider turning these into a reusable skill, prompt file or custom agent.');
+	if (report.clusters.some(c => c.recurrence)) {
+		lines.push('Tasks that recur on a rhythm can also be scheduled, so they run without you starting them.');
+	}
+	lines.push('', ...scheduled);
 	return lines.join('\n');
+}
+
+const SCHEDULED_PLATFORM_LABELS: Record<ScheduledTaskSummary['platform'], string> = {
+	claude: 'Claude Code scheduled task',
+	copilot: 'GitHub Copilot automation',
+};
+
+const HEALTH_LABELS: Record<ScheduledTaskHealth, string> = {
+	healthy: 'healthy', stale: 'STALE', failing: 'FAILING', disabled: 'disabled',
+	'one-off': 'one-off', manual: 'manual', 'never-run': 'not run yet',
+};
+
+/** One line per failed recent run whose session was analysed: date, tokens, cost and the session file to open. */
+function formatFailedRuns(t: ScheduledTaskSummary): string[] {
+	const cost = failedRunCost(t);
+	if (cost.runs.length === 0) { return []; }
+	return [
+		`      failed runs: ${cost.runs.length}, ${cost.tokens.toLocaleString('en-US')} tokens, $${cost.costUsd.toFixed(2)}`,
+		...cost.runs.map(r => {
+			const tokens = r.tokens === undefined ? '? tokens' : `${r.tokens.toLocaleString('en-US')} tokens`;
+			const usd = r.costUsd === undefined ? '' : `, $${r.costUsd.toFixed(2)}`;
+			return `        ✗ ${sanitizeForDisplay(r.at).slice(0, 10)} — ${tokens}${usd} — ${sanitizeForDisplay(r.sessionFile ?? '')}`;
+		}),
+	];
+}
+
+function formatRecentSuccess(t: ScheduledTaskSummary): string {
+	const runs = t.recentRuns ?? [];
+	return runs.length > 0 ? `${runs.filter(r => r.ok).length}/${runs.length} recent runs succeeded` : '';
+}
+
+/** Scheduled-automation inventory: health, repository, schedule, last run and success per task. */
+function formatScheduledTasks(report: RepeatedTaskReport): string[] {
+	const tasks = report.scheduledTasks ?? [];
+	if (tasks.length === 0) { return []; }
+	const atRisk = tasks.filter(isAtRisk).length;
+	const lines = [
+		`Scheduled automations (${tasks.length}${atRisk > 0 ? `, ${atRisk} at risk` : ''}) — their runs are left out of the suggestions:`,
+	];
+	for (const t of tasks) {
+		lines.push(`  - "${sanitizeForDisplay(t.name)}" (${SCHEDULED_PLATFORM_LABELS[t.platform]})${t.health ? ` — ${HEALTH_LABELS[t.health]}` : ''}`);
+		const where = t.repository ?? t.folder;
+		const details = [
+			where ? `repo ${sanitizeForDisplay(where)}` : '',
+			t.schedule ? `schedule ${sanitizeForDisplay(t.schedule)}` : '',
+			t.lastRun ? `last run ${sanitizeForDisplay(t.lastRun).slice(0, 10)}` : 'never run',
+			formatRecentSuccess(t),
+			`${t.runCount} run(s) in this window`,
+		].filter(Boolean);
+		lines.push(`      ${details.join(' · ')}`, ...formatFailedRuns(t));
+	}
+	lines.push(`  Stale = enabled with no run for ${STALE_AFTER_DAYS} days; failing = most recent runs failed.`, '');
+	return lines;
 }
 
 export const skillSuggestionsCommand = new Command('skill-suggestions')

@@ -856,6 +856,43 @@ test('computeDailyRollupsFromLocalSessions handles OpenCode sessions', async () 
 	assert.equal(first.key.model, 'claude-sonnet');
 });
 
+test('computeDailyRollupsFromLocalSessions handles Crush sessions, defaulting missing interactions to 0', async () => {
+	const svc = makeService({
+		getCopilotSessionFiles: async () => ['/fake/project/.crush/crush.db#abc'],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+		isCrushSession: () => true,
+		getCrushSessionData: async () => ({
+			tokens: 30,
+			interactions: 1,
+			modelUsage: { 'gpt-5': { inputTokens: 10, outputTokens: 20 } },
+			timestamp: Date.now() - 60000,
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({ lookbackDays: 7, userId: undefined });
+	assert.equal(result.rollups.size, 1);
+	const first = Array.from(result.rollups.values())[0] as any;
+	assert.equal(first.key.model, 'gpt-5');
+	assert.equal(first.value.inputTokens, 10);
+	assert.equal(first.value.outputTokens, 20);
+	assert.equal(first.value.interactions, 0);
+});
+
+test('computeDailyRollupsFromLocalSessions skips OpenCode sessions older than the lookback window', async () => {
+	const svc = makeService({
+		getCopilotSessionFiles: async () => ['/fake/opencode/session.json'],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+		isOpenCodeSession: () => true,
+		getOpenCodeSessionData: async () => ({
+			tokens: 300,
+			interactions: 2,
+			modelUsage: { 'claude-sonnet': { inputTokens: 100, outputTokens: 200, interactions: 2 } },
+			timestamp: Date.now() - 30 * 24 * 60 * 60 * 1000,
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({ lookbackDays: 7, userId: undefined });
+	assert.equal(result.rollups.size, 0);
+});
+
 test('computeDailyRollupsFromLocalSessions skips OpenCode sessions without handler', async () => {
 	const svc = makeService({
 		getCopilotSessionFiles: async () => ['/fake/opencode/session.json'],
@@ -2623,4 +2660,81 @@ test('extractFluencyMetricsFromCache strips latency histograms from toolCallsJso
 	assert.ok(result.toolCallsJson.length < 32 * 1024, `toolCallsJson is ${result.toolCallsJson.length} bytes`);
 	// The original cache object is left intact for the local dashboard.
 	assert.ok(cached.usageAnalysis.toolCalls.latencyByTool.tool_0);
+});
+
+// ── Retyped rollup-builder helpers (repo-health rh-56eb1ce0e222) ─────────
+
+test('validateCachedData accepts a well-formed cache entry and rejects malformed ones', () => {
+	const svc = makeService();
+	const check = (value: unknown) => (svc as any).validateCachedData(value, 'f.jsonl');
+	assert.equal(check({ modelUsage: {}, interactions: 0 }), true);
+	assert.equal(check({ modelUsage: { 'gpt-4o': { inputTokens: 1, outputTokens: 2 } }, interactions: 3 }), true);
+	assert.equal(check(null), false);
+	assert.equal(check('cache'), false);
+	assert.equal(check({ interactions: 1 }), false, 'missing modelUsage');
+	assert.equal(check({ modelUsage: null, interactions: 1 }), false, 'null modelUsage');
+	assert.equal(check({ modelUsage: {}, interactions: '5' }), false, 'string interactions');
+	assert.equal(check({ modelUsage: {}, interactions: -1 }), false, 'negative interactions');
+	assert.equal(check({ modelUsage: {}, interactions: Number.POSITIVE_INFINITY }), false, 'infinite interactions');
+});
+
+test('extractApiReportedTokens reads each result shape and returns null otherwise', () => {
+	const svc = makeService();
+	const read = (result: unknown) => (svc as any).extractApiReportedTokens(result);
+	assert.deepEqual(read({ usage: { promptTokens: 10, completionTokens: 4 } }), { inputTokens: 10, outputTokens: 4 });
+	assert.deepEqual(read({ usage: { promptTokens: 'x' } }), { inputTokens: 0, outputTokens: 0 });
+	assert.deepEqual(read({ promptTokens: 7, outputTokens: 3 }), { inputTokens: 7, outputTokens: 3 });
+	assert.deepEqual(read({ metadata: { promptTokens: 5, outputTokens: 2 } }), { inputTokens: 5, outputTokens: 2 });
+	assert.equal(read({ promptTokens: 7 }), null, 'flat shape needs both counts');
+	assert.equal(read(undefined), null);
+	assert.equal(read(null), null);
+});
+
+test('upsertDeltaRequest takes the model from the request, then result metadata, then the default', () => {
+	const svc = makeService();
+	const map = new Map<string, Map<string, number>>();
+	const seen = new Set<string>();
+	const ts = Date.UTC(2026, 10, 20, 12);
+	const upsert = (req: Record<string, unknown>) => (svc as any).upsertDeltaRequest(req, 'default-model', seen, ts, 0, map);
+	upsert({ requestId: 'a', timestamp: ts, modelId: 'copilot/gpt-5' });
+	upsert({ requestId: 'b', timestamp: ts, result: { metadata: { modelId: 'copilot/claude-sonnet-4' } } });
+	upsert({ requestId: 'c', timestamp: ts });
+	upsert({ requestId: 'a', timestamp: ts, modelId: 'copilot/gpt-5' }); // duplicate id is ignored
+	assert.deepEqual(Object.fromEntries(map.get('2026-11-20')!), { 'gpt-5': 1, 'claude-sonnet-4': 1, 'default-model': 1 });
+});
+
+test('updateDeltaDefaultModel reads kind:0 state and selectedModel updates, stripping the copilot/ prefix', () => {
+	const svc = makeService();
+	const update = (event: Record<string, unknown>, current = 'unknown') => (svc as any).updateDeltaDefaultModel(event, current);
+	assert.equal(update({ kind: 0, v: { selectedModel: { identifier: 'copilot/gpt-5' } } }), 'gpt-5');
+	assert.equal(update({ kind: 0, v: { inputState: { selectedModel: { metadata: { id: 'copilot/o3' } } } } }), 'o3');
+	assert.equal(update({ kind: 2, k: ['selectedModel'], v: { metadata: { id: 'claude-opus-4' } } }), 'claude-opus-4');
+	assert.equal(update({ kind: 2, k: ['requests'], v: [] }, 'kept'), 'kept');
+	assert.equal(update({ kind: 0, v: {} }, 'kept'), 'kept');
+	// The fallback parser reads the same shapes.
+	assert.equal((svc as any).updateFallbackVsCodeModel({ kind: 2, k: ['selectedModel'], v: { identifier: 'copilot/gpt-4.1' } }, 'x'), 'gpt-4.1');
+});
+
+test('CLI event helpers resolve the model and token counts from loosely typed events', () => {
+	const svc = makeService({ estimateTokensFromText: (text) => text.length });
+	const model = (event: Record<string, unknown>) => (svc as any).getCliEventModel(event, 'fallback');
+	assert.equal(model({ data: { model: 'gpt-5' }, model: 'ignored' }), 'gpt-5');
+	assert.equal(model({ model: 'claude-sonnet-4' }), 'claude-sonnet-4');
+	assert.equal(model({}), 'fallback');
+	assert.equal(model({ model: 42 }), '42');
+	assert.equal((svc as any).updateCliDefaultModel({ type: 'session.start', data: { selectedModel: 'gpt-5' } }, 'x'), 'gpt-5');
+	assert.equal((svc as any).updateCliDefaultModel({ type: 'session.model_change', data: { newModel: 42 } }, 'x'), 'x');
+	const counts = (event: Record<string, unknown>) => (svc as any).getCliEventTokenCounts(event, 'gpt-5');
+	assert.deepEqual(counts({ type: 'user.message', data: { content: 'hello' } }), { inputTokens: 5, outputTokens: 0, interactions: 1 });
+	assert.deepEqual(counts({ type: 'assistant.message', data: { content: 'hi' } }), { inputTokens: 0, outputTokens: 2, interactions: 0 });
+	assert.deepEqual(counts({ type: 'tool.result', data: { output: 'abc' } }), { inputTokens: 3, outputTokens: 0, interactions: 0 });
+	assert.deepEqual(counts({ type: 'user.message' }), { inputTokens: 0, outputTokens: 0, interactions: 0 });
+});
+
+test('estimateTokenCountsFromMessage reads message text or parts and string response values', () => {
+	const svc = makeService({ estimateTokensFromText: (text) => text.length });
+	const estimate = (req: Record<string, unknown>) => (svc as any).estimateTokenCountsFromMessage(req, 'gpt-5');
+	assert.deepEqual(estimate({ message: { text: 'abcd' }, response: [{ value: 'xy' }, { value: 3 }, null] }), { inputTokens: 4, outputTokens: 2 });
+	assert.deepEqual(estimate({ message: { parts: [{ text: 'ab' }, { text: 'c' }, {}] } }), { inputTokens: 3, outputTokens: 0 });
+	assert.deepEqual(estimate({}), { inputTokens: 0, outputTokens: 0 });
 });

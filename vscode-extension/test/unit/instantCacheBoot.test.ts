@@ -116,7 +116,10 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 		'must not iterate this.cacheManager.cache directly — see getDeduplicatedCacheEntries()');
 
 	// Builds preload entries straight from cache and renders the same way a real refresh does.
-	assert.ok(body.includes('this.buildMinimalPreloadDetails('), 'must reuse buildMinimalPreloadDetails() to build SessionFileDetails without a fresh parse');
+	assert.ok(body.includes('this.preloadFromCacheEntry(sessionFile, sessionData)'), 'must build each entry with preloadFromCacheEntry() (buildMinimalPreloadDetails(), no fresh parse)');
+	const fromCacheBody = extractBracesBlock(EXTENSION_SRC, 'private preloadFromCacheEntry(sessionFile: string, sessionData: SessionFileCache): SessionFilePreload {');
+	assert.ok(fromCacheBody.includes('this.buildMinimalPreloadDetails('), 'must reuse buildMinimalPreloadDetails() to build SessionFileDetails without a fresh parse');
+	assert.ok(fromCacheBody.includes('wasCached: true'), 'an entry built from the cache alone is a cache hit');
 	assert.ok(body.includes('this.calculateDetailedStats(undefined, preloaded)'), 'must aggregate stats via calculateDetailedStats() like the real refresh does');
 	for (const renderCall of ['this.updateStatusBarAndTooltip(stats)', 'this.updateDetailsPanelIfOpen(stats, true)', 'this.updateChartPanelIfOpen(true)']) {
 		assert.ok(body.includes(renderCall), `renderInstantStatsFromCache() must call ${renderCall} so an already-open panel also gets the instant first paint`);
@@ -184,10 +187,14 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 	// latch onto that type's braces instead of the function body. Anchor the
 	// marker on the tail of the signature instead, right before the real `{`.
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
-	assert.ok(preloadBody.includes('this.seedPreloadQueueFromCache(queue, seen, cutoffMs, editorSet)'),
+	assert.ok(preloadBody.includes('this.seedPreloadQueueFromCache(queue, seen, cutoffMs, isStoppedWsl, preloaded, editorSet)'),
 		'_preloadSessionFiles() must seed the queue from the cache before kicking off adapter discovery, passing through its own cutoffMs so the seed is bounded the same way the rest of this pass is');
 
+	// The stopped-WSL check is built before the seed, from the running distros, and the same
+	// predicate is handed to the reconciliation, so neither touches a stopped distro's cached path.
+	const filterIndex = preloadBody.indexOf('const isStoppedWsl = await this.cacheManager.createStoppedWslPathFilter();');
 	const seedIndex = preloadBody.indexOf('this.seedPreloadQueueFromCache(');
+	assert.ok(filterIndex !== -1 && filterIndex < seedIndex, 'must build the stopped-WSL predicate before seeding the queue');
 	const discoveryIndex = preloadBody.indexOf('getCopilotSessionFilesStreaming');
 	assert.ok(seedIndex !== -1 && discoveryIndex !== -1 && seedIndex < discoveryIndex,
 		'the cache seed must happen before discovery starts, otherwise workers gain nothing from it');
@@ -214,7 +221,7 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 	// be reconciled out of `preloaded` (see reconcilePreloadedAgainstDiscovery()) — otherwise it
 	// keeps contributing stale stats to every refresh forever, since clearExpiredCache() only
 	// detects outright-deleted files, not "un-discovered while still readable" ones.
-	const reconcileIndex = preloadBody.indexOf('this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles)');
+	const reconcileIndex = preloadBody.indexOf('this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles, isStoppedWsl)');
 	assert.ok(reconcileIndex !== -1,
 		'_preloadSessionFiles() must reconcile `preloaded` against this run\'s discovery result via reconcilePreloadedAgainstDiscovery() after the Promise.all resolves');
 	const promiseAllIndex = preloadBody.indexOf('await Promise.all([');
@@ -223,7 +230,7 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 });
 
 test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty, non-sample-mode discovery result, and compares with path normalization', () => {
-	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
+	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[], isStoppedWsl: (filePath: string) => boolean): SessionFilePreload[] {');
 
 	// Must bail out (keep every cached entry, no pruning) on a flaky/partial scan, OR while sample-data
 	// mode is active — gated on isSampleDataModeActive() as well as lastDiscoveryHadError and an empty
@@ -234,12 +241,16 @@ test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty, non-s
 	assert.ok(/if \(this\.isSampleDataModeActive\(\) \|\| this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
 		'must return `preloaded` unfiltered whenever sample-data mode is active, or this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust with real session data');
 
-	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(p\.sessionFile\)\)/.test(body),
+	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(filePath\)\)/.test(body) && body.includes('isConfirmed(p.sessionFile)'),
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
+	// A stopped WSL distro's path is invisible to discovery; it must count as confirmed, so it is
+	// neither evicted (evictUndiscoveredSessionData() would existsSync() it, starting the distro) nor
+	// filtered out of `preloaded` (its usage stays in the totals).
+	assert.ok(body.includes('|| isStoppedWsl(filePath)'), 'a path in a stopped WSL distro must count as confirmed');
 });
 
 test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the deduplicated + cutoff-filtered cache view, normalizes seen keys, and populates editorSet', () => {
-	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, editorSet?: Set<string>): number {');
+	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, isStoppedWsl: (filePath: string) => boolean, preloaded: SessionFilePreload[], editorSet?: Set<string>): number {');
 	const sampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return 0; }');
 	assert.ok(sampleGuardIndex !== -1, 'must skip seeding entirely in sample-data mode — otherwise real cached sessions get mixed into a screenshot/regression fixture run');
 
@@ -255,13 +266,15 @@ test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the dedupli
 	assert.ok(/\.filter\(\(\[, data\]\) => data\.mtime >= cutoffMs\)/.test(body),
 		'must filter cache entries to cutoffMs before seeding — an excluded older entry still exists on disk and arrives via normal streaming discovery instead, just not front-loaded ahead of relevant files');
 
-	assert.ok(/seen\.add\(_normalizePathForDedup\(p\)\)/.test(body),
+	assert.ok(/seen\.add\(_normalizePathForDedup\(filePath\)\)/.test(body),
 		'must normalize cached paths with _normalizePathForDedup() before adding to `seen`, matching the discovery-side check');
 
-	assert.ok(body.includes('this.detectEditorSource(file)'),
+	assert.ok(body.includes('this.detectEditorSource(filePath)'),
 		'must call detectEditorSource() for cache-seeded paths, or the loading UI editor pills will silently miss editors only known from the cache');
-	assert.ok(body.includes('queue.push(...cachedPaths)'), 'must push the cached (un-normalized) paths onto the shared queue — downstream stat/parse code needs the real path, not the dedup key');
-	assert.ok(body.includes('return cachedPaths.length'), 'must return the seeded count so the caller can fold it into totalDiscovered');
+	assert.ok(body.includes('if (!isStoppedWsl(filePath)) { queue.push(filePath); queued++; }'), 'must push the cached (un-normalized) paths onto the shared queue — downstream stat/parse code needs the real path, not the dedup key — except a stopped WSL distro\'s, whose stat would start it');
+	assert.ok(body.includes('else if (!data.detailsOnly) { preloaded.push(this.preloadFromCacheEntry(filePath, data)); }'),
+		'a stopped WSL distro\'s cached entry must go straight into `preloaded` (no stat), so its usage stays in the totals');
+	assert.ok(body.includes('return queued'), 'must return the queued count so the caller can fold it into totalDiscovered (a kept entry is never processed, so counting it would stall the progress total)');
 });
 
 // A structural "does the source call getDeduplicatedCacheEntries()" assertion (see the tests
@@ -457,10 +470,12 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 		'publishRefreshResult() must set _hasCompletedRealRefresh before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
 });
 
-test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {
-	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
-	assert.ok(body.includes('this.cacheManager.deleteCachedSessionData(rawPath)'),
-		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
+test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware evictUndiscoveredSessionData()', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[], isStoppedWsl: (filePath: string) => boolean): SessionFilePreload[] {');
+	// evictUndiscoveredSessionData() keeps the usage of a file that is gone (issue #2728) and then
+	// evicts through the tombstoning deleteCachedSessionData(); usageHistoryStore.test.ts covers it.
+	assert.ok(body.includes('this.cacheManager.evictUndiscoveredSessionData(rawPath)'),
+		'must evict via cacheManager.evictUndiscoveredSessionData() (which tombstones the path through deleteCachedSessionData()), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
 	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
 		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
 
@@ -471,7 +486,7 @@ test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unc
 	// would be.
 	assert.ok(/for \(const rawPath of Array\.from\(this\.cacheManager\.cache\.keys\(\)\)\)/.test(body),
 		'must scan all raw cache keys (not just entries derived from `preloaded`) when evicting unconfirmed entries');
-	assert.ok(/if \(!confirmedKeys\.has\(_normalizePathForDedup\(rawPath\)\)\) \{/.test(body),
+	assert.ok(body.includes('if (!isConfirmed(rawPath)) { this.cacheManager.evictUndiscoveredSessionData(rawPath); }'),
 		'must match raw cache keys directly against confirmedKeys via _normalizePathForDedup(), so an entry that never reached `preloaded` (cutoff-filtered or failed) is evicted too, not only unconfirmed dedup winners');
 });
 

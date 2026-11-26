@@ -1,0 +1,51 @@
+name: session-log-data-synthetic-analysis
+description: Exercises the session-log-data skill against fabricated files only.
+type: capability
+version: "1.0"
+
+agent_environment:
+  skills:
+    - ../../.github/skills/session-log-data
+  files:
+    - src: fixtures/synthetic-session-logs
+      dest: session-logs
+    - src: fixtures/synthetic-usage/usage-agg-daily.json
+      dest: usage-data/usage-agg-daily.json
+
+defaults:
+  executor: copilot-sdk
+  runs: 1
+  timeout: 120s
+  model: claude-sonnet-5.5
+
+scoring:
+  threshold: 1
+
+stimuli:
+  - name: invoke-skill-and-summarize-synthetic-fixtures
+    prompt: |
+      Use /session-log-data. Inspect only the staged synthetic files in
+      session-logs/ and usage-data/. Return exactly one compact JSON object,
+      with no Markdown, and these keys in this order:
+      source, json_sessions, jsonl_sessions, usage_input_tokens,
+      usage_output_tokens, usage_total_tokens, interactions, data_is_synthetic.
+      Count session documents by extension, excluding .editor-types.json.
+      Sum inputTokens, outputTokens, and interactions from the usage aggregate;
+      total tokens is input plus output. Do not quote fixture prompts or describe
+      these fabricated numbers as real user activity. Set source to
+      "synthetic-fixtures" and data_is_synthetic to true.
+    constraints:
+      max_turns: 6
+      max_tokens: 10000
+      max_duration: 2m
+      max_agent_duration: 90s
+    graders:
+      - type: skill-invocation
+        name: session-log-data-was-invoked
+        config:
+          required:
+            - session-log-data
+      - type: output-matches
+        name: exact-synthetic-fixture-summary
+        config:
+          pattern: '^\{"source":"synthetic-fixtures","json_sessions":1,"jsonl_sessions":1,"usage_input_tokens":70,"usage_output_tokens":30,"usage_total_tokens":100,"interactions":3,"data_is_synthetic":true\}$(?![\s\S])'

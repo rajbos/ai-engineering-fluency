@@ -76,7 +76,7 @@ interface Harness {
 	close: () => void;
 }
 
-async function bootLogViewer(): Promise<Harness> {
+async function bootLogViewer(data = buildLogData()): Promise<Harness> {
 	const bundle = await bundleLogViewer();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
 		runScripts: 'outside-only',
@@ -98,7 +98,7 @@ async function bootLogViewer(): Promise<Harness> {
 	window.HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
 		scrolledTo.push(`${this.className.split(' ')[0]}:${this.getAttribute('data-turn')}`);
 	};
-	window.__INITIAL_LOGDATA__ = buildLogData();
+	window.__INITIAL_LOGDATA__ = data;
 	window.eval(bundle);
 	for (let i = 0; i < 20; i++) { await new Promise(resolve => setImmediate(resolve)); }
 	return { window, document: window.document, posted, scrolledTo, close: () => window.close() };
@@ -123,6 +123,16 @@ function legsRow(h: Harness, step: number): HTMLElement | null {
 }
 
 describe('Log Viewer tables (bundled webview in jsdom)', () => {
+	test('labels delegated instructions as automated rather than user-authored content', async () => {
+		const data = buildLogData();
+		data.turns[0].instructionSource = 'delegated';
+		data.interactions = 0;
+		const h = await bootLogViewer(data);
+		try {
+			assert.match(h.document.querySelector('.turn-card[data-turn="1"] .user-message .message-label')?.textContent ?? '', /Delegated instruction \(automated\)/);
+			assert.match(h.document.querySelector('.turn-card[data-turn="2"] .user-message .message-label')?.textContent ?? '', /User/);
+		} finally { h.close(); }
+	});
 	test('renders every table through the shared data table', async () => {
 		const h = await bootLogViewer();
 		try {

@@ -38,12 +38,20 @@ async function main() {
     logLevel: 'info',
   };
 
+  // The Team Server window runs its preload with `sandbox: true`. A sandboxed preload gets only
+  // a polyfilled `require` (electron, events, timers, url) and no `__filename`/`__dirname`, so
+  // the Node banner above would throw on its first line and the window's bridge would never be
+  // exposed. It imports nothing that needs `import.meta.url`, so build it without banner/define.
+  // scripts/validate-desktop-preloads.js (run by check:render) loads it the way Electron does.
+  const sandboxedPreloadOptions = { ...sharedNodeOptions, banner: undefined, define: undefined };
+
   copyStaticAssets(distDir, webviewDir);
 
   if (!watchMode) {
     await Promise.all([
       esbuild.build({ ...sharedNodeOptions, entryPoints: ['src/main.ts'], outfile: 'dist/main.js' }),
       esbuild.build({ ...sharedNodeOptions, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.js' }),
+      esbuild.build({ ...sandboxedPreloadOptions, entryPoints: ['src/teamServerPreload.ts'], outfile: 'dist/teamServerPreload.js' }),
     ]);
     console.log(`Desktop built (${production ? 'production' : 'development'})`);
     return;
@@ -92,12 +100,13 @@ async function main() {
     },
   };
 
-  const [mainCtx, preloadCtx] = await Promise.all([
+  const [mainCtx, preloadCtx, teamServerPreloadCtx] = await Promise.all([
     esbuild.context({ ...sharedNodeOptions, entryPoints: ['src/main.ts'], outfile: 'dist/main.js', plugins: [rebuildPlugin] }),
     esbuild.context({ ...sharedNodeOptions, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.js', plugins: [rebuildPlugin] }),
+    esbuild.context({ ...sandboxedPreloadOptions, entryPoints: ['src/teamServerPreload.ts'], outfile: 'dist/teamServerPreload.js', plugins: [rebuildPlugin] }),
   ]);
 
-  await Promise.all([mainCtx.watch(), preloadCtx.watch()]);
+  await Promise.all([mainCtx.watch(), preloadCtx.watch(), teamServerPreloadCtx.watch()]);
   console.log('[watch] watching src/ for changes — Ctrl+C to stop');
 }
 

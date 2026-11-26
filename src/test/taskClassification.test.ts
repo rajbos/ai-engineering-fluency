@@ -221,6 +221,11 @@ test('countDelegationToolCalls: returns 0 for empty input', () => {
 	assert.equal(countDelegationToolCalls({}), 0);
 });
 
+test('countDelegationToolCalls: matches Mistral Vibe subsession tools (start_session, send_to_session)', () => {
+	const total = countDelegationToolCalls({ start_session: 2, send_to_session: 3, read_file: 10 });
+	assert.equal(total, 5);
+});
+
 test('countDelegationToolCalls: matches the Copilot CLI sub-agent tool family', () => {
 	const total = countDelegationToolCalls({ task: 2, read_agent: 1, write_agent: 1, list_agents: 1, edit: 20 });
 	assert.equal(total, 5);

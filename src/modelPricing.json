@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-10-27",
+    "lastUpdated": "2026-11-22",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1427,6 +1427,89 @@
       ],
       "cachedInputCostPerMillion": 0.05,
       "cacheCreationCostPerMillion": 1.25
+    },
+    "claude-fable-5.2": {
+      "inputCostPerMillion": 8.0,
+      "outputCostPerMillion": 40.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Fable 5.2"
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 10.0
+    },
+    "gemini-4-carbon": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 4 Carbon"
+      ],
+      "cachedInputCostPerMillion": 0.1
+    },
+    "gemini-4-hydrogen": {
+      "inputCostPerMillion": 1.5,
+      "outputCostPerMillion": 7.5,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 4 Hydrogen"
+      ],
+      "cachedInputCostPerMillion": 0.075
+    },
+    "gpt-6.2-astra": {
+      "inputCostPerMillion": 8.0,
+      "outputCostPerMillion": 40.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6.2 Astra"
+      ],
+      "cachedInputCostPerMillion": 0.4,
+      "cacheCreationCostPerMillion": 10.0
+    },
+    "gpt-6.2-sol": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6.2 Sol"
+      ],
+      "cachedInputCostPerMillion": 0.1,
+      "cacheCreationCostPerMillion": 2.5
+    },
+    "mai-code-2": {
+      "inputCostPerMillion": 0.5,
+      "outputCostPerMillion": 2.5,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "MAI Code 2"
+      ],
+      "cachedInputCostPerMillion": 0.025
+    },
+    "mai-code-2-flash": {
+      "inputCostPerMillion": 0.05,
+      "outputCostPerMillion": 0.25,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "MAI Code 2 Flash"
+      ],
+      "cachedInputCostPerMillion": 0.005
+    },
+    "gemini-4-neon": {
+      "inputCostPerMillion": 3.0,
+      "outputCostPerMillion": 15.0,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 4 Neon"
+      ],
+      "cachedInputCostPerMillion": 0.15
     }
   }
 }

@@ -112,3 +112,62 @@ test('extractDeletedPathsFromCommand: rm variants, quotes, globs and variables',
 	assert.deepEqual(extractDeletedPathsFromCommand('Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue'), []);
 	assert.deepEqual(extractDeletedPathsFromCommand(undefined), []);
 });
+
+// ── Read sizes ───────────────────────────────────────────────────────────────
+
+test('Claude Code: a read carries the length of the text returned; an image or failed read does not', () => {
+	const touches = extractFileActivity(jsonl(
+		claudeUse('r1', 'Read', { file_path: '/repo/a.ts' }),
+		claudeResult('r1', '1\tconst a = 1;'),
+		claudeUse('r2', 'Read', { file_path: '/repo/b.ts' }),
+		claudeResult('r2', [{ type: 'text', text: 'abc' }, { type: 'text', text: 'de' }]),
+		claudeUse('r3', 'Read', { file_path: '/repo/shot.png' }),
+		claudeResult('r3', [{ type: 'image', source: { type: 'base64', data: 'AAAA' } }]),
+		claudeUse('r4', 'Read', { file_path: '/repo/gone.ts' }),
+		claudeResult('r4', 'File does not exist', true),
+		claudeUse('e1', 'Edit', { file_path: '/repo/a.ts' }),
+		claudeResult('e1', 'The file has been updated'),
+	));
+	assert.deepEqual(touches.map(t => [t.path, t.kind, t.chars]), [
+		['/repo/a.ts', 'read', 14],
+		['/repo/b.ts', 'read', 5],
+		['/repo/shot.png', 'read', undefined],
+		['/repo/a.ts', 'edited', undefined],
+	]);
+});
+
+test('Copilot CLI: a view carries the result length the CLI reports; other tools and missing metrics do not', () => {
+	const start = (id: string, toolName: string) =>
+		({ type: 'tool.execution_start', data: { toolCallId: id, toolName, arguments: { path: `/r/${id}.ts` } } });
+	const complete = (id: string, metrics?: Record<string, number>) =>
+		({ type: 'tool.execution_complete', data: { toolCallId: id, success: true, ...(metrics ? { toolTelemetry: { metrics } } : {}) } });
+	const touches = extractFileActivity(jsonl(
+		start('a', 'view'), complete('a', { resultLength: 900, resultForLlmLength: 700 }),
+		start('b', 'view'), complete('b', { resultLength: 300 }),
+		start('c', 'view'), complete('c'),
+		start('d', 'edit'), complete('d', { resultForLlmLength: 50 }),
+	));
+	assert.deepEqual(touches.map(t => [t.path, t.chars]), [['/r/a.ts', 700], ['/r/b.ts', 300], ['/r/c.ts', undefined], ['/r/d.ts', undefined]]);
+});
+
+test('VS Code Copilot Chat: a read is sized from its toolCallResults entry, whichever line comes first', () => {
+	const read = (id: string, p: string) =>
+		({ kind: 'toolInvocationSerialized', toolCallId: id, toolId: 'copilot_readFile', pastTenseMessage: { value: 'Read', uris: { [`file:///${p}`]: { path: `/${p}` } } } });
+	const result = (...texts: string[]) => ({ content: [{ value: { node: { children: texts.map(text => ({ type: 2, text })) } } }] });
+	const touches = extractFileActivity(jsonl(
+		{ kind: 2, k: ['requests', 0, 'result'], v: { metadata: { toolCallResults: {
+			'call_a__vscode-1778753190029': result('hello ', 'world'),
+			'call_b__vscode-1778753190030': { content: [{ value: 'plain text' }] },
+			'call_edit__vscode-1778753190031': result('edited'),
+		} } } },
+		{ kind: 2, k: ['requests', 0, 'response'], v: [
+			read('call_a', 'c:/r/a.ts'), read('call_b', 'c:/r/b.ts'),
+			// Older logs give the invocation a GUID that no result key carries.
+			read('e18c59ca-0d3f-47c0-b7bf-6cac4db78f43', 'c:/r/c.ts'),
+			{ kind: 'toolInvocationSerialized', toolCallId: 'call_edit', toolId: 'copilot_replaceString', invocationMessage: { value: 'Replacing', uris: { 'file:///c:/r/a.ts': { path: '/c:/r/a.ts' } } } },
+		] },
+	));
+	assert.deepEqual(touches.map(t => [t.path, t.kind, t.chars]), [
+		['c:/r/a.ts', 'read', 11], ['c:/r/b.ts', 'read', 10], ['c:/r/c.ts', 'read', undefined], ['c:/r/a.ts', 'edited', undefined],
+	]);
+});

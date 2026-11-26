@@ -86,6 +86,7 @@ function writeUnifiedSession(opts: {
 	id: string;
 	meta?: unknown;
 	journalLines?: unknown[];
+	chunkFiles?: Record<string, unknown>;
 	indexContextUsage?: unknown;
 	indexModel?: string;
 }): { metaPath: string; cleanup: () => void } {
@@ -99,6 +100,13 @@ function writeUnifiedSession(opts: {
 		config: { active_model: 'mistral-large-4-0-3' },
 	}));
 	fs.writeFileSync(path.join(sessionDir, 'CURRENT'), '{"generation":"0000000000000001"}');
+	if (opts.chunkFiles) {
+		const chunksDir = path.join(sessionDir, 'chunks');
+		fs.mkdirSync(chunksDir, { recursive: true });
+		for (const [name, content] of Object.entries(opts.chunkFiles)) {
+			fs.writeFileSync(path.join(chunksDir, name), JSON.stringify(content));
+		}
+	}
 	if (opts.journalLines) {
 		fs.writeFileSync(
 			path.join(sessionDir, 'journal', '0000000000000001.jsonl'),
@@ -250,4 +258,247 @@ test('isVibeSessionFile: matches unified-store meta.json paths', () => {
 	assert.ok(da.isVibeSessionFile(path.join(home, '.vibe', 'logs', 'session', 'unified', 'some-uuid', 'meta.json')));
 	assert.ok(da.isVibeSessionFile(path.join(home, '.vibe', 'logs', 'session', 'session_20260922_091515_5327080d', 'meta.json')));
 	assert.ok(!da.isVibeSessionFile(path.join(home, '.vibe', 'logs', 'session', 'unified', 'some-uuid', 'messages.jsonl')));
+});
+
+/** A core_input record carrying a user_message command, as the desktop app journals live turns. */
+function coreInputUser(clientId: string, text: string, inputId: number, timeMs: number): unknown {
+	return { type: 'core_input', payload: { input: {
+		input_id: inputId,
+		command: { type: 'user_message', mode: 'queue', turn_id: `turn-${inputId}`,
+			content: [{ type: 'text', text, _meta: { vibe_client_message_id: clientId } }] },
+		determinism: { time_unix_ms: timeMs },
+	} } };
+}
+
+test('unified session: live user turns are synthesized from core_input user_message records', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'aaaa6666-0000-0000-0000-000000000000',
+		journalLines: [
+			{ type: 'command_reserved', payload: { client_command_id: 'c1', method: 'turn/start', params: { injected: false, message: [{ text: 'first' }] } } },
+			coreInputUser('c1', 'first', 1, 1000),
+			{ type: 'command_reserved', payload: { client_command_id: 'c2', method: 'turn/start', params: { injected: true, message: [{ text: 'steer' }] } } },
+			coreInputUser('c2', 'steer', 2, 2000),
+			coreInputUser('c3', 'second real turn', 3, 3000),
+			{ type: 'projection_delta', payload: { delta: [
+				{ op: 'append_entry', entry: { id: 'a1', type: 'message', role: 'assistant', createdAt: 1500, content: [{ type: 'text', text: 'answer' }] } },
+			] } },
+			envelopeDelta({ inputTokens: 10, outputTokens: 5, totalTokens: 15 }),
+		],
+	});
+	try {
+		// c1 and c3 are genuine turn starts; c2 was injected via its command_reserved record.
+		assert.equal(await da.countInteractions(metaPath), 2);
+		const messages = await da.readSessionMessages(metaPath);
+		const users = messages.filter(m => m.role === 'user');
+		assert.deepEqual(users.map(m => m.content), ['first', 'steer', 'second real turn']);
+		assert.equal(users[1].injected, true);
+		assert.equal(users[0].injected, undefined);
+	} finally { cleanup(); }
+});
+
+test('unified session: a checkpointed chunk user entry deduplicates its core_input record by client id', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'bbbb7777-0000-0000-0000-000000000000',
+		journalLines: [coreInputUser('c1', 'hello once', 1, 1000)],
+		chunkFiles: { 'abc123.json': [
+			{ id: 'c1', type: 'message', role: 'user', source: 'turn_start', createdAt: 1000, content: [{ type: 'text', text: 'hello once' }] },
+		] },
+	});
+	try {
+		assert.equal(await da.countInteractions(metaPath), 1);
+		const messages = await da.readSessionMessages(metaPath);
+		assert.equal(messages.filter(m => m.role === 'user').length, 1);
+	} finally { cleanup(); }
+});
+
+test('unified session: replace_entry settles an effect and state.output becomes the tool result', async () => {
+	const running = { id: 't1', type: 'effect', createdAt: 1, detail: { kind: 'tool', toolName: 'bash', input: { command: 'ls' } },
+		state: { status: 'running', outputText: '' } };
+	const settled = { id: 't1', type: 'effect', createdAt: 1, detail: { kind: 'tool', toolName: 'bash', input: { command: 'ls' } },
+		state: { status: 'completed', outputText: '', output: { type: 'tool_result', content: [], structured_content: { command: 'ls', returncode: 0, stdout: 'a.txt\nb.txt', stderr: '' } } } };
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'cccc8888-0000-0000-0000-000000000000',
+		journalLines: [
+			coreInputUser('c1', 'run ls', 1, 1000),
+			{ type: 'projection_delta', payload: { delta: [
+				{ op: 'append_entry', entry: running },
+				{ op: 'append_entry', entry: { id: 'a1', type: 'message', role: 'assistant', createdAt: 1200, content: [{ type: 'text', text: 'done' }] } },
+			] } },
+			{ type: 'projection_delta', payload: { delta: [ { op: 'replace_entry', entry: settled } ] } },
+			envelopeDelta({ inputTokens: 10, outputTokens: 5, totalTokens: 15 }),
+		],
+	});
+	try {
+		const messages = await da.readSessionMessages(metaPath);
+		const tool = messages.find(m => m.role === 'tool');
+		assert.equal(tool?.content, 'a.txt\nb.txt');
+		const assistant = messages.find(m => m.role === 'assistant');
+		assert.equal(assistant?.tool_calls?.[0]?.function?.name, 'bash');
+	} finally { cleanup(); }
+});
+
+test('unified session: effect with text content parts prefers them over structured_content', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'dddd9999-0000-0000-0000-000000000000',
+		journalLines: [
+			coreInputUser('c1', 'go', 1, 1000),
+			{ type: 'projection_delta', payload: { delta: [
+				{ op: 'append_entry', entry: { id: 't1', type: 'effect', createdAt: 2, detail: { kind: 'tool', toolName: 'read', input: {} },
+					state: { output: { content: [{ type: 'text', text: 'file contents here' }], structured_content: { stdout: 'ignored' } } } } },
+			] } },
+			envelopeDelta({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+		],
+	});
+	try {
+		const messages = await da.readSessionMessages(metaPath);
+		assert.equal(messages.find(m => m.role === 'tool')?.content, 'file contents here');
+	} finally { cleanup(); }
+});
+
+test('desktop session: runtime_path session_api and environment.working_directory are read from meta.json', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'eeeeaaaa-0000-0000-0000-000000000000',
+		meta: {
+			session_id: 'eeeeaaaa-0000-0000-0000-000000000000',
+			start_time: '2026-11-22T23:15:46.585000+00:00',
+			end_time: '2026-11-23T01:00:00.000000+00:00',
+			config: { active_model: 'mistral-large-4-0' },
+			runtime_path: 'session_api',
+			project: { kind: 'local', id: '33ed8100-bde9-44de-a21a-75f0d0f8d3bd' },
+			environment: { working_directory: 'C:\\\\Users\\\\RobBos\\\\repo' },
+		},
+	});
+	try {
+		assert.equal(await da.getRuntimePath(metaPath), 'session_api');
+		assert.equal(await da.isDesktopSession(metaPath), true);
+		const meta = await da.getSessionMeta(metaPath);
+		assert.equal(meta.model, 'mistral-large-4-0');
+		assert.equal(meta.workspacePath, 'C:\\\\Users\\\\RobBos\\\\repo');
+	} finally { cleanup(); }
+});
+
+test('CLI session: no runtime_path means not a desktop session; workspacePath still read', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'ffffbbbb-0000-0000-0000-000000000000',
+		meta: {
+			session_id: 'ffffbbbb-0000-0000-0000-000000000000',
+			start_time: '2026-11-04T16:46:59.862000+00:00',
+			end_time: '2026-11-04T16:46:59.862000+00:00',
+			config: { active_model: 'mistral-large-4-0-3' },
+			environment: { working_directory: '/home/rob/repo' },
+		},
+	});
+	try {
+		assert.equal(await da.getRuntimePath(metaPath), undefined);
+		assert.equal(await da.isDesktopSession(metaPath), false);
+		assert.equal((await da.getSessionMeta(metaPath)).workspacePath, '/home/rob/repo');
+	} finally { cleanup(); }
+});
+
+test('runtime_path: unsafe object keys are treated as absent', async () => {
+	const { metaPath, cleanup } = writeUnifiedSession({
+		id: 'cccccccc-0000-0000-0000-000000000000',
+		meta: { session_id: 'cccccccc-0000-0000-0000-000000000000', runtime_path: '__proto__' },
+	});
+	try {
+		assert.equal(await da.getRuntimePath(metaPath), undefined);
+		assert.equal(await da.isDesktopSession(metaPath), false);
+	} finally { cleanup(); }
+});
+
+// ── Subsession hierarchy (meta.json session_id / parent_session_id / child_sessions) ──
+
+/** Runs fn with VIBE_HOME pointed at a fresh temp dir; always restores env and removes the dir. */
+async function withVibeHome(fn: (root: string) => Promise<void>): Promise<void> {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-home-'));
+	const prev = process.env.VIBE_HOME;
+	process.env.VIBE_HOME = root;
+	try {
+		await fn(root);
+	} finally {
+		if (prev === undefined) { delete process.env.VIBE_HOME; } else { process.env.VIBE_HOME = prev; }
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+}
+
+/** Writes a legacy-layout session dir <root>/logs/session/<dirName>/meta.json; returns the meta path. */
+function writeLegacySessionDir(root: string, dirName: string, meta: unknown): string {
+	const dir = path.join(root, 'logs', 'session', dirName);
+	fs.mkdirSync(dir, { recursive: true });
+	const metaPath = path.join(dir, 'meta.json');
+	fs.writeFileSync(metaPath, JSON.stringify(meta));
+	return metaPath;
+}
+
+/** Writes a unified-store session dir <root>/logs/session/unified/<id>/meta.json; returns the meta path. */
+function writeUnifiedSessionDir(root: string, id: string, meta: unknown): string {
+	const dir = path.join(root, 'logs', 'session', 'unified', id);
+	fs.mkdirSync(dir, { recursive: true });
+	const metaPath = path.join(dir, 'meta.json');
+	fs.writeFileSync(metaPath, JSON.stringify(meta));
+	return metaPath;
+}
+
+test('getSessionIdentity: reads session_id, parent_session_id and child_sessions; unsafe values treated as absent', async () => {
+	const parent = writeMeta({
+		session_id: 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001',
+		parent_session_id: null,
+		child_sessions: ['bbbb2222-0000-0000-0000-000000000002', 42, '__proto__', ''],
+	});
+	const child = writeMeta({
+		session_id: 'bbbb2222-0000-0000-0000-000000000002',
+		parent_session_id: 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001',
+	});
+	const unsafe = writeMeta({ session_id: '__proto__', parent_session_id: '__proto__' });
+	try {
+		const p = await da.getSessionIdentity(parent.metaPath);
+		assert.equal(p.sessionId, 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001');
+		assert.equal(p.parentSessionId, undefined);
+		assert.deepEqual(p.childSessionIds, ['bbbb2222-0000-0000-0000-000000000002']);
+		const c = await da.getSessionIdentity(child.metaPath);
+		assert.equal(c.sessionId, 'bbbb2222-0000-0000-0000-000000000002');
+		assert.equal(c.parentSessionId, 'aaaa1111-bbbb-cccc-dddd-eeeeeeee0001');
+		assert.deepEqual(c.childSessionIds, []);
+		const u = await da.getSessionIdentity(unsafe.metaPath);
+		assert.equal(u.sessionId, undefined);
+		assert.equal(u.parentSessionId, undefined);
+		const missing = await da.getSessionIdentity(path.join(os.tmpdir(), 'no-such-vibe', 'meta.json'));
+		assert.equal(missing.sessionId, undefined);
+		assert.equal(missing.parentSessionId, undefined);
+		assert.deepEqual(missing.childSessionIds, []);
+	} finally { parent.cleanup(); child.cleanup(); unsafe.cleanup(); }
+});
+
+test('findSessionMetaById: resolves unified dir by uuid and legacy dir by id[:8] suffix; rejects unsafe/unknown ids', async () => {
+	await withVibeHome(async (root) => {
+		const legacyId = '5327080d-1111-2222-3333-444444444444';
+		const legacyMeta = writeLegacySessionDir(root, 'session_20260922_091515_5327080d', { session_id: legacyId });
+		const unifiedId = '1502172e-554f-f02b-d539-d2473c83eca2';
+		const unifiedMeta = writeUnifiedSessionDir(root, unifiedId, { session_id: unifiedId });
+		assert.equal(await da.findSessionMetaById(unifiedId), unifiedMeta);
+		assert.equal(await da.findSessionMetaById(legacyId), legacyMeta);
+		assert.equal(await da.findSessionMetaById('99999999-0000-0000-0000-000000000000'), undefined);
+		assert.equal(await da.findSessionMetaById('../../etc/passwd'), undefined);
+		assert.equal(await da.findSessionMetaById(''), undefined);
+	});
+});
+
+test('getChildCounts: counts subsessions per parent from parent_session_id across both layouts, restricted to candidates', async () => {
+	await withVibeHome(async (root) => {
+		const parentId = 'aaaa1111-0000-0000-0000-000000000001';
+		const otherRootId = 'aaaa1111-0000-0000-0000-000000000099';
+		writeLegacySessionDir(root, 'session_20260922_091515_aaaa1111', { session_id: parentId, parent_session_id: null });
+		writeLegacySessionDir(root, 'session_20260922_092000_bbbb2222', { session_id: 'bbbb2222-0000-0000-0000-000000000002', parent_session_id: parentId });
+		writeLegacySessionDir(root, 'session_20260922_093000_cccc3333', { session_id: 'cccc3333-0000-0000-0000-000000000003', parent_session_id: parentId });
+		writeUnifiedSessionDir(root, 'dddd4444-0000-0000-0000-000000000004', { session_id: 'dddd4444-0000-0000-0000-000000000004', parent_session_id: parentId });
+		writeUnifiedSessionDir(root, otherRootId, { session_id: otherRootId, parent_session_id: null });
+		// Child pointing at a parent that is not a candidate must be ignored.
+		writeLegacySessionDir(root, 'session_20260922_094000_eeee5555', { session_id: 'eeee5555-0000-0000-0000-000000000005', parent_session_id: 'ffffffff-0000-0000-0000-000000000006' });
+
+		const counts = await da.getChildCounts([parentId, otherRootId]);
+		assert.equal(counts.get(parentId), 3);
+		assert.equal(counts.has(otherRootId), false);
+		assert.equal(counts.size, 1);
+		assert.deepEqual(await da.getChildCounts([]), new Map());
+	});
 });

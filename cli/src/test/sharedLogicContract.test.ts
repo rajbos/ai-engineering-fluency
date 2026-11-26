@@ -30,7 +30,7 @@ import { getModelUsageFromSession } from '../../../src/usageAnalysis';
 import tokenEstimatorsData from '../../../src/tokenEstimators.json';
 import modelPricingData from '../../../src/modelPricing.json';
 
-import { calculateDailyStats, calculateDetailedStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, processSessionFile, processSessionFileForViews } from '../helpers';
+import { calculateDailyStats, calculateEfficiencySessionInputs, calculateUsageAnalysisStats, processSessionFile, processSessionFileForViews } from '../helpers';
 import { aggregateIntoPeriod, buildChartPayload, buildEfficiencyPayload, createEmptyChartPayload, createEmptyPeriodStats } from '../analysis';
 import { disableCache } from '../cliCache';
 
@@ -118,7 +118,7 @@ test('CLI usage analysis includes recent-session buckets for thin IDE hosts', as
 
 const AUTO_MODEL = 'claude-sonnet-4.5';
 
-function mockAutoSession(t: TestContext, format: 'json' | 'jsonl', debug = false, mtime?: Date): string {
+function mockAutoSession(t: TestContext, format: 'json' | 'jsonl', debug = false): string {
 	disableCache();
 	const today = new Date();
 	today.setHours(12, 0, 0, 0);
@@ -160,12 +160,11 @@ function mockAutoSession(t: TestContext, format: 'json' | 'jsonl', debug = false
 			attrs: { model: AUTO_MODEL, inputTokens: 8000, outputTokens: 1600, cachedTokens: 3200 },
 		}));
 	}
-	// Pin mtime (default today's noon) so daily attribution is deterministic.
-	const pinned = mtime ?? today;
+	// Pin mtime to today's noon so daily attribution is deterministic.
 	const realStat = fs.statSync(filePath);
 	t.mock.method(fs.promises, 'stat', async (file: string) => {
 		assert.equal(file, filePath);
-		return { ...realStat, mtime: pinned, mtimeMs: pinned.getTime() };
+		return { ...realStat, mtime: today, mtimeMs: today.getTime() };
 	});
 	return filePath;
 }
@@ -194,22 +193,6 @@ for (const format of ['json', 'jsonl'] as const) {
 		assertAutoDiscount(data.modelUsage);
 	});
 }
-
-test('CLI detailed stats count a session modified this month', async t => {
-	const stats = await calculateDetailedStats([mockAutoSession(t, 'jsonl')]);
-	assert.equal(stats.month.sessions, 1);
-	assert.ok(stats.month.tokens > 0);
-});
-
-test('CLI detailed stats skip sessions last modified before the previous month without parsing them', async t => {
-	// The content is dated today, so only the mtime check can keep this session out.
-	const now = new Date();
-	const stats = await calculateDetailedStats([mockAutoSession(t, 'jsonl', false, new Date(now.getFullYear(), now.getMonth() - 2, 15))]);
-	for (const period of [stats.today, stats.month, stats.lastMonth, stats.last30Days]) {
-		assert.equal(period.sessions, 0);
-		assert.equal(period.tokens, 0);
-	}
-});
 
 test('CLI debug replacement preserves the estimated Auto share including cached reads', async t => {
 	const data = await processSessionFile(mockAutoSession(t, 'jsonl', true));

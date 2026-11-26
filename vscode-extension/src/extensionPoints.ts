@@ -1,3 +1,7 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { ExclusiveRunner } from './analysis/exclusiveRunner';
+
 /**
  * A button contribution registered via the extension points API.
  */
@@ -19,4 +23,41 @@ export interface AiFluencyExtensionApi {
    * Returns a Disposable; call dispose() to remove the button.
    */
   registerButton(button: ExtensionPointButton, handler: () => void | Promise<void>): { dispose(): void };
+  /**
+   * Open an existing JSON/JSONL session in the session viewer.
+   * Requires an absolute filesystem path recovered by the caller's session scanner.
+   * Resolves after loading and rendering; rejects invalid paths and viewer failures.
+   */
+  openSessionLog(sessionFilePath: string): Promise<void>;
+}
+
+/** Forgiving parsers can return no turns on failure; the public API must not report success. */
+export function assertViewableSessionTurns(turns: readonly unknown[], strict: boolean): void {
+  if (strict && turns.length === 0) { throw new Error('Session contains no viewable chat turns.'); }
+}
+
+/** Bind the companion API without using webview dispatch, which swallows failures. */
+export function createExtensionApi(tracker: {
+  registerExtensionPointButton: AiFluencyExtensionApi['registerButton'];
+  showLogViewer(sessionFilePath: string, focusedTurnNumber?: number, strict?: boolean): Promise<void>;
+}): AiFluencyExtensionApi {
+  const viewerRunner = new ExclusiveRunner();
+  return {
+    registerButton: (button, handler) => tracker.registerExtensionPointButton(button, handler),
+    openSessionLog: async (sessionFilePath) => {
+      if (typeof sessionFilePath !== 'string' || !sessionFilePath.trim() ||
+          sessionFilePath.includes('\0') || !path.isAbsolute(sessionFilePath)) {
+        throw new TypeError('openSessionLog requires an absolute session file path.');
+      }
+      if (!['.json', '.jsonl'].includes(path.extname(sessionFilePath).toLowerCase())) {
+        throw new TypeError('openSessionLog supports JSON and JSONL session files only.');
+      }
+      await viewerRunner.run(async () => {
+        if (!(await fs.stat(sessionFilePath)).isFile()) {
+          throw new TypeError('openSessionLog requires a regular session file.');
+        }
+        await tracker.showLogViewer(sessionFilePath, undefined, true);
+      });
+    },
+  };
 }

@@ -904,6 +904,22 @@ export interface RepeatedTaskSessionRef {
   title?: string | null;
   lastInteraction?: string | null;
   repository?: string;
+  /** Editor/agent the session ran in (e.g. `Claude Code`, `VS Code`, `Copilot CLI`), when known. */
+  editor?: string;
+}
+
+/**
+ * How regularly a repeated task comes back: `daily` (most days, weekends
+ * allowed), `weekly`, or `regular` (a steady interval of `typicalGapDays`).
+ * Present only when the task recurs on enough distinct days to be worth
+ * scheduling rather than only capturing as a skill.
+ */
+export interface RepeatedTaskRecurrence {
+  cadence: 'daily' | 'weekly' | 'regular';
+  /** Distinct UTC calendar days with at least one session of this task. */
+  activeDays: number;
+  /** Median number of days between consecutive active days. */
+  typicalGapDays: number;
 }
 
 /**
@@ -925,6 +941,10 @@ export interface RepeatedTaskCluster {
    * representative prompt. Optional: payloads cached by older builds lack it.
    */
   examplePrompts?: string[];
+  /** Editors the cluster's sessions ran in, most sessions first. Optional: older payloads lack it. */
+  editors?: string[];
+  /** Set when the task recurs on a schedule-like rhythm (see RepeatedTaskRecurrence). */
+  recurrence?: RepeatedTaskRecurrence;
 }
 
 /** Repeated-task candidates across all scanned sessions. */
@@ -932,7 +952,95 @@ export interface RepeatedTaskReport {
   minClusterSize: number;
   /** Sessions whose first user prompt survived normalization and was clustered (see normalizePromptTokens). */
   sessionsScanned: number;
+  /** May be empty when only scheduled runs were found. */
   clusters: RepeatedTaskCluster[];
+  /**
+   * Tasks already running on a schedule (Claude Code scheduled tasks, GitHub
+   * Copilot automations), most runs first. Their runs are left out of
+   * `clusters` and `sessionsScanned`. Absent when there are none.
+   */
+  scheduledTasks?: ScheduledTaskSummary[];
+}
+
+/** Where a scheduled task runs: Claude Code scheduled tasks or GitHub Copilot automations. */
+export type ScheduledTaskPlatform = 'claude' | 'copilot';
+
+/**
+ * How a scheduled task is doing (see `assessScheduledTaskHealth()`):
+ * `stale` (enabled, no run for STALE_AFTER_DAYS) and `failing` (most recent
+ * runs failed) are risks; the others are informational.
+ */
+export type ScheduledTaskHealth = 'healthy' | 'stale' | 'failing' | 'disabled' | 'one-off' | 'manual' | 'never-run';
+
+/** One run of a scheduled task as the app recorded it. */
+export interface ScheduledTaskRun {
+  /** ISO timestamp the run started. */
+  at: string;
+  /** False when the app recorded the run as failed. */
+  ok: boolean;
+  /** The agent session the run started (Claude CLI session id, Copilot CLI session UUID). */
+  sessionId?: string;
+  // ── From the analysed session, when it is in the analysis window ──
+  /** Session file, so the run can be opened in the session viewer. */
+  sessionFile?: string;
+  /** Total tokens the run's session used. */
+  tokens?: number;
+  /** Cost of the run's session in USD (exact when the provider reports it, else estimated). */
+  costUsd?: number;
+}
+
+/**
+ * A scheduled task as configured in its app (Claude desktop `scheduled-tasks.json`,
+ * Copilot app `workflows`), with the runs the app recorded for it.
+ */
+export interface ScheduledTaskDefinition {
+  name: string;
+  platform: ScheduledTaskPlatform;
+  /** Cron expression, `daily at 09:00`-style interval, `once`, or `manual`. */
+  schedule: string | null;
+  enabled: boolean;
+  /** Runs once at a fixed time rather than on a schedule. */
+  oneOff?: boolean;
+  /** Runs only when started by hand (a Copilot automation with a manual interval). */
+  manual?: boolean;
+  /** Local folder the task runs in (repository checkout). */
+  folder: string | null;
+  /** `owner/repo` of that folder, when known. */
+  repository: string | null;
+  /** ISO timestamps. */
+  createdAt?: string | null;
+  lastRunAt: string | null;
+  nextRunAt?: string | null;
+  /** Total runs the app recorded. */
+  totalRuns: number;
+  failedRuns: number;
+  /** Newest first, at most RECENT_RUN_LIMIT. */
+  recentRuns: ScheduledTaskRun[];
+}
+
+/** One scheduled task and its runs in the analysis window. */
+export interface ScheduledTaskSummary {
+  /** The task's name as configured by the user (Claude task name, Copilot automation name). */
+  name: string;
+  platform: ScheduledTaskPlatform;
+  /** Sessions that were runs of this task. */
+  runCount: number;
+  /** Distinct UTC days with a run. */
+  activeDays: number;
+  /** ISO timestamp of the most recent run. */
+  lastRun: string | null;
+  // ── From the app's own configuration, when it could be read ──
+  schedule?: string | null;
+  enabled?: boolean;
+  folder?: string | null;
+  repository?: string | null;
+  nextRunAt?: string | null;
+  /** All runs the app recorded, and how many of them failed. */
+  totalRuns?: number;
+  failedRuns?: number;
+  /** Newest first, at most RECENT_RUN_LIMIT. */
+  recentRuns?: ScheduledTaskRun[];
+  health?: ScheduledTaskHealth;
 }
 
 export interface EditScopeUsage {
@@ -1138,8 +1246,12 @@ export interface WorkspaceCustomizationRow {
   /**
    * Folders merged into this row by workspace grouping (worktrees, clones, case/remote
    * variants — see src/workspaceGrouping.ts). Present only when more than one folder merged.
+   * Known linked worktrees are left out (counted in `worktreeCount`); the row's own folder
+   * is always first.
    */
   memberPaths?: string[];
+  /** Known linked worktrees merged into this row, beyond the row's own folder. */
+  worktreeCount?: number;
 }
 
 export interface WorkspaceCustomizationMatrix {
@@ -1168,8 +1280,19 @@ export interface WorkspaceCustomizationMatrix {
  * could not determine the state (no GitHub token, a denied API call, or a
  * control whose absence is not observable), and it must never be collapsed
  * into either `present` or `absent`.
+ *
+ * `not-applicable` means the control does not apply to this repository at all
+ * (infrastructure as code in a repository that deploys nothing). It neither
+ * blocks a stage nor counts as missing evidence.
  */
-export type DarkFactoryControlState = 'present' | 'absent' | 'unknown';
+export type DarkFactoryControlState = 'present' | 'absent' | 'unknown' | 'not-applicable';
+
+/**
+ * Where a repository is hosted, as far as its `origin` remote tells:
+ * `github` (a GitHub remote resolved), `other` (a remote on another host), or
+ * `unknown` (no remote at all).
+ */
+export type DarkFactoryHosting = 'github' | 'other' | 'unknown';
 
 /** Where a control's state comes from. */
 export type DarkFactoryControlTier =
@@ -1199,6 +1322,16 @@ export interface DarkFactoryControlDefinition {
   label: string;
   tier: DarkFactoryControlTier;
   evidence: DarkFactoryEvidenceKind;
+  /**
+   * A recommended control is shown and can be acted on, but never blocks its
+   * stage and is not counted as missing evidence.
+   */
+  recommended?: boolean;
+  /**
+   * Set when the control only exists on GitHub. For a repository whose remote
+   * is on another host its absence is reported as `unknown`, not `absent`.
+   */
+  platform?: 'github';
   /** Why the control matters on the ladder. */
   why: string;
   /** What to do when it is absent. */
@@ -1223,9 +1356,12 @@ export interface DarkFactoryControlResult extends DarkFactoryControlDefinition {
   detail?: string;
 }
 
-/** Whether a stage's controls are all satisfied, definitely not, or unverifiable. */
+/**
+ * Whether a stage's required controls are all satisfied, definitely not, or
+ * unverifiable. Recommended and not-applicable controls play no part.
+ */
 export type DarkFactoryStageVerdict =
-  /** Every control is present. */
+  /** Every required, applicable control is present. */
   | 'attained'
   /** At least one control is absent — this stage is not reached. */
   | 'blocked'
@@ -1238,12 +1374,14 @@ export interface DarkFactoryStageResult {
   name: string;
   summary: string;
   verdict: DarkFactoryStageVerdict;
-  /** Control ids that are present. */
+  /** Required control ids that are present. */
   present: string[];
-  /** Control ids that are absent — the specific things blocking this stage. */
+  /** Required control ids that are absent — the specific things blocking this stage. */
   missing: string[];
-  /** Control ids whose state could not be determined. */
+  /** Required control ids whose state could not be determined. */
   unknown: string[];
+  /** Required control ids that do not apply to this repository. */
+  notApplicable: string[];
 }
 
 /** An anti-pattern the scan detected in a repository. */
@@ -1263,6 +1401,8 @@ export interface DarkFactoryRepoReport {
   repoRoot: string;
   /** `owner/repo` when the origin remote could be resolved. */
   nameWithOwner?: string;
+  /** Where the repository is hosted, when its origin remote says. */
+  hosting?: DarkFactoryHosting;
   /**
    * Highest stage whose controls are *all* confirmed present. This is a lower
    * bound: unknowns never lift it.
@@ -1273,9 +1413,9 @@ export interface DarkFactoryRepoReport {
    * optimistically. This is an upper bound, never a claim.
    */
   ceilingStage: number;
-  /** True when every control resolved to `present` or `absent`. */
+  /** True when no required control is left `unknown`. */
   fullyEvidenced: boolean;
-  /** Number of controls whose state could not be determined. */
+  /** Number of required controls whose state could not be determined. */
   unknownCount: number;
   stages: DarkFactoryStageResult[];
   controls: DarkFactoryControlResult[];
@@ -1432,7 +1572,7 @@ export interface ContextPressureStats {
   worstFillPercent?: number;
 }
 
-/** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */
+/** Parent/child session reference used in hierarchy info (Copilot CLI, pi and Mistral Vibe sessions). */
 export interface SessionRelationRef {
   uuid: string;
   name: string;
@@ -1456,9 +1596,9 @@ export interface SessionFileDetails {
   title?: string; // session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
   workspacePath?: string; // absolute local cwd/workspace path the session ran in (from adapter getMeta)
-  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Parent session info (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   parentInfo?: SessionRelationRef | null;
-  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Direct child sessions (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   childInfo?: SessionRelationRef[];
   /**
    * Total child count — may exceed childInfo.length when some
@@ -1492,6 +1632,8 @@ export interface ActualUsage {
 
 // Chat turn information for log viewer
 export interface ChatTurn {
+  /** Viewer-only delegated instructions, not a human interaction. Absent for metrics parsing. */
+  instructionSource?: 'delegated';
   turnNumber: number;
   timestamp: string | null;
   /** ISO time of the last assistant/tool event of this turn, when the source records it. Absent means unknown, never an estimate. */
@@ -1540,9 +1682,9 @@ export interface SessionLogData {
   cachedTokens?: number;
   /** Number of distinct subagent sessions started (CLI format: from subagent.started events; pi: from child session count). */
   subAgentsStarted?: number;
-  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Parent session info (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   parentInfo?: SessionRelationRef | null;
-  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  /** Direct child sessions (Copilot CLI, pi and Mistral Vibe sessions; populated from data.db / JSONL parentSession field / meta.json parent_session_id). */
   childInfo?: SessionRelationRef[];
   /** Total child count (may exceed childInfo.length when some children fall outside the loaded window). */
   totalChildCount?: number;
@@ -1662,7 +1804,11 @@ export interface EvaluatedInsight {
   body: string;
   actionLabel?: string;
   actionCommand?: string;
+  /** Optional second action, rendered alongside the primary one (e.g. an alternate next step). */
+  secondaryActionLabel?: string;
+  secondaryActionCommand?: string;
   status: InsightStatus;
+  /** When true, this insight may also be surfaced as a VS Code toast notification. */
   allowToast?: boolean;
 }
 

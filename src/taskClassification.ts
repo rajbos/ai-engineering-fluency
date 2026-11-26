@@ -194,7 +194,8 @@ const EDIT_TOOL_PATTERN = /edit|write|create_?file|replace_?string|str_replace|a
 const READ_TOOL_PATTERN = /read_?file|grep_?search|file_?search|search|glob|list_dir|websearch|fetch/i;
 const TERMINAL_TOOL_PATTERN = /terminal|bash|shell|run_?command/i;
 const PLANNING_TOOL_PATTERN = /todo|task[-_]?create|enterplanmode|\bplan\b/i;
-export const DELEGATION_TOOL_PATTERN = /^(task|agent|read_agent|write_agent|list_agents|create_session|open_pr_session|open_issue_session|fork_session)$|subagent|sub[-_]?agent|agent[-_]?spawn|spawn[-_]?(task|agent)|delegate/i;
+// Vibe's subsession tools: `start_session` spawns a subsession, `send_to_session` drives one.
+export const DELEGATION_TOOL_PATTERN = /^(task|agent|read_agent|write_agent|list_agents|create_session|open_pr_session|open_issue_session|fork_session|start_session|send_to_session)$|subagent|sub[-_]?agent|agent[-_]?spawn|spawn[-_]?(task|agent)|delegate/i;
 
 export function countDelegationToolCalls(byTool: Record<string, number>): number {
 	let total = 0;

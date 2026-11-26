@@ -28,6 +28,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.6.0</h3>
+        <ul>
+            <li>Updated shared webview bundles: a Scheduled automations table in Usage Analysis → Insights with failing and stale tasks and what their failed runs cost, cadence badges in Skill Suggestions, a filter-by-editor option in the Chart view, and the full stage ladder in AI Readiness</li>
+            <li>Diagnostics' Research usage tables moved into Usage Analysis, and Pricing Check now covers the whole selected time range</li>
+            <li>Updated bundled CLI: Cursor 3.3x chats, Claude Desktop Cowork sessions in the moved Claude-Data folder, <code>CLAUDE_CONFIG_DIR</code>, Mistral Vibe Desktop and Vibe subsessions are now found and counted, large OpenCode and Kilo Code databases are read much faster, and sessions last active before last month are no longer re-parsed</li>
+            <li>The Efficiency button, which opened nothing in JetBrains IDEs, is no longer shown</li>
+        </ul>
         <h3>0.5.4</h3>
         <ul>
             <li>Updated shared webview bundles: sortable, paged tables in every view, per-tool reliability and latency in Usage Analysis, a One model, two harnesses comparison in Efficiency, and a View index in What's New</li>

@@ -2,7 +2,7 @@
  * Usage analysis functions for session data processing.
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
-import { analyzeHydraFusionSession, toHydraFusionRollup, addHydraFusionRollup, createEmptyHydraFusionRollup } from './hydrafusion';
+import { analyzeHydraFusionSession, toHydraFusionRollup, addHydraFusionRollup, createEmptyHydraFusionRollup, isCopilotFusionAutoSession, resolveCopilotRouterModel } from './hydrafusion';
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -1834,11 +1834,12 @@ function _cmsCountJsonlRequests(lines: string[], analysis: SessionUsageAnalysis,
 	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
 	const costCounts: CostCounts = { low: 0, medium: 0, high: 0, unknown: 0 };
 	let defaultModel = 'unknown';
+	const fusionAuto = isCopilotFusionAutoSession(lines);
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line) as CmsEvent;
-			defaultModel = _cmsExtractDefaultModel(event, defaultModel);
+			defaultModel = resolveCopilotRouterModel(_cmsExtractDefaultModel(event, defaultModel), fusionAuto);
 			_cmsTrackSelectionSignalsFromEvent(event, analysis);
 			_cmsCountEventRequests(event, tierCounts, costCounts, defaultModel, modelPricing);
 		} catch { /* skip malformed lines */ }
@@ -2155,6 +2156,8 @@ type AsuCliState = {
 	efficiencyTurns: EfficiencyTurn[];
 	/** Which custom agent the user has selected (Copilot CLI `subagent.selected`). */
 	agent: CliAgentState;
+	/** The session selected `auto` and Copilot Fusion routed it (see isCopilotFusionAutoSession). */
+	fusionAuto: boolean;
 };
 
 /** Append a tool call to the current (or an implicit first) efficiency turn. */
@@ -2312,7 +2315,7 @@ function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeSt
 }
 
 function _asuHandleSessionStartEvent(data: Record<string, unknown>, cliState: AsuCliState): void {
-	if (typeof data.selectedModel === 'string') { cliState.defaultModel = data.selectedModel; }
+	if (typeof data.selectedModel === 'string') { cliState.defaultModel = resolveCopilotRouterModel(data.selectedModel, cliState.fusionAuto); }
 	if (typeof data.reasoningEffort === 'string') { cliState.defaultEffort = data.reasoningEffort; }
 }
 
@@ -2380,7 +2383,7 @@ function _asuCreateEfficiencyTurn(event: any, cliState: AsuCliState): Efficiency
 
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
 	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
-	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = resolveCopilotRouterModel(event.data.newModel, cliState.fusionAuto); }
 	_asuAccumulateAssistantText(event, cliState);
 	_asuExtendTurnWindow(event, cliState);
 	advanceCliAgentState(cliState.agent, analysis, event);
@@ -2678,6 +2681,7 @@ async function _asuProcessNonDeltaJsonl(
 	const cliState: AsuCliState = {
 		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
 		pendingToolCalls: new Map(), editedFilePaths: new Set(), efficiencyTurns: [], agent: createCliAgentState(),
+		fusionAuto: isCopilotFusionAutoSession(lines),
 	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
@@ -2897,6 +2901,8 @@ type GmusJsonlState = {
 	cliShutdown: CliShutdownAccumulator | null;
 	cliRealOutputByModel: { [model: string]: number } | null;
 	totalCliToolCalls: number;
+	/** The session selected `auto` and Copilot Fusion routed it (see isCopilotFusionAutoSession). */
+	fusionAuto: boolean;
 };
 
 /** Handle an assistant.message event, recording real or estimated output tokens. */
@@ -2958,11 +2964,11 @@ function _gmusExtractKind2Model(event: any): string | null {
  
 function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): void {
 	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
-		state.defaultModel = event.data.selectedModel;
+		state.defaultModel = resolveCopilotRouterModel(event.data.selectedModel, state.fusionAuto);
 		return;
 	}
 	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-		state.defaultModel = event.data.newModel;
+		state.defaultModel = resolveCopilotRouterModel(event.data.newModel, state.fusionAuto);
 		return;
 	}
 	const kind0Model = _gmusExtractKind0Model(event);
@@ -2990,7 +2996,8 @@ function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: Mo
 function _gmusParseJsonlLines(lines: string[], modelUsage: ModelUsage, deps: GmusDeps): GmusJsonlState {
 	const state: GmusJsonlState = {
 		defaultModel: 'unknown', isDeltaBased: false, sessionState: {},
-		cliShutdown: null, cliRealOutputByModel: null, totalCliToolCalls: 0
+		cliShutdown: null, cliRealOutputByModel: null, totalCliToolCalls: 0,
+		fusionAuto: isCopilotFusionAutoSession(lines),
 	};
 	for (const line of lines) {
 		if (!line.trim()) { continue; }

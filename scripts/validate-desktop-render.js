@@ -21,7 +21,12 @@
  * each in the dark and the light theme: a populated history, and no sessions at all
  * (the empty states).
  *
- * The session files are written under a temporary HOME, never the user's own.
+ * The session files are written under a temporary HOME, never the user's own. It
+ * lives in a git-ignored desktop/.render-check-<random> folder, not the OS temp directory: the
+ * session readers refuse files under the temp directory (src/utils/safeFileRead.ts),
+ * which left the "populated" scenario silently empty. The page is rendered with the
+ * browser's color scheme set to the page's theme, because the app's --vscode-*
+ * tokens switch on prefers-color-scheme, which Electron takes from the OS theme.
  * No editor or Electron window is opened.
  *
  * Needs the built desktop webviews (`pnpm run build` in desktop/) and Playwright
@@ -29,23 +34,76 @@
  *
  * Usage:
  *   node scripts/validate-desktop-render.js [--panel <id>] [--keep]
+ *        [--screenshots <dir>] [--repo-root <dir>] [--now <epoch ms>] [--work <dir>]
+ *
+ *   --screenshots  also save a full-page PNG of every render into <dir>, named for
+ *                  the visual-view-diff report: `desktop-<view>.<theme>.png` for the
+ *                  populated scenario, `desktop-<view>--empty.<theme>.png` for the
+ *                  empty one. scripts/desktop-visual-diff.js compares these.
+ *   --repo-root    render another checkout (its desktop/src/test/renderPanels.ts and
+ *                  desktop/dist/webview), e.g. a baseline worktree. Default: this repo.
+ *   --now          pin the clock, in Node (the fixture sessions and the payloads) and
+ *                  in the page, so two runs a minute apart produce the same pixels.
+ *   --work         use this (new or empty) directory for the temporary pages and
+ *                  HOME instead of a random one, so file paths shown in a view are
+ *                  the same across runs. Removed afterwards unless --keep.
  */
 
 const fs = require('fs');
 const http = require('http');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const REPO_ROOT = path.resolve(__dirname, '..');
-const DESKTOP_DIR = path.join(REPO_ROOT, 'desktop');
-const WEBVIEW_DIST = path.join(DESKTOP_DIR, 'dist', 'webview');
 const { loadChromium } = require('../.github/skills/visual-view-diff/lib/browser.js');
 const { readDesktopViews } = require('./validate-desktop-contract.js');
+const { checkSandboxedPreloads } = require('./validate-desktop-preloads.js');
 
 const SCENARIOS = ['populated', 'empty'];
 const THEMES = ['dark', 'light'];
 const RENDER_TIMEOUT_MS = 15000;
+// Same viewport and settle time as the webview visual diff (views.config.json defaults).
+const SCREENSHOT_VIEWPORT = { width: 1280, height: 900 };
+const SCREENSHOT_SETTLE_MS = 1200;
+
+/** The checkout being rendered: this repo, or the one --repo-root names. */
+function checkoutPaths(repoRoot) {
+  const desktopDir = path.join(repoRoot, 'desktop');
+  return { repoRoot, desktopDir, webviewDist: path.join(desktopDir, 'dist', 'webview') };
+}
+
+/** `--name value` from argv; a flag given without a value is an error rather than a silent default. */
+function option(argv, name) {
+  const i = argv.indexOf(`--${name}`);
+  if (i === -1) { return undefined; }
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith('--')) { throw new Error(`--${name} needs a value`); }
+  return value;
+}
+
+/** The file name a render's screenshot is saved under (see --screenshots). */
+function screenshotName(view, scenario, theme) {
+  return `desktop-${view}${scenario === 'populated' ? '' : `--${scenario}`}.${theme}.png`;
+}
+
+/**
+ * A `--require` preload that pins Date to `now` for the page builder, so the fixture
+ * sessions' timestamps and every "today"-relative payload are identical across runs.
+ */
+function writeClockPreload(dir, now) {
+  const file = path.join(dir, 'pin-clock.js');
+  fs.writeFileSync(file, [
+    "'use strict';",
+    `const NOW = ${Number(now)};`,
+    'const RealDate = Date;',
+    'class PinnedDate extends RealDate {',
+    '  constructor(...args) { if (args.length === 0) { super(NOW); } else { super(...args); } }',
+    '  static now() { return NOW; }',
+    '}',
+    'globalThis.Date = PinnedDate;',
+    '',
+  ].join('\n'));
+  return file;
+}
 
 const CONTENT_TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf' };
 
@@ -71,35 +129,39 @@ function serve(routes) {
 }
 
 /** Bundles the page-building entry for plain Node. Returns the bundle path. */
-function bundleBuilder(tmp) {
-  const esbuild = require(path.join(DESKTOP_DIR, 'node_modules', 'esbuild'));
+function bundleBuilder(tmp, checkout) {
+  const { repoRoot, desktopDir } = checkout;
+  const entry = path.join(desktopDir, 'src', 'test', 'renderPanels.ts');
+  if (!fs.existsSync(entry)) { throw new Error(`${entry} does not exist: this checkout predates the desktop render check`); }
+  const esbuild = require(path.join(desktopDir, 'node_modules', 'esbuild'));
   const outfile = path.join(tmp, 'renderPanels.js');
   esbuild.buildSync({
-    entryPoints: [path.join(DESKTOP_DIR, 'src', 'test', 'renderPanels.ts')],
+    entryPoints: [entry],
     outfile,
     bundle: true,
     format: 'cjs',
     platform: 'node',
     target: 'node22',
     // Same resolution and loaders as desktop/esbuild.js.
-    nodePaths: ['desktop', 'cli', 'vscode-extension'].map((d) => path.join(REPO_ROOT, d, 'node_modules')),
+    nodePaths: ['desktop', 'cli', 'vscode-extension'].map((d) => path.join(repoRoot, d, 'node_modules')),
     loader: { '.json': 'json', '.css': 'text' },
     banner: { js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;' },
     define: { 'import.meta.url': '__importMetaUrl' },
     logLevel: 'error',
   });
   // The SQLite reader (sql.js) loads its wasm from next to the bundle, as it does in dist/.
-  const wasm = path.join(DESKTOP_DIR, 'dist', 'sql-wasm.wasm');
+  const wasm = path.join(desktopDir, 'dist', 'sql-wasm.wasm');
   if (fs.existsSync(wasm)) { fs.copyFileSync(wasm, path.join(tmp, 'sql-wasm.wasm')); }
   return outfile;
 }
 
 /** Writes every scenario's pages under `tmp/<scenario>`; HOME is private to each run. */
-function buildPages(tmp, bundle) {
+function buildPages(tmp, bundle, now) {
+  const preload = now === undefined ? [] : ['--require', writeClockPreload(tmp, now)];
   for (const scenario of SCENARIOS) {
     const home = path.join(tmp, `home-${scenario}`);
     fs.mkdirSync(home, { recursive: true });
-    const run = spawnSync(process.execPath, [bundle, path.join(tmp, scenario), scenario], {
+    const run = spawnSync(process.execPath, [...preload, bundle, path.join(tmp, scenario), scenario], {
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -117,9 +179,10 @@ function buildPages(tmp, bundle) {
   }
 }
 
-async function renderOne(browser, name, url) {
+async function renderOne(browser, name, url, { theme, screenshot, now } = {}) {
   const problems = [];
-  const context = await browser.newContext();
+  const context = await browser.newContext({ colorScheme: theme, ...(screenshot ? { viewport: SCREENSHOT_VIEWPORT } : {}) });
+  if (now !== undefined) { await context.clock.setFixedTime(now); }
   // What desktop/src/preload.ts exposes to the pages (its postMessage goes to the main process).
   await context.addInitScript(() => {
     window.acquireVsCodeApi = () => ({ postMessage: () => undefined, getState: () => undefined, setState: (s) => s });
@@ -145,6 +208,11 @@ async function renderOne(browser, name, url) {
     await page.waitForTimeout(500);
     const fontLoaded = await page.evaluate(async () => (await document.fonts.load('16px codicon')).length > 0);
     if (!fontLoaded) { problems.push('the codicon font did not load'); }
+    if (screenshot) {
+      // Charts animate in; give them the same settle time the webview diff does.
+      await page.waitForTimeout(SCREENSHOT_SETTLE_MS);
+      await page.screenshot({ path: screenshot, fullPage: true, animations: 'disabled', caret: 'hide' });
+    }
   } catch (e) {
     problems.push(`navigation failed: ${e.message}`);
   } finally {
@@ -154,18 +222,52 @@ async function renderOne(browser, name, url) {
   return { name, problems: [...new Set(problems)] };
 }
 
+/** --work: a fresh or empty directory, never one holding someone else's files. */
+function claimWorkDir(dir) {
+  const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+  if (stat && (!stat.isDirectory() || fs.readdirSync(dir).length > 0)) {
+    throw new Error(`--work ${dir} must be a new or empty directory`);
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 async function main() {
-  const only = process.argv.includes('--panel') ? process.argv[process.argv.indexOf('--panel') + 1] : null;
-  const views = readDesktopViews().filter((v) => !only || v === only);
+  const argv = process.argv.slice(2);
+  const only = option(argv, 'panel') ?? null;
+  const checkout = checkoutPaths(path.resolve(option(argv, 'repo-root') ?? path.join(__dirname, '..')));
+  const WEBVIEW_DIST = checkout.webviewDist;
+  const screenshotDir = option(argv, 'screenshots');
+  const nowArg = option(argv, 'now');
+  const now = nowArg === undefined ? undefined : Number(nowArg);
+  if (now !== undefined && !Number.isSafeInteger(now)) { throw new Error('--now must be a time in epoch milliseconds'); }
+  const workArg = option(argv, 'work');
+  const views = readDesktopViews(checkout.desktopDir).filter((v) => !only || v === only);
   if (views.length === 0 || !fs.existsSync(path.join(WEBVIEW_DIST, `${views[0]}.js`))) {
     console.error(`❌ ${WEBVIEW_DIST} has no built webviews (or --panel names no desktop view). Run "pnpm run build" in desktop/ first.`);
     process.exit(1);
   }
 
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-render-'));
+  // The sandboxed preloads (validate-desktop-preloads.js) are checked here so CI gates on them
+  // with the build it already made. Only for this checkout: a --repo-root baseline is rendered
+  // for screenshots and may predate a fix.
+  if (!option(argv, 'repo-root')) {
+    const preloads = checkSandboxedPreloads(checkout.desktopDir);
+    if (preloads.findings.length) {
+      for (const f of preloads.findings) { console.error(`❌ ${f}`); }
+      process.exit(1);
+    }
+    console.log(`✅ Sandboxed preloads load and expose their bridge: ${preloads.checked.join('; ') || 'none'}
+`);
+  }
+
+  if (screenshotDir) { fs.mkdirSync(screenshotDir, { recursive: true }); }
+
+  // Not os.tmpdir(): see the header comment.
+  const tmp = workArg ? claimWorkDir(path.resolve(workArg)) : fs.mkdtempSync(path.join(__dirname, '..', 'desktop', '.render-check-'));
   const servers = [];
   try {
-    buildPages(tmp, bundleBuilder(tmp));
+    buildPages(tmp, bundleBuilder(tmp, checkout), now);
 
     const staticRoutes = new Map();
     const panelRoutes = new Map();
@@ -196,7 +298,12 @@ async function main() {
           }
           const route = `/${scenario}/${theme}/${view}`;
           panelRoutes.set(route, { html: html.replaceAll('app://panel', panelOrigin).replaceAll('app://static', staticOrigin) });
-          jobs.push({ name: `${view} (${scenario}, ${theme})`, url: panelOrigin + route });
+          jobs.push({
+            name: `${view} (${scenario}, ${theme})`,
+            url: panelOrigin + route,
+            theme,
+            screenshot: screenshotDir ? path.join(screenshotDir, screenshotName(view, scenario, theme)) : undefined,
+          });
         }
       }
     }
@@ -206,7 +313,7 @@ async function main() {
     try {
       console.log('🖥️  Desktop app headless render\n');
       for (const job of jobs) {
-        const result = await renderOne(browser, job.name, job.url);
+        const result = await renderOne(browser, job.name, job.url, { theme: job.theme, screenshot: job.screenshot, now });
         console.log(`   ${result.problems.length ? '❌' : '✅'} ${result.name}`);
         for (const p of result.problems) { console.log(`        ${p}`); }
         if (result.problems.length) { failures.push(result); }
@@ -230,4 +337,8 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error(`❌ ${e.stack || e.message}`); process.exit(1); });
+if (require.main === module) {
+  main().catch((e) => { console.error(`❌ ${e.stack || e.message}`); process.exit(1); });
+}
+
+module.exports = { screenshotName };

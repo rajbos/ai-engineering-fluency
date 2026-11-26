@@ -422,7 +422,7 @@ In the standard shell prompt setup, oh-my-posh's segment-level `cache` block pre
 
 What does help is the CLI's own segment cache (`~/.copilot-token-tracker/omp-segment-cache.json`, default 5-minute TTL). After the first call, subsequent statusline renders return the cached value in ~150 ms instead of the full ~7 s cold parse.
 
-Once the cached value is older than the TTL, `segment` still prints it immediately and starts **one** low-priority background process to recompute it. A lock file (`~/.copilot-token-tracker/omp-segment-refresh.lock`, holding the refreshing process ID) stops the other terminals and statuslines from starting their own scan while that refresh runs; it is taken over only once its process has exited. The parsed-session cache is saved every 100 files during a scan, so a refresh that gets killed doesn't make the next one start from zero.
+Once the cached value is older than the TTL, `segment` still prints it immediately and starts **one** low-priority background process to recompute it. A lock file (`~/.copilot-token-tracker/omp-segment-refresh.lock`, holding the refreshing process ID) stops the other terminals and statuslines from starting their own scan while that refresh runs; it is taken over only once its process has exited. The parsed-session cache is saved every 30 seconds during a scan, so a refresh that gets killed doesn't make the next one start from zero.
 
 Tune the TTL with the `--ttl` flag inside `statusline.ps1` if you want more or less freshness:
 

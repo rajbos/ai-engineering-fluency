@@ -583,6 +583,75 @@ function buildBillingGroupCostDatasets(entries: DailyTokenStats[], deps: ChartDa
 	});
 }
 
+/** Lines added plus lines removed; missing counts are zero. */
+function locOf(usage: { linesAdded?: number; linesRemoved?: number } | undefined): number {
+	return (usage?.linesAdded ?? 0) + (usage?.linesRemoved ?? 0);
+}
+
+/** Per-editor token and lines-of-code datasets, one series per editor seen in any period. */
+function buildEditorDatasets(entries: DailyTokenStats[]) {
+	const allEditors = new Set<string>();
+	entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
+	const editors = Array.from(allEditors);
+	const editorDatasets = editors.map((editor, idx) => {
+		const color = getModelColor(idx);
+		return { label: editor, data: entries.map(e => e.editorUsage[editor]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	const locEditorDatasets = editors.map((editor, idx) => {
+		const color = getModelColor(idx);
+		return { label: editor, data: entries.map(e => locOf(e.editorUsage[editor])), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	return { editorDatasets, locEditorDatasets };
+}
+
+/** Per-repository token and lines-of-code datasets; the "Unknown" repository is never charted. */
+function buildRepositoryDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDeps) {
+	const allRepos = new Set<string>();
+	entries.forEach(e => Object.keys(e.repositoryUsage).filter(r => r !== 'Unknown').forEach(r => allRepos.add(r)));
+	const repos = Array.from(allRepos);
+	const repositoryDatasets = repos.map((repo, idx) => {
+		const color = getModelColor(idx);
+		return { label: deps.getRepoDisplayName(repo), fullRepo: repo, data: entries.map(e => e.repositoryUsage[repo]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	const locRepositoryDatasets = repos.map((repo, idx) => {
+		const color = getModelColor(idx);
+		return { label: deps.getRepoDisplayName(repo), fullRepo: repo, data: entries.map(e => locOf(e.repositoryUsage[repo])), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	return { repositoryDatasets, locRepositoryDatasets };
+}
+
+/** Per-language lines-of-code datasets. */
+function buildLanguageDatasets(entries: DailyTokenStats[]) {
+	const allLanguages = new Set<string>();
+	entries.forEach(e => { if (e.languageUsage) { Object.keys(e.languageUsage).forEach(l => allLanguages.add(l)); } });
+	return Array.from(allLanguages).map((lang, idx) => {
+		const color = getModelColor(idx);
+		return { label: lang, data: entries.map(e => locOf(e.languageUsage?.[lang])), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
+/** Per-task-category token datasets from the precomputed `taskCategoryUsage`. */
+function buildTaskCategoryDatasets(entries: DailyTokenStats[]) {
+	const allTaskCategories = new Set<string>();
+	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
+	return Array.from(allTaskCategories).map((category, idx) => {
+		const color = getModelColor(idx);
+		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
+/** Lines-of-code series per period, plus the totals and per-period average. */
+function buildLocSeries(entries: DailyTokenStats[]) {
+	const locData = entries.map(e => locOf(e));
+	const linesAddedData = entries.map(e => e.linesAdded ?? 0);
+	const linesRemovedData = entries.map(e => e.linesRemoved ?? 0);
+	const totalLinesAdded = entries.reduce((s, e) => s + (e.linesAdded ?? 0), 0);
+	const totalLinesRemoved = entries.reduce((s, e) => s + (e.linesRemoved ?? 0), 0);
+	const totalLoc = totalLinesAdded + totalLinesRemoved;
+	const avgLocPerPeriod = entries.length > 0 ? totalLoc / entries.length : 0;
+	return { locData, linesAddedData, linesRemovedData, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod };
+}
+
 function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	const entries = buckets.map(b => b.stats);
 	const labels = buckets.map(b => b.label);
@@ -590,44 +659,15 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	const tokensData = entries.map(e => e.tokens);
 	const sessionsData = entries.map(e => e.sessions);
 	const modelDatasets = buildModelDatasets(entries, deps);
-	const allEditors = new Set<string>();
-	entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
-	const editorDatasets = Array.from(allEditors).map((editor, idx) => {
-		const color = getModelColor(idx);
-		return { label: editor, data: entries.map(e => e.editorUsage[editor]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
-	const allRepos = new Set<string>();
-	entries.forEach(e => Object.keys(e.repositoryUsage).filter(r => r !== 'Unknown').forEach(r => allRepos.add(r)));
-	const repositoryDatasets = Array.from(allRepos).map((repo, idx) => {
-		const color = getModelColor(idx);
-		return { label: deps.getRepoDisplayName(repo), fullRepo: repo, data: entries.map(e => e.repositoryUsage[repo]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
+	const { editorDatasets, locEditorDatasets } = buildEditorDatasets(entries);
+	const { repositoryDatasets, locRepositoryDatasets } = buildRepositoryDatasets(entries, deps);
 	const totalTokens = tokensData.reduce((a, b) => a + b, 0);
 	const totalSessions = sessionsData.reduce((a, b) => a + b, 0);
 	const periodCount = buckets.length;
 	const costData = entries.map(e => deps.calculateEstimatedCost(e.modelUsage, 'copilot'));
 	const totalCost = costData.reduce((a, b) => a + b, 0);
-	const locData = entries.map(e => (e.linesAdded ?? 0) + (e.linesRemoved ?? 0));
-	const linesAddedData = entries.map(e => e.linesAdded ?? 0);
-	const linesRemovedData = entries.map(e => e.linesRemoved ?? 0);
-	const totalLinesAdded = entries.reduce((s, e) => s + (e.linesAdded ?? 0), 0);
-	const totalLinesRemoved = entries.reduce((s, e) => s + (e.linesRemoved ?? 0), 0);
-	const totalLoc = totalLinesAdded + totalLinesRemoved;
-	const avgLocPerPeriod = entries.length > 0 ? totalLoc / entries.length : 0;
-	const allLanguages = new Set<string>();
-	entries.forEach(e => { if (e.languageUsage) { Object.keys(e.languageUsage).forEach(l => allLanguages.add(l)); } });
-	const languageDatasets = Array.from(allLanguages).map((lang, idx) => {
-		const color = getModelColor(idx);
-		return { label: lang, data: entries.map(e => (e.languageUsage?.[lang]?.linesAdded ?? 0) + (e.languageUsage?.[lang]?.linesRemoved ?? 0)), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
-	const locEditorDatasets = Array.from(allEditors).map((editor, idx) => {
-		const color = getModelColor(idx);
-		return { label: editor, data: entries.map(e => (e.editorUsage[editor]?.linesAdded ?? 0) + (e.editorUsage[editor]?.linesRemoved ?? 0)), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
-	const locRepositoryDatasets = Array.from(allRepos).map((repo, idx) => {
-		const color = getModelColor(idx);
-		return { label: deps.getRepoDisplayName(repo), fullRepo: repo, data: entries.map(e => (e.repositoryUsage[repo]?.linesAdded ?? 0) + (e.repositoryUsage[repo]?.linesRemoved ?? 0)), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
+	const { locData, linesAddedData, linesRemovedData, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod } = buildLocSeries(entries);
+	const languageDatasets = buildLanguageDatasets(entries);
 	const editorCostDatasets = buildEditorCostDatasets(entries, deps);
 	const billingGroupCostDatasets = buildBillingGroupCostDatasets(entries, deps);
 	const modelCostDatasets = buildModelCostDatasets(entries, deps);
@@ -638,12 +678,7 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	const taskCategoryTokenDatasets = buildTaskCategoryTokenDatasets(entries);
 	const taskCategorySessionDatasets = buildTaskCategorySessionDatasets(entries);
 	const taskCategoryCostDatasets = buildTaskCategoryCostDatasets(entries, deps);
-	const allTaskCategories = new Set<string>();
-	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
-	const taskCategoryDatasets = Array.from(allTaskCategories).map((category, idx) => {
-		const color = getModelColor(idx);
-		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-	});
+	const taskCategoryDatasets = buildTaskCategoryDatasets(entries);
 	return {
 		labels,
 		periodKeys,

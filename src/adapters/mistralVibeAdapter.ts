@@ -2,8 +2,10 @@ import * as fs from 'fs';
 import type { ModelUsage, ChatTurn, VendorSessionStats, SessionDurationData } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { MistralVibeDataAccess, type VibeSessionStats } from '../mistralvibe';
+import { describeWslSessionPath } from '../wslDiscovery';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { detectVibeSessionEditorVariant } from '../workspaceHelpers';
 
 export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'mistralvibe';
@@ -14,6 +16,15 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	handles(sessionFile: string): boolean {
 		return this.mistralVibe.isVibeSessionFile(sessionFile);
+	}
+
+	/**
+	 * The Vibe CLI and the local Vibe Desktop app write to the same session tree and are
+	 * indistinguishable by path — only meta.json's `runtime_path` ("session_api" for the
+	 * desktop app) tells them apart.
+	 */
+	getDisplayName(sessionFile: string): string {
+		return detectVibeSessionEditorVariant(sessionFile);
 	}
 
 	getBackingPath(sessionFile: string): string {
@@ -39,10 +50,13 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
 		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
+		// Make the origin visible for sessions read from a WSL distro / an AoE sandbox store.
+		const source = describeWslSessionPath(sessionFile);
 		return {
-			title: meta.title,
+			title: source ? `[${source.label}] ${meta.title ?? ''}`.trim() : meta.title,
 			firstInteraction: meta.firstInteraction,
 			lastInteraction: meta.lastInteraction,
+			workspacePath: meta.workspacePath,
 		};
 	}
 

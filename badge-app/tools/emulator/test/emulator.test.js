@@ -11,7 +11,7 @@ const test = require('node:test');
 
 const runtime = require('../lib/runtime');
 const { SCENARIOS, validateScenarios } = require('../lib/scenarios');
-const { appFiles, crashIn, program } = require('../emulator');
+const { CLOCK_PRELUDE, CLOCK_SETTLE_MS, CLOCK_STEP_MS, appFiles, crashIn, program } = require('../emulator');
 const { mergeReports } = require('../badge-diff');
 
 test('readPin accepts the committed pin and rejects a branch name', () => {
@@ -93,8 +93,9 @@ test('the committed scenarios are valid and bad ones are rejected', () => {
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ press: 'jump' }] }] }), /unknown button/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ shot: 'Bad Name' }] }] }), /bad shot name/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ shot: 'one' }] }, { id: 'y', steps: [{ shot: 'one' }] }] }), /used twice/);
-	validateScenarios({ a: [{ id: 'x', steps: [{ wait: 80 }, { shot: 'one' }] }] });
+	validateScenarios({ a: [{ id: 'x', steps: [{ wait: 800 }, { shot: 'one' }] }] });
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ wait: 0 }] }] }), /wait must be/);
+	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ wait: 60001 }] }] }), /wait must be/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{ wait: 2.5 }] }] }), /wait must be/);
 	assert.throws(() => validateScenarios({ a: [{ id: 'x', steps: [{}] }] }), /needs shot/);
 });
@@ -123,6 +124,56 @@ test('appFiles maps the app under /system/apps and skips dotfiles and caches', (
 test('program launches the app by its installed path after the compat prelude', () => {
 	const text = program('# compat', 'fluency');
 	assert.ok(text.indexOf('# compat') < text.indexOf('launch("/system/apps/fluency")'));
+});
+
+test('program installs the virtual clock after badgeware and before the app starts', () => {
+	const text = program('# compat', 'fluency');
+	const at = text.indexOf(CLOCK_PRELUDE);
+	assert.ok(at > text.indexOf('import badgeware'), 'the clock needs badge and editor_support loaded');
+	assert.ok(at < text.indexOf('launch("/system/apps/fluency")'), 'the app must only ever see the virtual clock');
+	// Both clock reads go through it, and the poll that runs once per frame moves it.
+	assert.match(CLOCK_PRELUDE, /^type\(badge\)\.ticks = property\(/m);
+	assert.match(CLOCK_PRELUDE, /^type\(badge\)\.ticks_delta = property\(/m);
+	assert.match(CLOCK_PRELUDE, /^badge\.poll = _emu_poll$/m);
+	assert.match(CLOCK_PRELUDE, /js\.emuClockTarget/);
+	assert.ok(CLOCK_PRELUDE.includes(`min(${CLOCK_STEP_MS}, `), 'one fixed step per frame');
+});
+
+test('shots settle after the intro animations and before the score bars reload', () => {
+	const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'fluency', '__init__.py'), 'utf8');
+	const constant = (name) => {
+		const match = new RegExp(`^${name} = (\\d+)`, 'm').exec(source);
+		assert.ok(match, `${name} not found in fluency/__init__.py`);
+		return Number(match[1]);
+	};
+	const spiderIntro = constant('SPIDER_SWEEP_START_MS') + constant('SPIDER_SWEEP_MS') + constant('SPIDER_POP_MS');
+	assert.ok(CLOCK_SETTLE_MS >= spiderIntro, `a shot would catch the spider chart's intro (${spiderIntro} ms) unfinished`);
+	assert.ok(CLOCK_SETTLE_MS >= constant('TRANSITION_MS') + constant('TOAST_MS'), 'a shot would catch a slide or the look toast');
+	assert.ok(CLOCK_SETTLE_MS < constant('BARS_RELOAD_MS'), 'a shot would catch the score bars emptying for a reload');
+});
+
+test('clock.worker.js takes clock messages for itself and passes everything else on', async () => {
+	const source = fs.readFileSync(path.join(__dirname, '..', 'clock.worker.js'), 'utf8');
+	const order = [];
+	const listeners = [];
+	const self = { location: { origin: 'http://127.0.0.1:1234' }, addEventListener:(type, fn) => { order.push(`listen:${type}`); listeners.push(fn); } };
+	const run = new Function('self', 'importModule', `return (async () => { ${source.replace(/await import\(/, 'await importModule(')} })();`);
+	await run(self, async (url) => { order.push(`import:${url}`); });
+	assert.deepEqual(order, ['listen:message', 'import:/simulator/micropython.worker.js']);
+	assert.equal(self.emuClockTarget, 0);
+	const deliver = (data, origin = '') => {
+		let stopped = false;
+		listeners[0]({ data, origin, stopImmediatePropagation: () => { stopped = true; } });
+		return stopped;
+	};
+	assert.equal(deliver({ clockTarget: 3500 }), true);
+	assert.equal(self.emuClockTarget, 3500);
+	assert.equal(deliver({ clockTarget: 4000 }, 'http://127.0.0.1:1234'), true);
+	assert.equal(self.emuClockTarget, 4000);
+	assert.equal(deliver({ buttons: 8 }), false, 'button messages must still reach the simulator');
+	assert.equal(deliver({ clockTarget: '9' }), false);
+	assert.equal(deliver({ clockTarget: 9000 }, 'https://evil.example'), false, 'another origin cannot move the clock');
+	assert.equal(self.emuClockTarget, 4000);
 });
 
 test('mergeReports replaces earlier badge entries and keeps the webview ones', () => {

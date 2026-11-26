@@ -2,6 +2,7 @@
  * Claude Code data access layer.
  * Handles reading session data from Claude Code (Anthropic CLI/IDE extension) JSONL session files.
  * Sessions are stored at: ~/.claude/projects/{project-hash}/{session-uuid}.jsonl
+ * ($CLAUDE_CONFIG_DIR replaces ~/.claude when set, as Claude Code itself does).
  * Token data is ACTUAL Anthropic API counts — no estimation needed.
  */
 import * as fs from 'fs';
@@ -9,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
 import { withErrorRecovery } from './utils/errors';
-import { normalizePathForComparison } from './workspaceHelpers';
+import { isClaudeCodeSetAsideTranscript, normalizePathForComparison, resolveClaudeConfigDir } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { isHumanUserTurn } from './utils/claudeUserTurns';
@@ -44,13 +45,46 @@ export function normalizeClaudeModelId(model: string): string {
 	return model;
 }
 
+/** A parsed session JSONL event, read field by field. */
+type SessionEvent = Record<string, unknown>;
+
+/** The last truthy `field` among events of `type` (later events overwrite earlier ones). */
+function lastTypedEventField(events: SessionEvent[], type: string, field: string): string | undefined {
+	let value: string | undefined;
+	for (const event of events) {
+		if (event.type === type && event[field]) { value = event[field] as string; }
+	}
+	return value;
+}
+
+/** The first truthy `field` on any event. */
+function firstEventField(events: SessionEvent[], field: string): string | undefined {
+	for (const event of events) {
+		if (event[field]) { return event[field] as string; }
+	}
+	return undefined;
+}
+
+/** Epoch-ms timestamps of every event with a parseable `timestamp`, in event order. */
+function collectEventTimestamps(events: SessionEvent[]): number[] {
+	const timestamps: number[] = [];
+	for (const event of events) {
+		if (!event.timestamp) { continue; }
+		const ts = new Date(event.timestamp as string).getTime();
+		if (!isNaN(ts)) { timestamps.push(ts); }
+	}
+	return timestamps;
+}
+
 export class ClaudeCodeDataAccess {
 
 	/**
-	 * Get the Claude Code data directory path (~/.claude).
+	 * Get the Claude Code data directory path: $CLAUDE_CONFIG_DIR when set, otherwise ~/.claude.
+	 * Claude Code stores settings, session history and plugins under CLAUDE_CONFIG_DIR when the
+	 * variable is set, so a hard-coded ~/.claude would find no sessions at all for those users.
 	 */
 	getClaudeCodeDataDir(): string {
-		return path.join(os.homedir(), '.claude');
+		return resolveClaudeConfigDir(process.env) ?? path.join(os.homedir(), '.claude');
 	}
 
 	/**
@@ -68,7 +102,11 @@ export class ClaudeCodeDataAccess {
 	isClaudeCodeSessionFile(filePath: string): boolean {
 		const normalized = normalizePathForComparison(filePath);
 		const projectsDir = normalizePathForComparison(this.getClaudeCodeProjectsDir());
-		return normalized.startsWith(projectsDir) && normalized.endsWith('.jsonl');
+		if (!normalized.endsWith('.jsonl')) { return false; }
+		if (isClaudeCodeSetAsideTranscript(path.basename(filePath))) { return false; }
+		// A Claude Code home inside a running WSL distro, read from Windows (see wslDiscovery.ts).
+		if (/^\/\/wsl(?:\.localhost|\$)\/[^/]+\/home\/[^/]+\/\.claude\/projects\//.test(normalized)) { return true; }
+		return normalized.startsWith(projectsDir);
 	}
 
 	/**
@@ -112,6 +150,8 @@ export class ClaudeCodeDataAccess {
 						return this.collectJsonlFilesFromProject(fullPath, depth + 1, maxDepth);
 					}
 					if (!e.name.endsWith('.jsonl')) { return []; }
+					// An older copy Claude Code set aside next to the live transcript, not a session.
+					if (isClaudeCodeSetAsideTranscript(e.name)) { return []; }
 					try {
 						const st = await fs.promises.stat(fullPath);
 						return st.size > 0 ? [fullPath] : [];
@@ -437,26 +477,18 @@ export class ClaudeCodeDataAccess {
 	}
 
 	private extractMetaFieldsFromEvents(events: any[]): { title?: string; entrypoint?: string; cwd?: string; timestamps: number[] } {
-		let title: string | undefined;
-		let customTitle: string | undefined;
-		let entrypoint: string | undefined;
-		let cwd: string | undefined;
-		const timestamps: number[] = [];
-		for (const event of events) {
-			if (event.type === 'ai-title' && event.aiTitle) { title = event.aiTitle; }
-			// A title the user set (or Claude Desktop set when naming a Cowork session) is written as
-			// a separate `custom-title` event. Sessions started from Claude Desktop often carry ONLY
-			// this one, so reading `ai-title` alone left them with no title at all.
-			if (event.type === 'custom-title' && event.customTitle) { customTitle = event.customTitle; }
-			if (!entrypoint && event.entrypoint) { entrypoint = event.entrypoint; }
-			if (!cwd && event.cwd) { cwd = event.cwd; }
-			if (event.timestamp) {
-				const ts = new Date(event.timestamp).getTime();
-				if (!isNaN(ts)) { timestamps.push(ts); }
-			}
-		}
+		// A title the user set (or Claude Desktop set when naming a Cowork session) is written as
+		// a separate `custom-title` event. Sessions started from Claude Desktop often carry ONLY
+		// this one, so reading `ai-title` alone left them with no title at all.
 		// An explicit custom title outranks the model-generated one.
-		return { title: customTitle ?? title, entrypoint, cwd, timestamps };
+		const title = lastTypedEventField(events, 'custom-title', 'customTitle')
+			?? lastTypedEventField(events, 'ai-title', 'aiTitle');
+		return {
+			title,
+			entrypoint: firstEventField(events, 'entrypoint'),
+			cwd: firstEventField(events, 'cwd'),
+			timestamps: collectEventTimestamps(events),
+		};
 	}
 
 	/**

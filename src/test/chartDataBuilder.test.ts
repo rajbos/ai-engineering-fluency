@@ -360,3 +360,73 @@ test('buildChartData ignores unsafe language, editor-model and task keys from ca
 		assert.equal(proto[field], undefined, `Object.prototype must not gain "${field}"`);
 	}
 });
+
+// ── buildChartData per-period lines-of-code, editor and repository datasets ───
+
+test('buildChartData: per-period datasets cover LOC, languages, editors and repositories', () => {
+	const daily: DailyTokenStats[] = [
+		{
+			date: '2025-01-14',
+			tokens: 300,
+			sessions: 1,
+			interactions: 2,
+			modelUsage: { 'gpt-4o': { inputTokens: 200, outputTokens: 100, sessions: 1 } },
+			editorUsage: { 'VS Code': { tokens: 300, sessions: 1, linesAdded: 10, linesRemoved: 2 } },
+			repositoryUsage: {
+				'owner/repo': { tokens: 200, sessions: 1, linesAdded: 8, linesRemoved: 1 },
+				Unknown: { tokens: 100, sessions: 1 },
+			},
+			linesAdded: 10,
+			linesRemoved: 2,
+			languageUsage: { TypeScript: { linesAdded: 7, linesRemoved: 2 }, Markdown: { linesAdded: 3, linesRemoved: 0 } },
+			taskCategoryUsage: { Coding: { tokens: 300, sessions: 1 } },
+		} as DailyTokenStats,
+		{
+			date: '2025-01-15',
+			tokens: 100,
+			sessions: 1,
+			interactions: 1,
+			modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50, sessions: 1 } },
+			editorUsage: { Cursor: { tokens: 100, sessions: 1 } },
+			repositoryUsage: {},
+		},
+	];
+	const data = buildChartData(daily, { ...testDeps, getRepoDisplayName: (r: string) => `display:${r}`, calculateEstimatedCost: (u) => Object.keys(u).length });
+	const day = data.periods.day as any;
+	const n = day.labels.length;
+	const last2 = (arr: number[]) => arr.slice(n - 2);
+
+	assert.equal(day.periodCount, n);
+	assert.equal(day.totalTokens, 400);
+	assert.equal(day.totalSessions, 2);
+	assert.equal(day.avgPerPeriod, Math.round(400 / n));
+	assert.equal(day.totalCost, 2);
+	assert.equal(day.avgCostPerPeriod, 2 / n);
+	assert.deepEqual(last2(day.locData), [12, 0]);
+	assert.deepEqual(last2(day.linesAddedData), [10, 0]);
+	assert.deepEqual(last2(day.linesRemovedData), [2, 0]);
+	assert.equal(day.totalLinesAdded, 10);
+	assert.equal(day.totalLinesRemoved, 2);
+	assert.equal(day.avgLocPerPeriod, 12 / n);
+
+	assert.deepEqual(day.editorDatasets.map((d: any) => d.label), ['VS Code', 'Cursor']);
+	assert.deepEqual(last2(day.editorDatasets[0].data), [300, 0]);
+	assert.deepEqual(last2(day.locEditorDatasets[0].data), [12, 0]);
+	assert.deepEqual(last2(day.locEditorDatasets[1].data), [0, 0]);
+
+	// "Unknown" is never charted as a repository.
+	assert.deepEqual(day.repositoryDatasets.map((d: any) => [d.label, d.fullRepo]), [['display:owner/repo', 'owner/repo']]);
+	assert.deepEqual(last2(day.repositoryDatasets[0].data), [200, 0]);
+	assert.deepEqual(last2(day.locRepositoryDatasets[0].data), [9, 0]);
+
+	assert.deepEqual(day.languageDatasets.map((d: any) => d.label), ['TypeScript', 'Markdown']);
+	assert.deepEqual(last2(day.languageDatasets[0].data), [9, 0]);
+	assert.deepEqual(last2(day.languageDatasets[1].data), [3, 0]);
+
+	assert.deepEqual(day.taskCategoryDatasets.map((d: any) => d.label), ['Coding']);
+	assert.deepEqual(last2(day.taskCategoryDatasets[0].data), [300, 0]);
+	for (const ds of [...day.editorDatasets, ...day.locRepositoryDatasets, ...day.languageDatasets]) {
+		assert.equal(ds.borderWidth, 1);
+		assert.ok(ds.backgroundColor && ds.borderColor);
+	}
+});

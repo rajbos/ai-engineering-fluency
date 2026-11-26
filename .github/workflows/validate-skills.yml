@@ -35,7 +35,7 @@ jobs:
       skills: ${{ steps.changed-skills.outputs.skills }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -78,7 +78,7 @@ jobs:
         skill: ${{ fromJson(needs.detect-changes.outputs.skills) }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 
@@ -113,7 +113,7 @@ jobs:
   # SECURITY.md or is declared exempt/pending in
   # .github/skills/skill-security-classification.json. Checks ALL skills, not
   # just the changed ones, so editing only the classification file cannot leave
-  # a stale entry. See "Skill security classification" in AGENTS.md.
+  # a stale entry. See "Skill security classification" in .github/skills/README.md.
   security-classification:
     name: Skill security classification
     runs-on: ubuntu-latest
@@ -121,7 +121,7 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
 

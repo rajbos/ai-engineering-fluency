@@ -7,14 +7,15 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
+import { discoverWslSessionFiles, getWslDiagnosticRows, isWslScanAllowedByEnvironment } from '../../src/wslDiscovery';
 import { findWorkspacePathForDiscoveredPath, type IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { findRepositoryRemoteForFolder, resolveExactWorkspacePath } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { calculateEstimatedCost, NANO_AIU_TO_DOLLARS } from '../../src/tokenEstimation';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
-import type { CustomizationFileEntry, DailyTokenStats, DetailedStats, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import type { AgenticTrendPoint, CustomizationFileEntry, DailyRollupEntry, DailyTokenStats, DetailedStats, ScheduledTaskDefinition, SessionFileCache, SessionUsageAnalysis, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis } from '../../src/usageAnalysis';
-import { activeSessionDays, addSessionToDailyStats, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
+import { activeSessionDays, addSessionToDailyStats, scaleModelUsage, sortedDailyStats, sessionLocFromUsageAnalysis } from '../../src/statsHelpers';
 import { resolveSessionTaskAttribution } from '../../src/taskClassification';
 import { createSessionAttributesCache, resolveSessionAttributes, type SessionAttributesCache } from '../../src/sessionRepository';
 import { addSessionEfficiencyToDailyStats } from '../../src/modelEfficiency';
@@ -23,22 +24,28 @@ import type { EfficiencySessionInput } from '../../src/efficiencyAnalysis';
 import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery, withErrorRecoverySync } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
-import { groupWorkspaces, groupFolders, type WorkspaceGroup, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
+import { groupWorkspaces, groupFolders, stripWindowsLongPathPrefix, type WorkspaceGroup, type WorkspaceGroupingProbes, type WorkspaceUsageEntry } from '../../src/workspaceGrouping';
 import { buildWorkspaceCustomization, type WorkspaceCustomization } from '../../src/customizationMatrix';
 import { prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getTimeWindowStartDate } from '../../src/timeWindows';
-import { buildRepeatedTaskReport, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
+import { buildRepeatedTaskReport, scheduledRunOf, type RepeatedTaskSessionSource } from '../../src/repeatedTasks';
+import { automationRunName, CopilotAutomationRunsAccess, getCopilotAppDataDbPath } from '../../src/copilotAutomationRuns';
+import { readClaudeScheduledTasks } from '../../src/scheduledTaskSources';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import {
 	getEcosystems,
+	getDataAccessInstances,
 	modelPricing,
 	tokenEstimators,
 	statSessionFile,
 	getSessionBackingPath,
+	getSessionLastActivity,
+	sessionCacheStamp,
 	processSessionFile as processSessionFileWith,
 	type SessionDataCache,
 } from './sessionProcessing';
-export { readDebugLogTokensForSession, getSessionBackingPath } from './sessionProcessing';
+import { bucketMultiAgentParentsByDay, collectMultiAgentCandidates, countMultiAgentParents, createMultiAgentSources, type AgenticDayBucket } from '../../src/multiAgentSources';
+export { readDebugLogTokensForSession, getSessionBackingPath, getSessionLastActivity } from './sessionProcessing';
 
 // Import JSON data files
 import toolNamesData from '../../src/toolNames.json';
@@ -55,6 +62,7 @@ import {
 	buildChartPayload,
 	fmt,
 	formatTokens,
+	getEditorSourceFromPath,
 } from './analysis';
 export type { SessionData } from './analysis';
 export { effectiveTokens, buildChartPayload, buildEfficiencyPayload, fmt, formatTokens } from './analysis';
@@ -88,7 +96,11 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 /** Create session discovery instance for CLI */
 function createSessionDiscovery(): SessionDiscovery {
-	return new SessionDiscovery({ log, warn, error, ecosystems: getEcosystems() });
+	return new SessionDiscovery({
+		log, warn, error, ecosystems: getEcosystems(),
+		// Windows only; running WSL distros only (never starts one). Off via --no-wsl or AI_ENGINEERING_FLUENCY_WSL=0.
+		getExtraSessionFiles: async () => isWslScanAllowedByEnvironment() ? discoverWslSessionFiles({ log }) : [],
+	});
 }
 
 /** Discover all session files on this machine */
@@ -262,7 +274,7 @@ export async function buildWorkspaceCustomizationForSessions(
 		const workspace = await resolveSessionWorkspace(activity, claudeBasePath);
 		if (!workspace) { continue; }
 		// Normalised like the extension's trackWorkspaceForSession(), so both feed the grouping the same keys.
-		entries.push({ path: path.normalize(workspace.path), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });
+		entries.push({ path: path.normalize(stripWindowsLongPathPrefix(workspace.path)), sessionCount: 1, interactionCount: interactions, repository: workspace.repository });
 	}
 	if (entries.length === 0) { return undefined; }
 
@@ -289,9 +301,11 @@ export async function buildCustomizationMatrix(
 }
 
 /** Get diagnostic candidate paths info */
-export function getDiagnosticPaths(): { path: string; exists: boolean; source: string }[] {
+export async function getDiagnosticPaths(): Promise<{ path: string; exists: boolean; source: string }[]> {
 	const discovery = createSessionDiscovery();
-	return discovery.getDiagnosticCandidatePaths();
+	const local = discovery.getDiagnosticCandidatePaths();
+	// Running WSL distros (Windows only, never starts one); skipped with --no-wsl / AI_ENGINEERING_FLUENCY_WSL=0.
+	return isWslScanAllowedByEnvironment() ? [...local, ...await getWslDiagnosticRows({ log })] : local;
 }
 
 /** What an adapter knows about one session beyond its token counts. */
@@ -308,20 +322,6 @@ export async function getSessionMeta(filePath: string): Promise<SessionMeta | nu
 	if (!eco) { return null; }
 	try {
 		return await eco.getMeta(filePath);
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Cheap per-session last-activity time from the owning adapter, or null when the
- * adapter has no such lookup (then the file's own mtime is the right signal).
- */
-export async function getSessionLastActivity(filePath: string): Promise<Date | null> {
-	const eco = getEcosystems().find(e => e.handles(filePath));
-	if (!eco?.getLastActivity) { return null; }
-	try {
-		return await eco.getLastActivity(filePath);
 	} catch {
 		return null;
 	}
@@ -506,7 +506,8 @@ export async function processSessionFileForViews(filePath: string, verbose = fal
 	try {
 		const after = await sessionVersion(filePath, await statSessionFile(filePath));
 		if (before && sameSessionVersion(before, after)) {
-			setCached(filePath, before.mtimeMs, before.size, enriched);
+			const stamp = sessionCacheStamp(before);
+			setCached(filePath, stamp.mtimeMs, stamp.size, enriched);
 		}
 	} catch {
 		// Not cacheable (file vanished): still return the enriched data for this run.
@@ -516,22 +517,24 @@ export async function processSessionFileForViews(filePath: string, verbose = fal
 
 /**
  * {@link processSessionFile} at a session's {@link SessionVersion}. A regular file's cache entry
- * is keyed by its own stat, so the normal cached parse is current. A DB-backed session's entry
- * is keyed by the shared database's stat, which a write still in the WAL leaves unchanged, so
- * its cached tokens, interactions, model usage and day split can be outdated. Its base parse
- * therefore records the session activity time it was parsed at (`baseActivityMs`) and is reused
- * only while that still matches; otherwise (cold, or derived for an older activity) the session
- * is parsed afresh once — not twice — and stamped. Used by every path that combines the base
+ * is keyed by its own stat, so the normal cached parse is current. A DB-backed session with a
+ * known activity time is keyed by that time ({@link sessionCacheStamp}), not by the shared
+ * database's stat, which a write still in the WAL leaves unchanged. Its base parse also records
+ * the activity time it was parsed at (`baseActivityMs`) and is reused only while that still
+ * matches, which guards entries written under the older database-stat key; otherwise (cold, or
+ * derived for an older activity) the session is parsed afresh once — not twice — and stamped.
+ * Used by every path that combines the base
  * parse with fresher, activity-aware data: the view walk and Usage Analysis.
  */
 export async function processSessionFileAtVersion(filePath: string, verbose: boolean, version: SessionVersion | undefined): Promise<SessionData | null> {
 	if (version?.activityMs === undefined) { return processSessionFile(filePath, verbose); }
-	const cached = getCached(filePath, version.mtimeMs, version.size);
+	const stamp = sessionCacheStamp(version);
+	const cached = getCached(filePath, stamp.mtimeMs, stamp.size);
 	if (cached && cached.baseActivityMs === version.activityMs) { return cached; }
 	const fresh = await processSessionFileWith(filePath, { verbose, cache: { get: () => null, set: setCached } });
 	if (!fresh) { return fresh; }
 	const stamped: SessionData = { ...fresh, baseActivityMs: version.activityMs };
-	setCached(filePath, version.mtimeMs, version.size, stamped);
+	setCached(filePath, stamp.mtimeMs, stamp.size, stamped);
 	return stamped;
 }
 
@@ -545,17 +548,40 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 }
 
 /**
- * Whether a session may hold activity on or after `cutoff`, by the same rule as the usage
- * analysis (isSessionActiveSince). When the file can't be stat'ed it is kept, so
- * processSessionFile still reports the problem.
+ * One session in the `SessionFileCache` shape the shared team-server rollup builder
+ * (src/teamServer/dailyRollupBuilder.ts) reads, built from the CLI's own parse so every
+ * ecosystem adapter is covered. Per-day rollups come from the session's `dailyFractions`, the
+ * same `extractDailyFractions()` attribution the extension's analyzer uses for its cache, and
+ * the full usage analysis supplies the team-safe activity counters.
+ *
+ * Throws when the session cannot be parsed, so the builder counts it as failed rather than
+ * reporting an unreadable file as a genuinely empty one.
  */
-async function isActiveSinceForStats(file: string, cutoff: Date): Promise<boolean> {
-	try {
-		const stats = await statSessionFile(file);
-		return await isSessionActiveSince(createSessionActivityLookup(file), stats.mtime, cutoff);
-	} catch {
-		return true;
+export async function getSessionFileCacheForRollups(filePath: string, mtime: number, size: number): Promise<SessionFileCache> {
+	const data = await processSessionFile(filePath);
+	if (!data) { throw new Error(`could not parse session ${filePath}`); }
+	const { analysis, failed } = await analyzeSessionUsageShared(filePath, { mtimeMs: mtime, size });
+	const interactions = Math.max(0, data.interactions);
+	const dailyRollups: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, fraction] of Object.entries(data.dailyFractions)) {
+		if (!(fraction > 0)) { continue; }
+		dailyRollups[dayKey] = {
+			tokens: Math.round(data.tokens * fraction),
+			actualTokens: Math.round(data.actualTokens * fraction),
+			thinkingTokens: Math.round(data.thinkingTokens * fraction),
+			interactions: Math.max(1, Math.round(Math.max(1, interactions) * fraction)),
+			modelUsage: scaleModelUsage(data.modelUsage, fraction),
+		};
 	}
+	return {
+		tokens: data.tokens,
+		interactions,
+		modelUsage: data.modelUsage,
+		mtime,
+		size,
+		dailyRollups,
+		...(failed ? {} : { usageAnalysis: analysis }),
+	};
 }
 
 /**
@@ -583,10 +609,6 @@ export async function calculateDetailedStats(
 
 	const last30DaysDate = new Date(y, m, now.getDate() - 30);
 	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
-	// The earliest day any period counts. Sessions last active before it can't contribute, so they
-	// are skipped before parsing: on a machine with years of history this avoids re-parsing
-	// thousands of old session files on every run.
-	const earliestPeriodStart = new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1);
 
 	const periods: {
 		today: PeriodStats;
@@ -600,9 +622,12 @@ export async function calculateDetailedStats(
 		last30Days: createEmptyPeriodStats(),
 	};
 
+	// Only sessions with a day on or after the start of last month count (below), so sessions
+	// whose own last activity is before the earliest window are not parsed at all.
+	const parseCutoff = recentAnalysisCutoff(now);
 	let processed = 0;
 	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => {
-		const data = await isActiveSinceForStats(file, earliestPeriodStart) ? await processSessionFile(file) : null;
+		const data = await mayHaveActivitySince(file, parseCutoff) ? await processSessionFile(file) : null;
 		if (progressCallback) { progressCallback(++processed, sessionFiles.length); }
 		return data;
 	});
@@ -661,6 +686,12 @@ export interface UsageAnalysisOptions {
 	 * (Skill Suggestions) report. Off by default: the report carries prompt text.
 	 */
 	includeRepeatedTasks?: boolean;
+	/**
+	 * Scheduled-task data: session UUID → GitHub Copilot automation name (so automation
+	 * runs are reported as scheduled tasks), and both apps' scheduled-task inventory.
+	 * Defaults to reading ~/.copilot/data.db and the Claude desktop app's data; tests pass a stub.
+	 */
+	loadScheduledTaskSources?: () => Promise<ScheduledTaskSources>;
 }
 
 /**
@@ -682,6 +713,15 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 	const todaySessions: TodaySessionSummary[] = [];
 	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 	const repeatedTaskSources: RepeatedTaskSessionSource[] = [];
+	// Sessions active in the last-30-days window, as multi-agent candidate rows (file + day key).
+	const multiAgentRows: { sessionFile: string; dayKey: string }[] = [];
+	// Day keys of sessions classified as Delegation in the window (for the daily Agentic trend).
+	const delegationDayKeys: string[] = [];
+	let agenticDailyTrend: AgenticTrendPoint[] | undefined;
+	// GitHub Copilot automation runs, so scheduled runs are reported as scheduled tasks, not suggestions.
+	const { automationRuns, definitions: scheduledTaskDefinitions } = options.includeRepeatedTasks
+		? await (options.loadScheduledTaskSources ?? loadScheduledTaskSources)()
+		: { automationRuns: new Map<string, string>(), definitions: [] };
 
 	for (const file of sessionFiles) {
 		try {
@@ -702,14 +742,23 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			// analyze each recent session twice.
 			const version = await sessionVersion(file, stats, () => activity.lastActivity());
 			const { analysis } = await analyzeSessionUsageShared(file, version);
-			if (options.includeRepeatedTasks) {
-				await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart);
-			}
+			const repeatedTaskSource = options.includeRepeatedTasks
+				? await addRepeatedTaskSource(repeatedTaskSources, activity, analysis.firstUserPrompt, stats.mtimeMs, cutoffStart, automationRuns)
+				: undefined;
 			// Period stats bucket by the same activity time.
 			let sessionSummary: TodaySessionSummary | undefined;
 			// At the session's own version: a DB-backed session admitted by its fresh adapter
 			// activity must not be summarised from a base parse the WAL has left stale.
 			const data = activeAt >= last30DaysStart ? await processSessionFileAtVersion(file, false, version) : undefined;
+			if (repeatedTaskSource) {
+				// So a failed scheduled run can show what its session cost. Scheduled runs are parsed
+				// even when older than the 30-day stats window: there are few of them.
+				const runData = data ?? (scheduledRunOf(repeatedTaskSource) ? await processSessionFileAtVersion(file, false, version) : undefined);
+				if (runData) {
+					repeatedTaskSource.tokens = runData.tokens;
+					repeatedTaskSource.costUsd = calculateEstimatedCost(runData.modelUsage, modelPricing);
+				}
+			}
 			if (data && data.interactions > 0) {
 				let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
 				for (const usage of Object.values(data.modelUsage)) {
@@ -746,6 +795,11 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 			if (activeAt >= last30DaysStart) {
 				mergeUsageAnalysis(last30DaysPeriod, analysis);
 				last30DaysPeriod.sessions++;
+				if (resolveSessionTaskAttribution(analysis).taskCategory === 'Delegation') {
+					last30DaysPeriod.delegationSessions = (last30DaysPeriod.delegationSessions ?? 0) + 1;
+					delegationDayKeys.push(toLocalDayKey(activeAt));
+				}
+				multiAgentRows.push({ sessionFile: file, dayKey: toLocalDayKey(activeAt) });
 			}
 			if (activeAt >= monthStart) {
 				mergeUsageAnalysis(monthPeriod, analysis);
@@ -765,6 +819,28 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 		}
 	}
 
+	// Multi-agent parent sessions for the last-30-days period plus the daily Agentic trend,
+	// from the same shared MultiAgentSource list the extension uses (Hermes state.db, Vibe
+	// meta.json). Optional enrichment — errors are suppressed.
+	try {
+		const sources = createMultiAgentSources(getDataAccessInstances());
+		const candidates = await collectMultiAgentCandidates(sources, multiAgentRows);
+		const parentCount = await countMultiAgentParents(candidates);
+		if (parentCount > 0) { last30DaysPeriod.multiAgentParentSessions = parentCount; }
+		const byDay = new Map<string, AgenticDayBucket>();
+		await bucketMultiAgentParentsByDay(candidates, byDay);
+		for (const dayKey of delegationDayKeys) {
+			const bucket = byDay.get(dayKey) ?? { multiAgentParentSessions: 0, delegationSessions: 0 };
+			bucket.delegationSessions++;
+			byDay.set(dayKey, bucket);
+		}
+		if (byDay.size > 0) {
+			agenticDailyTrend = [...byDay.entries()]
+				.map(([date, v]) => ({ date, ...v }))
+				.sort((a, b) => a.date.localeCompare(b.date));
+		}
+	} catch { /* optional enrichment — suppress */ }
+
 	return {
 		today: todayPeriod,
 		last30Days: last30DaysPeriod,
@@ -773,7 +849,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[], option
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
 		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
-		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources) } : {}),
+		...(agenticDailyTrend ? { agenticDailyTrend } : {}),
+		...(options.includeRepeatedTasks ? { repeatedTasks: buildRepeatedTaskReport(repeatedTaskSources, { scheduledTaskDefinitions }) } : {}),
 	};
 }
 
@@ -830,7 +907,9 @@ export function createSessionActivityLookup(file: string, sources: SessionActivi
  * DB-backed sessions share their database's mtime, so the adapter's per-session
  * last interaction (or last activity) is what places a session in the window.
  */
-async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number): Promise<RepeatedTaskSessionSource> {
+async function toRepeatedTaskSource(
+	activity: SessionActivityLookup, firstUserPrompt: string, mtimeMs: number, automationRuns: ReadonlyMap<string, string>,
+): Promise<RepeatedTaskSessionSource> {
 	const meta = await activity.meta();
 	const lastInteraction = meta?.lastInteraction ?? (await activity.lastActivity())?.toISOString() ?? null;
 	return {
@@ -840,17 +919,42 @@ async function toRepeatedTaskSource(activity: SessionActivityLookup, firstUserPr
 		lastInteraction,
 		mtime: mtimeMs,
 		repository: meta?.repository ?? null,
+		editor: getEditorSourceFromPath(activity.file),
+		copilotAutomation: automationRunName(activity.file, automationRuns),
 	};
 }
 
-/** Add a session with a first prompt to the repeated-task sources when its own activity is in the window. */
+/** Scheduled-task data the repeated-task report needs; see UsageAnalysisOptions.loadScheduledTaskSources. */
+export interface ScheduledTaskSources {
+	automationRuns: Map<string, string>;
+	definitions: ScheduledTaskDefinition[];
+}
+
+/** Copilot automations and runs from ~/.copilot/data.db plus Claude desktop scheduled tasks; empty parts when an app is not installed. */
+async function loadScheduledTaskSources(): Promise<ScheduledTaskSources> {
+	const claude = await readClaudeScheduledTasks().catch(() => []);
+	const dbPath = getCopilotAppDataDbPath();
+	if (!fs.existsSync(dbPath)) { return { automationRuns: new Map(), definitions: claude }; }
+	const access = new CopilotAutomationRunsAccess(dbPath);
+	try {
+		return { automationRuns: await access.getAutomationRuns(), definitions: [...claude, ...await access.getAutomations()] };
+	} catch {
+		return { automationRuns: new Map(), definitions: claude };
+	} finally {
+		access.dispose();
+	}
+}
+
+/** Add a session with a first prompt to the repeated-task sources (and return it) when its own activity is in the window. */
 async function addRepeatedTaskSource(
 	sources: RepeatedTaskSessionSource[], activity: SessionActivityLookup,
-	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date,
-): Promise<void> {
-	if (!firstUserPrompt) { return; }
-	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs);
-	if (repeatedTaskActivityMs(source) >= cutoff.getTime()) { sources.push(source); }
+	firstUserPrompt: string | undefined, mtimeMs: number, cutoff: Date, automationRuns: ReadonlyMap<string, string>,
+): Promise<RepeatedTaskSessionSource | undefined> {
+	if (!firstUserPrompt) { return undefined; }
+	const source = await toRepeatedTaskSource(activity, firstUserPrompt, mtimeMs, automationRuns);
+	if (repeatedTaskActivityMs(source) < cutoff.getTime()) { return undefined; }
+	sources.push(source);
+	return source;
 }
 
 /**
@@ -978,6 +1082,26 @@ export async function isSessionActiveSince(activity: Pick<SessionActivityLookup,
 	return (await sessionActivityTime(activity, fileMtime)) >= cutoff;
 }
 
+/**
+ * Pre-parse filter for windowed walks: false only when the session certainly had no activity
+ * on or after `cutoff`, so skipping it cannot change the result. A regular file is judged by
+ * its mtime (nothing in it can be newer). A DB-backed (virtual) session is judged by its own
+ * adapter-reported activity, never by the database mtime: that moves with every other session
+ * in the database and can lag its own writes in the WAL. A virtual session whose activity is
+ * unknown, and any file that cannot be stat'ed (processSessionFile reports it), is kept.
+ */
+export async function mayHaveActivitySince(file: string, cutoff: Date, activity: Pick<SessionActivityLookup, 'lastActivity' | 'isVirtual'> = createSessionActivityLookup(file)): Promise<boolean> {
+	if (activity.isVirtual) {
+		const own = await activity.lastActivity();
+		return own === null || own >= cutoff;
+	}
+	try {
+		return (await statSessionFile(file)).mtime >= cutoff;
+	} catch {
+		return true;
+	}
+}
+
 function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>): DailyTokenStats[] {
 	const dailyStatsMap = new Map<string, DailyTokenStats>();
 	for (const data of sessions) {
@@ -1040,4 +1164,4 @@ export { ENVIRONMENTAL } from './constants';
 export { modelPricing, tokenEstimators, toolNameMap };
 
 /** Cache lifecycle — re-export for use in commands */
-export { loadCache, saveCache, disableCache, enableCacheCheckpoints, getCacheStats } from './cliCache';
+export { loadCache, saveCache, saveCacheOnSignals, disableCache, getCacheStats } from './cliCache';

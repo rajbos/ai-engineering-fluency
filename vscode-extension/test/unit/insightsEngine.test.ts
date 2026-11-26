@@ -2,8 +2,8 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { INSIGHT_CATALOG, evaluateInsights } from '../../../src/insightsEngine';
-import type { InsightContext } from '../../../src/insightsEngine';
+import { INSIGHT_CATALOG, evaluateInsights, insightToastMessage, insightTooltipTitle, pickToastInsight, reopenFailingAutomationInsight } from '../../../src/insightsEngine';
+import type { InsightContext, InsightStateBag } from '../../../src/insightsEngine';
 import { createTranslator } from '../../src/l10nCore';
 import type { ToolCurationAnalysis, UsageAnalysisPeriod, MemoryFilesAnalysis } from '../../../src/types';
 
@@ -975,6 +975,143 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.match(insight.body, /3 sessions/);
 	assert.match(insight.body, /run the tests/);
 	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+function recurringReport(editors: string[] | undefined, recurrence: { cadence: 'daily' | 'weekly' | 'regular'; activeDays: number; typicalGapDays: number } | undefined) {
+	const report = rtReport(4);
+	return { ...report, clusters: [{ ...report.clusters[0], editors, recurrence }] };
+}
+
+test('repeated-task-automation-candidate: fires only for a recurring task and names the matching schedulers', () => {
+	const none = makeCtx();
+	none.repeatedTasks = rtReport(4);
+	assert.equal(evaluateInsights(none, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate'), undefined);
+
+	const ctx = makeCtx();
+	ctx.repeatedTasks = recurringReport(['Claude Code', 'VS Code'], { cadence: 'weekly', activeDays: 4, typicalGapDays: 7 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate');
+	assert.ok(insight, 'should fire for a recurring cluster');
+	assert.match(insight.body, /about weekly/);
+	assert.match(insight.body, /4 different days/);
+	assert.match(insight.body, /run the tests/);
+	assert.match(insight.body, /Claude Code scheduled tasks or GitHub Copilot automations/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openSkillSuggestions');
+});
+
+test('repeated-task-automation-candidate: unknown editors fall back to a scheduled CLI job, with every-N-days phrasing', () => {
+	const ctx = makeCtx();
+	ctx.repeatedTasks = recurringReport(undefined, { cadence: 'regular', activeDays: 3, typicalGapDays: 3 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'repeated-task-automation-candidate');
+	assert.ok(insight);
+	assert.match(insight.body, /about every 3 days/);
+	assert.match(insight.body, /scheduled job that runs your agent's CLI/);
+});
+
+test('scheduled-tasks-running: celebrates tasks already on a schedule and names them per platform', () => {
+	const none = makeCtx();
+	none.repeatedTasks = rtReport(3);
+	assert.equal(evaluateInsights(none, {}, 7, null).find(i => i.id === 'scheduled-tasks-running'), undefined);
+
+	const ctx = makeCtx();
+	ctx.repeatedTasks = {
+		...rtReport(3),
+		scheduledTasks: [
+			{ name: 'repo-health-scan-daily', platform: 'claude', runCount: 30, activeDays: 30, lastRun: null },
+			{ name: 'Dependabot review', platform: 'copilot', runCount: 10, activeDays: 10, lastRun: null },
+			{ name: 'weekly-refactor', platform: 'claude', runCount: 4, activeDays: 4, lastRun: null },
+			{ name: 'one-more', platform: 'copilot', runCount: 1, activeDays: 1, lastRun: null },
+		],
+	};
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === 'scheduled-tasks-running');
+	assert.ok(insight, 'should fire when scheduled tasks ran');
+	assert.equal(insight.severity, 'celebration');
+	assert.match(insight.body, /^4 scheduled tasks ran 45 times/);
+	assert.match(insight.body, /"repo-health-scan-daily" \(Claude Code, 30×\)/);
+	assert.match(insight.body, /"Dependabot review" \(GitHub Copilot automation, 10×\)/);
+	assert.match(insight.body, /and 1 more/);
+	assert.doesNotMatch(insight.body, /one-more/);
+
+	const single = makeCtx();
+	single.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: [{ name: 'nightly', platform: 'copilot', runCount: 2, activeDays: 2, lastRun: null }] };
+	const one = evaluateInsights(single, {}, 7, null).find(i => i.id === 'scheduled-tasks-running');
+	assert.match(one!.body, /^1 scheduled task ran 2 times/);
+	assert.equal(evaluateInsights(single, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+});
+
+test('scheduled-automation-at-risk names stale automations; scheduled-automation-failing names failing ones with their cost', () => {
+	const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+	const ctx = makeCtx();
+	ctx.repeatedTasks = {
+		minClusterSize: 2, sessionsScanned: 0, clusters: [],
+		scheduledTasks: [
+			{ name: 'stopped', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(45), health: 'stale' },
+			{ name: 'never', platform: 'copilot', runCount: 0, activeDays: 0, lastRun: null, health: 'stale' },
+			{ name: 'broken', platform: 'copilot', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false, sessionFile: '/s/a.jsonl', tokens: 1_200_000, costUsd: 3 }, { at: daysAgo(2), ok: false, sessionFile: '/s/b.jsonl', tokens: 300_000, costUsd: 1.25 }, { at: daysAgo(3), ok: true }] },
+			{ name: 'flaky', platform: 'claude', runCount: 3, activeDays: 3, lastRun: daysAgo(1), health: 'failing', recentRuns: [{ at: daysAgo(1), ok: false }, { at: daysAgo(2), ok: false }, { at: daysAgo(3), ok: false }] },
+			{ name: 'fine', platform: 'claude', runCount: 5, activeDays: 5, lastRun: daysAgo(1), health: 'healthy' },
+			{ name: 'off', platform: 'claude', runCount: 0, activeDays: 0, lastRun: daysAgo(90), health: 'disabled' },
+		],
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'scheduled-automation-at-risk');
+	assert.ok(insight);
+	assert.match(insight.body, /^2 scheduled automations stopped running/);
+	assert.match(insight.body, /"stopped" has not run for 45 days/);
+	assert.match(insight.body, /"never" has never run/);
+	assert.doesNotMatch(insight.body, /"broken"|"flaky"|"fine"|"off"/);
+
+	const failing = results.find(i => i.id === 'scheduled-automation-failing');
+	assert.ok(failing);
+	assert.equal(failing.allowToast, true, 'a failing job is worth a toast');
+	assert.ok(results.indexOf(failing) < results.indexOf(insight), 'ranked above the stale list');
+	assert.match(failing.body, /^2 scheduled automations keep failing/);
+	assert.match(failing.body, /"broken" failed 2 of its last 3 runs, using 1\.5M tokens \(about \$4\.25\)/);
+	assert.match(failing.body, /"flaky" failed 3 of its last 3 runs(?!,)/, 'no cost when no failed run has a known session');
+	// Only tasks that ran in the window are celebrated.
+	assert.match(results.find(i => i.id === 'scheduled-tasks-running')!.body, /^3 scheduled tasks ran 11 times/);
+
+	const healthy = makeCtx();
+	healthy.repeatedTasks = { ...ctx.repeatedTasks, scheduledTasks: ctx.repeatedTasks.scheduledTasks!.filter(t => t.health === 'healthy') };
+	assert.equal(evaluateInsights(healthy, {}, 7, null).find(i => i.id === 'scheduled-automation-at-risk'), undefined);
+	assert.equal(evaluateInsights(healthy, {}, 7, null).find(i => i.id === 'scheduled-automation-failing'), undefined);
+});
+
+test('a scheduled automation that starts failing re-opens its insight once and toasts past the cadence', () => {
+	const task = (name: string, health: 'failing' | 'healthy') => ({ name, platform: 'claude' as const, runCount: 3, activeDays: 3, lastRun: null, health, recentRuns: [{ at: '2026-11-20T00:00:00Z', ok: health !== 'failing' }] });
+	const now = '2026-11-25T12:00:00.000Z';
+	const justNudged = '2026-11-25T11:00:00.000Z';
+	const bag: InsightStateBag = { 'scheduled-automation-failing': { status: 'dismissed', firstSurfacedAt: now, lastSurfacedAt: now } };
+
+	// First detection: re-opened even though it was dismissed, and toasted although a toast was just shown.
+	const first = reopenFailingAutomationInsight([task('nightly', 'failing'), task('ok', 'healthy')], bag, []);
+	assert.deepEqual(first, { reopened: true, nextNotifiedKeys: ['claude:nightly'] });
+	assert.equal(bag['scheduled-automation-failing'], undefined);
+	const ctx = makeCtx();
+	ctx.repeatedTasks = { minClusterSize: 2, sessionsScanned: 0, clusters: [], scheduledTasks: [task('nightly', 'failing')] };
+	const evaluated = evaluateInsights(ctx, bag, 7, justNudged);
+	const toast = pickToastInsight(evaluated, 7, justNudged, now, first.reopened);
+	assert.equal(toast?.id, 'scheduled-automation-failing');
+	assert.match(insightToastMessage(toast!), /^⚠️ A scheduled automation keeps failing — "nightly" failed 1 of its last 1 runs/);
+	assert.match(insightTooltipTitle(toast!), /keeps failing\n\n"nightly" failed/);
+
+	// Already told: nothing re-opened, and the cadence applies again.
+	bag['scheduled-automation-failing'] = { status: 'dismissed', firstSurfacedAt: now, lastSurfacedAt: now };
+	const again = reopenFailingAutomationInsight([task('nightly', 'failing')], bag, first.nextNotifiedKeys);
+	assert.equal(again.reopened, false);
+	assert.equal(bag['scheduled-automation-failing'].status, 'dismissed');
+	assert.equal(pickToastInsight(evaluateInsights(ctx, bag, 7, justNudged), 7, justNudged, now, again.reopened), undefined);
+
+	// A refresh with no inventory (read error, empty data.db) must not reset what was notified,
+	// or the refresh after it re-opens and toasts the same failure again.
+	const empty = reopenFailingAutomationInsight([], bag, again.nextNotifiedKeys);
+	assert.deepEqual(empty, { reopened: false, nextNotifiedKeys: ['claude:nightly'] });
+	assert.equal(reopenFailingAutomationInsight([task('nightly', 'failing')], bag, empty.nextNotifiedKeys).reopened, false);
+	assert.equal(bag['scheduled-automation-failing'].status, 'dismissed');
+
+	// Other insights keep their plain toast and tooltip.
+	const plain = { id: 'x', title: 'Try skills', body: 'body' };
+	assert.equal(insightToastMessage(plain), '💡 Try skills');
+	assert.equal(insightTooltipTitle(plain), 'Try skills');
 });
 
 test('curation insights open Tool Curation on Workspace Health, and name the new Skill Suggestions location', () => {

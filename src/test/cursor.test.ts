@@ -5,6 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import type { UriLike } from '../opencode';
 import { CursorDataAccess } from '../cursor';
+import { CursorAdapter } from '../adapters/cursorAdapter';
+import type { ReadOnlySqliteReader } from '../utils/readOnlySqlite';
 
 const FAKE_URI: UriLike = { fsPath: '', path: '', scheme: 'file' };
 
@@ -182,7 +184,7 @@ test('falls back to sql.js when node:sqlite is unavailable, and still returns co
 
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron).
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const virtualPath = `${fixture.dbPath}#${composerId}`;
 		const data = await access.readComposerData(virtualPath);
@@ -208,7 +210,7 @@ test('a db path that fails to open read-only is only probed once, not retried on
 				throw new Error('simulated read-only open failure');
 			}
 		}
-		(access as unknown as { getNodeSqliteModule: () => { DatabaseSync: unknown } }).getNodeSqliteModule = () => (
+		(access as unknown as { _readOnly: { getNodeSqliteModule: () => { DatabaseSync: unknown } } })._readOnly.getNodeSqliteModule = () => (
 			{ DatabaseSync: FailingDatabaseSync }
 		);
 		access.getCursorDbPath = () => dbPath;
@@ -229,25 +231,22 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 		const access = new CursorDataAccess(FAKE_URI);
 		// Force the read-only backend to fail once, as a transient SQLITE_BUSY would while the
 		// writer holds an exclusive lock during its own checkpoint.
-		const accessInternals = access as unknown as {
-			_readOnlyUnsupportedDbs: Map<string, number>;
-			isReadOnlyDemoted(dbPath: string): boolean;
-		};
-		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now());
+		const readOnly = (access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly;
+		readOnly.demote(fixture.dbPath, Date.now());
 		assert.equal(
-			accessInternals.isReadOnlyDemoted(fixture.dbPath), true,
+			readOnly.isDemoted(fixture.dbPath), true,
 			'a just-failed db should be demoted to the sql.js fallback'
 		);
 
 		// Past the cooldown the demotion must lapse — otherwise one transient failure strands this
 		// db on the copy-based fallback forever, reintroducing the multi-GB copies (#2033).
-		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now() - 6 * 60_000);
+		readOnly.demote(fixture.dbPath, Date.now() - 6 * 60_000);
 		assert.equal(
-			accessInternals.isReadOnlyDemoted(fixture.dbPath), false,
+			readOnly.isDemoted(fixture.dbPath), false,
 			'the demotion must expire so the copy-free backend is retried'
 		);
 		assert.equal(
-			accessInternals._readOnlyUnsupportedDbs.has(fixture.dbPath), false,
+			readOnly.hasDemotionEntry(fixture.dbPath), false,
 			'the lapsed entry should be cleared rather than accumulating'
 		);
 	} finally {
@@ -256,15 +255,17 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 });
 
 test('a failed read-only open demotes the db only temporarily — the REAL query path retries the native backend once the cooldown expires', async () => {
-	// Unlike the test above (which only pokes the private _readOnlyUnsupportedDbs map and the
-	// isReadOnlyDemoted predicate directly), this exercises the actual public query path end to
+	// Unlike the test above (which only pokes the private reader's demotion map and its
+	// isDemoted predicate directly), this exercises the actual public query path end to
 	// end with an injected failing/recovering backend and a controllable clock, so a regression
 	// that left queryReadOnly permanently bypassed after one failure would be caught here.
 	const fixture = createCursorDbFixture();
 	const realNow = Date.now;
 	try {
 		const composerId = 'composer-cooldown';
-		const payload = JSON.stringify({ composerId, name: 'Cooldown session', contextTokensUsed: 5 });
+		// Inline headers keep this a single-query read (a header-less composer also looks up the
+		// chunked composerConvHeaders rows, #2735), so openAttempts counts one open per read.
+		const payload = JSON.stringify({ composerId, name: 'Cooldown session', contextTokensUsed: 5, fullConversationHeadersOnly: [{ type: 1, bubbleId: 'b1' }] });
 		fixture.writer.exec(`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${payload.replace(/'/g, "''")}')`);
 
 		const access = new CursorDataAccess(FAKE_URI);
@@ -280,10 +281,11 @@ test('a failed read-only open demotes the db only temporarily — the REAL query
 				}
 				this.real = new RealDatabaseSync(dbPath, options);
 			}
+			exec(sql: string) { return this.real.exec(sql); }
 			prepare(sql: string) { return this.real.prepare(sql); }
 			close() { return this.real.close(); }
 		}
-		(access as unknown as { getNodeSqliteModule: () => { DatabaseSync: unknown } }).getNodeSqliteModule = () => (
+		(access as unknown as { _readOnly: { getNodeSqliteModule: () => { DatabaseSync: unknown } } })._readOnly.getNodeSqliteModule = () => (
 			{ DatabaseSync: ControllableDatabaseSync }
 		);
 
@@ -331,7 +333,7 @@ test('the sql.js fallback backend caches a parsed Database per db path instead o
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron) — every query below must go
 		// through the sql.js fallback.
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const dbCounter = installDbConstructionCounter(access);
 
@@ -369,7 +371,7 @@ test('a transient read failure is not cached as "composer not found" — it is r
 		const access = new CursorDataAccess(FAKE_URI);
 		// Force every query through the sql.js fallback, and make its very first load fail —
 		// simulating a momentary error (e.g. a transient lock) rather than a genuinely missing row.
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 		let initAttempts = 0;
 		const realInitSqlJs = access.initSqlJs.bind(access);
 		access.initSqlJs = async () => {
@@ -455,7 +457,7 @@ test('the sql.js fallback reuses the parsed Database across a throttled read ins
 		const access = new CursorDataAccess(FAKE_URI);
 		// Simulate an environment without node:sqlite (older Electron) — every query below must go
 		// through the sql.js fallback and its per-db-path Database cache (getSqlJsDb).
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const dbCounter = installDbConstructionCounter(access);
 
@@ -512,7 +514,7 @@ test('a WAL-blind plain read (merge failed, nothing cached) is not persisted as 
 		write('v2'); // pending only in the WAL from here on
 
 		const access = new CursorDataAccess(FAKE_URI);
-		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
 
 		const virtualPath = `${fixture.dbPath}#${composerId}`;
 		const composerCache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;
@@ -542,6 +544,110 @@ test('a WAL-blind plain read (merge failed, nothing cached) is not persisted as 
 	} finally {
 		Date.now = realNow;
 		rawFs.copyFileSync = originalCopyFileSync;
+		fixture.cleanup();
+	}
+});
+
+/**
+ * Cursor 3.3x (#2735) writes composers with an empty `fullConversationHeadersOnly` and keeps the
+ * headers in chunked `composerConvHeaders:<composerId>:<000000>` rows. Seeds that shape, plus a
+ * neighbouring composer whose id shares the prefix, so the key-range bounds are exercised too.
+ */
+function seedChunkedComposer(writer: { exec(sql: string): void }, composerId: string): void {
+	const put = (key: string, value: unknown) => writer.exec(
+		`INSERT INTO cursorDiskKV VALUES ('${key}', '${JSON.stringify(value).replace(/'/g, "''")}')`
+	);
+	put(`composerData:${composerId}`, {
+		_v: 18, composerId, name: 'New format', contextTokensUsed: 900, modelConfig: { modelName: 'grok-4.7' },
+		fullConversationHeadersOnly: [], conversationMap: {},
+		headerLog: { chunkSize: 2, chunkCount: 2, count: 4 },
+	});
+	// Inserted out of order on purpose: chunks must be read in key order, not insertion order.
+	put(`composerConvHeaders:${composerId}:000001`, [{ bubbleId: 'u2', type: 1 }, { bubbleId: 'u2/s:0', type: 2 }]);
+	put(`composerConvHeaders:${composerId}:000000`, [{ bubbleId: 'u1', type: 1 }, { bubbleId: 'u1/s:0', type: 2 }]);
+	put(`composerConvHeaders:${composerId}x:000000`, [{ bubbleId: 'other', type: 1 }]);
+	put(`bubbleId:${composerId}:u1`, { bubbleId: 'u1', type: 1, text: 'first question' });
+	put(`bubbleId:${composerId}:u1/s:0`, { bubbleId: 'u1/s:0', type: 2, text: 'first answer' });
+	put(`bubbleId:${composerId}:u2`, { bubbleId: 'u2', type: 1, text: 'second question' });
+	put(`bubbleId:${composerId}:u2/s:0`, { bubbleId: 'u2/s:0', type: 2, text: 'second answer' });
+}
+
+test('new-format composers (#2735): interactions and turns come from chunked composerConvHeaders rows', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'chunked-composer';
+		seedChunkedComposer(fixture.writer, composerId);
+		const access = new CursorDataAccess(FAKE_URI);
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+
+		const data = await access.readComposerData(virtualPath);
+		assert.deepEqual(
+			data?.fullConversationHeadersOnly?.map(h => h.bubbleId),
+			['u1', 'u1/s:0', 'u2', 'u2/s:0'],
+			'chunks are concatenated in key order and a neighbouring composer\'s chunk is not included'
+		);
+
+		const sync = await access.getSessionData(virtualPath);
+		assert.equal(sync.interactions, 2, 'a new-format chat must not be skipped as 0 interactions');
+		assert.equal(sync.tokens, 900);
+
+		const { turns } = await new CursorAdapter(access).buildTurns(virtualPath);
+		assert.deepEqual(
+			turns.map(t => [t.userMessage, t.assistantResponse]),
+			[['first question', 'first answer'], ['second question', 'second answer']]
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('new-format composers (#2735): chunked headers are read through the sql.js fallback too, and cached with the composer', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'chunked-fallback';
+		seedChunkedComposer(fixture.writer, composerId);
+		fixture.writer.close(); // checkpoint so the plain sql.js buffer read sees the rows
+
+		const access = new CursorDataAccess(FAKE_URI);
+		(access as unknown as { _readOnly: ReadOnlySqliteReader })._readOnly.getNodeSqliteModule = () => null;
+		let queryCount = 0;
+		const originalQueryAll = (access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll.bind(access);
+		(access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll = (...args: unknown[]) => {
+			queryCount++;
+			return originalQueryAll(...args);
+		};
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const sync = await access.getSessionData(virtualPath);
+		assert.equal(sync.interactions, 2);
+		assert.equal(queryCount, 2, 'one composer query plus one chunk query for 4 concurrent reads');
+
+		await access.countInteractions(virtualPath);
+		assert.equal(queryCount, 2, 'the resolved headers are served from the composer cache afterwards');
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('legacy composers keep using their inline fullConversationHeadersOnly without a chunk query', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'legacy-composer';
+		fixture.writer.exec(
+			`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${JSON.stringify({
+				composerId, fullConversationHeadersOnly: [{ type: 1, bubbleId: 'a' }, { type: 2, bubbleId: 'b' }, { type: 1, bubbleId: 'c' }],
+			}).replace(/'/g, "''")}')`
+		);
+		const access = new CursorDataAccess(FAKE_URI);
+		let queryCount = 0;
+		const originalQueryAll = (access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll.bind(access);
+		(access as unknown as { queryAll: (...args: unknown[]) => unknown }).queryAll = (...args: unknown[]) => {
+			queryCount++;
+			return originalQueryAll(...args);
+		};
+		assert.equal(await access.countInteractions(`${fixture.dbPath}#${composerId}`), 2);
+		assert.equal(queryCount, 1, 'inline headers are used as-is, no extra chunk lookup');
+	} finally {
 		fixture.cleanup();
 	}
 });

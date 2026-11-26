@@ -56,7 +56,6 @@ import type {
   SessionLogData,
   AgentSessionsResult,
   TokenEstimator,
-  SessionRelationRef,
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
@@ -65,11 +64,13 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  ScheduledTaskSummary,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
 } from '../../src/types';
 import { buildShareCardData, type ShareCardPeriodData } from './shareCardData';
+import { buildFluencyScorePayload } from '../../src/teamServer/fluencyScorePayload';
 import {
 	ensureContextPressure,
 	hasContextSignal,
@@ -183,7 +184,7 @@ import {
   evaluateUsageInsights as _evaluateUsageInsights,
   mergeInsightStates as _mergeInsightStates,
   countNewInsights as _countNewInsights,
-  isToastAllowed as _isToastAllowed,
+  pickToastInsight as _pickToastInsight, insightToastMessage as _insightToastMessage, insightTooltipTitle as _insightTooltipTitle, reopenFailingAutomationInsight as _reopenFailingAutomationInsight,
 } from '../../src/insightsEngine';
 
 // --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
@@ -224,12 +225,13 @@ import {
 } from '../../src/diagnosticsViewBuilder';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
-import { PiDataAccess } from '../../src/pi';
+import { automationRunName } from '../../src/copilotAutomationRuns';
+import { readClaudeScheduledTasks } from '../../src/scheduledTaskSources';
 import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
+import { analyzeHydraFusionSession, aiuToUsd, isCopilotFusionAutoSession, resolveCopilotRouterModel } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath, setCopilotCliOtelLogger } from '../../src/copilotCliOtel';
 import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
@@ -250,6 +252,8 @@ import { ExclusiveRunner } from './analysis/exclusiveRunner';
 import { runOffHostThread as _runOffHostThread } from './analysis/runOffHostThread';
 import { computeSessionFileDetails as _computeSessionFileDetails } from './analysis/sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace as _scanCustomizationFilesForWorkspace } from './analysis/workspaceCustomizationScan';
+import { createCopilotCliMultiAgentSource, enrichCopilotSessionHierarchy, enrichPiSessionHierarchy, enrichVibeSessionHierarchy } from './analysis/sessionHierarchy';
+import { bucketMultiAgentParentsByDay, collectMultiAgentCandidates, countMultiAgentParents, createMultiAgentSources, type MultiAgentCandidate, type MultiAgentSource } from '../../src/multiAgentSources';
 
 // --- Session parsing & token estimation ---
 import {
@@ -276,6 +280,7 @@ import { RepoHeatmapPanel, createRepoHeatmapHost } from './repoHeatmapPanel';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { getMachineLockDir } from '../../src/machineParseLock';
 import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
@@ -318,7 +323,6 @@ import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
-  STAGE_THRESHOLDS,
   STATS_REFRESH_INTERVAL_MS,
 } from '../../src/maturityScoring';
 
@@ -334,13 +338,12 @@ import {
   resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
   extractMcpServerName as _extractMcpServerName,
-  normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
   dedupeByNormalizedKeyKeepGreatest as _dedupeByNormalizedKeyKeepGreatest,
   normalizeToRepoRoot as _normalizeToRepoRoot,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
-import { groupWorkspaces as _groupWorkspaces, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, groupFolders as _groupFolders, type WorkspaceGroup } from '../../src/workspaceGrouping';
+import { groupWorkspaces as _groupWorkspaces, mergeGroupCustomizationFiles as _mergeGroupCustomizationFiles, workspaceEntriesWithRemotes as _workspaceEntriesWithRemotes, groupFolders as _groupFolders, stripWindowsLongPathPrefix as _stripWindowsLongPathPrefix, type WorkspaceGroup } from '../../src/workspaceGrouping';
 import { prefetchWorkspaceGroupingProbes as _prefetchWorkspaceGroupingProbes } from '../../src/workspaceGroupingProbes';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
@@ -436,7 +439,7 @@ import {
   type ViewRegressionProbeSnapshot,
 } from './viewRegression';
 // --- Backend & UI ---
-import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
+import { assertViewableSessionTurns, createExtensionApi, type AiFluencyExtensionApi, type ExtensionPointButton } from './extensionPoints';
 import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
 import { deferWhileApplyingSettings } from './backend/settingsBatch';
 import { BackendFacade } from './backend/facade';
@@ -453,6 +456,7 @@ import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { registerBadgeSetup, type BadgeSnapshot } from './badge/registerBadgeSetup';
+import { registerUsageHistoryCommands } from './usageHistoryCommands';
 import { formatWindsurfDiagnosticsContent } from './windsurfDiagnosticsReport';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 import { TtftScanResultCache } from './ttftAnalysisCache';
@@ -477,6 +481,7 @@ import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from 
 import { findViewIndexEntry, type ViewIndexNavigation } from './whatsNew/viewIndex';
 import { SurfaceRevealQueue } from './whatsNew/surfaceRevealQueue';
 import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
+import { checkWebviewSessionFilePath, parseWebviewTurnNumber } from './sessionFilePathGuard';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -1182,7 +1187,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v86: Claude Code sessions from the VS Code extension (entrypoint claude-vscode) are labelled
 	// 'Claude Code (VS Code)' instead of 'Claude Code' (#2479): cache hits skip re-analysis, so existing
 	// entries would keep the old editor key until their file changed.
-	private static readonly CACHE_VERSION = 86;
+	// v87: Copilot app sessions that selected `auto` and were routed by Copilot Fusion are attributed
+	// to `hydrafusion` (Copilot Fusion) instead of `auto`: existing entries keep `auto` until re-parsed.
+	private static readonly CACHE_VERSION = 87;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -1239,6 +1246,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY = 'worktrees.backgroundScan.lastNotifiedBytes';
 	private logViewerPanel?: vscode.WebviewPanel;
 	private logViewerSessionFilePath: string = '';
+	private logViewerStrict = false;
 	private logViewerCurrentData?: SessionLogData;
 	public openCode!: OpenCodeDataAccess;
 	public crush!: CrushDataAccess;
@@ -1253,7 +1261,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public windsurf!: WindsurfDataAccess;
 	private hermes!: HermesDataAccess;
 	public ecosystems!: IEcosystemAdapter[];
-	private cacheManager!: CacheManager;
+	cacheManager!: CacheManager;
 	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
@@ -1593,7 +1601,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 24;
 	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
 	private _followerResyncTimer: NodeJS.Timeout | undefined;
-	private _refreshHeartbeat: NodeJS.Timeout | undefined;
 
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
@@ -1735,6 +1742,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
+	/** Scheduled tasks from the last Usage Analysis refresh, for the AI Readiness findings. */
+	private _lastScheduledTasks?: ScheduledTaskSummary[];
 
 	// True while this window is refreshing the shared repository-PRs snapshot from the GitHub API
 	private _repoPrRefreshInFlight = false;
@@ -2737,7 +2746,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
 		this.cacheManager = new CacheManager(context, {
-			log: (m: string) => this.log(m),
+			log: (m: string) => this.log(m), editorTypeOf: (p: string) => this.getEditorTypeFromPath(p),
 			warn: (m: string) => this.warn(m),
 			error: (m: string) => this.error(m),
 			// Mirrors clearCache()'s own local-clear invalidation, minus the two steps that are
@@ -2789,6 +2798,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
 				}
 			},
+			machineLockDir: getMachineLockDir(),
 		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
@@ -3559,15 +3569,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const preloaded: SessionFilePreload[] = [];
 			for (const [sessionFile, sessionData] of this.getDeduplicatedCacheEntries()) {
 				if (!this.isUsableForInstantPaint(sessionData, instantPaintCutoffMs)) { continue; }
-				const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
-				preloaded.push({
-					sessionFile,
-					mtime: sessionData.mtime,
-					fileSize: sessionData.size ?? 0,
-					sessionData,
-					wasCached: true,
-					details: this.buildMinimalPreloadDetails(sessionFile, stat, sessionData),
-				});
+				preloaded.push(this.preloadFromCacheEntry(sessionFile, sessionData));
 			}
 			if (preloaded.length === 0) { return; }
 
@@ -3872,7 +3874,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const topNew = newInsights[0];
 		this.refreshStatusBarInsightBadge(
 			newInsights.length,
-			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+			topNew ? { title: _insightTooltipTitle(topNew), id: topNew.id } : undefined,
 		);
 	}
 
@@ -5355,23 +5357,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * it and its cache hit resolves just as fast, only later in the queue instead of dominating the
 	 * front of it.
 	 *
-	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
+	 * A cached path inside a WSL distro that is not running now (`isStoppedWsl`) is never queued:
+	 * the worker's stat would start that distro. Its cached data goes straight into `preloaded`
+	 * instead, so its usage stays in the totals while the distro is stopped.
+	 *
+	 * Returns the number of paths queued (for the caller's totalDiscovered count).
 	 */
-	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, editorSet?: Set<string>): number {
+	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, isStoppedWsl: (filePath: string) => boolean, preloaded: SessionFilePreload[], editorSet?: Set<string>): number {
 		if (this.isSampleDataModeActive()) { return 0; }
-		const cachedPaths = this.getDeduplicatedCacheEntries()
-			.filter(([, data]) => data.mtime >= cutoffMs)
-			.map(([filePath]) => filePath);
-		if (cachedPaths.length === 0) { return 0; }
-		for (const p of cachedPaths) { seen.add(_normalizePathForDedup(p)); }
-		if (editorSet) {
-			for (const file of cachedPaths) {
-				const editor = this.detectEditorSource(file);
-				if (editor && editor !== 'Unknown') { editorSet.add(editor); }
-			}
+		const entries = this.getDeduplicatedCacheEntries().filter(([, data]) => data.mtime >= cutoffMs);
+		let queued = 0;
+		for (const [filePath, data] of entries) {
+			seen.add(_normalizePathForDedup(filePath));
+			const editor = editorSet ? this.detectEditorSource(filePath) : undefined;
+			if (editor && editor !== 'Unknown') { editorSet?.add(editor); }
+			if (!isStoppedWsl(filePath)) { queue.push(filePath); queued++; }
+			else if (!data.detailsOnly) { preloaded.push(this.preloadFromCacheEntry(filePath, data)); }
 		}
-		queue.push(...cachedPaths);
-		return cachedPaths.length;
+		return queued;
+	}
+
+	/** A preload entry built from cached data alone, without a stat (the instant paint, a stopped WSL distro). */
+	private preloadFromCacheEntry(sessionFile: string, sessionData: SessionFileCache): SessionFilePreload {
+		const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
+		const details = sessionData.interactions > 0 ? this.buildMinimalPreloadDetails(sessionFile, stat, sessionData) : undefined;
+		return { sessionFile, mtime: sessionData.mtime, fileSize: sessionData.size ?? 0, sessionData, wasCached: true, details };
 	}
 
 	/**
@@ -5403,16 +5413,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * files as `sessionFiles` in that mode, so `confirmedKeys` would contain nothing but fixture
 	 * paths — sweeping the whole cache against that would tombstone every real session the user
 	 * actually has, not just reconcile fixture-related entries.
+	 *
+	 * A path inside a WSL distro that is not running now (`isStoppedWsl`) counts as confirmed:
+	 * discovery cannot see it while the distro is stopped, and evicting it would both touch the
+	 * path (starting the distro) and drop its usage from the totals.
 	 */
-	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
+	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[], isStoppedWsl: (filePath: string) => boolean): SessionFilePreload[] {
 		if (this.isSampleDataModeActive() || this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
+		const isConfirmed = (filePath: string): boolean => confirmedKeys.has(_normalizePathForDedup(filePath)) || isStoppedWsl(filePath);
 		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
-			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {
-				this.cacheManager.deleteCachedSessionData(rawPath);
-			}
+			if (!isConfirmed(rawPath)) { this.cacheManager.evictUndiscoveredSessionData(rawPath); }
 		}
-		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
+		return preloaded.filter(p => isConfirmed(p.sessionFile));
 	}
 
 	/**
@@ -5448,7 +5461,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Seed the queue from the on-disk cache's known file list before discovery
 		// starts (see seedPreloadQueueFromCache doc comment for why).
 		const seen = new Set<string>();
-		const seededCount = this.seedPreloadQueueFromCache(queue, seen, cutoffMs, editorSet);
+		// Which cached paths sit in a WSL distro that is not running now: never stat'ed this refresh.
+		const isStoppedWsl = await this.cacheManager.createStoppedWslPathFilter();
+		const seededCount = this.seedPreloadQueueFromCache(queue, seen, cutoffMs, isStoppedWsl, preloaded, editorSet);
 		totalDiscovered += seededCount;
 
 		// Discovery fills the queue via onBatch callback
@@ -5562,7 +5577,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...Array.from({ length: CONCURRENCY }, () => worker()),
 		]);
 
-		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles);
+		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles, isStoppedWsl);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup. Scheduled
 		// unconditionally (not only on a successful, non-empty scan) so a cached entry for a file
@@ -5771,7 +5786,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let isLeader = false;
 		try { isLeader = await this.cacheManager.acquireRefreshLock(); }
 		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
-		this.startRefreshHeartbeat(isLeader);
+		await this.beginRefreshTurn(isLeader);
 
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
@@ -6070,10 +6085,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		this.showLoadingTooltipForStep('computing', silent);
 
+		// No per-file progress from here to the end of the save: keep the leader's locks alive meanwhile.
+		const endBusy = this.cacheManager.beginRefreshBusy();
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 		const published = await this.publishRefreshResult(
 			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
 		);
+		endBusy();
 		if (!published) { return undefined; }
 
 		const refreshElapsedSec = ((Date.now() - refreshStartMs) / 1000).toFixed(1);
@@ -6137,21 +6155,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Start (leader) or clear (follower) the periodic heartbeat that renews the
 	 * refresh leader lock so a legitimately long parse is not treated as stale by
-	 * another window.
+	 * another window. Progress reported by the parse (buildProgressCallback()) is
+	 * written along with it, so a leader that is alive but stuck is taken over.
+	 *
+	 * A leader then takes its machine-wide parse turn: it waits (bounded) for another VS Code
+	 * edition's or the desktop app's in-progress parse and reuses a compatible peer snapshot (see
+	 * src/machineParseLock.ts). releaseRefreshLock() ends that turn. Never in sample-data mode,
+	 * whose fixture parse must neither wait on nor mix with real data.
 	 */
-	private startRefreshHeartbeat(isLeader: boolean): void {
-		this.stopRefreshHeartbeat();
-		if (!isLeader) { return; }
-		this._refreshHeartbeat = setInterval(() => {
-			void this.cacheManager.renewRefreshLock();
-		}, 30 * 1000);
+	private async beginRefreshTurn(isLeader: boolean): Promise<void> {
+		this.cacheManager.startLeaderHeartbeat(isLeader);
+		if (isLeader && !this.isSampleDataModeActive()) { await this.cacheManager.coordinateCrossHostParse(); }
 	}
 
 	private stopRefreshHeartbeat(): void {
-		if (this._refreshHeartbeat) {
-			clearInterval(this._refreshHeartbeat);
-			this._refreshHeartbeat = undefined;
-		}
+		this.cacheManager.stopLeaderHeartbeat();
 	}
 
 	/**
@@ -6194,6 +6212,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let lastProgressSentMs = 0;
 		let lastPercentage = -1;
 		return (completed: number, total: number) => {
+			this.cacheManager.noteRefreshProgress(); // keeps the leader's locks from looking hung
 			const percentage = Math.round((completed / total) * 100);
 			if (!silent) {
 				// Only touch the status bar text when the rounded percentage actually
@@ -6600,13 +6619,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Skip the score computation when the service would refuse the upload anyway.
 		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl || settings.sharingProfile === 'off') { return; }
 		const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
-		const scorePayload: Record<string, unknown> = {
-			overallStage: maturityData.overallStage, overallLabel: maturityData.overallLabel,
-			categories: maturityData.categories.map((c: any) => ({
-				category: c.category, icon: c.icon, stage: c.stage, tips: c.tips,
-			})),
-			computedAt: new Date().toISOString(),
-		};
+		const scorePayload = buildFluencyScorePayload(maturityData);
 		// Gated on the way in, not ordered on the way out: this upload is detached, so two of them
 		// can still land out of order and leave the server holding the older score. Making that
 		// safe needs the server to reject an older version, which is not this PR's to change.
@@ -6656,13 +6669,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
 		const now = new Date().toISOString();
 
+		// A scheduled task that started failing since the last refresh re-opens its insight, even if dismissed.
+		const failing = _reopenFailingAutomationInsight(stats.repeatedTasks?.scheduledTasks ?? [], this._insightStateBag, this.context.globalState.get<string[]>('insights.notifiedFailingAutomations', []));
 		// The same evaluation the Usage Analysis payload runs, so a toast never sees fewer inputs than the panel.
 		const evaluated = _evaluateUsageInsights(stats, this.insightEvaluationState());
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
 		this.refreshInsightBadgeFromState(now, evaluated);
 
-		await this.context.globalState.update('insights.state', this._insightStateBag);
+		await Promise.all([this.context.globalState.update('insights.state', this._insightStateBag), this.context.globalState.update('insights.notifiedFailingAutomations', failing.nextNotifiedKeys)]);
 		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open
@@ -6676,9 +6691,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Surface a toast for the highest-weight 'new' allowToast insight (rate-limited)
 		const toastsEnabled = vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('insights.toastsEnabled', true);
 		if (!toastsEnabled) { return; }
-		if (!_isToastAllowed(cadenceDays, this._lastInsightNudgeAt, now)) { return; }
-
-		const toastCandidate = evaluated.find(i => i.allowToast && i.status === 'new');
+		// Rate-limited by the cadence, except a scheduled automation that just started failing.
+		const toastCandidate = _pickToastInsight(evaluated, cadenceDays, this._lastInsightNudgeAt, now, failing.reopened);
 		if (!toastCandidate) { return; }
 
 		this._lastInsightNudgeAt = now;
@@ -6690,7 +6704,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const view = l10n.t('button.openInsightsTab');
 		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			`💡 ${toastCandidate.title}`,
+			_insightToastMessage(toastCandidate),
 			view,
 			dismiss,
 		);
@@ -6794,6 +6808,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 					aggregateInputs.push({ editorType: this.getEditorTypeFromPath(r.sessionFile), sessionData: r.sessionData, mtime: r.mtime, lastInteraction: r.sessionData.lastInteraction || r.details.lastInteraction });
 				} catch (fileError) { this.warn(`Error processing session file ${r.sessionFile}: ${fileError}`); }
 			}
+			// Sessions whose files are gone keep counting (issue #2728); skipped for sample data.
+			if (!this.isSampleDataModeActive()) { aggregateInputs.push(...this.cacheManager.usageHistory.toAggregateInputs(this.cacheManager.cache.keys(), p => this.getEditorTypeFromPath(p), fileLoadCutoffMs)); }
 
 			const aggregated = aggregatePeriodStats(aggregateInputs, { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs });
 			todayStats = aggregated.todayStats; monthStats = aggregated.monthStats;
@@ -7356,7 +7372,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions = timedStepSync(lg, 'recent session buckets', () => this.buildRecentSessionBuckets(usageResults, now));
 			autoCompactionsLast7Days = timedStepSync(lg, 'auto-compaction stats', () => this.buildAutoCompactionStats(usageResults, now));
 			correctionReport = timedStepSync(lg, 'correction report', () => this.buildCorrectionReport(usageResults));
-			repeatedTasks = timedStepSync(lg, 'repeated-task report', () => this.buildRepeatedTaskReport(usageResults));
+			repeatedTasks = await timedStep(lg, 'repeated-task report (+ copilot automation runs)', () => this.buildRepeatedTaskReport(usageResults));
 			await timedStep(lg, 'workspace dedup + customization scans', () => this.deduplicateWorkspacePathsWithScans(workspaceSessionCounts, workspaceInteractionCounts));
 			timedStepSync(lg, 'customization matrix', () => this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts));
 			await timedStep(lg, 'multi-agent parent count (data.db)', () => this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey));
@@ -8054,102 +8070,51 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
-	/** Splits usage results (within the last-30-days window) into Copilot CLI uuids and Hermes session ids, along with each id's day key (for daily trend bucketing). */
-	private _collectMultiAgentCandidateIds(
-		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
-		last30DaysUtcStartKey: string,
-	): { cliUuids: string[]; hermesIds: string[]; dayByCliUuid: Map<string, string>; dayByHermesId: Map<string, string> } {
-		const cliUuids: string[] = [];
-		const hermesIds: string[] = [];
-		const dayByCliUuid = new Map<string, string>();
-		const dayByHermesId = new Map<string, string>();
-		for (const r of usageResults) {
-			if (!r) { continue; }
-			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
-			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
-			const uuid = this.extractCopilotCliUuid(r.sessionFile);
-			if (uuid) { cliUuids.push(uuid); dayByCliUuid.set(uuid, lastActivityKey); continue; }
-			if (this.hermes.isHermesSessionFile(r.sessionFile)) {
-				const id = this.hermes.getSessionId(r.sessionFile);
-				if (id) { hermesIds.push(id); dayByHermesId.set(id, lastActivityKey); }
-			}
-		}
-		return { cliUuids, hermesIds, dayByCliUuid, dayByHermesId };
+	/** The multi-agent sources this host knows: the host-only Copilot data.db source plus the shared src/ sources (Hermes state.db, Vibe meta.json). */
+	private _multiAgentSources(): MultiAgentSource[] {
+		return [
+			createCopilotCliMultiAgentSource(this.copilotAppData, f => this.extractCopilotCliUuid(f)),
+			...createMultiAgentSources({ hermes: this.hermes, mistralVibe: this.mistralVibe }),
+		];
 	}
 
-	/** Counts Copilot CLI sessions (from data.db hierarchy) with 2+ direct child workspaces. */
-	private async _countCliMultiAgentParents(cliUuids: string[]): Promise<number> {
-		if (cliUuids.length === 0) { return 0; }
-		try {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
-			let count = 0;
-			for (const uuid of cliUuids) {
-				const node = hierarchy.get(uuid);
-				if (node && node.totalChildCount >= STAGE_THRESHOLDS.agentic.multiAgentMinChildren) { count++; }
-			}
-			return count;
-		} catch {
-			return 0; /* optional enrichment — suppress */
+	/** Collects multi-agent candidates (source + session id + day key) from usage results inside the last-30-days window. */
+	private async _collectMultiAgentCandidates(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): Promise<MultiAgentCandidate[]> {
+		const rows: { sessionFile: string; dayKey: string }[] = [];
+		for (const r of usageResults) {
+			if (!r) { continue; }
+			const dayKey = this.computeLastActivityKey(r.sessionData, r.mtime);
+			if (dayKey < last30DaysUtcStartKey) { continue; }
+			rows.push({ sessionFile: r.sessionFile, dayKey });
 		}
+		return collectMultiAgentCandidates(this._multiAgentSources(), rows);
 	}
 
 	/**
-	 * Query data.db (Copilot CLI) and Hermes's state.db for multi-agent parent counts and
-	 * set the combined total on the period. A session counts as a "multi-agent parent" when
-	 * it has 2+ direct children (child workspaces for Copilot CLI; `source='subagent'` rows
-	 * pointing back via `parent_session_id` for Hermes). Errors are swallowed — optional enrichment only.
+	 * Query the multi-agent sources (Copilot CLI data.db, Hermes state.db, Vibe meta.json)
+	 * for multi-agent parent counts and set the combined total on the period. A session counts
+	 * as a "multi-agent parent" when it has 2+ direct children. Errors are swallowed — optional
+	 * enrichment only.
 	 */
 	private async enrichMultiAgentParentCount(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		last30DaysStats: UsageAnalysisPeriod,
 		last30DaysUtcStartKey: string,
 	): Promise<void> {
-		const { cliUuids, hermesIds } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
-		let count = await this._countCliMultiAgentParents(cliUuids);
-		if (hermesIds.length > 0) {
-			try {
-				count += await this.hermes.getMultiAgentParentCount(hermesIds);
-			} catch { /* optional enrichment — suppress */ }
-		}
-		if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
-	}
-
-	/** Buckets multi-agent-parent counts (CLI + Hermes) per day into `byDay`. Shared by `_computeAgenticDailyTrend`. */
-	private async _bucketMultiAgentParentsByDay(
-		cliUuids: string[],
-		hermesIds: string[],
-		dayByCliUuid: Map<string, string>,
-		dayByHermesId: Map<string, string>,
-		byDay: Map<string, { multiAgentParentSessions: number; delegationSessions: number }>,
-	): Promise<void> {
-		const getEntry = (day: string) => {
-			let entry = byDay.get(day);
-			if (!entry) { entry = { multiAgentParentSessions: 0, delegationSessions: 0 }; byDay.set(day, entry); }
-			return entry;
-		};
-		const threshold = STAGE_THRESHOLDS.agentic.multiAgentMinChildren;
-		if (cliUuids.length > 0) {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
-			for (const uuid of cliUuids) {
-				const node = hierarchy.get(uuid);
-				const day = dayByCliUuid.get(uuid);
-				if (node && node.totalChildCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
-			}
-		}
-		if (hermesIds.length > 0) {
-			const childCounts = await this.hermes.getChildCounts(hermesIds);
-			for (const id of hermesIds) {
-				const childCount = childCounts.get(id) ?? 0;
-				const day = dayByHermesId.get(id);
-				if (childCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
-			}
-		}
+		try {
+			const candidates = await this._collectMultiAgentCandidates(usageResults, last30DaysUtcStartKey);
+			const count = await countMultiAgentParents(candidates);
+			if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
+		} catch { /* optional enrichment — suppress */ }
 	}
 
 	/**
 	 * Builds the daily "Multi-Agent Usage" trend (last ~30 days) shown as a sparkline on the
 	 * Fluency dashboard's Agentic category card. Each day combines two independent signals:
-	 * multi-agent-parent sessions (data.db/Hermes hierarchy, 2+ children) and delegation
+	 * multi-agent-parent sessions (multi-agent source hierarchy, 2+ children) and delegation
 	 * sessions (adapter-agnostic tool-name classification). Errors are swallowed — optional
 	 * enrichment only, absent from the payload when it fails or there is no signal.
 	 */
@@ -8158,9 +8123,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		last30DaysUtcStartKey: string,
 	): Promise<AgenticTrendPoint[] | undefined> {
 		try {
-			const { cliUuids, hermesIds, dayByCliUuid, dayByHermesId } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+			const candidates = await this._collectMultiAgentCandidates(usageResults, last30DaysUtcStartKey);
 			const byDay = new Map<string, { multiAgentParentSessions: number; delegationSessions: number }>();
-			await this._bucketMultiAgentParentsByDay(cliUuids, hermesIds, dayByCliUuid, dayByHermesId, byDay);
+			await bucketMultiAgentParentsByDay(candidates, byDay);
 			for (const r of usageResults) {
 				if (!r || r.sessionData.taskCategory !== 'Delegation') { continue; }
 				const day = this.computeLastActivityKey(r.sessionData, r.mtime);
@@ -8485,14 +8450,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Build the repeated-task report from already-parsed session results:
 	 * cluster the first user prompt of every scanned session (across all
 	 * repositories) into tasks the user keeps prompting for manually —
-	 * candidates for a reusable skill or prompt file. Pure in-memory
-	 * clustering over cached prompts; returns undefined when no cluster
-	 * reaches the minimum size.
+	 * candidates for a reusable skill or prompt file. In-memory clustering
+	 * over cached prompts; runs of Claude Code scheduled tasks and GitHub
+	 * Copilot automations (data.db) are reported as scheduled tasks instead.
+	 * Returns undefined when there is neither a cluster nor a scheduled run.
 	 */
-	private buildRepeatedTaskReport(
-		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
-	): RepeatedTaskReport | undefined {
-		return _buildRepeatedTaskReport(results
+	private async buildRepeatedTaskReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+	): Promise<RepeatedTaskReport | undefined> {
+		// GitHub Copilot automation runs from data.db, so scheduled runs are reported as scheduled tasks,
+		// plus both apps' scheduled-task inventory for their schedule, repository and health.
+		const [automationRuns, copilotAutomations, claudeTasks] = await Promise.all([
+			this.copilotAppData.getAutomationRuns(), this.copilotAppData.getAutomations(), readClaudeScheduledTasks(),
+		]);
+		const report = _buildRepeatedTaskReport(results
 			.filter((r): r is NonNullable<typeof r> => !!r)
 			.map(r => ({
 				file: r.sessionFile,
@@ -8501,7 +8472,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastInteraction: r.sessionData.lastInteraction,
 				mtime: r.mtime,
 				repository: r.sessionData.repository,
-			})));
+				editor: this.getEditorTypeFromPath(r.sessionFile),
+				copilotAutomation: automationRunName(r.sessionFile, automationRuns),
+				// So a failed scheduled run can show what its session cost.
+				tokens: r.sessionData.tokens,
+				costUsd: r.sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(r.sessionData.modelUsage || {}),
+			})), { scheduledTaskDefinitions: [...claudeTasks, ...copilotAutomations] });
+		this._lastScheduledTasks = report?.scheduledTasks;
+		return report;
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -8614,7 +8592,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// so those workspaces still show up in the Copilot Customization Files health matrix.
 			const workspaceFolder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, fallbackWorkspacePath);
 			if (workspaceFolder) {
-				const norm = path.normalize(workspaceFolder);
+				// `\\?\C:\…` and `C:\…` are one folder: drop the long-path prefix before keying.
+				const norm = path.normalize(_stripWindowsLongPathPrefix(workspaceFolder));
 				sessionCounts.set(norm, (sessionCounts.get(norm) || 0) + 1);
 				interactionCounts.set(norm, (interactionCounts.get(norm) || 0) + interactions);
 				if (repository) {
@@ -9442,10 +9421,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Extract full session log data including chat turns for the log viewer.
 	 */
-	private async getSessionLogData(sessionFile: string): Promise<SessionLogData> {
+	private async getSessionLogData(sessionFile: string, strict = false): Promise<SessionLogData> {
 		// Use pre-enriched details from the diagnostics cache when available — it carries
-		// hierarchy data (parentInfo, childInfo) populated by enrichSessionHierarchy /
-		// enrichPiSessionHierarchy during the background load.
+		// hierarchy data (parentInfo, childInfo) populated by analysis/sessionHierarchy.ts
+		// during the background load.
 		const cached = this.diagnosticsCachedFiles.find(f => f.file === sessionFile);
 		const details = cached ?? await this.getSessionFileDetails(sessionFile);
 		let subAgentsStarted: number | undefined;
@@ -9455,12 +9434,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			const eco = this.findEcosystem(sessionFile);
 			if (eco?.buildTurns) {
-				const result = await eco.buildTurns(sessionFile);
+				const result = await eco.buildTurns(sessionFile, { includeSidechainInstructions: strict });
+				assertViewableSessionTurns(result.turns, strict);
 				return this.buildBaseLogData(details, result.turns, undefined, undefined, eco, sessionFile, result.actualTokens);
 			}
 
 			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) {
+				assertViewableSessionTurns([], strict);
 				return this.buildBaseLogData(details, [], undefined);
 			}
 
@@ -9481,14 +9462,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 				turns = this.buildJsonSessionTurns(sessionContent);
 			}
 		} catch (error) {
+			if (strict) { throw error; }
 			this.warn(`Error extracting chat turns from ${sessionFile}: ${error}`);
 		}
 
+		assertViewableSessionTurns(turns, strict);
 		let usageAnalysis: SessionUsageAnalysis | undefined;
 		try {
 			const mtimeMs = new Date(details.modified).getTime();
 			usageAnalysis = await this.getUsageAnalysisFromSessionCached(sessionFile, mtimeMs, details.size);
 		} catch (usageError) {
+			if (strict) { throw usageError; }
 			this.warn(`Error loading usage analysis for ${sessionFile}: ${usageError}`);
 		}
 
@@ -9647,8 +9631,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
 		let cliSessionEffort: string | undefined;
 
-		cliSessionModel = this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel);
-		const modelRef = { value: cliSessionModel };
+		const fusionAuto = isCopilotFusionAutoSession(lines);
+		cliSessionModel = resolveCopilotRouterModel(this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel), fusionAuto);
+		const modelRef = { value: cliSessionModel, fusionAuto };
 		const effortRef = { value: cliSessionEffort };
 
 		const subAgentOutputTokenMap = new Map<string, number>();
@@ -9688,7 +9673,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return null;
 	}
 
-	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
+	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
 		const subAgentStarted = event.type === 'subagent.started';
 		let turnAdded = false;
 		if (event.type === 'session.model_change') { this.updateCliSessionRefs(event, modelRef, effortRef); }
@@ -9709,8 +9694,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		turns[turns.length - 1].mcpTools.push({ server: event.data?.mcpServer || 'unknown', tool: event.data?.toolName || event.toolName || 'unknown' });
 	}
 
-	private updateCliSessionRefs(event: any, modelRef: { value: string }, effortRef: { value: string | undefined }): void {
-		if (typeof event.data?.newModel === 'string') { modelRef.value = event.data.newModel; }
+	private updateCliSessionRefs(event: any, modelRef: { value: string; fusionAuto: boolean }, effortRef: { value: string | undefined }): void {
+		if (typeof event.data?.newModel === 'string') { modelRef.value = resolveCopilotRouterModel(event.data.newModel, modelRef.fusionAuto); }
 		if (typeof event.data?.reasoningEffort === 'string') { effortRef.value = event.data.reasoningEffort; }
 	}
 
@@ -10617,14 +10602,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.log(`🧭 [Tool Curation Trace] ${stage} ${details}`);
 	}
 
+	/** Every webview-supplied session-file path goes through this before the extension opens it; a refusal is logged only. */
+	private checkWebviewSessionFile(file: unknown, source: string): Promise<string | undefined> { return checkWebviewSessionFilePath(file, source, { isCachedSessionFile: (p) => this.getCachedSessionData(p) !== undefined, listSessionFiles: () => this.sessionDiscovery.getCopilotSessionFiles(), log: (m) => this.log(m) }); }
+
 	private async _handleOpenSessionFile(message: any): Promise<void> {
-		if (!message.file) { return; }
-		const turnNumber = typeof message.turnNumber === 'number' && Number.isSafeInteger(message.turnNumber) && message.turnNumber > 0
-			? message.turnNumber
-			: undefined;
+		const file = await this.checkWebviewSessionFile(message.file, 'openSessionFile:analysis'); if (!file) { return; }
+		const turnNumber = parseWebviewTurnNumber(message.turnNumber);
 		await this.dispatch('openSessionFile:analysis', async () => {
-			try { await this.showLogViewer(message.file, turnNumber); }
-			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
+			try { await this.showLogViewer(file, turnNumber); }
+			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + file); }
 		});
 	}
 
@@ -11194,7 +11180,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number): Promise<void> {
+	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number, strict = false): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
 			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
@@ -11210,7 +11196,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			return;
 		}
 		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
+		this.logViewerCurrentData = undefined;
 		this.logViewerSessionFilePath = sessionFilePath;
+		this.logViewerStrict = strict;
 		this.logViewerPanel = vscode.window.createWebviewPanel(
 			'copilotLogViewer', `Session: ${path.basename(sessionFilePath)}`,
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
@@ -11228,13 +11216,20 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 		const panel = this.logViewerPanel;
 		panel.webview.html = this.getLoadingHtml(panel.webview);
-		void (async () => {
-			const logData = await this.getSessionLogData(sessionFilePath);
-			if (this.logViewerPanel !== panel) { return; }
+		const loading = (async () => {
+			const logData = await this.getSessionLogData(sessionFilePath, strict);
+			if (this.logViewerPanel !== panel) {
+				if (strict) { throw new Error('Session viewer was closed or replaced before loading completed.'); }
+				return;
+			}
 			this.logViewerCurrentData = logData;
 			panel.title = `Session: ${logData.title || path.basename(sessionFilePath)}`;
 			panel.webview.html = this.getLogViewerHtml(panel.webview, logData, focusedTurnNumber);
 		})();
+		if (strict) {
+			try { await loading; }
+			catch (error) { if (this.logViewerPanel === panel) { panel.dispose(); } throw error; }
+		}
 	}
 
 	private async handleLogViewerMessage(message: any): Promise<void> {
@@ -11260,7 +11255,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			}
 			case 'refreshSession': {
 				try {
-					const newData = await this.getSessionLogData(sessionFilePath);
+					const newData = await this.getSessionLogData(sessionFilePath, this.logViewerStrict);
 					this.logViewerCurrentData = newData;
 					if (this.logViewerPanel) {
 						this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, newData);
@@ -11555,6 +11550,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			scheduledTasks: this._lastScheduledTasks,
 		});
 	}
 
@@ -13539,9 +13535,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       case "reportNewEditorPath":
         if (message.path) { await this.dispatch('reportNewEditorPath:diagnostics', () => this.diagHandleReportNewEditorPath(message.path)); } break;
       case "openSessionFile":
-        if (message.file) { await this.dispatch('openSessionFile:diagnostics', async () => { try { await this.showLogViewer(message.file); } catch { vscode.window.showErrorMessage("Could not open log viewer: " + message.file); } }); } break;
+        { const file = await this.checkWebviewSessionFile(message.file, 'openSessionFile:diagnostics'); if (file) { await this.dispatch('openSessionFile:diagnostics', async () => { try { await this.showLogViewer(file); } catch { vscode.window.showErrorMessage("Could not open log viewer: " + file); } }); } } break;
       case "openFormattedJsonlFile":
-        if (message.file) { await this.dispatch('openFormattedJsonlFile:diagnostics', () => this.diagHandleOpenFormattedJsonlFile(message.file)); } break;
+        { const file = await this.checkWebviewSessionFile(message.file, 'openFormattedJsonlFile:diagnostics'); if (file) { await this.dispatch('openFormattedJsonlFile:diagnostics', () => this.diagHandleOpenFormattedJsonlFile(file)); } } break;
       case "revealPath":
         if (message.path) { await this.dispatch('revealPath:diagnostics', () => this.diagHandleRevealPath(message.path)); } break;
       default:
@@ -15009,8 +15005,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       }
       await yieldToEventLoop();
     }
-    await this.enrichSessionHierarchy(detailedSessionFiles);
-    await this.enrichPiSessionHierarchy(detailedSessionFiles);
+    await enrichCopilotSessionHierarchy(this.copilotAppData, f => this.extractCopilotCliUuid(f), detailedSessionFiles);
+    await enrichPiSessionHierarchy(detailedSessionFiles);
+    await enrichVibeSessionHierarchy(this.mistralVibe, detailedSessionFiles);
     await this.sendBgLoadResults(panel, detailedSessionFiles, initialCacheHits, initialCacheMisses);
   }
 
@@ -15034,112 +15031,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       return UUID_RE.test(uuid) ? uuid : null;
     }
     return null;
-  }
-
-  /**
-   * Enrich Copilot CLI sessions in `files` with parent/child hierarchy data
-   * read from ~/.copilot/data.db.  All other session types are left untouched.
-   * Errors are suppressed — hierarchy is an optional enrichment.
-   */
-  private async enrichSessionHierarchy(files: SessionFileDetails[]): Promise<void> {
-    // Build uuid → SessionFileDetails map for Copilot CLI sessions only.
-    const uuidToDetails = new Map<string, SessionFileDetails>();
-    for (const details of files) {
-      const uuid = this.extractCopilotCliUuid(details.file);
-      if (uuid) { uuidToDetails.set(uuid, details); }
-    }
-    if (uuidToDetails.size === 0) { return; }
-
-    try {
-      const hierarchy = await this.copilotAppData.getSessionHierarchy([...uuidToDetails.keys()]);
-      for (const [uuid, node] of hierarchy) {
-        const details = uuidToDetails.get(uuid);
-        if (!details) { continue; }
-        if (node.parentUuid) {
-          const ref: SessionRelationRef = {
-            uuid: node.parentUuid,
-            name: node.parentName ?? node.parentUuid,
-            sessionFile: uuidToDetails.get(node.parentUuid)?.file,
-          };
-          details.parentInfo = ref;
-        }
-        if (node.childUuids.length > 0) {
-          details.childInfo = node.childUuids.map(cUuid => ({
-            uuid: cUuid,
-            name: node.childNames.get(cUuid) ?? cUuid,
-            sessionFile: uuidToDetails.get(cUuid)?.file,
-          } satisfies SessionRelationRef));
-          details.totalChildCount = node.totalChildCount;
-        }
-      }
-    } catch { /* hierarchy is optional — never surface errors */ }
-  }
-
-  /**
-   * Enrich Pi sessions in `files` with parent/child hierarchy data derived from
-   * the `parentSession` field in each session's JSONL header.
-   * All other session types are left untouched.
-   * Errors are suppressed — hierarchy is an optional enrichment.
-   */
-  private async enrichPiSessionHierarchy(files: SessionFileDetails[]): Promise<void> {
-    const pi = new PiDataAccess();
-    const piFiles = files.filter(f => pi.isPiSessionFile(f.file));
-    if (piFiles.length === 0) { return; }
-
-    // Normalise a path for platform-independent comparison.
-    const norm = (p: string) => _normalizePath(p);
-
-    // Build normalised-path → SessionFileDetails map.
-    const pathToDetails = new Map<string, SessionFileDetails>();
-    for (const details of piFiles) {
-      pathToDetails.set(norm(details.file), details);
-    }
-
-    // Discover parent links.
-    // Primary: path-based detection (pi nests child sessions under {parentId}/{hash}/run-N/session.jsonl).
-    // Fallback: header-based parentSession field (future pi versions may use this).
-    const parentByChild = new Map<string, string>();     // normChildPath → normParentPath
-    const childrenByParent = new Map<string, string[]>(); // normParentPath → normChildPaths[]
-    await Promise.all(piFiles.map(async (details) => {
-      try {
-        const rawParent =
-          pi.getParentSessionPathFromFilePath(details.file) ??
-          await pi.getParentSessionPath(details.file);
-        if (!rawParent) { return; }
-        const normChild = norm(details.file);
-        const normParent = norm(rawParent);
-        parentByChild.set(normChild, normParent);
-        if (!childrenByParent.has(normParent)) { childrenByParent.set(normParent, []); }
-        childrenByParent.get(normParent)!.push(normChild);
-      } catch { /* skip unreadable sessions */ }
-    }));
-
-    // Apply parentInfo to child sessions.
-    for (const [normChild, normParent] of parentByChild) {
-      const childDetails = pathToDetails.get(normChild);
-      if (!childDetails) { continue; }
-      const parentDetails = pathToDetails.get(normParent);
-      childDetails.parentInfo = {
-        uuid: normParent,
-        name: parentDetails?.title ?? path.basename(path.dirname(normParent)),
-        sessionFile: parentDetails?.file,
-      } satisfies SessionRelationRef;
-    }
-
-    // Apply childInfo to parent sessions.
-    for (const [normParent, normChildren] of childrenByParent) {
-      const parentDetails = pathToDetails.get(normParent);
-      if (!parentDetails) { continue; }
-      parentDetails.childInfo = normChildren.map(nc => {
-        const childDetails = pathToDetails.get(nc);
-        return {
-          uuid: nc,
-          name: childDetails?.title ?? path.basename(path.dirname(nc)),
-          sessionFile: childDetails?.file,
-        } satisfies SessionRelationRef;
-      });
-      parentDetails.totalChildCount = normChildren.length;
-    }
   }
 
   /**
@@ -16156,15 +16047,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   registerViewCommands(context, tokenTracker);
   registerDiagnosticAndAuthCommands(context, tokenTracker);
   registerBadgeSetup(context, tokenTracker);
+  registerUsageHistoryCommands(context, tokenTracker);
 
   context.subscriptions.push(tokenTracker);
 
   tokenTracker.log("Extension activation complete");
 
-  return {
-    registerButton: (button: ExtensionPointButton, handler: () => void | Promise<void>) =>
-      tokenTracker.registerExtensionPointButton(button, handler),
-  };
+  return createExtensionApi(tokenTracker);
 }
 
 export function deactivate() {
