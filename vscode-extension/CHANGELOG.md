@@ -4,15 +4,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
-### Features
-- Workspace Health → Copilot Customization Files: workspaces missing the most customization types are listed first (those with none at all lead), then the busiest. Each customization type column header shows its name under the icon, so the table reads without the legend. The note about workspace names that look like ungrouped worktrees or clones is collapsed to a single line with the count; expand it to see every name (#2747)
-
-### Bug Fixes
-- Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out.
-- A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`).
-- Team server sharing: an upload to a server that accepts the connection but never answers now gives up after 60 seconds and reports the failure, instead of showing "uploading…" for about five minutes.
-
-## [0.21.0] - 2026-11-25
+## [0.21.0] - 2026-11-26
 
 ### Features
 - Usage Analysis → Insights: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run toward the task's failed runs and **failing** status. A run that is still going (active in the last hour) is not counted as failed.
@@ -23,6 +15,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Windows: session files of Claude Code, Codex CLI, Copilot CLI and Mistral Vibe (including Agent of Empires sandbox stores) are also read from WSL distros that are already running. Discovery only scans running distros and never starts one. Setting: `aiEngineeringFluency.wsl.scanRunningDistros`
 - Mistral Vibe Desktop sessions are tracked and reported as their own editor, **Mistral Vibe Desktop**, separate from the Vibe CLI that shares its session store (#2721)
 - Mistral Vibe subsessions are now linked to the session that started them and count toward the multi-agent metrics, instead of showing up as unrelated standalone sessions (#2743)
+- Workspace Health → Copilot Customization Files: workspaces missing the most customization types are listed first (those with none at all lead), then the busiest. Each customization type column header shows its name under the icon, so the table reads without the legend. The note about workspace names that look like ungrouped worktrees or clones is collapsed to a single line with the count; expand it to see every name (#2747)
 
 ### Bug Fixes
 - Cursor: chats from newer Cursor builds (3.3x), which store their conversation headers in chunks, are counted again. Every new chat counted 0 interactions and was left out of the totals (#2735)
@@ -35,6 +28,9 @@ All notable changes to the VS Code extension will be documented in this file.
 - Older transcript copies Claude Code sets aside as `<session>.orphaned-<timestamp>-<suffix>.jsonl` are no longer read as extra sessions, which counted that session twice (#2728).
 - An OpenCode or Kilo Code database over 256 MiB (database plus WAL) is now read once instead of once per session query, which made refreshes on a large OpenCode store take many minutes (#2710).
 - OpenCode and Kilo Code databases are now read in place through a read-only SQLite connection where the runtime provides `node:sqlite`, instead of copying and parsing the whole file. There is no longer a 256 MiB limit, and sessions still pending in the database's WAL file are no longer missed on large stores. Runtimes without `node:sqlite` keep the previous reader (#2710).
+- Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out (#2751)
+- A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`) (#2751)
+- Team server sharing: an upload to a server that accepts the connection but never answers now gives up after 60 seconds and reports the failure, instead of showing "uploading…" for about five minutes (#2754)
 
 ## [0.20.0] - 2026-11-23
 

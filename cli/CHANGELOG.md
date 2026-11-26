@@ -4,10 +4,7 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
-### Performance
-- `usage`, `environmental` and `segment` no longer parse sessions last active before the start of last month, so a first run (or one after the session cache was cleared) on a large history is much faster. A database-backed session (OpenCode, Kilo Code, Cursor, ...) is judged by its own last activity, so an old session in a database that was written to recently no longer shows up in today's, this month's or last month's numbers
-
-## [0.8.0] - 2026-11-25
+## [0.8.0] - 2026-11-26
 
 ### Features
 - Mistral Vibe subsessions are now linked to the session that started them and count toward the multi-agent metrics, instead of showing up as unrelated standalone sessions (#2743)
@@ -18,6 +15,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 - Windows: Claude Desktop Cowork sessions are found again on current Claude desktop installs, which moved their data from the app package's `LocalCache\Roaming\Claude` folder to `%LOCALAPPDATA%\Claude-Data\claude_<package>`. Every existing location is read, newest first, and a session present in two locations is counted once
 - Claude Code sessions are now found when `CLAUDE_CONFIG_DIR` moves Claude Code's data out of `~/.claude`, and older transcript copies Claude Code sets aside (`<session>.orphaned-<timestamp>-<suffix>.jsonl`) are no longer counted as extra sessions (#2728)
 - `skill-suggestions`: a Claude Code scheduled run that never finished (it stalled on an unanswered permission prompt, or the app cut it short) now counts as a failed run and toward the **failing** status. A run that is still going (active in the last hour) is not counted as failed.
+
+### Performance
+- `usage`, `environmental` and `segment` no longer parse sessions last active before the start of last month, so a first run (or one after the session cache was cleared) on a large history is much faster. A database-backed session (OpenCode, Kilo Code, Cursor, ...) is judged by its own last activity, so an old session in a database that was written to recently no longer shows up in today's, this month's or last month's numbers (#2755)
 
 ## [0.7.2] - 2026-11-24
 
