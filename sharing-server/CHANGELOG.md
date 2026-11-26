@@ -4,6 +4,9 @@ All notable changes to the sharing server (`@rajbos/ai-engineering-fluency-shari
 
 ## [Unreleased]
 
+### Bug Fixes
+- Startup: when an existing backup cannot be restored, the server retries, then starts without ever overwriting that backup with its empty database. Backups stay off, and are logged as skipped, until a restart restores the backup. Previously the periodic backup replaced the good backup with the empty one.
+
 ## [0.4.0] - 2026-11-25
 
 ### Upgrade notes

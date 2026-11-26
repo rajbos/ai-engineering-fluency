@@ -34,6 +34,27 @@ export async function initDbWithRetry(maxAttempts = 20): Promise<void> {
 }
 
 /**
+ * Restore the backup, retrying a failed copy with backoff. During a rollout the previous
+ * replica may still hold the backup file while it writes its shutdown backup, so a first
+ * failure is often transient. If every attempt fails, the server starts on an empty database
+ * with backups refused (see `restoreFromBackup` in db.ts), so the good backup survives.
+ */
+export async function restoreFromBackupWithRetry(maxAttempts = 5, baseDelayMs = 2_000): Promise<boolean> {
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		if (restoreFromBackup()) {
+			return true;
+		}
+		if (attempt < maxAttempts) {
+			const delay = Math.min(attempt * baseDelayMs, 10_000);
+			console.warn(`[db] Restore attempt ${attempt}/${maxAttempts} failed. Retrying in ${delay}ms…`);
+			await new Promise(r => setTimeout(r, delay));
+		}
+	}
+	console.error('[db] All restore attempts failed: starting with an empty database and backups disabled.');
+	return false;
+}
+
+/**
  * Back up the DB to Azure Files then close cleanly on SIGTERM/SIGINT.
  *
  * Idempotent: as a library this may be called both by a downstream app and by
@@ -73,7 +94,7 @@ export async function startServer(app: Hono, options: StartServerOptions = {}): 
 	// Restore database from Azure Files backup before opening SQLite.
 	// SQLite runs on local container disk (/tmp/db) to avoid Azure Files SMB
 	// locking issues. Azure Files is used only as a backup/restore store.
-	restoreFromBackup();
+	await restoreFromBackupWithRetry();
 	await initDbWithRetry();
 	syncAdminLogins();
 

@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Performance
+- `usage`, `environmental` and `segment` no longer parse sessions last active before the start of last month, so a first run (or one after the session cache was cleared) on a large history is much faster. A database-backed session (OpenCode, Kilo Code, Cursor, ...) is judged by its own last activity, so an old session in a database that was written to recently no longer shows up in today's, this month's or last month's numbers
+
 ## [0.8.0] - 2026-11-25
 
 ### Features

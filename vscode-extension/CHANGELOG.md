@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Workspace Health → Copilot Customization Files: workspaces missing the most customization types are listed first (those with none at all lead), then the busiest. Each customization type column header shows its name under the icon, so the table reads without the legend. The note about workspace names that look like ungrouped worktrees or clones is collapsed to a single line with the count; expand it to see every name (#2747)
+
 ### Bug Fixes
 - Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out.
 - A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`).
