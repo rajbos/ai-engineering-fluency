@@ -4,10 +4,7 @@ All notable changes to the sharing server (`@rajbos/ai-engineering-fluency-shari
 
 ## [Unreleased]
 
-### Bug Fixes
-- Startup: when an existing backup cannot be restored, the server retries, then starts without ever overwriting that backup with its empty database. Backups stay off, and are logged as skipped, until a restart restores the backup. Previously the periodic backup replaced the good backup with the empty one.
-
-## [0.4.0] - 2026-11-25
+## [0.4.0] - 2026-11-26
 
 ### Upgrade notes
 - **A strong `SESSION_SECRET` is now required.** The server refuses to start unless `NODE_ENV` is `development` or `test`, or `SESSION_SECRET` is at least 32 characters, has no surrounding whitespace and is not a documented placeholder. Set one before upgrading (#2412)
@@ -29,3 +26,4 @@ All notable changes to the sharing server (`@rajbos/ai-engineering-fluency-shari
 
 ### Bug Fixes
 - The container mounts the Azure Files share as its `node` user, so backups no longer fail with `EPERM` (#2677)
+- Startup: when an existing backup cannot be restored, the server retries, then starts without ever overwriting that backup with its empty database. Backups stay off, and are logged as skipped, until a restart restores the backup. Previously the periodic backup replaced the good backup with the empty one (#2750)

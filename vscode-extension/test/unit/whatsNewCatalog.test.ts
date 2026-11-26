@@ -94,6 +94,20 @@ test('catalog integrity', async (t) => {
 		assert.ok(compared > 0, 'expected at least one dated catalog release in the changelog');
 	});
 
+	await t.test('a dated current version has its own changelog section', () => {
+		// The date check above skips versions with no changelog heading, so dating the
+		// current release without promoting its changelog section would pass unnoticed,
+		// and release.yml would then refuse to publish it.
+		const current = WHATS_NEW_RELEASES.find((release) => release.version === extensionPackageJson.version);
+		if (!current || current.date === null) { return; }
+		const changelog = fs.readFileSync(path.resolve(__dirname, '../../../../CHANGELOG.md'), 'utf8');
+		const expected = `## [${current.version}] - ${current.date}`;
+		assert.ok(
+			changelog.split(/\r?\n/).some((line) => line.trim() === expected),
+			`${current.version} is dated ${current.date} in the catalog but has no "${expected}" section in CHANGELOG.md`,
+		);
+	});
+
 	await t.test('at most one release is marked unreleased', () => {
 		const unreleased = WHATS_NEW_RELEASES.filter((r) => r.date === null);
 		assert.ok(unreleased.length <= 1, `expected at most one unreleased entry, got ${unreleased.length}`);
