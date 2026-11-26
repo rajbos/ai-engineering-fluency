@@ -9,6 +9,7 @@ import {
 	bindDataTables,
 	getDataTablePage,
 	getDataTableState,
+	resetDataTableState,
 	setDataTableFilter,
 	setDataTablePage,
 	setDataTableSort,
@@ -22,6 +23,7 @@ import {
 	buildCustomizationSectionHtml,
 	customizationStatusRank,
 	hasNoCustomization,
+	orderCustomizationRows,
 	renderCustomizationTable,
 	renderMergedWorkspaceMembers,
 	renderUngroupedWorkspaceNote,
@@ -174,6 +176,13 @@ test('customizationMatrix: renders interactions column, icon headers with type l
 	assert.match(html, />1234</);
 	assert.match(html, /aria-label="Instructions"/);
 	assert.match(html, /title="Sort by Agents"/);
+	// Each type header shows its icon and its name as visible text, not only in the tooltip.
+	assert.match(html, /<span class="customization-type-header"><span aria-hidden="true">📄<\/span><span>Instructions<\/span><\/span>/);
+	assert.match(html, /<span class="customization-type-header"><span aria-hidden="true">🤖<\/span><span>Agents<\/span><\/span>/);
+	// The legend keeps the status key but no longer repeats the type names the headers show.
+	const legend = html.slice(html.lastIndexOf('border-top: 1px solid var(--border-subtle)'));
+	assert.ok(!legend.includes('Instructions') && !legend.includes('📄'), 'no type list in the legend');
+	assert.ok(legend.includes('status-badge--fresh') && legend.includes('status-badge--missing'), 'status key still present');
 	assert.match(html, /Only workspaces without customization files/);
 	assert.match(html, /1 workspace\(s\) have no customization files/);
 });
@@ -289,6 +298,23 @@ test('merged-folder list: a single worktree grouped under a checkout found only 
 	assert.equal(renderMergedWorkspaceMembers(undefined), '');
 });
 
+test('default order: most missing customization types first, then most interactions', () => {
+	const row = (name: string, interactions: number, statuses: Record<string, '✅' | '⚠️' | '❌'>): WorkspaceCustomizationRow =>
+		({ workspacePath: `/${name}`, workspaceName: name, sessionCount: 1, interactionCount: interactions, typeStatuses: statuses });
+	const rows = [
+		row('complete-busy', 900, { a: '✅', b: '✅' }),
+		row('one-missing', 50, { a: '✅', b: '❌' }),
+		row('none-quiet', 5, { a: '❌', b: '❌' }),
+		row('stale', 400, { a: '⚠️', b: '✅' }),
+		row('none-busy', 70, { a: '❌', b: '❌' }),
+	];
+	assert.deepEqual(orderCustomizationRows(rows).map(r => r.workspaceName), ['none-busy', 'none-quiet', 'one-missing', 'complete-busy', 'stale']);
+	resetDataTableState(CUSTOMIZATION_TABLE_ID); // other tests leave a column sort behind
+	const html = renderCustomizationTable({ customizationTypes: [], workspaces: rows, totalWorkspaces: 5, workspacesWithIssues: 2 });
+	const order = [...html.matchAll(/class="customization-workspace-name"[^>]*>([^<]+)</g)].map(m => m[1]);
+	assert.deepEqual(order, ['none-busy', 'none-quiet', 'one-missing', 'complete-busy', 'stale'], 'the table renders that order by default');
+});
+
 test('workspace cell: worktree count goes in the name tooltip, not in the merged list', () => {
 	const matrix: WorkspaceCustomizationMatrix = {
 		customizationTypes: [],
@@ -304,7 +330,34 @@ test('merged-folder list and ungrouped note escape folder names and carry an acc
 	const html = renderMergedWorkspaceMembers(['/a/<b>', '/c/"d"']);
 	assert.ok(!html.includes('<b>'), 'paths are escaped');
 	const note = renderUngroupedWorkspaceNote(['repo-85ed99', 'goofy-wozniak-42f712']);
-	assert.ok(note.includes('2 workspace name(s) look like ungrouped worktrees or clones: repo-85ed99, goofy-wozniak-42f712'));
 	assert.match(note, /aria-label="Ungrouped workspace names"/);
 	assert.equal(renderUngroupedWorkspaceNote([]), '');
+	assert.ok(!renderUngroupedWorkspaceNote(['<img src=x>']).includes('<img'), 'names are escaped');
+});
+
+test('ungrouped note: collapsed by default, count in the summary, every name in the list', () => {
+	const names = ['repo-85ed99', 'goofy-wozniak-42f712', 'animated-pancake-271234ba', 'bookish-happiness-d76281cf'];
+	const dom = new JSDOM(`<body>${renderUngroupedWorkspaceNote(names)}</body>`);
+	try {
+		const details = dom.window.document.querySelector('details.ungrouped-workspace-note') as HTMLDetailsElement;
+		assert.ok(details, 'rendered as a <details> element');
+		assert.equal(details.open, false, 'collapsed by default');
+		const summary = details.querySelector('summary')!.textContent!.replace(/\s+/g, ' ').trim();
+		assert.ok(summary.endsWith('4 workspace name(s) look like ungrouped worktrees or clones'), summary);
+		assert.ok(!summary.includes('repo-85ed99'), 'the names stay out of the summary');
+		assert.deepEqual(Array.from(details.querySelectorAll('li'), li => li.textContent), names, 'all names, not just the first three');
+	} finally {
+		dom.window.close();
+	}
+});
+
+test('ungrouped note sits below the summary line, outside its flex row', () => {
+	const html = buildCustomizationSectionHtml({ ...matrix([row('a', 1)]), ungroupedWorkspaceNames: ['repo-85ed99'] });
+	const dom = new JSDOM(`<body>${html}</body>`);
+	try {
+		const note = dom.window.document.querySelector('.ungrouped-workspace-note')!;
+		assert.equal(note.parentElement!.id, 'section-customization-files');
+	} finally {
+		dom.window.close();
+	}
 });

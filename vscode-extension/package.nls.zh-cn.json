@@ -621,7 +621,7 @@
   "memoryFiles.table.lastUpdated": "最近更新",
   "customizationMatrix.mergedFolders": "已合并 {0} 个文件夹",
   "customizationMatrix.ungroupedBadge": "未分组的工作区名称",
-  "customizationMatrix.ungroupedNames": "{0} 个工作区名称看起来像未分组的工作树或克隆：{1}",
+  "customizationMatrix.ungroupedSummary": "{0} 个工作区名称看起来像未分组的工作树或克隆",
   "customizationMatrix.worktreesIncluded": "还包含此仓库的 {0} 个工作树",
   "memoryFiles.unknownWorkspace": "未知工作区",
   "memoryFiles.globalWorkspaceLabel": "用户（全局）",

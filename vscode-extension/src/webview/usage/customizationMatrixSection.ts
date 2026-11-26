@@ -53,17 +53,25 @@ export function renderMergedWorkspaceMembers(memberPaths: string[] | undefined):
 /** Summary note for workspace names that still look like worktree / clone artefacts after grouping. */
 export function renderUngroupedWorkspaceNote(names: string[] | undefined): string {
 	if (!names || names.length === 0) { return ''; }
-	const examples = names.slice(0, 3).join(', ');
-	return `<span class="ungrouped-workspace-note" style="display:inline-flex;align-items:center;gap:4px;" title="${escapeHtml(names.join('\n'))}">${statusBadgeHtml('⚠️', localize('customizationMatrix.ungroupedBadge'))} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedNames', names.length, examples))}</span>`;
+	// Collapsed by default: a diagnostic hint about naming patterns the grouping does not know yet,
+	// not something to act on per workspace, so only the count stays in view.
+	const items = names.map(name => `<li>${escapeHtml(name)}</li>`).join('');
+	return `
+		<details class="ungrouped-workspace-note" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+			<summary style="cursor: pointer;"><span style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">${statusBadgeHtml('⚠️', localize('customizationMatrix.ungroupedBadge'))} ${escapeHtml(localizeFormat('customizationMatrix.ungroupedSummary', names.length))}</span></summary>
+			<ul style="margin: 4px 0 0 16px; padding: 0; font-family: 'Courier New', monospace;">${items}</ul>
+		</details>`;
 }
 
 export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix): DataTableColumn<WorkspaceCustomizationRow>[] {
 	const typeColumns: DataTableColumn<WorkspaceCustomizationRow>[] = (matrix.customizationTypes ?? []).map(type => ({
 		id: `type:${type.id}`,
-		label: type.icon,
+		label: type.label,
+		// Icon above its name, so the columns read without the legend; the name may wrap.
+		headerHtml: `<span class="customization-type-header"><span aria-hidden="true">${escapeHtml(type.icon)}</span><span>${escapeHtml(type.label)}</span></span>`,
 		headerTitle: type.label,
 		align: 'center',
-		width: '44px',
+		width: '92px',
 		sortValue: row => customizationStatusRank(row.typeStatuses?.[type.id]),
 		render: row => {
 			const status = row.typeStatuses?.[type.id] || '❓';
@@ -108,14 +116,29 @@ export function buildCustomizationColumns(matrix: WorkspaceCustomizationMatrix):
 	];
 }
 
+function missingTypeCount(row: WorkspaceCustomizationRow): number {
+	return Object.values(row.typeStatuses ?? {}).filter(status => status === '❌').length;
+}
+
+/**
+ * Default row order, before the user clicks a column: the workspaces missing the most
+ * customization types first (so the ones with none at all lead), then the busiest.
+ */
+export function orderCustomizationRows(rows: readonly WorkspaceCustomizationRow[]): WorkspaceCustomizationRow[] {
+	return [...rows].sort((a, b) =>
+		missingTypeCount(b) - missingTypeCount(a)
+		|| b.interactionCount - a.interactionCount
+		|| b.sessionCount - a.sessionCount);
+}
+
 /** Renders only the paged table root, so sort/page/filter can swap it in place. */
 export function renderCustomizationTable(matrix: WorkspaceCustomizationMatrix): string {
 	return renderDataTable({
 		tableId: CUSTOMIZATION_TABLE_ID,
 		ariaLabel: localize('usage.customization.aria.table'),
-		rows: matrix.workspaces,
+		rows: orderCustomizationRows(matrix.workspaces),
 		columns: buildCustomizationColumns(matrix),
-		initialSort: { columnId: 'interactions', direction: 'desc' },
+		// No column sort by default: the rows keep orderCustomizationRows()'s missing-first order.
 		defaultFilters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false },
 		filterRows: (row, filters) => !filters[CUSTOMIZATION_FILTER_NONE_ONLY] || hasNoCustomization(row),
 		pageSize: CUSTOMIZATION_PAGE_SIZE,
@@ -124,15 +147,11 @@ export function renderCustomizationTable(matrix: WorkspaceCustomizationMatrix): 
 	});
 }
 
-function buildLegendHtml(matrix: WorkspaceCustomizationMatrix): string {
+/** Status key only: the column headers already name each customization type. */
+function buildLegendHtml(): string {
 	return `
 			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-					${(matrix.customizationTypes ?? []).map(type => `
-						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-					`).join('')}
-				</div>
-				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+				<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
 					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.legend.fresh'))}</span>
 					<span style="color: var(--text-muted);">•</span>
 					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.status.stale'))} ${escapeHtml(localize('usage.customization.legend.stale'))}</span>
@@ -152,7 +171,7 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				<div style="color: var(--text-muted); padding:12px;">${escapeHtml(localize('usage.customization.empty'))}</div>
 			</div>`;
 	}
-	const state = getDataTableState(CUSTOMIZATION_TABLE_ID, { sort: { columnId: 'interactions', direction: 'desc' }, filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false } });
+	const state = getDataTableState(CUSTOMIZATION_TABLE_ID, { filters: { [CUSTOMIZATION_FILTER_NONE_ONLY]: false } });
 	const noneOnly = state.filters[CUSTOMIZATION_FILTER_NONE_ONLY] === true;
 	// Keep the toggle while the filter is on, even if a refresh left no matching workspaces —
 	// otherwise a persisted filter would hide every row with no way to turn it off.
@@ -174,12 +193,12 @@ export function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatr
 				${currentMatrix.workspacesWithIssues > 0
 					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️', localize('usage.customization.badge.noCustomization'))} ${escapeHtml(localizeFormat('usage.customization.summary.issues', currentMatrix.workspacesWithIssues))}</span>`
 					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅', localize('usage.customization.status.fresh'))} ${escapeHtml(localize('usage.customization.summary.allGood'))}</span>`}
-				${renderUngroupedWorkspaceNote(currentMatrix.ungroupedWorkspaceNames)}
 			</div>
+			${renderUngroupedWorkspaceNote(currentMatrix.ungroupedWorkspaceNames)}
 			${filterToggle}
 			<div class="customization-matrix-container">
 				${renderCustomizationTable(currentMatrix)}
 			</div>
-			${buildLegendHtml(currentMatrix)}
+			${buildLegendHtml()}
 		</div>`;
 }
