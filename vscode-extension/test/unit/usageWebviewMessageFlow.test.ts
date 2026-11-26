@@ -2317,3 +2317,43 @@ test('a payload with no curationAnalysis still renders instead of throwing in th
 
 	assert.ok(harness.window.document.getElementById('section-missed-potential'), 'the layout renders without curation data');
 });
+
+test('malformed insights from the host are dropped or fall back to safe defaults', async () => {
+	// sanitizeInsights treats the host payload as untrusted: entries that are not objects or
+	// carry no string id are dropped, and an unknown severity/status falls back to the default.
+	const harness = await bootWebview(buildStats());
+	const label = () => harness.window.document.querySelector('.tab-button[data-tab="insights"]')?.textContent?.trim();
+
+	harness.post({
+		command: 'updateInsights',
+		insights: [
+			null,
+			'not-an-object',
+			{ id: 42, title: 'numeric id', body: 'dropped', status: 'new' },
+			{ id: 'kept', category: 'tools', severity: 'catastrophic', status: 'bogus', title: 'Kept insight', body: 'kept' },
+		],
+	});
+	await harness.settle();
+
+	const card = harness.window.document.getElementById('insight-card-kept');
+	assert.ok(card, 'the one well-formed insight renders');
+	assert.ok(card.textContent.includes('Kept insight'));
+	assert.equal(harness.window.document.querySelectorAll('[id^="insight-card-"]').length, 1, 'malformed entries are dropped');
+	assert.equal(label(), 'Insights 1', 'an unknown status falls back to "new", so the badge counts it');
+});
+
+test('a host message whose command is not a string is ignored instead of throwing', async () => {
+	const harness = await bootWebview(buildStats());
+	harness.posted.length = 0;
+
+	harness.post({ command: 42, path: 'C:/repo' });
+	harness.post({ command: { toString: 'worktreeFound' }, worktree: { path: 'C:/repo' } });
+	harness.post({ path: 'C:/repo' });
+	await harness.settle();
+
+	assert.ok(
+		!harness.posted.some((m) => m.command === 'usageWebviewTrace' && m.stage === 'handleExtensionMessage.threw'),
+		`no handler may throw on a malformed command: ${JSON.stringify(harness.posted)}`,
+	);
+	assert.ok(harness.window.document.getElementById('section-missed-potential'), 'the rendered layout is left intact');
+});
