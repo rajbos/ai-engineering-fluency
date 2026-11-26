@@ -59,6 +59,21 @@ let lastSaveAt = Date.now();
 
 const cachePolicy = new CliCachePolicy<CacheEntry>(MAX_CACHE_ENTRIES);
 
+/**
+ * Write a file so readers never see a partial file: write a temporary file next to it, then
+ * rename it over the target. Throws on failure; the temporary file is removed.
+ */
+export function writeFileAtomic(filePath: string, content: string): void {
+	const tempPath = `${filePath}.${process.pid}.tmp`;
+	try {
+		fs.writeFileSync(tempPath, content, 'utf-8');
+		fs.renameSync(tempPath, filePath);
+	} catch (error) {
+		fs.rmSync(tempPath, { force: true });
+		throw error;
+	}
+}
+
 /** Disable caching (e.g. when --no-cache is passed). */
 export function disableCache(): void {
 	cacheEnabled = false;
