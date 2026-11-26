@@ -101,11 +101,10 @@ test('catalog integrity', async (t) => {
 		const current = WHATS_NEW_RELEASES.find((release) => release.version === extensionPackageJson.version);
 		if (!current || current.date === null) { return; }
 		const changelog = fs.readFileSync(path.resolve(__dirname, '../../../../CHANGELOG.md'), 'utf8');
-		const escaped = current.version.replace(/\./g, '\\.');
-		assert.match(
-			changelog,
-			new RegExp(`^## \\[${escaped}\\] - ${current.date}$`, 'm'),
-			`${current.version} is dated ${current.date} in the catalog but has no matching CHANGELOG.md section`,
+		const expected = `## [${current.version}] - ${current.date}`;
+		assert.ok(
+			changelog.split(/\r?\n/).some((line) => line.trim() === expected),
+			`${current.version} is dated ${current.date} in the catalog but has no "${expected}" section in CHANGELOG.md`,
 		);
 	});
 
