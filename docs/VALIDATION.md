@@ -317,13 +317,14 @@ Two things to know about that comment:
 The desktop app (`desktop/`) renders the extension's webview bundles in Electron
 with its own host code in `desktop/src/main.ts` and `desktop/src/panelPage.ts` (the
 page of each panel; it imports no `electron`). Nothing about that wiring fails
-to compile when it drifts, so four checks compare the desktop app with the
+to compile when it drifts, so five checks compare the desktop app with the
 extension it borrows from. From `desktop/`:
 
 ```bash
 pnpm run check           # check-types + check:contract + check:shell
 pnpm run build           # the render check loads the built dist/webview
 pnpm run check:render    # headless render of every view (needs Playwright, see below)
+pnpm run check:preload   # sandboxed preloads load and expose their bridge (also run by check:render)
 pnpm run check:views     # which extension views the desktop does not ship (report)
 ```
 
@@ -395,6 +396,16 @@ or from the repo root, `./build.ps1 -Project desktop -Target test`.
   Run it locally after `pnpm install` in `vscode-extension/`, `cli/` and `desktop/`:
   `node scripts/desktop-visual-diff.js` (output in `visual-output/`). Changes to
   the shared webviews or `src/` are screenshotted by the webview diff instead.
+- **`check:preload`** (`scripts/validate-desktop-preloads.js`) — for every
+  `new BrowserWindow` in `desktop/src/main.ts` whose preload runs with
+  `sandbox: true`, loads the built `desktop/dist/<preload>.js` the way Electron's
+  sandboxed renderer does (wrapped in a function with only `require` for
+  `electron`/`events`/`timers`/`url`, no `__filename` or `__dirname`) and fails if
+  it throws, exposes nothing through `contextBridge`, or lacks a
+  `window.<api>.<member>` the desktop page calls. A sandboxed preload that throws
+  leaves its window's buttons dead with no visible error; the Team Server window
+  shipped that way because the shared esbuild banner read `__filename`.
+  `check:render` runs it first (not for a `--repo-root` baseline), so CI gates on it.
 - **`check:views`** — the `sync-host-views` skill, which reports extension views
   the desktop (like Visual Studio and JetBrains) does not ship, and desktop views
   that are bundled but not in `PANEL_MENU` or the other way round.

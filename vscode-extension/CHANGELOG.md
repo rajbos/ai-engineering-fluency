@@ -10,6 +10,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ### Bug Fixes
 - Windows: a WSL distro that stopped after its sessions were read is no longer started again by a refresh or cache cleanup, which checked those cached session files on disk. Its sessions are kept in the totals until the distro runs again, instead of dropping out.
 - A failing scheduled automation is no longer announced again after a refresh that could not read the automation list (a read error or an empty Copilot app `data.db`).
+- Team server sharing: an upload to a server that accepts the connection but never answers now gives up after 60 seconds and reports the failure, instead of showing "uploading…" for about five minutes.
 
 ## [0.21.0] - 2026-11-25
 
