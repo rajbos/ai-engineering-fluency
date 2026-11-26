@@ -4,8 +4,10 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-26
+
 ### Bug Fixes
-- `segment` no longer starts a full re-parse of every session file on each call once its cached value expires. Shell prompts and Copilot CLI or Claude Code statuslines that call it every few seconds from several terminals could stack up many parallel scans and keep the CPU busy (and drain a laptop battery) for hours. It now prints the last cached value immediately and refreshes it in a single background process at low CPU priority; a lock file naming that process stops other terminals from starting their own scan until it exits
+- `segment` no longer starts a full re-parse of every session file on each call once its cached value expires. Shell prompts and Copilot CLI or Claude Code statuslines that call it every few seconds from several terminals could stack up many parallel scans and keep the CPU busy (and drain a laptop battery) for hours. It now prints the last cached value immediately and refreshes it in a single background process at low CPU priority; a lock file naming that process stops other terminals from starting their own scan until it exits (#2762)
 
 ## [0.8.0] - 2026-11-26
 
