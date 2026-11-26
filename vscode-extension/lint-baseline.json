@@ -61,7 +61,6 @@
 			"vscode-extension/src/webview/diagnostics/main.ts": 2,
 			"vscode-extension/src/webview/environmental/main.ts": 1,
 			"vscode-extension/src/webview/usage/ccrActivity.ts": 2,
-			"vscode-extension/src/webview/usage/main.ts": 56,
 			"vscode-extension/src/webview/usage/skillSuggestions.ts": 4,
 			"vscode-extension/src/webview/whatsnew/main.ts": 1,
 			"vscode-extension/src/worktreeBackgroundScan.ts": 3

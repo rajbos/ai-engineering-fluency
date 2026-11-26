@@ -16,7 +16,7 @@ import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileS
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize, localizeFormat } from '../shared/localization';
 import { createViewStateManager } from '../shared/viewState';
-import { applyWebviewLocale } from '../shared/webviewLocale';
+import { applyWebviewLocale, type WebviewLocaleFields } from '../shared/webviewLocale';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import { markUsageLoadingInactive, renderUsageLoadingState as renderUsageLoadingCard, resetUsageLoadingSteps, updateUsageLoadingProgress as applyUsageLoadingProgress } from './usageLoadingCard';
 import { renderCcrCheckButtonHtml, wireCcrActivityButtons, renderCcrActivityResult, replayCcrActivityResults } from './ccrActivity';
@@ -317,6 +317,10 @@ interface RepoAnalysisRecord {
 	data?: RepoAnalysisData;
 	error?: string;
 }
+type RepoHygieneSummaryFields = NonNullable<RepoAnalysisData['summary']>;
+
+/** A message from the extension host: untrusted, so every field is checked before use. */
+type HostMessage = Record<string, unknown>;
 
 /** Webview state persisted by VS Code across tab switches (survives the panel being hidden). */
 type UsageWebviewState = {
@@ -545,7 +549,7 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
 	renderUsageLoadingCard(initialMessage);
 }
 
-function updateUsageLoadingProgress(message: any): void {
+function updateUsageLoadingProgress(message: HostMessage): void {
 	applyUsageLoadingProgress(message, () => { layoutLazyTabLoadStarted = false; });
 }
 
@@ -1342,11 +1346,11 @@ function refreshSessionsPanelBody(): void {
 	vscode.postMessage({ command: 'loadRecentSessions', period: sessionsLookback });
 }
 
-function handleRecentSessionsLoaded(message: any): void {
+function handleRecentSessionsLoaded(message: HostMessage): void {
 	const period = message.period as Period;
 	if (!period) { return; }
 	const sessions = Array.isArray(message.sessions)
-		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
+		? message.sessions.filter((s: unknown) => typeof asRecord(s)?.interactions === 'number') as TodaySessionSummary[]
 		: [];
 	recentSessionsCache[period] = sessions;
 	if (sessionsLookback === period) {
@@ -1365,13 +1369,23 @@ function replaceRecentSessionsCache(raw: unknown): void {
 	}
 }
 
-function coerceNumber(value: any): number {
+/** A record view of an untrusted value: its fields stay `unknown` until checked; null for non-objects. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+}
+
+/** Whether an untrusted value is one of the allowed literals. */
+function isOneOf<T>(values: readonly T[], value: unknown): value is T {
+	return (values as readonly unknown[]).includes(value);
+}
+
+function coerceNumber(value: unknown): number {
 	const n = Number(value);
 	return Number.isFinite(n) ? n : 0;
 }
 
-function sanitizeModeUsage(mode: any): ModeUsage {
-	const m = (mode && typeof mode === 'object') ? mode : {};
+function sanitizeModeUsage(mode: unknown): ModeUsage {
+	const m = asRecord(mode) ?? {};
 	return {
 		ask: coerceNumber(m.ask),
 		edit: coerceNumber(m.edit),
@@ -1404,8 +1418,8 @@ function sanitizeAgentUsage(raw: unknown): AgentUsage | undefined {
 	return Object.keys(clean).length > 0 ? { byAgent: clean } : undefined;
 }
 
-function sanitizeContextRefs(refs: any): ContextReferenceUsage {
-	const r = (refs && typeof refs === 'object') ? refs : {};
+function sanitizeContextRefs(refs: unknown): ContextReferenceUsage {
+	const r = asRecord(refs) ?? {};
 	return {
 		file: coerceNumber(r.file),
 		selection: coerceNumber(r.selection),
@@ -1422,10 +1436,10 @@ function sanitizeContextRefs(refs: any): ContextReferenceUsage {
 		outputPanel: coerceNumber(r.outputPanel),
 		problemsPanel: coerceNumber(r.problemsPanel),
 		pullRequest: coerceNumber(r.pullRequest),
-		byKind: r.byKind ?? {},
+		byKind: (r.byKind ?? {}) as ContextReferenceUsage['byKind'],
 		copilotInstructions: coerceNumber(r.copilotInstructions),
 		agentsMd: coerceNumber(r.agentsMd),
-		byPath: r.byPath ?? {},
+		byPath: (r.byPath ?? {}) as ContextReferenceUsage['byPath'],
 	};
 }
 
@@ -1434,10 +1448,10 @@ function sanitizeContextRefs(refs: any): ContextReferenceUsage {
  * coerced and the model list / tier map are rebuilt so an untrusted payload
  * cannot smuggle extra fields into the render path.
  */
-function sanitizePeriod(period: any): UsageAnalysisPeriod {
-	const p = (period && typeof period === 'object') ? period : {};
-	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
-	const mcpTools = (p.mcpTools && typeof p.mcpTools === 'object') ? p.mcpTools : {};
+function sanitizePeriod(period: unknown): UsageAnalysisPeriod {
+	const p = asRecord(period) ?? {};
+	const toolCalls = asRecord(p.toolCalls) ?? {};
+	const mcpTools = asRecord(p.mcpTools) ?? {};
 	return {
 		sessions: coerceNumber(p.sessions),
 		modeUsage: sanitizeModeUsage(p.modeUsage),
@@ -1445,13 +1459,13 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		contextReferences: sanitizeContextRefs(p.contextReferences),
 		toolCalls: {
 			total: coerceNumber(toolCalls.total),
-			byTool: toolCalls.byTool ?? {},
+			byTool: (toolCalls.byTool ?? {}) as UsageAnalysisPeriod['toolCalls']['byTool'],
 			...sanitizeToolOutcomeMaps(toolCalls),
 		},
 		mcpTools: {
 			total: coerceNumber(mcpTools.total),
-			byServer: mcpTools.byServer ?? {},
-			byTool: mcpTools.byTool ?? {},
+			byServer: (mcpTools.byServer ?? {}) as UsageAnalysisPeriod['mcpTools']['byServer'],
+			byTool: (mcpTools.byTool ?? {}) as UsageAnalysisPeriod['mcpTools']['byTool'],
 			...sanitizeMcpOutcomeMaps(mcpTools),
 		},
 		modelSwitching: {
@@ -1478,27 +1492,28 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			totalRequests: 0,
 			...(p.modelSwitching ?? {}),
 		},
-		thinkingEffortUsage: p.thinkingEffortUsage,
-		modelEfficiency: p.modelEfficiency,
+		thinkingEffortUsage: p.thinkingEffortUsage as UsageAnalysisPeriod['thinkingEffortUsage'],
+		modelEfficiency: p.modelEfficiency as UsageAnalysisPeriod['modelEfficiency'],
 		contextWindow: sanitizeContextWindow(p.contextWindow),
 		contextPressure: sanitizeContextPressure(p.contextPressure),
 	};
 }
 
-function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
+function sanitizeInsights(rawInsights: unknown[]): EvaluatedInsight[] {
 	return rawInsights
-		.filter((i: any) => i && typeof i === 'object' && typeof i.id === 'string')
-		.map((i: any): EvaluatedInsight => ({
+		.map(asRecord)
+		.filter((i): i is Record<string, unknown> => typeof i?.id === 'string')
+		.map((i): EvaluatedInsight => ({
 			id: String(i.id),
 			category: typeof i.category === 'string' ? i.category : 'general',
-			severity: (['tip', 'opportunity', 'celebration'].includes(i.severity) ? i.severity : 'tip') as InsightSeverity,
+			severity: isOneOf<InsightSeverity>(['tip', 'opportunity', 'celebration'], i.severity) ? i.severity : 'tip',
 			title: typeof i.title === 'string' ? i.title : '',
 			body: typeof i.body === 'string' ? i.body : '',
 			actionLabel: typeof i.actionLabel === 'string' ? i.actionLabel : undefined,
 			actionCommand: typeof i.actionCommand === 'string' ? i.actionCommand : undefined,
 			secondaryActionLabel: typeof i.secondaryActionLabel === 'string' ? i.secondaryActionLabel : undefined,
 			secondaryActionCommand: typeof i.secondaryActionCommand === 'string' ? i.secondaryActionCommand : undefined,
-			status: (['new', 'seen', 'dismissed', 'snoozed', 'done'].includes(i.status) ? i.status : 'new') as InsightStatus,
+			status: isOneOf<InsightStatus>(['new', 'seen', 'dismissed', 'snoozed', 'done'], i.status) ? i.status : 'new',
 			allowToast: !!i.allowToast,
 		}));
 }
@@ -1506,9 +1521,10 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 const CORRECTION_MOMENT_TYPES: CorrectionMomentType[] = ['user-correction', 'edit-retry', 'edit-self-correction', 'tool-error', 'agent-self-correction'];
 const CORRECTION_FILTERS: CorrectionFilter[] = [...CORRECTION_MOMENT_TYPES, 'escalated'];
 
-function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
+function sanitizeCorrectionMoment(input: unknown): CorrectionMoment | null {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object') { return null; }
-	if (!CORRECTION_MOMENT_TYPES.includes(raw.type) || typeof raw.snippet !== 'string') { return null; }
+	if (!isOneOf(CORRECTION_MOMENT_TYPES, raw.type) || typeof raw.snippet !== 'string') { return null; }
 	return {
 		type: raw.type,
 		turnNumber: typeof raw.turnNumber === 'number' ? raw.turnNumber : 0,
@@ -1520,11 +1536,12 @@ function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
 		matchedPattern: typeof raw.matchedPattern === 'string' ? raw.matchedPattern : undefined,
 		intensity: raw.intensity === 'strong' ? 'strong' : undefined,
 		escalated: raw.escalated === true ? true : undefined,
-		corroboratedBy: ['tool-error', 'edit-retry', 'user-correction'].includes(raw.corroboratedBy) ? raw.corroboratedBy : undefined,
+		corroboratedBy: isOneOf(['tool-error', 'edit-retry', 'user-correction'] as const, raw.corroboratedBy) ? raw.corroboratedBy : undefined,
 	};
 }
 
-function sanitizeCorrectionCounts(raw: any): CorrectionCounts {
+function sanitizeCorrectionCounts(input: unknown): CorrectionCounts {
+	const raw = asRecord(input);
 	const num = (v: unknown): number => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
 	return {
 		userCorrections: num(raw?.userCorrections),
@@ -1537,7 +1554,8 @@ function sanitizeCorrectionCounts(raw: any): CorrectionCounts {
 	};
 }
 
-function sanitizeCorrectionSession(raw: any): CorrectionSessionEntry | null {
+function sanitizeCorrectionSession(input: unknown): CorrectionSessionEntry | null {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object' || typeof raw.file !== 'string' || !Array.isArray(raw.moments)) { return null; }
 	const moments = raw.moments.map(sanitizeCorrectionMoment).filter((m: CorrectionMoment | null): m is CorrectionMoment => m !== null);
 	if (moments.length === 0) { return null; }
@@ -1552,7 +1570,8 @@ function sanitizeCorrectionSession(raw: any): CorrectionSessionEntry | null {
 	};
 }
 
-function sanitizeCorrectionRepoGroup(raw: any): CorrectionRepoGroup | null {
+function sanitizeCorrectionRepoGroup(input: unknown): CorrectionRepoGroup | null {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object' || typeof raw.repository !== 'string' || !Array.isArray(raw.sessions)) { return null; }
 	const sessions = raw.sessions.map(sanitizeCorrectionSession).filter((s: CorrectionSessionEntry | null): s is CorrectionSessionEntry => s !== null);
 	if (sessions.length === 0) { return null; }
@@ -1564,7 +1583,8 @@ function sanitizeCorrectionRepoGroup(raw: any): CorrectionRepoGroup | null {
 	};
 }
 
-function sanitizeCorrectionReport(raw: any): CorrectionReport | null {
+function sanitizeCorrectionReport(input: unknown): CorrectionReport | null {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.repos)) { return null; }
 	const repos = raw.repos.map(sanitizeCorrectionRepoGroup).filter((r: CorrectionRepoGroup | null): r is CorrectionRepoGroup => r !== null);
 	if (repos.length === 0) { return null; }
@@ -1619,7 +1639,7 @@ function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysisView | n
 }
 
 /** Sanitize the optional correction/repeated-task reports onto the stats object. */
-function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
+function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: Record<string, unknown>): void {
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'correctionReport')) {
 		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
 	}
@@ -1628,10 +1648,10 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 	sanitized.hydraFusion = sanitizeRouterPayload(raw?.hydraFusion);
 }
 
-function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
+function applySessionSummaries(sanitized: UsageAnalysisStats, raw: Record<string, unknown>): void {
 	if (Array.isArray(raw.todaySessions)) {
 		sanitized.todaySessions = raw.todaySessions.filter(
-			(session: any) => session && typeof session === 'object' && typeof session.interactions === 'number'
+			(session: unknown) => typeof asRecord(session)?.interactions === 'number'
 		) as TodaySessionSummary[];
 	}
 	const recentSessions = sanitizeRecentSessionBuckets(raw.recentSessions);
@@ -1648,13 +1668,14 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 }
 
 /** Validate the Claude Desktop coverage counts; returns null for any non-numeric or incoherent payload. */
-function sanitizeClaudeDesktopCoverage(raw: any): UsageAnalysisStats['claudeDesktopCoverage'] {
+function sanitizeClaudeDesktopCoverage(input: unknown): UsageAnalysisStats['claudeDesktopCoverage'] {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object') { return null; }
 	const known = raw.knownSessions;
 	const withTranscript = raw.withTranscript;
 	const missing = raw.missingTranscript;
-	const valid = [known, withTranscript, missing].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0);
-	if (!valid || withTranscript + missing !== known) { return null; }
+	const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+	if (!isCount(known) || !isCount(withTranscript) || !isCount(missing) || withTranscript + missing !== known) { return null; }
 	return { knownSessions: known, withTranscript, missingTranscript: missing };
 }
 
@@ -1663,7 +1684,7 @@ function sanitizeClaudeDesktopCoverage(raw: any): UsageAnalysisStats['claudeDesk
  * Only assigns when the raw payload explicitly includes the key — omitting it (e.g. a partial/silent
  * refresh) must not clobber a previously-cached value, so we don't default to `null` here. Whether the
  * field was explicitly `null` (all files gone) vs. omitted (no change) is resolved in `handleUpdateStats`. */
-function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void {
+function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: Record<string, unknown>): void {
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'memoryFilesAnalysis')) {
 		sanitized.memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
 	}
@@ -1697,7 +1718,8 @@ function _applyCurationAnalysis(sanitized: UsageAnalysisStats, raw: { curationAn
 	}
 }
 
-function sanitizeStats(raw: any): UsageAnalysisStats | null {
+function sanitizeStats(input: unknown): UsageAnalysisStats | null {
+	const raw = asRecord(input);
 	if (!raw || typeof raw !== 'object') {
 		traceCurationOnce('sanitize-invalid-root', 'sanitizeStats.invalidRoot');
 		return null;
@@ -1968,7 +1990,7 @@ function sanitizeWorktreeResult(item: unknown): WorktreeResult {
 	};
 }
 
-function handleWorktreeRootPicked(message: any): void {
+function handleWorktreeRootPicked(message: HostMessage): void {
 	if (!message.folderPath) { return; }
 	const folderPath = String(message.folderPath);
 	if (!worktreeRoots.some((r) => r.toLowerCase() === folderPath.toLowerCase())) {
@@ -1983,7 +2005,7 @@ function handleWorktreeRootPicked(message: any): void {
  * Case-insensitive dedup, existing order preserved. Skipped while a scan is running so the
  * list is not mutated mid-scan.
  */
-function handleWorktreeRootsDiscovered(message: any): void {
+function handleWorktreeRootsDiscovered(message: HostMessage): void {
 	if (worktreeScanInProgress || !Array.isArray(message.roots)) { return; }
 	let added = false;
 	for (const raw of message.roots) {
@@ -2007,12 +2029,12 @@ function handleWorktreeScanStarted(): void {
 	updateWorktreeResults();
 }
 
-function handleWorktreeScanRootStarted(message: any): void {
+function handleWorktreeScanRootStarted(message: HostMessage): void {
 	worktreeScanStatus = { ...worktreeScanStatus, root: String(message.root || ""), checked: 0, total: 0, phase: "walking", dirsScanned: 0 };
 	updateWorktreeProgressArea();
 }
 
-function handleWorktreeScanWalkProgress(message: any): void {
+function handleWorktreeScanWalkProgress(message: HostMessage): void {
 	worktreeScanStatus = {
 		...worktreeScanStatus,
 		root: String(message.root ?? worktreeScanStatus.root),
@@ -2023,17 +2045,17 @@ function handleWorktreeScanWalkProgress(message: any): void {
 	updateWorktreeProgressArea();
 }
 
-function handleWorktreeScanRootMarkersFound(message: any): void {
+function handleWorktreeScanRootMarkersFound(message: HostMessage): void {
 	worktreeScanStatus = { ...worktreeScanStatus, total: numField(message.count), phase: "checking" };
 	updateWorktreeProgressArea();
 }
 
-function handleWorktreeScanRootSkipped(message: any): void {
+function handleWorktreeScanRootSkipped(message: HostMessage): void {
 	worktreeScanError = `Skipped "${message.root}": ${message.reason || "not accessible"}`;
 	updateWorktreeControls();
 }
 
-function handleWorktreeScanProgress(message: any): void {
+function handleWorktreeScanProgress(message: HostMessage): void {
 	worktreeScanStatus = {
 		root: String(message.root ?? worktreeScanStatus.root),
 		checked: numField(message.checked),
@@ -2044,14 +2066,14 @@ function handleWorktreeScanProgress(message: any): void {
 	updateWorktreeProgressArea();
 }
 
-function handleWorktreeFound(message: any): void {
+function handleWorktreeFound(message: HostMessage): void {
 	if (!message.worktree) { return; }
 	worktreeResults.push(sanitizeWorktreeResult(message.worktree));
 	scheduleWorktreeResultsRender();
 }
 
 /** Remove a worktree row after the extension has confirmed and run "git worktree remove". */
-function handleWorktreeDeleted(message: any): void {
+function handleWorktreeDeleted(message: HostMessage): void {
 	const targetPath = String(message.path ?? "");
 	if (!targetPath) { return; }
 	const idx = worktreeResults.findIndex((w) => w.path === targetPath);
@@ -2095,7 +2117,7 @@ function isWorktreeInCleanupQueue(p: string): boolean {
 	return worktreeCleanupInProgress && worktreeCleanupQueue.some((t) => t.path === p);
 }
 
-function handleCleanupStarted(message: any): void {
+function handleCleanupStarted(message: HostMessage): void {
 	worktreeCleanupConfirmPending = false;
 	worktreeCleanupInProgress = true;
 	worktreeCleanupStatus = { processed: 0, total: numField(message.total) };
@@ -2107,7 +2129,7 @@ function handleCleanupStarted(message: any): void {
 	updateWorktreeResults();
 }
 
-function handleCleanupWorktreeResult(message: any): void {
+function handleCleanupWorktreeResult(message: HostMessage): void {
 	worktreeCleanupStatus = { processed: numField(message.processed), total: numField(message.total) };
 	const rawStatus = message.status;
 	const status: WorktreeCleanupOutcome = rawStatus === "deleted" || rawStatus === "skipped" ? rawStatus : "error";
@@ -2148,7 +2170,7 @@ function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagno
 }
 
 /** The extension passed its confirmation and began removing a worktree from the cleanup report. */
-function handleWorktreeDeleteStarted(message: any): void {
+function handleWorktreeDeleteStarted(message: HostMessage): void {
 	const p = String(message.path ?? "");
 	if (!p) { return; }
 	worktreeRetryState.set(p, { status: "running" });
@@ -2156,7 +2178,7 @@ function handleWorktreeDeleteStarted(message: any): void {
 }
 
 /** Final outcome of a "Delete anyway…" retry; "cancelled" (modal dismissed) just clears the state. */
-function handleWorktreeDeleteResult(message: any): void {
+function handleWorktreeDeleteResult(message: HostMessage): void {
 	const p = String(message.path ?? "");
 	if (!p) { return; }
 	// A final result only means something for a retry still in flight; scan/cleanup clear the map, so a late result must not repopulate it.
@@ -2186,18 +2208,18 @@ function handleCleanupCancelled(): void {
 	updateWorktreeResults();
 }
 
-function handleWorktreeEnrichStarted(message: any): void {
+function handleWorktreeEnrichStarted(message: HostMessage): void {
 	worktreeScanStatus = { ...worktreeScanStatus, phase: "enriching", enriched: 0, enrichTotal: numField(message.total), elapsedMs: numField(message.elapsedMs) };
 	updateWorktreeProgressArea();
 }
 
-function handleWorktreeEnrichProgress(message: any): void {
+function handleWorktreeEnrichProgress(message: HostMessage): void {
 	worktreeScanStatus = { ...worktreeScanStatus, phase: "enriching", enriched: numField(message.enriched), enrichTotal: numField(message.total), elapsedMs: numField(message.elapsedMs) };
 	updateWorktreeProgressArea();
 }
 
 /** Patch a discovered worktree's size + push status once the background enrichment computes them. */
-function handleWorktreeEnriched(message: any): void {
+function handleWorktreeEnriched(message: HostMessage): void {
 	const targetPath = String(message.path ?? "");
 	if (!targetPath) { return; }
 	const wt = worktreeResults.find((w) => w.path === targetPath);
@@ -2227,7 +2249,7 @@ function handleWorktreeScanCancelled(): void {
  * notification's "Show Me" action reveals an already-open panel. Ignored while a live/manual
  * scan or cleanup is in flight so it can't clobber what the user is actively watching.
  */
-function handleWorktreeBackgroundResults(message: any): void {
+function handleWorktreeBackgroundResults(message: HostMessage): void {
 	if (worktreeScanInProgress || worktreeCleanupInProgress) { return; }
 	const worktrees = Array.isArray(message.worktrees) ? message.worktrees : [];
 	worktreeResults = worktrees.map(sanitizeWorktreeResult);
@@ -2237,7 +2259,7 @@ function handleWorktreeBackgroundResults(message: any): void {
 }
 
 /** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
-const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
+const _worktreeMessageHandlers: Record<string, (message: HostMessage) => void> = {
 	worktreeRootPicked: handleWorktreeRootPicked,
 	worktreeRootsDiscovered: handleWorktreeRootsDiscovered,
 	worktreeScanStarted: () => handleWorktreeScanStarted(),
@@ -2265,8 +2287,8 @@ const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	cleanupCancelled: () => handleCleanupCancelled(),
 };
 
-function handleWorktreeMessage(message: any): void {
-	const handler = _worktreeMessageHandlers[message.command];
+function handleWorktreeMessage(message: HostMessage): void {
+	const handler = typeof message.command === 'string' ? _worktreeMessageHandlers[message.command] : undefined;
 	if (handler) { handler(message); }
 }
 
@@ -5390,17 +5412,18 @@ function wireCopyButtons(): void {
 	});
 }
 
-function handleUpdateStats(message: any): void {
+function handleUpdateStats(message: HostMessage): void {
 	clearLoadingTimeout();
 	// The initial payload is `null` for a panel opened before any stats were cached, so this is
 	// the first chance to localize. applyWebviewLocale ignores unresolved keys, and
 	// re-applying the same map is a no-op, so this is safe to run on every update.
-	applyWebviewLocale(message.data);
-	if (typeof message.data?.use24HourTime === 'boolean') {
-		use24HourTime = message.data.use24HourTime;
+	const data = asRecord(message.data);
+	applyWebviewLocale(data as WebviewLocaleFields | null);
+	if (typeof data?.use24HourTime === 'boolean') {
+		use24HourTime = data.use24HourTime;
 	}
-	if (typeof message.data?.hideAutomaticToolCalls === 'boolean') {
-		hideAutomaticToolCalls = message.data.hideAutomaticToolCalls;
+	if (typeof data?.hideAutomaticToolCalls === 'boolean') {
+		hideAutomaticToolCalls = data.hideAutomaticToolCalls;
 	}
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
@@ -5469,7 +5492,7 @@ function handleToolSuppressed(toolName: string): void {
 	}
 }
 
-function handleRepoPrStatsLoaded(data: any): void {
+function handleRepoPrStatsLoaded(data: unknown): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (isEmptyActivitySnapshot(repoPrStatsData)) { repoPrStatsLoaded = false; }
 	// Only the failure is worth a log line: a successful render is visible in the panel, but a
@@ -5482,7 +5505,7 @@ function handleRepoPrStatsLoaded(data: any): void {
 	}
 }
 
-function handleAgentSessionsLoaded(data: any): void {
+function handleAgentSessionsLoaded(data: unknown): void {
 	if (!data || typeof data !== 'object') { return; }
 	agentSessionsData = sanitizeAgentSessionsData(data);
 	if (isEmptyActivitySnapshot(agentSessionsData)) { agentSessionsLoaded = false; }
@@ -5497,7 +5520,7 @@ function handleUpdateInsights(rawInsights: unknown): void {
 	refreshInsightsPanel(sanitized);
 }
 
-function handleLoadingStateMessage(message: any): boolean {
+function handleLoadingStateMessage(message: HostMessage): boolean {
 	switch (message.command) {
 		case 'usageLoadingProgress':
 			updateUsageLoadingProgress(message); return true;
@@ -5516,18 +5539,19 @@ function handleLoadingStateMessage(message: any): boolean {
 }
 
 /** Handles repository hygiene analysis messages. Returns true when the command was handled. */
-function handleRepoAnalysisMessage(message: any): boolean {
+function handleRepoAnalysisMessage(message: HostMessage): boolean {
+	const workspacePath = message.workspacePath as string | undefined;
 	switch (message.command) {
 		case 'repoAnalysisResults':
 			try {
-				displayRepoAnalysisResults(message.data, message.workspacePath);
+				displayRepoAnalysisResults(message.data as RepoAnalysisData, workspacePath);
 			} catch (err) {
 				console.error('Failed to render repo analysis results', err);
-				displayRepoAnalysisError(err instanceof Error ? err.message : String(err), message.workspacePath);
+				displayRepoAnalysisError(err instanceof Error ? err.message : String(err), workspacePath);
 			}
 			return true;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath);
+			displayRepoAnalysisError(message.error as string, workspacePath);
 			return true;
 		case 'repoAnalysisBatchComplete':
 			handleBatchAnalysisComplete();
@@ -5536,8 +5560,9 @@ function handleRepoAnalysisMessage(message: any): boolean {
 	return false;
 }
 
-function handleTabMessage(message: any): boolean {
-	if (message.command === 'readinessLoaded' || message.command === 'readinessScanFailed') { return darkFactoryTab.handleMessage(message); }
+function handleTabMessage(message: HostMessage): boolean {
+	const command = message.command;
+	if (command === 'readinessLoaded' || command === 'readinessScanFailed') { return darkFactoryTab.handleMessage({ ...message, command }); }
 	if (message.command === 'ccrActivityResult' || message.command === 'ccrActivityError') {
 		renderCcrActivityResult(String(message.owner ?? ''), String(message.repo ?? ''), Number(message.prNumber), message);
 		return true;
@@ -5545,7 +5570,7 @@ function handleTabMessage(message: any): boolean {
 	return false;
 }
 
-function handleExtensionMessage(message: any): void {
+function handleExtensionMessage(message: HostMessage): void {
 	if (handleLoadingStateMessage(message)) { return; }
 	if (handleRepoAnalysisMessage(message)) { return; }
 	if (handleTabMessage(message)) { return; }
@@ -5590,7 +5615,8 @@ function handleExtensionMessage(message: any): void {
  * would otherwise land on a filtered table with no visible fill percentage to
  * explain why those rows are the ones listed.
  */
-function applySessionsTabPreset(preset: any): void {
+function applySessionsTabPreset(input: unknown): void {
+	const preset = asRecord(input);
 	if (!preset || typeof preset !== 'object' || preset.filter !== 'nearContextLimit') { return; }
 	sessionFilterNearContextLimitOnly = true;
 	sessionFilterEditors.clear();
@@ -5632,7 +5658,7 @@ function reapplyPresetForcedColumns(): void {
 	for (const id of presetForcedColumns) { enabledSessionColumns.add(id); }
 }
 
-function handleSwitchTab(message: any): void {
+function handleSwitchTab(message: HostMessage): void {
 	const tab = String(message.tab);
 	// Ignore unknown tabs entirely: a bogus name must not blank the dashboard, and only
 	// allowlisted names may be interpolated into the selector below.
@@ -5772,7 +5798,7 @@ function traceToHost(stage: string, details: Record<string, unknown>): void {
 	vscode.postMessage({ command: 'usageWebviewTrace', stage, details });
 }
 
-registerMessageHandler<any>((message) => {
+registerMessageHandler<HostMessage>((message) => {
 	// An exception thrown here escapes the listener uncaught and is only visible in the
 	// webview devtools, which nobody has open — the panel just silently stays on "Loading…".
 	// Report it back to the extension so it lands in the Output channel instead.
@@ -5789,7 +5815,7 @@ registerMessageHandler<any>((message) => {
 	// check silently discarding real extension messages. Bounded by the trace budget, and
 	// silent unless the trust model breaks again on some future host build.
 	traceToHost('message-rejected-untrusted', {
-		command: String((event as any)?.data?.command ?? '(none)'),
+		command: String((event.data as HostMessage | null | undefined)?.command ?? '(none)'),
 		origin: event.origin,
 		ownOrigin: location.origin,
 		href: String(location.href).slice(0, 120),
@@ -5800,7 +5826,7 @@ registerMessageHandler<any>((message) => {
 window.addEventListener('error', (event) => {
 	traceToHost('window.error', { message: String(event.message).slice(0, 200) });
 });
-window.addEventListener('unhandledrejection', (event: any) => {
+window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
 	traceToHost('unhandledRejection', { reason: String(event?.reason).slice(0, 200) });
 });
 notifyUsageWebviewReady('listener-registered');
@@ -5854,7 +5880,7 @@ const REPO_CATEGORY_LABELS: { [key: string]: string } = {
 	documentation: '📚 Documentation'
 };
 
-function buildScoreHeaderElement(summary: any): HTMLElement {
+function buildScoreHeaderElement(summary: RepoHygieneSummaryFields): HTMLElement {
 	const header = el('div');
 	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;');
 	const title = el('div');
@@ -5867,7 +5893,7 @@ function buildScoreHeaderElement(summary: any): HTMLElement {
 	return header;
 }
 
-function buildStatsGridElement(summary: any): HTMLElement {
+function buildStatsGridElement(summary: RepoHygieneSummaryFields): HTMLElement {
 	const statsGrid = el('div');
 	statsGrid.setAttribute('style', 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;');
 	const statCards = [
@@ -5939,7 +5965,7 @@ function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
 	return checkRow;
 }
 
-function buildCategorySectionElement(categoryId: string, categoryChecks: RepoHygieneCheck[], summary: any): HTMLElement {
+function buildCategorySectionElement(categoryId: string, categoryChecks: RepoHygieneCheck[], summary: RepoHygieneSummaryFields): HTMLElement {
 	const section = el('div');
 	section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
 	const sectionHeader = el('div');
@@ -6134,7 +6160,7 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: WorkspaceC
 	setHtml(listPane, renderRepoHygieneListTable({ rows, other, showCollapse: !other && showAllWorkspacesInHealth && !hasSelectedRepository && canCollapse }));
 }
 
-function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
+function renderRepoDetailSuccess(detailsPane: HTMLElement, data: RepoAnalysisData, workspaceName: string): void {
 	detailsPane.replaceChildren();
 	const card = el('div', 'repo-details-card');
 	card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
@@ -6152,7 +6178,7 @@ function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspac
 	switchButton.setAttribute('style', 'min-width: 120px;');
 	switchButton.textContent = 'Switch Repository';
 	header.append(label, switchButton);
-	card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
+	card.append(header, buildRepoAnalysisBodyElement(data, selectedRepoPath ?? undefined));
 	detailsPane.appendChild(card);
 }
 
@@ -6191,7 +6217,7 @@ function renderRepositoryHygienePanels(): void {
 	const workspaceName = getWorkspaceName(selectedRepoPath);
 	const record = repoAnalysisState.get(selectedRepoPath);
 	if (record?.data) {
-		renderRepoDetailSuccess(detailsPane, record, workspaceName);
+		renderRepoDetailSuccess(detailsPane, record.data, workspaceName);
 		return;
 	}
 
