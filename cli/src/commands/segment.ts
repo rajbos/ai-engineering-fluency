@@ -98,11 +98,15 @@ interface LockSnapshot {
 }
 
 function readLock(lockPath: string): LockSnapshot | null {
+	let fd: number | undefined;
 	try {
-		const { mtimeMs } = fs.statSync(lockPath);
-		return { content: fs.readFileSync(lockPath, 'utf-8'), mtimeMs };
+		fd = fs.openSync(lockPath, 'r');
+		const { mtimeMs } = fs.fstatSync(fd);
+		return { content: fs.readFileSync(fd, 'utf-8'), mtimeMs };
 	} catch {
 		return null;
+	} finally {
+		if (fd !== undefined) { fs.closeSync(fd); }
 	}
 }
 

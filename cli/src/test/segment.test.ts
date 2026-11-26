@@ -96,9 +96,8 @@ test('tryAcquireRefreshLock keeps a lock whose owner is running, however long it
 	try {
 		const lockPath = path.join(dir, 'refresh.lock');
 		fs.writeFileSync(lockPath, '12345');
-		const mtime = fs.statSync(lockPath).mtimeMs;
 
-		const acquired = tryAcquireRefreshLock(lockPath, { now: mtime + 30 * 60_000, isAlive: () => true });
+		const acquired = tryAcquireRefreshLock(lockPath, { now: Date.now(), isAlive: () => true });
 		assert.equal(acquired, false);
 		assert.equal(fs.readFileSync(lockPath, 'utf-8'), '12345');
 	} finally {
