@@ -16,7 +16,7 @@ import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
 import { memoryFilesCommand } from './commands/memoryFiles';
 import { skillSuggestionsCommand } from './commands/skillSuggestions';
-import { loadCache, saveCache, disableCache } from './helpers';
+import { loadCache, saveCache, disableCache, enableCacheCheckpoints } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const packageJson = require('../package.json');
@@ -36,6 +36,7 @@ export function createProgram(): Command {
 			disableCache();
 		} else {
 			loadCache();
+			enableCacheCheckpoints();
 		}
 	});
 	program.hook('postAction', () => {

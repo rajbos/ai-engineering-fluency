@@ -68,6 +68,8 @@ test('each command section documents every option of that command', () => {
 	for (const cmd of COMMANDS) {
 		const section = commandSection(docs, cmd.name());
 		for (const option of cmd.options) {
+			// Hidden options are internal (e.g. segment's --background-refresh worker) and not user-facing
+			if (option.hidden) { continue; }
 			const flag = flagOf(option);
 			assert.ok(flag, `option on "${cmd.name()}" has no flag`);
 			assert.ok(section.includes(flag), `option "${flag}" is not documented in the "${cmd.name()}" section`);

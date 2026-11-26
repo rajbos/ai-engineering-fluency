@@ -5,6 +5,8 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 ## [Unreleased]
 
 ### Bug Fixes
+- `segment` no longer starts a full re-parse of every session file on each call once its cached value expires. Shell prompts and Copilot CLI or Claude Code statuslines that call it every few seconds from several terminals could stack up many parallel scans and keep the CPU busy (and drain a laptop battery) for hours. It now prints the last cached value immediately and refreshes it in a single background process at low CPU priority; a lock file naming that process stops other terminals from starting their own scan until it exits. Parsed sessions are saved to `cli-cache.json` every 100 files during a scan, so a killed scan no longer makes the next one start from zero, and cache files are written atomically
+- `segment`, `usage`, `environmental` and `all` no longer parse sessions last active before the start of the previous month, which none of their periods count; on a machine with years of session history this skips thousands of files per run. The parsed-session cache now keeps up to 6,000 entries instead of 2,000, so heavy users' recent sessions are no longer evicted and re-parsed on every run
 - Diagnostic log lines from the shared session parsing code now go to stderr. A skipped oversized session file used to write `[processSessionFile] Skipping oversized file ...` to stdout ahead of the JSON, so `JSON.parse` of `--json` output failed, and with it the Visual Studio and JetBrains views that read `all --json` and `fluency --json`
 
 ## [0.7.1] - 2026-10-27

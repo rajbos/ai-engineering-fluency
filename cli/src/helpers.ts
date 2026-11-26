@@ -545,6 +545,20 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 }
 
 /**
+ * Whether a session may hold activity on or after `cutoff`, by the same rule as the usage
+ * analysis (isSessionActiveSince). When the file can't be stat'ed it is kept, so
+ * processSessionFile still reports the problem.
+ */
+async function isActiveSinceForStats(file: string, cutoff: Date): Promise<boolean> {
+	try {
+		const stats = await statSessionFile(file);
+		return await isSessionActiveSince(createSessionActivityLookup(file), stats.mtime, cutoff);
+	} catch {
+		return true;
+	}
+}
+
+/**
  * Calculate detailed statistics across all time periods.
  */
 export async function calculateDetailedStats(
@@ -569,6 +583,10 @@ export async function calculateDetailedStats(
 
 	const last30DaysDate = new Date(y, m, now.getDate() - 30);
 	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
+	// The earliest day any period counts. Sessions last active before it can't contribute, so they
+	// are skipped before parsing: on a machine with years of history this avoids re-parsing
+	// thousands of old session files on every run.
+	const earliestPeriodStart = new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1);
 
 	const periods: {
 		today: PeriodStats;
@@ -584,7 +602,7 @@ export async function calculateDetailedStats(
 
 	let processed = 0;
 	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => {
-		const data = await processSessionFile(file);
+		const data = await isActiveSinceForStats(file, earliestPeriodStart) ? await processSessionFile(file) : null;
 		if (progressCallback) { progressCallback(++processed, sessionFiles.length); }
 		return data;
 	});
@@ -1022,4 +1040,4 @@ export { ENVIRONMENTAL } from './constants';
 export { modelPricing, tokenEstimators, toolNameMap };
 
 /** Cache lifecycle — re-export for use in commands */
-export { loadCache, saveCache, disableCache, getCacheStats } from './cliCache';
+export { loadCache, saveCache, disableCache, enableCacheCheckpoints, getCacheStats } from './cliCache';
