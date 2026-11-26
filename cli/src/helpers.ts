@@ -622,9 +622,12 @@ export async function calculateDetailedStats(
 		last30Days: createEmptyPeriodStats(),
 	};
 
+	// Only sessions with a day on or after the start of last month count (below), so sessions
+	// whose own last activity is before the earliest window are not parsed at all.
+	const parseCutoff = recentAnalysisCutoff(now);
 	let processed = 0;
 	const sessionResults = await runWithConcurrency(sessionFiles, async (file) => {
-		const data = await processSessionFile(file);
+		const data = await mayHaveActivitySince(file, parseCutoff) ? await processSessionFile(file) : null;
 		if (progressCallback) { progressCallback(++processed, sessionFiles.length); }
 		return data;
 	});
@@ -1077,6 +1080,26 @@ export async function sessionActivityTime(activity: Pick<SessionActivityLookup, 
 export async function isSessionActiveSince(activity: Pick<SessionActivityLookup, 'lastActivity' | 'isVirtual'>, fileMtime: Date, cutoff: Date): Promise<boolean> {
 	if (!activity.isVirtual) { return fileMtime >= cutoff; }
 	return (await sessionActivityTime(activity, fileMtime)) >= cutoff;
+}
+
+/**
+ * Pre-parse filter for windowed walks: false only when the session certainly had no activity
+ * on or after `cutoff`, so skipping it cannot change the result. A regular file is judged by
+ * its mtime (nothing in it can be newer). A DB-backed (virtual) session is judged by its own
+ * adapter-reported activity, never by the database mtime: that moves with every other session
+ * in the database and can lag its own writes in the WAL. A virtual session whose activity is
+ * unknown, and any file that cannot be stat'ed (processSessionFile reports it), is kept.
+ */
+export async function mayHaveActivitySince(file: string, cutoff: Date, activity: Pick<SessionActivityLookup, 'lastActivity' | 'isVirtual'> = createSessionActivityLookup(file)): Promise<boolean> {
+	if (activity.isVirtual) {
+		const own = await activity.lastActivity();
+		return own === null || own >= cutoff;
+	}
+	try {
+		return (await statSessionFile(file)).mtime >= cutoff;
+	} catch {
+		return true;
+	}
 }
 
 function dailyStatsFromSessions(sessions: Array<SessionData | null | undefined>): DailyTokenStats[] {
