@@ -47,19 +47,23 @@ export function scheduledTaskKey(task: Pick<ScheduledTaskSummary, 'platform' | '
 
 /**
  * Which failing tasks are failing for the first time, given the keys the host
- * already told the user about. `failingKeys` is what the host should store
- * next: only the tasks failing now, so a task that recovers and later fails
- * again is reported again.
+ * already told the user about. `nextNotifiedKeys` is what the host should store
+ * next: the tasks failing now, so a task that recovers and later fails again is
+ * reported again, plus every already-notified task missing from `tasks`. A task
+ * is only forgotten once it is seen not failing: a refresh whose inventory is
+ * empty or partial (a read error, a `data.db` returning nothing) says nothing
+ * about it, and forgetting it there would announce it again on the next refresh.
  */
 export function trackFailingTasks(
 	tasks: readonly ScheduledTaskSummary[],
 	notifiedKeys: readonly string[],
-): { newlyFailing: ScheduledTaskSummary[]; failingKeys: string[] } {
+): { newlyFailing: ScheduledTaskSummary[]; nextNotifiedKeys: string[] } {
 	const failing = tasks.filter(t => t.health === 'failing');
 	const notified = new Set(notifiedKeys);
+	const present = new Set(tasks.map(scheduledTaskKey));
 	return {
 		newlyFailing: failing.filter(t => !notified.has(scheduledTaskKey(t))),
-		failingKeys: failing.map(scheduledTaskKey),
+		nextNotifiedKeys: [...failing.map(scheduledTaskKey), ...notifiedKeys.filter(k => !present.has(k))],
 	};
 }
 

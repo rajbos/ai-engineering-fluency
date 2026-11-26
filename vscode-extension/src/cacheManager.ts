@@ -18,6 +18,7 @@ import {
 import { mergePlaceholderDetails } from './detailsOnlyCache';
 import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
 import { UsageHistoryStore } from './usageHistoryStore';
+import { createStoppedWslPathFilter } from '../../src/wslDiscovery';
 
 export interface CacheManagerDeps {
 	log: (msg: string) => void;
@@ -41,6 +42,9 @@ export interface CacheManagerDeps {
 	// Editor label for a session path, recorded when a session's file disappears so the usage
 	// history (see usageHistoryStore.ts) keeps attributing it to the right editor afterwards.
 	editorTypeOf?: (filePath: string) => string;
+	// Builds the "is this path inside a stopped WSL distro" check clearExpiredCache() applies before
+	// touching a cached path (touching one starts the distro). Injectable so tests need no real WSL.
+	stoppedWslPathFilter?: (paths: Iterable<string>) => Promise<(filePath: string) => boolean>;
 }
 
 /** True when two entries describe the same version of a file (same mtime and size). */
@@ -382,9 +386,21 @@ export class CacheManager {
 		}
 	}
 
+	/**
+	 * Whether a cached path lies inside a WSL distro that is not running right now. Callers check this
+	 * before any stat/access of a cached path, since touching one starts the distro. wsl.exe is only asked
+	 * when the cache holds a WSL path at all.
+	 */
+	createStoppedWslPathFilter(): Promise<(filePath: string) => boolean> {
+		return (this.deps.stoppedWslPathFilter ?? createStoppedWslPathFilter)(this.sessionFileCache.keys());
+	}
+
 	async clearExpiredCache(): Promise<void> {
 		// Remove cache entries for files that no longer exist (async to avoid blocking the event loop)
 		const filesToCheck = Array.from(this.sessionFileCache.keys());
+		// A path inside a WSL distro that is not running now is neither checked (fs.access() on it
+		// would start the distro) nor retired: its cached usage stays in the totals until it runs again.
+		const isStoppedWsl = await this.createStoppedWslPathFilter();
 		const BATCH_SIZE = 50;
 		for (let i = 0; i < filesToCheck.length; i += BATCH_SIZE) {
 			await Promise.all(
@@ -401,7 +417,7 @@ export class CacheManager {
 					// session instead of just transiently dropping it from memory. Leaving them
 					// unvalidated here (neither expired nor confirmed) is the safe default; a real fix
 					// needs adapter-aware stat resolution, which CacheManager doesn't have.
-					if (CacheManager.isVirtualSessionPath(filePath)) { return; }
+					if (CacheManager.isVirtualSessionPath(filePath) || isStoppedWsl(filePath)) { return; }
 					try {
 						await fs.promises.access(filePath);
 					} catch (err) {

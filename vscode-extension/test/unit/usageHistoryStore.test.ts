@@ -141,6 +141,35 @@ test('CacheManager.clearExpiredCache() keeps the usage of a session whose file i
 	assert.equal(reloaded.usageHistory.size, 1, 'clearExpiredCache() persists the history, so a restart still has it');
 });
 
+test('CacheManager.clearExpiredCache() never touches, and keeps, a session in a stopped WSL distro', async () => {
+	const dir = makeTmpFixtureDir('ctt-usage-history-');
+	const context: any = { extensionMode: 1, globalStorageUri: { fsPath: dir }, globalState: createMockMemento() };
+	let filterPaths: string[] = [];
+	const m = new CacheManager(context, {
+		log: () => {}, warn: () => {}, error: () => {}, lockOwnerId: 'w1',
+		// Stub for the running-distro check: Debian is stopped, nothing else is.
+		stoppedWslPathFilter: async (paths) => { filterPaths = [...paths]; return (p: string) => p.startsWith('\\\\wsl.localhost\\Debian\\'); },
+	}, 1);
+	const stopped = '\\\\wsl.localhost\\Debian\\home\\rob\\.claude\\projects\\a.jsonl';
+	const gone = path.join(dir, `${SESSION_B}.jsonl`);
+	m.setCachedSessionData(stopped, entry(NOW, 777), 10);
+	m.setCachedSessionData(gone, entry(NOW), 10);
+
+	const touched: string[] = [];
+	const realAccess = fs.promises.access;
+	(fs.promises as any).access = async (p: fs.PathLike, mode?: number) => { touched.push(String(p)); return realAccess(p, mode); };
+	try {
+		await m.clearExpiredCache();
+	} finally {
+		(fs.promises as any).access = realAccess;
+	}
+
+	assert.deepEqual(filterPaths.sort(), [gone, stopped].sort(), 'the check is built from the cached paths');
+	assert.deepEqual(touched, [gone], 'the stopped distro\'s path is never accessed (that would start the distro)');
+	assert.equal(m.getCachedSessionData(stopped)?.tokens, 777, 'its cached usage is kept, not evicted');
+	assert.ok(!m.cache.has(gone), 'a really missing local file is still retired');
+});
+
 test('CacheManager.evictUndiscoveredSessionData() keeps usage only when the file is really gone', () => {
 	const dir = makeTmpFixtureDir('ctt-usage-history-');
 	const m = makeManager(dir);

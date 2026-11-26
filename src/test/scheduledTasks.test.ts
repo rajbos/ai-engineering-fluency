@@ -169,11 +169,27 @@ test('trackFailingTasks: reports only failing tasks not yet notified, and forget
 	const task = (name: string, health: 'failing' | 'healthy' | 'stale') => ({ name, platform: 'copilot' as const, runCount: 0, activeDays: 0, lastRun: null, health });
 	const first = trackFailingTasks([task('a', 'failing'), task('b', 'healthy'), task('c', 'stale')], []);
 	assert.deepEqual(first.newlyFailing.map(t => t.name), ['a']);
-	assert.deepEqual(first.failingKeys, ['copilot:a']);
-	assert.deepEqual(trackFailingTasks([task('a', 'failing')], first.failingKeys).newlyFailing, []);
+	assert.deepEqual(first.nextNotifiedKeys, ['copilot:a']);
+	assert.deepEqual(trackFailingTasks([task('a', 'failing')], first.nextNotifiedKeys).newlyFailing, []);
 	// "a" recovered, so it is dropped from the stored keys and announced again when it fails later.
-	const recovered = trackFailingTasks([task('a', 'healthy')], first.failingKeys);
-	assert.deepEqual(recovered.failingKeys, []);
-	assert.deepEqual(trackFailingTasks([task('a', 'failing')], recovered.failingKeys).newlyFailing.map(t => t.name), ['a']);
+	const recovered = trackFailingTasks([task('a', 'healthy')], first.nextNotifiedKeys);
+	assert.deepEqual(recovered.nextNotifiedKeys, []);
+	assert.deepEqual(trackFailingTasks([task('a', 'failing')], recovered.nextNotifiedKeys).newlyFailing.map(t => t.name), ['a']);
 	assert.equal(scheduledTaskKey({ platform: 'claude', name: 'x' }), 'claude:x');
+});
+
+test('trackFailingTasks: an empty or partial inventory keeps the notified keys, so the next refresh does not notify again', () => {
+	const task = (name: string, health: 'failing' | 'healthy') => ({ name, platform: 'copilot' as const, runCount: 0, activeDays: 0, lastRun: null, health });
+	const first = trackFailingTasks([task('a', 'failing'), task('b', 'failing')], []);
+	assert.deepEqual(first.nextNotifiedKeys, ['copilot:a', 'copilot:b']);
+	// The inventory was unavailable (caught error, data.db read returned []): nothing to judge, nothing forgotten.
+	const unavailable = trackFailingTasks([], first.nextNotifiedKeys);
+	assert.deepEqual(unavailable.newlyFailing, []);
+	assert.deepEqual(unavailable.nextNotifiedKeys, ['copilot:a', 'copilot:b']);
+	const back = trackFailingTasks([task('a', 'failing'), task('b', 'failing')], unavailable.nextNotifiedKeys);
+	assert.deepEqual(back.newlyFailing, []);
+	// Partial inventory: "b" is missing (kept), "a" is seen healthy (forgotten).
+	const partial = trackFailingTasks([task('a', 'healthy')], back.nextNotifiedKeys);
+	assert.deepEqual(partial.nextNotifiedKeys, ['copilot:b']);
+	assert.deepEqual(trackFailingTasks([task('a', 'failing'), task('b', 'failing')], partial.nextNotifiedKeys).newlyFailing.map(t => t.name), ['a']);
 });
